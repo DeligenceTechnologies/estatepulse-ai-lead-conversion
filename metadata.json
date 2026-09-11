@@ -1,0 +1,10 @@
+{
+  "name": "Remix EstatePulse AI - Lead Conversion System",
+  "description": "AI-powered real estate lead conversion platform with instant response, voice qualification, lead scoring, follow-ups, and CRM sync.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

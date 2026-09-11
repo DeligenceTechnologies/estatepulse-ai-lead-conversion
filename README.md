@@ -1,0 +1,65 @@
+# EstatePulse AI — Lead Conversion System
+
+A frontend prototype/demo of the AI Real Estate Lead Conversion Platform described in
+the product requirements doc, built around a fictional brokerage ("Austin Home
+Advisors") matching PRD Section 61's recommended demo scenario.
+
+This is a **client-only demo**: all "backend" behavior (AI qualification, voice
+calls, SMS, scoring, CRM sync, n8n workflows) is simulated in the browser via
+`src/context/AppContext.tsx`, with state persisted to `localStorage`. There is no
+server, database, or real integration wired up yet — no API keys are required to
+run it. See `.env.example` for the real integrations (Supabase, Retell, Twilio,
+Calendly, Follow Up Boss, n8n) this UI would connect to in a production build.
+
+## What's implemented
+
+- Dashboard, Lead Pipeline, Conversations, Voice Calls, Appointments, Follow-Up
+  Sequences, Agent Team, Integrations, AI Prompt & Tone settings, Analytics/ROI
+- Lead detail view with deterministic score breakdown (PRD Section 26)
+- Agent Pre-Call Briefing screen (PRD Section 41)
+- Live AI voice call simulator with real-time structured data extraction
+- Webhook payload tester (`POST /api/webhooks/leads` simulation, PRD Section 66)
+- Public marketing landing page + live demo lead capture form (PRD Section 59-61)
+- PDF report export (`src/utils/pdfExport.ts`)
+
+## Run locally
+
+**Prerequisites:** Node.js 18+
+
+```bash
+npm install
+npm run dev
+```
+
+Then open http://localhost:3000.
+
+Other scripts:
+
+```bash
+npm run build    # production build to dist/
+npm run preview  # preview the production build
+npm run lint      # TypeScript type-check (tsc --noEmit)
+```
+
+## Project structure
+
+```
+src/
+  App.tsx                 # Top-level routing between views + global modals
+  context/AppContext.tsx  # All demo "backend" logic: leads, scoring, conversations, etc.
+  types.ts                 # Data models matching the PRD's Supabase schema
+  data/mockData.ts         # Seed data for the Austin Home Advisors demo org
+  components/layout/       # Sidebar, Header
+  components/views/        # One component per sidebar section
+  components/modals/       # Lead detail, pre-call briefing, live call simulator, etc.
+  utils/pdfExport.ts       # Client-side PDF report generation (jsPDF)
+```
+
+## Next steps toward production (per the PRD)
+
+This prototype covers the UI/UX and interaction model end-to-end. To become the
+real product it would need: Supabase (auth, Postgres, RLS, multi-tenancy), n8n
+workflow orchestration, a real voice provider (Retell/Vapi), Twilio SMS, an LLM
+provider abstraction (Claude/OpenAI) for qualification and scoring, and CRM sync
+(Follow Up Boss / GoHighLevel / generic webhooks) — all currently simulated
+client-side in `AppContext.tsx`.
