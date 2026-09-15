@@ -35,7 +35,7 @@ export const SignupPage: React.FC = () => {
   return (
     <AuthLayout
       title="Create your workspace"
-      subtitle="Sets up your account and your brokerage. You become its owner."
+      subtitle="Sets up your account and your organization. You become its owner."
       footer={
         <>
           Already have an account?{' '}
@@ -66,7 +66,7 @@ export const SignupPage: React.FC = () => {
           />
         </div>
         <Field
-          label="Brokerage name"
+          label="Organization name"
           name="organizationName"
           value={organizationName}
           autoComplete="organization"
