@@ -3,6 +3,7 @@
   "configurations": [
     {
       "name": "estatepulse-dev",
+      "cwd": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000

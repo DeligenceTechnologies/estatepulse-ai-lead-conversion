@@ -9,3 +9,7 @@ coverage/
 
 # Local Netlify folder
 .netlify
+
+# Backend build output
+backend/dist/
+backend/src/generated/
