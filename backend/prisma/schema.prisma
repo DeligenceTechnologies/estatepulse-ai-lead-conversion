@@ -1,0 +1,535 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model agent_availability {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id        String         @db.Uuid
+  day_of_week     Int            @db.SmallInt
+  start_time      DateTime       @db.Time(6)
+  end_time        DateTime       @db.Time(6)
+  is_available    Boolean        @default(true)
+  organization_id String         @db.Uuid
+  agent_profiles  agent_profiles @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([agent_id, day_of_week])
+  @@index([organization_id], map: "idx_agent_availability_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model agent_profiles {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  user_id              String                 @db.Uuid
+  display_name         String                 @db.VarChar(255)
+  title                String?                @db.VarChar(100)
+  status               String                 @default("available") @db.VarChar(30)
+  phone                String?                @db.VarChar(50)
+  email                String?                @db.VarChar(255)
+  timezone             String                 @default("America/Chicago") @db.VarChar(100)
+  max_active_leads     Int                    @default(25)
+  routing_enabled      Boolean                @default(true)
+  round_robin_position Int?
+  calendly_url         String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  agent_availability   agent_availability[]
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users                  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  agent_territories    agent_territories[]
+  appointments         appointments[]
+  calendar_connections calendar_connections[]
+  lead_assignments     lead_assignments[]
+
+  @@unique([organization_id, user_id])
+  @@index([organization_id], map: "idx_agent_profiles_organization")
+  @@index([organization_id, routing_enabled], map: "idx_agent_profiles_routing")
+  @@index([organization_id, status], map: "idx_agent_profiles_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model agent_territories {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id        String         @db.Uuid
+  territory_name  String         @db.VarChar(255)
+  territory_type  String         @default("submarket") @db.VarChar(50)
+  priority        Int            @default(1)
+  is_active       Boolean        @default(true)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  organization_id String         @db.Uuid
+  agent_profiles  agent_profiles @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([agent_id, territory_name])
+  @@index([agent_id], map: "idx_agent_territories_agent")
+  @@index([territory_name], map: "idx_agent_territories_name")
+  @@index([organization_id], map: "idx_agent_territories_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model appointments {
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String                @db.Uuid
+  lead_id                String                @db.Uuid
+  agent_id               String                @db.Uuid
+  calendar_connection_id String?               @db.Uuid
+  provider               String                @db.VarChar(30)
+  external_event_id      String?               @db.VarChar(255)
+  status                 String                @default("scheduled") @db.VarChar(20)
+  start_at               DateTime              @db.Timestamptz(6)
+  end_at                 DateTime              @db.Timestamptz(6)
+  meeting_url            String?
+  notes                  String?
+  created_at             DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime              @default(now()) @db.Timestamptz(6)
+  agent_profiles         agent_profiles        @relation(fields: [agent_id], references: [id], onUpdate: NoAction)
+  calendar_connections   calendar_connections? @relation(fields: [calendar_connection_id], references: [id], onUpdate: NoAction)
+  leads                  leads                 @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations          organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_appointments_agent")
+  @@index([external_event_id], map: "idx_appointments_external_event")
+  @@index([lead_id], map: "idx_appointments_lead")
+  @@index([organization_id], map: "idx_appointments_organization")
+  @@index([agent_id, start_at], map: "idx_appointments_start")
+  @@index([organization_id, status], map: "idx_appointments_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model audit_logs {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String?        @db.Uuid
+  actor_type       String         @db.VarChar(20)
+  actor_id         String?        @db.Uuid
+  action           String         @db.VarChar(100)
+  entity_type      String         @db.VarChar(50)
+  entity_id        String?        @db.Uuid
+  payload          Json?
+  response_time_ms Int?
+  correlation_id   String?        @db.Uuid
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  organizations    organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+
+  @@index([action], map: "idx_audit_logs_action")
+  @@index([correlation_id], map: "idx_audit_logs_correlation")
+  @@index([created_at(sort: Desc)], map: "idx_audit_logs_created")
+  @@index([entity_type, entity_id], map: "idx_audit_logs_entity")
+  @@index([organization_id], map: "idx_audit_logs_organization")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model calendar_connections {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String         @db.Uuid
+  agent_id               String         @db.Uuid
+  provider               String         @db.VarChar(30)
+  external_account_id    String?        @db.VarChar(255)
+  credentials_secret_ref String?
+  status                 String         @default("active") @db.VarChar(20)
+  last_synced_at         DateTime?      @db.Timestamptz(6)
+  metadata               Json?
+  created_at             DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime       @default(now()) @db.Timestamptz(6)
+  appointments           appointments[]
+  agent_profiles         agent_profiles @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations          organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_calendar_connections_agent")
+  @@index([organization_id], map: "idx_calendar_connections_organization")
+  @@index([organization_id, status], map: "idx_calendar_connections_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model conversations {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  lead_id         String        @db.Uuid
+  channel         String        @default("sms") @db.VarChar(20)
+  status          String        @default("active") @db.VarChar(20)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  leads           leads         @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  messages        messages[]
+  voice_calls     voice_calls[]
+
+  @@index([lead_id], map: "idx_conversations_lead")
+  @@index([organization_id], map: "idx_conversations_organization")
+  @@index([organization_id, status], map: "idx_conversations_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model followup_sequences {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  name                 String                 @db.VarChar(100)
+  code                 String                 @db.VarChar(50)
+  description          String?
+  status               String                 @default("active") @db.VarChar(20)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sequence_enrollments sequence_enrollments[]
+  sequence_steps       sequence_steps[]
+
+  @@unique([organization_id, code], map: "followup_sequences_code_unique")
+  @@index([organization_id], map: "idx_followup_sequences_organization")
+  @@index([organization_id, status], map: "idx_followup_sequences_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model integrations {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String        @db.Uuid
+  provider               String        @db.VarChar(50)
+  integration_type       String        @db.VarChar(30)
+  status                 String        @default("active") @db.VarChar(20)
+  external_account_id    String?       @db.VarChar(255)
+  credentials_secret_ref String?
+  last_sync_at           DateTime?     @db.Timestamptz(6)
+  metadata               Json?
+  created_at             DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime      @default(now()) @db.Timestamptz(6)
+  organizations          organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_integrations_organization")
+  @@index([organization_id, provider], map: "idx_integrations_provider")
+  @@index([organization_id, status], map: "idx_integrations_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lead_assignments {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lead_id         String         @db.Uuid
+  agent_id        String         @db.Uuid
+  assignment_type String         @db.VarChar(30)
+  assigned_at     DateTime       @default(now()) @db.Timestamptz(6)
+  unassigned_at   DateTime?      @db.Timestamptz(6)
+  is_current      Boolean        @default(true)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  organization_id String         @db.Uuid
+  agent_profiles  agent_profiles @relation(fields: [agent_id], references: [id], onUpdate: NoAction)
+  leads           leads          @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_lead_assignments_agent")
+  @@index([lead_id, is_current], map: "idx_lead_assignments_current")
+  @@index([lead_id], map: "idx_lead_assignments_lead")
+  @@index([organization_id], map: "idx_lead_assignments_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lead_sources {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  name            String        @db.VarChar(100)
+  code            String        @db.VarChar(50)
+  source_type     String        @db.VarChar(50)
+  is_active       Boolean       @default(true)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  leads           leads[]
+
+  @@unique([organization_id, code], map: "lead_sources_code_unique")
+  @@index([organization_id], map: "idx_lead_sources_organization")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model leads {
+  id                       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String                 @db.Uuid
+  lead_source_id           String?                @db.Uuid
+  first_name               String?                @db.VarChar(100)
+  last_name                String?                @db.VarChar(100)
+  email                    String?                @db.VarChar(255)
+  phone                    String?                @db.VarChar(50)
+  normalized_email         String?                @db.VarChar(255)
+  normalized_phone         String?                @db.VarChar(50)
+  status                   String                 @default("new") @db.VarChar(30)
+  score                    Decimal?               @db.Decimal(5, 2)
+  temperature              String?                @db.VarChar(10)
+  buying_intent            String?                @db.VarChar(100)
+  timeline                 String?                @db.VarChar(100)
+  min_budget               Decimal?               @db.Decimal(12, 2)
+  max_budget               Decimal?               @db.Decimal(12, 2)
+  financing_status         String?                @db.VarChar(100)
+  all_cash                 Boolean?
+  location                 String?                @db.VarChar(255)
+  bedrooms                 Int?
+  motivation               String?
+  qualification_confidence Decimal?               @db.Decimal(5, 2)
+  extracted_intel          Json?
+  ai_summary               String?
+  consent_status           String                 @default("pending") @db.VarChar(20)
+  dnc_status               Boolean                @default(false)
+  automation_paused        Boolean                @default(false)
+  takeover_user_id         String?                @db.Uuid
+  takeover_at              DateTime?              @db.Timestamptz(6)
+  lost_reason              String?                @db.VarChar(255)
+  first_contact_at         DateTime?              @db.Timestamptz(6)
+  first_response_at        DateTime?              @db.Timestamptz(6)
+  last_contact_at          DateTime?              @db.Timestamptz(6)
+  external_lead_id         String?                @db.VarChar(255)
+  utm_source               String?                @db.VarChar(255)
+  utm_medium               String?                @db.VarChar(255)
+  utm_campaign             String?                @db.VarChar(255)
+  created_at               DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime               @default(now()) @db.Timestamptz(6)
+  appointments             appointments[]
+  conversations            conversations[]
+  lead_assignments         lead_assignments[]
+  lead_sources             lead_sources?          @relation(fields: [lead_source_id], references: [id], onUpdate: NoAction)
+  organizations            organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                    users?                 @relation(fields: [takeover_user_id], references: [id], onUpdate: NoAction)
+  sequence_enrollments     sequence_enrollments[]
+  voice_calls              voice_calls[]
+
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_leads_created_at")
+  @@index([organization_id, normalized_email], map: "idx_leads_email")
+  @@index([organization_id], map: "idx_leads_organization")
+  @@index([organization_id, normalized_phone], map: "idx_leads_phone")
+  @@index([lead_source_id], map: "idx_leads_source")
+  @@index([organization_id, status], map: "idx_leads_status")
+  @@index([organization_id, temperature], map: "idx_leads_temperature")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model messages {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id     String        @db.Uuid
+  sender_type         String        @db.VarChar(20)
+  sender_user_id      String?       @db.Uuid
+  direction           String        @db.VarChar(10)
+  channel             String        @default("sms") @db.VarChar(20)
+  body                String
+  provider_message_id String?       @db.VarChar(255)
+  delivery_status     String        @default("pending") @db.VarChar(20)
+  sent_at             DateTime?     @db.Timestamptz(6)
+  delivered_at        DateTime?     @db.Timestamptz(6)
+  failed_at           DateTime?     @db.Timestamptz(6)
+  metadata            Json?
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  organization_id     String        @db.Uuid
+  conversations       conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users               users?        @relation(fields: [sender_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([conversation_id], map: "idx_messages_conversation")
+  @@index([conversation_id, created_at], map: "idx_messages_created_at")
+  @@index([organization_id], map: "idx_messages_org")
+  @@index([provider_message_id], map: "idx_messages_provider_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model organization_members {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  user_id         String        @db.Uuid
+  role            String        @default("agent") @db.VarChar(30)
+  status          String        @default("active") @db.VarChar(30)
+  joined_at       DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, user_id])
+  @@index([organization_id], map: "idx_org_members_organization")
+  @@index([organization_id, role], map: "idx_org_members_role")
+  @@index([user_id], map: "idx_org_members_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model organizations {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                  String                  @db.VarChar(255)
+  slug                  String                  @unique @db.VarChar(100)
+  email                 String?                 @db.VarChar(255)
+  phone                 String?                 @db.VarChar(50)
+  timezone              String                  @default("America/Chicago") @db.VarChar(100)
+  status                String                  @default("active") @db.VarChar(30)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  routing_policy        String                  @default("geographic_round_robin") @db.VarChar(30)
+  agent_availability    agent_availability[]
+  agent_profiles        agent_profiles[]
+  agent_territories     agent_territories[]
+  appointments          appointments[]
+  audit_logs            audit_logs[]
+  calendar_connections  calendar_connections[]
+  conversations         conversations[]
+  followup_sequences    followup_sequences[]
+  integrations          integrations[]
+  lead_assignments      lead_assignments[]
+  lead_sources          lead_sources[]
+  leads                 leads[]
+  messages              messages[]
+  organization_members  organization_members[]
+  sequence_steps        sequence_steps[]
+  voice_calls           voice_calls[]
+  webhook_events        webhook_events[]
+  webhook_subscriptions webhook_subscriptions[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sequence_enrollments {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lead_id            String             @db.Uuid
+  sequence_id        String             @db.Uuid
+  current_step       Int                @default(1)
+  status             String             @default("active") @db.VarChar(20)
+  next_action_at     DateTime?          @db.Timestamptz(6)
+  enrolled_at        DateTime           @default(now()) @db.Timestamptz(6)
+  completed_at       DateTime?          @db.Timestamptz(6)
+  stopped_at         DateTime?          @db.Timestamptz(6)
+  stopped_reason     String?            @db.VarChar(100)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
+  leads              leads              @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  followup_sequences followup_sequences @relation(fields: [sequence_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([lead_id, status], map: "idx_sequence_enrollments_active_leads")
+  @@index([lead_id], map: "idx_sequence_enrollments_lead")
+  @@index([status, next_action_at], map: "idx_sequence_enrollments_next_action")
+  @@index([sequence_id], map: "idx_sequence_enrollments_sequence")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sequence_steps {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sequence_id        String             @db.Uuid
+  step_order         Int
+  action_type        String             @db.VarChar(20)
+  delay_minutes      Int                @default(0)
+  message_template   String?
+  voice_prompt       String?
+  max_attempts       Int                @default(1)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
+  organization_id    String             @db.Uuid
+  organizations      organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  followup_sequences followup_sequences @relation(fields: [sequence_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([sequence_id, step_order], map: "sequence_steps_order_unique")
+  @@index([organization_id], map: "idx_sequence_steps_org")
+  @@index([sequence_id, step_order], map: "idx_sequence_steps_sequence")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model users {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                String                 @db.VarChar(255)
+  first_name           String?                @db.VarChar(100)
+  last_name            String?                @db.VarChar(100)
+  phone                String?                @db.VarChar(50)
+  avatar_url           String?
+  status               String                 @default("active") @db.VarChar(30)
+  last_login_at        DateTime?              @db.Timestamptz(6)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  password_hash        String?
+  agent_profiles       agent_profiles[]
+  leads                leads[]
+  messages             messages[]
+  organization_members organization_members[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model voice_calls {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id   String         @db.Uuid
+  lead_id           String         @db.Uuid
+  conversation_id   String?        @db.Uuid
+  provider          String         @default("retell") @db.VarChar(30)
+  provider_call_id  String?        @db.VarChar(255)
+  direction         String         @default("outbound") @db.VarChar(10)
+  status            String         @default("queued") @db.VarChar(30)
+  started_at        DateTime?      @db.Timestamptz(6)
+  ended_at          DateTime?      @db.Timestamptz(6)
+  duration_seconds  Int?
+  recording_url     String?
+  transcript        String?
+  ai_summary        String?
+  extracted_intel   Json?
+  handoff_requested Boolean        @default(false)
+  dnc_detected      Boolean        @default(false)
+  created_at        DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime       @default(now()) @db.Timestamptz(6)
+  conversations     conversations? @relation(fields: [conversation_id], references: [id], onUpdate: NoAction)
+  leads             leads          @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations     organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([lead_id, created_at(sort: Desc)], map: "idx_voice_calls_created_at")
+  @@index([lead_id], map: "idx_voice_calls_lead")
+  @@index([organization_id], map: "idx_voice_calls_organization")
+  @@index([provider_call_id], map: "idx_voice_calls_provider_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model webhook_events {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String?        @db.Uuid
+  provider           String         @db.VarChar(50)
+  event_type         String         @db.VarChar(100)
+  external_event_id  String?        @db.VarChar(255)
+  payload            Json
+  signature_verified Boolean        @default(false)
+  processing_status  String         @default("received") @db.VarChar(20)
+  attempts           Int            @default(0)
+  received_at        DateTime       @default(now()) @db.Timestamptz(6)
+  processed_at       DateTime?      @db.Timestamptz(6)
+  error_message      String?
+  correlation_id     String?        @db.Uuid
+  organizations      organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_webhook_events_organization")
+  @@index([received_at(sort: Desc)], map: "idx_webhook_events_received")
+  @@index([processing_status], map: "idx_webhook_events_status")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model webhook_subscriptions {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id   String        @db.Uuid
+  name              String        @db.VarChar(100)
+  endpoint_url      String
+  secret_ref        String?
+  subscribed_events Json          @default("[]")
+  is_active         Boolean       @default(true)
+  created_at        DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime      @default(now()) @db.Timestamptz(6)
+  organizations     organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id, is_active], map: "idx_webhook_subscriptions_active")
+  @@index([organization_id], map: "idx_webhook_subscriptions_organization")
+}

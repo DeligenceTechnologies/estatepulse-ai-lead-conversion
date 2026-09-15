@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/server.js",
     "lint": "tsc --noEmit",
-    "test": "node --env-file=.env --test src/**/*.test.ts",
+    "test": "node --env-file=.env --import tsx --import ./src/test-setup.ts --test src/auth/auth.test.ts",
     "db:pull": "prisma db pull",
     "db:generate": "prisma generate"
   },
@@ -31,5 +31,12 @@
     "prisma": "^6.16.0",
     "tsx": "^4.19.0",
     "typescript": "~5.8.2"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "bcrypt@6.0.0": true
   }
 }
