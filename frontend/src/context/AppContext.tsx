@@ -575,7 +575,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFollowupSequences(INITIAL_FOLLOWUP_SEQUENCES);
     setIntegrations(INITIAL_INTEGRATIONS);
     setAuditLogs(INITIAL_AUDIT_LOGS);
-    localStorage.clear();
+    // Only the demo keys. localStorage.clear() would also wipe the auth token
+    // and sign the user out mid-session.
+    [
+      'ep_org_settings',
+      'ep_agents',
+      'ep_leads',
+      'ep_conversations',
+      'ep_calls',
+      'ep_appointments',
+      'ep_sequences',
+      'ep_integrations',
+      'ep_audit_logs',
+    ].forEach(key => localStorage.removeItem(key));
     addAuditLog('System Reset', 'system', 'demo_org', 'Reset application state to initial Austin Home Advisors demo scenario.', 'System (n8n)');
   };
 

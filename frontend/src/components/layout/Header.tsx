@@ -9,9 +9,11 @@ import {
   Clock, 
   ShieldCheck,
   Zap,
-  Globe
+  Globe,
+  LogOut
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
 
 interface HeaderProps {
   onOpenNewLead: () => void;
@@ -27,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
     startLiveCallSimulation,
     setPreCallLeadId 
   } = useApp();
+  const { user, role, logout } = useAuth();
 
   const hotLead = leads.find(l => l.temperature === 'hot');
   const demoLead = leads[0];
@@ -158,15 +161,23 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
           </button>
         )}
 
-        {/* Active Organization Avatar */}
+        {/* Authenticated user */}
         <div className="pl-2 border-l border-slate-800 flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-200">
-            AV
+            {initialsFor(user)}
           </div>
           <div className="hidden xl:block text-left">
-            <div className="text-xs font-medium text-slate-200 leading-tight">Alex Vance</div>
-            <div className="text-[10px] text-emerald-400">Team Lead (Online)</div>
+            <div className="text-xs font-medium text-slate-200 leading-tight">{displayName(user)}</div>
+            <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
           </div>
+          <button
+            onClick={logout}
+            title="Sign out"
+            aria-label="Sign out"
+            className="ml-1 p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>
