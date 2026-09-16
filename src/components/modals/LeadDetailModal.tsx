@@ -30,7 +30,7 @@ export const LeadDetailModal: React.FC = () => {
   const { 
     selectedLeadId, 
     setSelectedLeadId, 
-    leads, 
+    findLead, 
     conversations, 
     calls, 
     appointments, 
@@ -50,7 +50,9 @@ export const LeadDetailModal: React.FC = () => {
 
   if (!selectedLeadId) return null;
 
-  const lead = leads.find(l => l.id === selectedLeadId);
+  // findLead, not leads.find: a lead opened from the pipeline lives in Postgres,
+  // not in the demo store.
+  const lead = findLead(selectedLeadId);
   if (!lead) return null;
 
   const conversation = conversations[lead.id];
@@ -128,7 +130,9 @@ export const LeadDetailModal: React.FC = () => {
                 <span>•</span>
                 <span>{lead.email}</span>
                 <span>•</span>
-                <span className="text-slate-300 font-medium">Agent: {assignedAgent.name}</span>
+                <span className="text-slate-300 font-medium">
+                  Agent: {lead.assignedAgentId ? assignedAgent.name : 'Unassigned'}
+                </span>
                 <span>•</span>
                 <span className="text-emerald-400 font-medium">Source: {lead.source}</span>
               </div>
@@ -214,7 +218,9 @@ export const LeadDetailModal: React.FC = () => {
                     <span>Budget Range</span>
                   </div>
                   <div className="text-base font-bold text-emerald-300 font-mono">
-                    ${(lead.budgetMin / 1000).toFixed(0)}K – ${(lead.budgetMax / 1000).toFixed(0)}K
+                    {lead.budgetMin || lead.budgetMax
+                      ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K`
+                      : '—'}
                   </div>
                   <span className="text-[10px] text-slate-500">Confirmed in AI conversation</span>
                 </div>
@@ -225,7 +231,7 @@ export const LeadDetailModal: React.FC = () => {
                     <span>Target Location</span>
                   </div>
                   <div className="text-base font-bold text-slate-200 truncate">
-                    {lead.preferredLocation}
+                    {lead.preferredLocation || '—'}
                   </div>
                   <span className="text-[10px] text-slate-500">Target area verified</span>
                 </div>
@@ -236,7 +242,7 @@ export const LeadDetailModal: React.FC = () => {
                     <span>Buying Timeline</span>
                   </div>
                   <div className="text-base font-bold text-slate-200">
-                    {lead.timeline}
+                    {lead.timeline || '—'}
                   </div>
                   <span className="text-[10px] text-slate-500">High priority urgency</span>
                 </div>
@@ -247,7 +253,8 @@ export const LeadDetailModal: React.FC = () => {
                     <span>Bedrooms & Spec</span>
                   </div>
                   <div className="text-base font-bold text-slate-200">
-                    {lead.bedrooms} Beds ({lead.propertyType})
+                    {lead.bedrooms ? `${lead.bedrooms} Beds` : '—'}
+                    {lead.propertyType ? ` (${lead.propertyType})` : ''}
                   </div>
                   <span className="text-[10px] text-slate-500">Single family preference</span>
                 </div>
@@ -290,7 +297,7 @@ export const LeadDetailModal: React.FC = () => {
                     Financing & Pre-Approval
                   </h4>
                   <div className="text-xs text-slate-200 bg-slate-900 p-3 rounded-lg border border-slate-800">
-                    {lead.financingStatus}
+                    {lead.financingStatus || '—'}
                   </div>
                   <div className="text-[11px] text-slate-400">
                     Pre-approval Status: <strong className={lead.preapprovalStatus ? 'text-emerald-400' : 'text-amber-400'}>

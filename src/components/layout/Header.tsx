@@ -32,7 +32,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
   const demoLead = leads[0];
 
   const viewTitles: Record<string, { title: string; subtitle: string }> = {
-    dashboard: { 
+    lead_sources: {
+      title: 'Lead Sources',
+      subtitle: 'Live webhook endpoints — real data from Postgres, not the demo store'
+    },
+    dashboard: {
       title: 'Conversion Command Center', 
       subtitle: 'Real-time overview of inbound lead velocity, AI response times, and booking rate' 
     },

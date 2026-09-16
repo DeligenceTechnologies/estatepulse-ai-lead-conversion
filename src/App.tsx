@@ -20,6 +20,7 @@ import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { AnalyticsView } from './components/views/AnalyticsView';
 import { PublicLandingPageView } from './components/views/PublicLandingPageView';
+import { LeadSourcesView } from './components/views/LeadSourcesView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -35,7 +36,7 @@ const AppContent: React.FC = () => {
   const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
 
   // If the user wants to view the public conversion landing page (PRD Section 59)
-  if (activeView === 'landing' || (activeView as string) === 'landing_page') {
+  if (activeView === 'landing_page') {
     return (
       <>
         <PublicLandingPageView />
@@ -50,7 +51,10 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
       {/* Structural Sidebar */}
-      <Sidebar />
+      <Sidebar
+        onOpenNewLead={() => setIsNewLeadOpen(true)}
+        onOpenWebhookTester={() => setIsWebhookTesterOpen(true)}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -70,6 +74,7 @@ const AppContent: React.FC = () => {
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
           )}
+          {activeView === 'lead_sources' && <LeadSourcesView />}
           {activeView === 'ai_settings' && <AISettingsView />}
           {activeView === 'analytics' && <AnalyticsView />}
         </main>
