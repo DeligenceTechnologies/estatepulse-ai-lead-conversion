@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { ingestLead } from './service.js';
+import { ingestLead } from './service';
 
 /**
  * Public (unauthenticated) lead-ingestion webhook. Identity comes from the token

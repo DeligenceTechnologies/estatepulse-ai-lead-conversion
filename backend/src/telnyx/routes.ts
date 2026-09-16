@@ -1,12 +1,12 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { requireAuth } from '../auth/requireAuth.js';
-import * as credStore from './credStore.js';
-import * as assistant from './assistant.js';
-import * as numbers from './numbers.js';
-import * as strategyStore from './strategyStore.js';
-import * as engine from './engine.js';
-import * as ingest from '../ingest/service.js';
-import { prisma } from '../db.js';
+import { requireAuth } from '../auth/requireAuth';
+import * as credStore from './credStore';
+import * as assistant from './assistant';
+import * as numbers from './numbers';
+import * as strategyStore from './strategyStore';
+import * as engine from './engine';
+import * as ingest from '../ingest/service';
+import { prisma } from '../db';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Map a DB leads row to the frontend Lead shape (camelCase). Enum-ish fields are cast client-side.

@@ -1,5 +1,5 @@
-import { prisma } from '../db.js';
-import { getCreds } from './credStore.js';
+import { prisma } from '../db';
+import { getCreds } from './credStore';
 
 /**
  * Records contact attempts and their outcomes on the real tables:

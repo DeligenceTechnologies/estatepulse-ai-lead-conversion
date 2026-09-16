@@ -1,4 +1,4 @@
-import { getCreds, saveCreds, type Creds } from './credStore.js';
+import { getCreds, saveCreds, type Creds } from './credStore';
 
 /** Per-org phone number provisioning against the tenant's Telnyx account. */
 const V2 = 'https://api.telnyx.com/v2';

@@ -1,5 +1,5 @@
-import { prisma } from '../db.js';
-import { enroll } from './engine.js';
+import { prisma } from '../db';
+import { enroll } from './engine';
 
 /**
  * Auto-kickoff: polls for new leads and enrolls them into their org's strategy.

@@ -1,11 +1,11 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '../db.js';
-import { AppError } from '../errors.js';
-import { signToken } from './jwt.js';
-import { hashPassword, verifyPassword } from './password.js';
-import type { AuthContext, AuthSessionDTO, Role } from './types.js';
-import { ROLES } from './types.js';
-import type { LoginInput, SignupInput } from './schemas.js';
+import { prisma } from '../db';
+import { AppError } from '../errors';
+import { signToken } from './jwt';
+import { hashPassword, verifyPassword } from './password';
+import type { AuthContext, AuthSessionDTO, Role } from './types';
+import { ROLES } from './types';
+import type { LoginInput, SignupInput } from './schemas';
 
 /**
  * Prisma reports a unique violation's target as a string[], a string, or

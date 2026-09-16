@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
-import { AppError } from '../errors.js';
-import { verifyToken } from './jwt.js';
-import { loadAuthContext } from './service.js';
+import { AppError } from '../errors';
+import { verifyToken } from './jwt';
+import { loadAuthContext } from './service';
 
 const BEARER = 'Bearer ';
 

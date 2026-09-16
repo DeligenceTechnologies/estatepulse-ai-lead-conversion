@@ -1,4 +1,4 @@
-import { getCreds, saveCreds, type Creds } from './credStore.js';
+import { getCreds, saveCreds, type Creds } from './credStore';
 
 /** Telnyx AI Assistant read/update — per org (Bring-Your-Own-Telnyx). */
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';

@@ -1,5 +1,5 @@
-import { prisma } from '../db.js';
-import { encrypt, decrypt } from '../crypto.js';
+import { prisma } from '../db';
+import { encrypt, decrypt } from '../crypto';
 
 /**
  * Per-org Telnyx credentials (Bring-Your-Own-Telnyx), persisted in the shared

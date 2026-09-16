@@ -1,7 +1,7 @@
-import { prisma } from '../db.js';
-import { generateIngestToken, sha256Hex } from './tokens.js';
-import { parsePayload, normalizePhone, normalizeEmail } from './parse.js';
-import * as engine from '../telnyx/engine.js';
+import { prisma } from '../db';
+import { generateIngestToken, sha256Hex } from './tokens';
+import { parsePayload, normalizePhone, normalizeEmail } from './parse';
+import * as engine from '../telnyx/engine';
 
 /**
  * Milestone-1 lead ingestion. A public webhook resolves an ingest token to an

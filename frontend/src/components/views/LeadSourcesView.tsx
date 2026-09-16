@@ -320,9 +320,9 @@ export const LeadSourcesView: React.FC = () => {
             <div className="font-semibold text-rose-100">Can't reach the backend</div>
             {error}
             <div className="mt-2 text-rose-300/80">
-              Start it with <code className="font-mono">cd server && npm run dev</code>, then make sure
-              <code className="font-mono"> API_KEY</code> is set in the project-root{' '}
-              <code className="font-mono">.env</code> and restart <code className="font-mono">npm run dev</code>.
+              Start it with <code className="font-mono">cd backend && npm run dev</code> and check it is
+              listening on <code className="font-mono">:4000</code>. If you are signed in and still see
+              this, your session may have expired — sign out and back in.
             </div>
           </div>
         </div>

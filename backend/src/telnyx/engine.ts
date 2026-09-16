@@ -1,8 +1,8 @@
-import { prisma } from '../db.js';
-import { getStrategy, type StrategyStep } from './strategyStore.js';
-import { sendSms } from './sms.js';
-import { placeCall } from './voice.js';
-import * as activity from './activity.js';
+import { prisma } from '../db';
+import { getStrategy, type StrategyStep } from './strategyStore';
+import { sendSms } from './sms';
+import { placeCall } from './voice';
+import * as activity from './activity';
 
 /**
  * Strategy execution engine. On a new lead it enrolls and fires the org's cadence

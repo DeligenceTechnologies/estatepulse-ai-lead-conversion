@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
-import { createApp } from '../app.js';
-import { prisma } from '../db.js';
+import { createApp } from '../app';
+import { prisma } from '../db';
 
 /**
  * Integration suite against the real database. Every row it creates is torn

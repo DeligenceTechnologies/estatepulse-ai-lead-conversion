@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
-import { env } from '../env.js';
-import { AppError } from '../errors.js';
+import { env } from '../env';
+import { AppError } from '../errors';
 
 const EXPIRES_IN = '7d';
 

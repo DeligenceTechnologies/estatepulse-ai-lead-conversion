@@ -11,13 +11,13 @@ reach `localhost`), and the **frontend**.
 ## 1. Point the backend at a public URL
 
 Tally calls your webhook from their servers, so the URL you give them has to be
-reachable from the internet. `http://localhost:3001` is not. You need a tunnel.
+reachable from the internet. `http://localhost:4000` is not. You need a tunnel.
 
 **cloudflared** is the easiest — quick tunnels need no account:
 
 ```bash
 brew install cloudflared          # or: https://github.com/cloudflare/cloudflared/releases
-cloudflared tunnel --url http://localhost:3001
+cloudflared tunnel --url http://localhost:4000
 ```
 
 It prints something like `https://random-words-here.trycloudflare.com`.
@@ -26,10 +26,10 @@ It prints something like `https://random-words-here.trycloudflare.com`.
 
 ```bash
 brew install ngrok && ngrok config add-authtoken <your-token>
-ngrok http 3001
+ngrok http 4000
 ```
 
-Then set that URL in `server/.env` so the webhook URLs we generate point at the
+Then set that URL in `backend/.env` so the webhook URLs we generate point at the
 tunnel rather than at localhost:
 
 ```bash
@@ -43,32 +43,24 @@ PUBLIC_API_BASE_URL="https://random-words-here.trycloudflare.com"
 
 ---
 
-## 2. Start the API
-
-```bash
-cd server
-npm run dev          # watch mode, or `npm run build && npm run start:prod`
-```
-
-Check it: `curl http://localhost:3001/v1/health` → `{"status":"ok","database":"ok",...}`
-
----
-
-## 3. Start the portal and the frontend
-
-The browser no longer holds an API key. It signs in against the portal, and the
-portal forwards to this service with the organization's `x-api-key` attached
-server-side — so there is nothing to paste into a frontend `.env`.
-
-Start the portal (needs `backend/.env`; see `backend/.env.example`):
+## 2. Start the backend
 
 ```bash
 cd backend
-npm run dev          # :4000
+npm run dev          # watch mode, or `npm run build && npm start`
 ```
 
-`TALLY_API_URL` there must point at this service — `http://localhost:3001` by
-default. Then the frontend:
+One process serves the portal and the ingestion routes on :4000.
+
+Check it: `curl http://localhost:4000/api/v1/health` → `{"status":"ok","database":"ok",...}`
+
+---
+
+## 3. Start the frontend
+
+The browser holds no API key. It signs in, and the backend reads the
+organization off that session token — so there is nothing to paste into a
+frontend `.env`.
 
 ```bash
 cd frontend
@@ -129,9 +121,9 @@ Two things worth checking, because they're the ones that silently go wrong:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Can't reach the API" / `TALLY_SERVICE_UNREACHABLE` | This service isn't running, or `TALLY_API_URL` in `backend/.env` points somewhere else | Start it on :3001 and check that variable |
-| 401 from the UI on every Lead Sources call | The session expired, or you are not logged in | Sign in again — the portal's JWT is what identifies the org now |
-| Nothing arrives after submitting | The webhook URL points at `localhost`, so Tally can't call it | Set `PUBLIC_API_BASE_URL` to your tunnel URL and restart the API |
+| "Can't reach the API" in the UI | The backend isn't running | Start it on :4000 |
+| 401 from the UI on every Lead Sources call | The session expired, or you are not logged in | Sign in again — the session token is what identifies the org |
+| Nothing arrives after submitting | The webhook URL points at `localhost`, so Tally can't call it | Set `PUBLIC_API_BASE_URL` in `backend/.env` to your tunnel URL and restart |
 | Red **bad signature** card | The secret in Tally doesn't match ours | Nothing is lost — the raw payload is retained and can be re-verified once the secret is corrected |
 | Grey **unsigned** pill | No secret pasted into Tally | Add it, or leave it: signature is verified-when-present by default, not required |
 | Tally's own test shows a failure | Tally requires a 2xx within 10 seconds | Check the API log; a cold start on a free tunnel can exceed this on the very first request |

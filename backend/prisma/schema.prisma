@@ -193,6 +193,37 @@ model followup_sequences {
   @@index([organization_id, status], map: "idx_followup_sequences_status")
 }
 
+/// A form provider's API credential, held so we can install and later repair the
+/// webhook on a customer's form. Deliberately NOT `integrations`, whose
+/// `credentials_secret_ref` is modelled as a pointer to an external vault.
+model provider_credentials {
+  id                  String        @id @db.Uuid
+  organization_id     String        @db.Uuid
+  provider            String        @db.VarChar(50)
+  label               String?       @db.VarChar(255)
+  /// AES-256-GCM envelope; AAD binds it to (organization_id, id).
+  credential_enc      String
+  /// sha256(key) — dedupe only, never a lookup path.
+  credential_hash     String        @db.VarChar(64)
+  credential_prefix   String        @db.VarChar(32)
+  credential_last4    String        @db.VarChar(8)
+  external_account_id String?       @db.VarChar(255)
+  account_email       String?       @db.VarChar(255)
+  account_name        String?       @db.VarChar(255)
+  /// ACTIVE | INVALID | REVOKED
+  status              String        @default("ACTIVE") @db.VarChar(20)
+  last_verified_at    DateTime?     @db.Timestamptz(6)
+  last_error_at       DateTime?     @db.Timestamptz(6)
+  last_error_code     String?       @db.VarChar(50)
+  revoked_at          DateTime?     @db.Timestamptz(6)
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lead_sources        lead_sources[]
+
+  @@index([organization_id, provider, status], map: "idx_provider_credentials_org")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model integrations {
@@ -239,18 +270,96 @@ model lead_assignments {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lead_sources {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id String        @db.Uuid
-  name            String        @db.VarChar(100)
-  code            String        @db.VarChar(50)
-  source_type     String        @db.VarChar(50)
-  is_active       Boolean       @default(true)
-  ingest_token_hash   String?   @unique @db.VarChar(64)
-  ingest_token_prefix String?   @db.VarChar(20)
-  created_at      DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
-  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  leads           leads[]
+  id                          String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id             String                       @db.Uuid
+  name                        String                       @db.VarChar(100)
+  code                        String                       @db.VarChar(50)
+  /// Stays 'webhook' for API-connected sources too — they are byte-identical on
+  /// the ingest path. The distinction lives in `connection_method`.
+  source_type                 String                       @db.VarChar(50)
+  /// Which form provider this source belongs to, e.g. 'TALLY'.
+  provider                    String                       @default("TALLY") @db.VarChar(50)
+  /// MANUAL (customer pasted our URL) | API (we installed the webhook).
+  /// Only an API source can be repaired, paused or removed remotely.
+  connection_method           String                       @default("MANUAL") @db.VarChar(20)
+  provider_credential_id      String?                      @db.Uuid
+  /// The provider's own id for the webhook we installed.
+  external_webhook_id         String?                      @db.VarChar(255)
+  external_workspace_id       String?                      @db.VarChar(255)
+  /// PENDING | INSTALLED | DRIFTED | UNINSTALLED | ORPHANED | ERROR
+  remote_state                String?                      @db.VarChar(20)
+  remote_synced_at            DateTime?                    @db.Timestamptz(6)
+  remote_error_code           String?                      @db.VarChar(50)
+  remote_error_message        String?
+  /// Non-null => mappings built from the form schema that no real delivery has
+  /// confirmed yet.
+  prebuilt_at                 DateTime?                    @db.Timestamptz(6)
+  provider_credentials        provider_credentials?        @relation(fields: [provider_credential_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  is_active                   Boolean                      @default(true)
+  created_at                  DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                     @default(now()) @db.Timestamptz(6)
+  /// Soft-disable only. A retired token must still resolve to an org so
+  /// "14 deliveries hit a retired URL" reaches the right customer instead of
+  /// vanishing into a 404 log.
+  archived_at                 DateTime?                    @db.Timestamptz(6)
+  /// "Observe only" while mapping is being configured.
+  auto_create_leads           Boolean                      @default(true)
+  /// Consent basis when the form has no mapped consent field. PENDING on
+  /// purpose — the demo's createLead() hardcodes 'granted' for every lead, which
+  /// would assert consent we never obtained.
+  default_consent_status      String                       @default("pending") @db.VarChar(20)
+  default_lead_type           String                       @default("buyer") @db.VarChar(20)
+  /// Tally data.formId — detects a customer pointing a different form at the
+  /// same URL.
+  external_form_id            String?                      @db.VarChar(255)
+  external_form_name          String?                      @db.VarChar(255)
+  /// Lifecycle for the onboarding UI: awaiting_first_event -> needs_mapping ->
+  /// active. Varchar to match this schema's existing convention (no enums).
+  ingest_status               String?                      @db.VarChar(30)
+  /// AES-256-GCM(token), AAD-bound to (organization_id, id). Exists because
+  /// re-displayability is a hard requirement here, unlike an API key: the
+  /// customer returns next week to paste the URL into a second form, and a
+  /// show-once design would force a rotation that silently breaks whatever form
+  /// still points at the old URL.
+  ingest_token_enc            String?
+  /// sha256(token) — the ONLY lookup path on the ingest hot path: one equality
+  /// probe, no scan, no decryption. Storing the token in plaintext would mean a
+  /// leaked backup lets an attacker inject fabricated leads into every tenant,
+  /// which from M2 onward is real SMS/voice spend and TCPA exposure.
+  ingest_token_hash           String?                      @unique @db.VarChar(64)
+  /// Non-secret display fragment for logs and support triage, e.g. "whk_live_7F3A".
+  ingest_token_prefix         String?                      @db.VarChar(32)
+  last_event_at               DateTime?                    @db.Timestamptz(6)
+  last_failure_at             DateTime?                    @db.Timestamptz(6)
+  last_success_at             DateTime?                    @db.Timestamptz(6)
+  mapping_status              String?                      @db.VarChar(30)
+  /// Bumped on every mapping write and stamped on each submission, so
+  /// "reprocess everything ingested under v2" is one query.
+  mapping_version             Int                          @default(0)
+  /// Rotation grace window. Without it, the instant a customer clicks Rotate
+  /// every submission fails until they finish pasting into Tally.
+  previous_secret_enc         String?
+  previous_secret_valid_until DateTime?                    @db.Timestamptz(6)
+  /// Separate from "a secret exists": Tally's signing is optional, so a customer
+  /// can configure a secret here and forget to paste it there.
+  /// false => verify if present, accept if absent, flag it.
+  /// true  => no valid signature, no processing.
+  require_signature           Boolean                      @default(false)
+  /// sha256 of sorted (fieldKey:fieldType) — cheap form-change detection.
+  schema_fingerprint          String?                      @db.VarChar(64)
+  /// AES-256-GCM(secret) — encrypted, NEVER hashed. Verification is
+  /// base64(HMAC-SHA256(secret, rawBody)), which needs the cleartext at verify
+  /// time; a hash cannot produce it.
+  signing_secret_enc          String?
+  signing_secret_last4        String?                      @db.VarChar(8)
+  signing_secret_set_at       DateTime?                    @db.Timestamptz(6)
+  token_rotated_at            DateTime?                    @db.Timestamptz(6)
+  lead_source_field_mappings  lead_source_field_mappings[]
+  lead_source_fields          lead_source_fields[]
+  organizations               organizations                @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lead_submissions            lead_submissions[]
+  leads                       leads[]
+  webhook_events              webhook_events[]
 
   @@unique([organization_id, code], map: "lead_sources_code_unique")
   @@index([organization_id], map: "idx_lead_sources_organization")
@@ -298,9 +407,24 @@ model leads {
   utm_campaign             String?                @db.VarChar(255)
   created_at               DateTime               @default(now()) @db.Timestamptz(6)
   updated_at               DateTime               @default(now()) @db.Timestamptz(6)
+  custom_fields            Json                   @default("{}")
+  field_provenance         Json                   @default("{}")
+  consent_source           String?                @db.VarChar(50)
+  consent_text             String?
+  consent_at               DateTime?              @db.Timestamptz(6)
+  phone_valid              Boolean                @default(false)
+  /// False when the submitted address did not look like an email. Such a lead
+  /// is still a lead — its address just never becomes a merge identity, or
+  /// everyone who types "n/a" collapses into one person.
+  email_valid              Boolean                @default(false)
+  submission_count         Int                    @default(1)
+  last_submission_at       DateTime?              @db.Timestamptz(6)
+  needs_review             Boolean                @default(false)
+  review_reasons           String[]               @default([])
   appointments             appointments[]
   conversations            conversations[]
   lead_assignments         lead_assignments[]
+  leadSubmissions          lead_submissions[]
   lead_sources             lead_sources?          @relation(fields: [lead_source_id], references: [id], onUpdate: NoAction)
   organizations            organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                    users?                 @relation(fields: [takeover_user_id], references: [id], onUpdate: NoAction)
@@ -377,17 +501,21 @@ model organizations {
   created_at            DateTime                @default(now()) @db.Timestamptz(6)
   updated_at            DateTime                @default(now()) @db.Timestamptz(6)
   routing_policy        String                  @default("geographic_round_robin") @db.VarChar(30)
+  default_region        String                  @default("US") @db.VarChar(2)
   agent_availability    agent_availability[]
   agent_profiles        agent_profiles[]
   agent_territories     agent_territories[]
+  apiKeys               api_keys[]
   appointments          appointments[]
   audit_logs            audit_logs[]
   calendar_connections  calendar_connections[]
   conversations         conversations[]
+  domainEvents          domain_events[]
   followup_sequences    followup_sequences[]
   integrations          integrations[]
   lead_assignments      lead_assignments[]
   lead_sources          lead_sources[]
+  provider_credentials  provider_credentials[]
   leads                 leads[]
   messages              messages[]
   organization_members  organization_members[]
@@ -499,24 +627,85 @@ model voice_calls {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model webhook_events {
-  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id    String?        @db.Uuid
-  provider           String         @db.VarChar(50)
-  event_type         String         @db.VarChar(100)
-  external_event_id  String?        @db.VarChar(255)
-  payload            Json
-  signature_verified Boolean        @default(false)
-  processing_status  String         @default("received") @db.VarChar(20)
-  attempts           Int            @default(0)
-  received_at        DateTime       @default(now()) @db.Timestamptz(6)
-  processed_at       DateTime?      @db.Timestamptz(6)
-  error_message      String?
-  correlation_id     String?        @db.Uuid
-  organizations      organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String?           @db.Uuid
+  provider               String            @db.VarChar(50)
+  event_type             String            @db.VarChar(100)
+  /// NOTE: a pre-existing partial unique index covers
+  /// (provider, external_event_id) WHERE external_event_id IS NOT NULL.
+  /// Replay rows therefore MUST leave this NULL and carry their identity in
+  /// dedupe_key, or the replay violates that constraint.
+  external_event_id      String?           @db.VarChar(255)
+  payload                Json
+  signature_verified     Boolean           @default(false)
+  processing_status      String            @default("received") @db.VarChar(20)
+  attempts               Int               @default(0)
+  received_at            DateTime          @default(now()) @db.Timestamptz(6)
+  processed_at           DateTime?         @db.Timestamptz(6)
+  error_message          String?
+  correlation_id         String?           @db.Uuid
+  /// Backoff, delayed retry, and how a PAUSED source holds its backlog instead
+  /// of rejecting it.
+  available_at           DateTime?         @db.Timestamptz(6)
+  content_length         Int?
+  /// COALESCE(provider event id, sha256(raw body)). Unique per lead source —
+  /// see the partial unique index in the migration. This is what turns Tally's
+  /// 5m/30m/1h/6h/1d retry ladder into a no-op, AND it is the only replay
+  /// defense we have: Tally signs the body with no timestamp, so a captured
+  /// request stays valid forever. A security control, not a nicety.
+  dedupe_key             String?           @db.VarChar(128)
+  /// sha256(errorClass + top frame) — groups 400 identical failures into one
+  /// incident row in the Deliveries UI.
+  error_fingerprint      String?           @db.VarChar(64)
+  /// Allowlisted only; the signature header VALUE is redacted to a boolean.
+  headers                Json?
+  is_test                Boolean           @default(false)
+  lead_id                String?           @db.Uuid
+  lead_source_id         String?           @db.Uuid
+  locked_at              DateTime?         @db.Timestamptz(6)
+  locked_by              String?           @db.VarChar(100)
+  /// Per-field {rawValue, targetField, transformedValue, outcome, error}.
+  /// Turns "why is this lead wrong" from a support ticket into a glance.
+  mapping_trace          Json?
+  mapping_version_used   Int?
+  max_attempts           Int               @default(6)
+  /// PROCESSED | PROCESSED_WITH_WARNINGS | DUPLICATE | NEEDS_MAPPING |
+  /// NEEDS_IDENTITY | QUARANTINED_SIGNATURE | INVALID_PAYLOAD | ERROR
+  outcome                String?           @db.VarChar(30)
+  outcome_reason         String?           @db.VarChar(100)
+  /// sha256(raw body) — detects "same content, new event id".
+  payload_hash           String?           @db.VarChar(64)
+  processing_ms          Int?
+  provider_created_at    DateTime?         @db.Timestamptz(6)
+  provider_form_id       String?           @db.VarChar(255)
+  provider_submission_id String?           @db.VarChar(255)
+  /// Queue mechanics, deliberately separate from the business outcome below:
+  /// merging them means every new outcome value risks silently changing the
+  /// poller's partial-index predicate.
+  /// PENDING | PROCESSING | DONE | FAILED | DEAD_LETTER
+  queue_state            String?           @db.VarChar(20)
+  /// The exact bytes as received. Required for HMAC re-verification, which is
+  /// what makes quarantine recoverable: when a customer fixes a wrong signing
+  /// secret we re-run the HMAC over these bytes and promote whatever now
+  /// verifies, instead of having destroyed a day of their leads.
+  raw_body               String?
+  raw_body_purged_at     DateTime?         @db.Timestamptz(6)
+  /// Replay writes a NEW row and never mutates the original: the record of what
+  /// arrived and what we did with it at the time must stay immutable.
+  replay_of_id           String?           @db.Uuid
+  /// VALID | INVALID | MISSING | NOT_CONFIGURED
+  signature_state        String?           @db.VarChar(20)
+  used_previous_secret   Boolean           @default(false)
+  warnings               Json?
+  lead_submissions       lead_submissions?
+  lead_sources           lead_sources?     @relation(fields: [lead_source_id], references: [id], onUpdate: NoAction)
+  organizations          organizations?    @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
   @@index([organization_id], map: "idx_webhook_events_organization")
   @@index([received_at(sort: Desc)], map: "idx_webhook_events_received")
   @@index([processing_status], map: "idx_webhook_events_status")
+  @@index([lead_source_id, received_at(sort: Desc)], map: "idx_webhook_events_source_received")
+  @@index([error_fingerprint, received_at(sort: Desc)], map: "idx_webhook_events_error_group")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -536,20 +725,170 @@ model webhook_subscriptions {
   @@index([organization_id], map: "idx_webhook_subscriptions_organization")
 }
 
-// Maps the existing api_keys table (owned by the ingestion service). Used only
-// to mint a per-org x-api-key for the Tally-connection bridge. No relation
-// declared on purpose — this backend never navigates from it.
+/// Dashboard/API credential. Deliberately a DIFFERENT credential from a lead
+/// source's ingest token: an ingest token is pasted into a third party's UI and
+/// lives in their logs, while an API key can read the whole tenant. Rotating one
+/// must never break the other.
+///
+/// Hashed rather than encrypted, because we only ever verify a presented key and
+/// never reproduce it. Unsalted SHA-256 is correct here: the key is 192 bits of
+/// CSPRNG entropy, so there is no dictionary to attack and bcrypt would only add
+/// latency to every request.
 model api_keys {
-  id              String    @id @db.Uuid
-  organization_id String    @db.Uuid
-  name            String    @db.VarChar(100)
-  key_hash        String    @unique @db.VarChar(64)
-  key_prefix      String    @db.VarChar(32)
-  scopes          String[]  @default([])
-  last_used_at    DateTime? @db.Timestamptz(6)
-  expires_at      DateTime? @db.Timestamptz(6)
-  revoked_at      DateTime? @db.Timestamptz(6)
-  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  id              String        @id @db.Uuid
+  organization_id String        @db.Uuid
+  name            String        @db.VarChar(100)
+  key_hash        String        @unique @db.VarChar(64)
+  /// Display + support triage only, never secret.
+  key_prefix      String        @db.VarChar(32)
+  scopes          String[]      @default([])
+  last_used_at    DateTime?     @db.Timestamptz(6)
+  expires_at      DateTime?     @db.Timestamptz(6)
+  revoked_at      DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([organization_id], map: "idx_api_keys_organization")
+}
+
+/// OBSERVED form schema — what questions we have actually seen arrive.
+///
+/// Deliberately separate from lead_source_field_mappings, which is INTENT (what
+/// a human decided). Collapsing the two makes "seen but undecided"
+/// indistinguishable from "deliberately ignored", and loses the label history
+/// that powers the "your form changed" alert.
+model lead_source_fields {
+  id              String       @id @db.Uuid
+  organization_id String       @db.Uuid
+  lead_source_id  String       @db.Uuid
+  /// Tally's "question_a4Xb2". Stable across label edits, which is why mappings
+  /// key on this and a rename never breaks anything.
+  field_key       String       @db.VarChar(255)
+  label           String
+  /// [{label, seenAt}] — renames are informational, not breaking.
+  label_history   Json         @default("[]")
+  /// Varchar, not enum: Tally adds field types and we must never reject a real
+  /// submission because we have not heard of one yet.
+  field_type      String       @db.VarChar(50)
+  /// [{id, text}] snapshot for choice fields. Required so the mapping UI can
+  /// render real option text — value_map keys on text, not on option UUIDs,
+  /// because UUIDs are regenerated when a customer rebuilds a dropdown.
+  options         Json?
+  /// Last few normalized values, for the mapping UI preview.
+  sample_values   Json         @default("[]")
+  /// NEW | ACTIVE | MISSING
+  status          String       @default("NEW") @db.VarChar(20)
+  first_seen_at   DateTime     @default(now()) @db.Timestamptz(6)
+  last_seen_at    DateTime     @default(now()) @db.Timestamptz(6)
+  /// Consecutive deliveries missing this key. Conditional logic, hidden fields
+  /// and skipped optional questions all produce absent fields, so a field is
+  /// only called MISSING after a long streak — a customer who gets "you deleted
+  /// a question!" every time a respondent skips one stops trusting our alerts.
+  missing_streak  Int          @default(0)
+  lead_sources    lead_sources @relation(fields: [lead_source_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([lead_source_id, field_key], map: "lead_source_fields_key_unique")
+  @@index([lead_source_id, status], map: "idx_lead_source_fields_status")
+  @@index([organization_id], map: "idx_lead_source_fields_org")
+}
+
+/// INTENT — how a human decided to route a question into our canonical fields.
+model lead_source_field_mappings {
+  id               String       @id @db.Uuid
+  organization_id  String       @db.Uuid
+  lead_source_id   String       @db.Uuid
+  /// FK-by-value to lead_source_fields.field_key, deliberately not a hard FK: a
+  /// mapping may legitimately be authored (imported or manual) before the field
+  /// has ever been observed live.
+  source_field_key String       @db.VarChar(255)
+  /// Canonical target, e.g. "lead.first_name" | "lead.timeline".
+  /// "__ignore__" is a sentinel rather than NULL, because NULLs are never equal
+  /// in a unique index and would permit unlimited duplicate ignore rows.
+  target_field     String       @db.VarChar(100)
+  transform        Json         @default("{\"kind\": \"passthrough\"}")
+  /// Lower wins when two questions feed one target.
+  priority         Int          @default(100)
+  /// false => a heuristic suggestion awaiting human accept. Suggestions are
+  /// never silently applied: a wrong phone mapping means calling a stranger.
+  is_active        Boolean      @default(true)
+  confidence       Float?
+  /// HEURISTIC | USER | IMPORTED
+  origin           String       @default("USER") @db.VarChar(20)
+  created_at       DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime     @default(now()) @db.Timestamptz(6)
+  lead_sources     lead_sources @relation(fields: [lead_source_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([lead_source_id, source_field_key, target_field], map: "lead_source_field_mappings_unique")
+  @@index([lead_source_id, is_active], map: "idx_field_mappings_active")
+  @@index([lead_source_id, target_field], map: "idx_field_mappings_target")
+}
+
+/// Append-only record of every form submission.
+///
+/// lead_id is NULLABLE so a submission we cannot yet identify (no phone, no
+/// email, or mapping not configured) is still preserved rather than dropped —
+/// and stays replayable once the mapping is fixed.
+model lead_submissions {
+  id                     String         @id @db.Uuid
+  organization_id        String         @db.Uuid
+  lead_id                String?        @db.Uuid
+  lead_source_id         String         @db.Uuid
+  /// Exactly one submission per delivery — a second idempotency layer beneath
+  /// the transport-level dedupe_key.
+  webhook_event_id       String         @unique @db.Uuid
+  provider_submission_id String?        @db.VarChar(255)
+  /// Tally's respondentId — a cross-submission identity hint.
+  provider_respondent_id String?        @db.VarChar(255)
+  submitted_at           DateTime       @db.Timestamptz(6)
+  /// EVERY question and answer: {key, label, type, textValues[], scalarText, raw}.
+  /// The permanent, mapping-independent record — this is what makes a mapping
+  /// fix retroactively repairable.
+  normalized_answers     Json
+  mapped_values          Json           @default("{}")
+  unmapped_keys          String[]       @default([])
+  /// [{field, from, to, policy}] — the merge audit trail. Between this and prior
+  /// submissions, every value a lead ever held is reconstructible, so no merge
+  /// is truly destructive.
+  applied_changes        Json           @default("[]")
+  /// [{field, incoming, reason}] — e.g. "consent requested but lead previously
+  /// opted out". Precisely what you must produce in a compliance dispute.
+  skipped_changes        Json           @default("[]")
+  warnings               Json           @default("[]")
+  mapping_version        Int            @default(0)
+  mapping_confidence     Float?
+  is_first_for_lead      Boolean        @default(false)
+  created_at             DateTime       @default(now()) @db.Timestamptz(6)
+  leads                  leads?         @relation(fields: [lead_id], references: [id], onUpdate: NoAction)
+  lead_sources           lead_sources   @relation(fields: [lead_source_id], references: [id], onUpdate: NoAction)
+  webhook_events         webhook_events @relation(fields: [webhook_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([lead_id, created_at(sort: Desc)], map: "idx_lead_submissions_lead")
+  @@index([lead_source_id, created_at(sort: Desc)], map: "idx_lead_submissions_source")
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_lead_submissions_org")
+}
+
+/// Transactional outbox. Written in the SAME transaction as the lead write, so
+/// "lead created" and "notify downstream" can never disagree.
+///
+/// Nothing consumes it yet. It exists now so that adding WF-04 (instant SMS),
+/// WF-05 (AI voice) and CRM sync does not require touching the ingestion
+/// transaction. available_at also models delayed work, which is what follow-up
+/// sequences need — and unlike a Redis delayed set it stays queryable by lead
+/// and cancellable with one UPDATE when a lead replies or goes DNC.
+model domain_events {
+  id              String        @id @db.Uuid
+  organization_id String        @db.Uuid
+  aggregate_type  String        @db.VarChar(50)
+  aggregate_id    String        @db.Uuid
+  /// "lead.created" | "lead.merged" | "lead.reengaged" | "mapping.needs_review"
+  event_type      String        @db.VarChar(100)
+  payload         Json
+  occurred_at     DateTime      @default(now()) @db.Timestamptz(6)
+  available_at    DateTime      @default(now()) @db.Timestamptz(6)
+  published_at    DateTime?     @db.Timestamptz(6)
+  attempts        Int           @default(0)
+  last_error      String?
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([aggregate_type, aggregate_id, occurred_at(sort: Desc)], map: "idx_domain_events_aggregate")
 }

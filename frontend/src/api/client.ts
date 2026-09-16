@@ -9,23 +9,21 @@ import { getToken } from '../lib/api';
  * dependency one-directional is what stops the two from being accidentally
  * merged — see the DEMO / LIVE badges in the UI.
  *
- * Routing, after the frontend/backend split: the browser never talks to the
- * ingestion service directly. It calls the portal at `/api/tally/...` (the Vite
- * dev proxy, and a Netlify proxy in production, point `/api` at the portal),
- * the portal's JWT guard establishes WHICH org is asking, and the bridge in
- * backend/src/tally/routes.ts forwards to the ingestion service with that org's
- * x-api-key attached server-side.
+ * Requests go to a relative `/api` path, which the Vite dev server forwards to
+ * the backend (and `VITE_API_URL` points at in production), carrying the same
+ * session token the rest of the app uses. The backend's guard reads the
+ * organization off that token.
  *
- * That indirection is the point. The ingestion key can read a whole tenant, so
- * it must never reach the browser — and because the org comes from the session
- * rather than from a key baked into the build, two logged-in organizations no
- * longer share one credential.
+ * No API key is involved. An ingestion key can read a whole tenant, so it must
+ * never reach the browser; and because the org comes from the session rather
+ * than from a key baked into the build, two logged-in organizations can never
+ * share one credential.
  */
 
 // Same rule as src/lib/api.ts: relative in development, where the Vite proxy
-// makes the portal same-origin, and an absolute origin in production, where the
+// makes the API same-origin, and an absolute origin in production, where the
 // SPA is served from a CDN that has no /api of its own.
-const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api/tally`;
+const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
 
 export class ApiError extends Error {
   constructor(
@@ -54,7 +52,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch {
-    throw new ApiError(0, 'NETWORK', 'Cannot reach the API. Is the portal running on port 4000?');
+    throw new ApiError(0, 'NETWORK', 'Cannot reach the API. Is the backend running on port 4000?');
   }
 
   if (res.status === 204) return undefined as T;
@@ -82,7 +80,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function friendlyMessage(status: number): string {
   switch (status) {
     case 401:
-      return 'Your session has expired, or the portal could not reach the ingestion service. Sign in again.';
+      return 'Your session has expired. Sign in again.';
     case 404:
       return 'Not found.';
     case 429:

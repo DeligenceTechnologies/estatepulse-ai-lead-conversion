@@ -1,4 +1,4 @@
-import { prisma } from '../db.js';
+import { prisma } from '../db';
 
 /**
  * The org's single editable outbound strategy (voice + SMS steps), persisted in an

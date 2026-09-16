@@ -1,19 +1,35 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
+    "module": "commonjs",
+    "declaration": false,
+    "removeComments": true,
+    // Required by NestJS dependency injection: without emitDecoratorMetadata
+    // the container cannot see constructor parameter types and every injected
+    // provider resolves to undefined. This is why the whole backend is
+    // CommonJS — esbuild-based loaders (tsx) cannot emit this metadata.
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
     "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "outDir": "./dist",
+    "baseUrl": "./",
+    // NOT incremental: the Nest CLI deletes dist/ on every build, and a
+    // surviving .tsbuildinfo then reports "up to date" and emits nothing —
+    // which fails at run time with a missing dist/server.js, not at compile time.
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
 }

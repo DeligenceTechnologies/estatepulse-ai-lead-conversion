@@ -1,4 +1,4 @@
-import { getCreds } from './credStore.js';
+import { getCreds } from './credStore';
 
 /** Send an SMS from the org's own Telnyx number. */
 export async function sendSms(orgId: string, to: string, text: string) {

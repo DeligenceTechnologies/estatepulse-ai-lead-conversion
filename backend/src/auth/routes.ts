@@ -1,11 +1,11 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { env } from '../env.js';
-import { AppError, zodDetails } from '../errors.js';
-import { requireAuth } from './requireAuth.js';
-import { loginSchema, signupSchema } from './schemas.js';
-import { login, signup } from './service.js';
-import type { MeDTO } from './types.js';
+import { env } from '../env';
+import { AppError, zodDetails } from '../errors';
+import { requireAuth } from './requireAuth';
+import { loginSchema, signupSchema } from './schemas';
+import { login, signup } from './service';
+import type { MeDTO } from './types';
 
 const passthrough = (_req: Request, _res: Response, next: NextFunction): void => next();
 

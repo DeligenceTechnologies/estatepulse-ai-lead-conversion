@@ -1,4 +1,4 @@
-import { getCreds } from './credStore.js';
+import { getCreds } from './credStore';
 
 /**
  * Place an outbound AI qualification call from the org's Telnyx number.

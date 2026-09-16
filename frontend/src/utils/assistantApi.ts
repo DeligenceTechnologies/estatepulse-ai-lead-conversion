@@ -202,7 +202,12 @@ export const createIngestSource = (label: string) =>
 export const setIngestSourceActive = (id: string, active: boolean) =>
   apiFetch<{ ok: boolean; active: boolean }>(`/ingest/sources/${id}`, { method: 'PATCH', body: { active }, auth: true });
 
-// ---- Tally connection (bridge to the ingestion service via /api/tally/*) ----
+// ---- Tally connection (the ingestion routes, /api/v1/*) --------------------
+//
+// These used to go through a /api/tally/* proxy that swapped the session token
+// for a per-org API key, because the ingestion service was a second process.
+// It is the same process now, and its guard accepts the session token directly,
+// so these call the real endpoints.
 export interface TallyConnection {
   id: string;
   provider: string;
@@ -228,14 +233,14 @@ export interface TallyLeadSource {
   ingestStatus?: string | null;
   isActive?: boolean;
 }
-export const tallyProviders = () => apiFetch<unknown>('/tally/providers', { auth: true });
-export const tallyConnections = () => apiFetch<TallyConnection[]>('/tally/connections', { auth: true });
+export const tallyProviders = () => apiFetch<unknown>('/v1/integrations/providers', { auth: true });
+export const tallyConnections = () => apiFetch<TallyConnection[]>('/v1/integrations', { auth: true });
 export const tallyConnect = (apiKey: string, label?: string) =>
-  apiFetch<TallyConnection>('/tally/connect', { method: 'POST', body: { apiKey, label }, auth: true });
+  apiFetch<TallyConnection>('/v1/integrations', { method: 'POST', body: { provider: 'TALLY', apiKey, label }, auth: true });
 export const tallyVerify = (id: string) =>
-  apiFetch<TallyConnection>(`/tally/connections/${id}/verify`, { method: 'POST', auth: true });
+  apiFetch<TallyConnection>(`/v1/integrations/${id}/verify`, { method: 'POST', auth: true });
 export const tallyForms = (id: string) =>
-  apiFetch<{ items: TallyForm[]; nextCursor: string | null }>(`/tally/connections/${id}/forms`, { auth: true });
+  apiFetch<{ items: TallyForm[]; nextCursor: string | null }>(`/v1/integrations/${id}/forms`, { auth: true });
 export const tallyConnectForm = (credentialId: string, externalFormId: string, name?: string) =>
-  apiFetch<unknown>('/tally/lead-sources/connect', { method: 'POST', body: { credentialId, externalFormId, name }, auth: true });
-export const tallyLeadSources = () => apiFetch<TallyLeadSource[]>('/tally/lead-sources', { auth: true });
+  apiFetch<unknown>('/v1/lead-sources/connect', { method: 'POST', body: { credentialId, externalFormId, name }, auth: true });
+export const tallyLeadSources = () => apiFetch<TallyLeadSource[]>('/v1/lead-sources', { auth: true });
