@@ -17,10 +17,14 @@ import {
 import {
   ApiError,
   api,
+  providersApi,
   type LeadSourceConfig,
   type LeadSourceWithSecret,
   type WebhookDelivery,
 } from '../../api/client';
+import { ConnectFormPanel } from '../leadsources/ConnectFormPanel';
+import { CopyField } from '../leadsources/CopyField';
+import { ConnectionPill, MappingPill, SourceStatusPill } from '../leadsources/StatusPills';
 
 /**
  * Live backend screen — the ONLY view in this app that talks to the real API.
@@ -28,39 +32,6 @@ import {
  * deliberately holds its own fetch state rather than putting async data into
  * that context, so the two can never be accidentally merged.
  */
-
-const CopyField: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono = true,
-}) => {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="space-y-1">
-      <div className="text-[11px] text-slate-400 font-medium">{label}</div>
-      <div className="flex items-stretch gap-2">
-        <div
-          className={`flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-cyan-300 overflow-x-auto whitespace-nowrap ${
-            mono ? 'font-mono' : ''
-          }`}
-        >
-          {value}
-        </div>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(value);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1800);
-          }}
-          className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-        >
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-    </div>
-  );
-};
 
 const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> = ({
   state,
@@ -118,6 +89,33 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
         <span className="text-[10px] font-mono text-slate-500">{d.bodyBytes ?? 0}B</span>
       </div>
 
+      {/* The one-line answer to "did normalization work on this submission?" */}
+      {d.mapping && (
+        <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
+            {d.mapping.mapped} mapped
+          </span>
+          {d.mapping.unmapped > 0 && (
+            <span
+              title="Kept verbatim on the lead as an extra answer — not lost, just not one of our fields"
+              className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700"
+            >
+              {d.mapping.unmapped} unmapped
+            </span>
+          )}
+          {d.mapping.warnings > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">
+              {d.mapping.warnings} need{d.mapping.warnings === 1 ? 's' : ''} a look
+            </span>
+          )}
+          {d.mapping.errored > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold">
+              {d.mapping.errored} failed
+            </span>
+          )}
+        </div>
+      )}
+
       {quarantined && (
         <div className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-2 leading-relaxed">
           <strong>Signature didn't match.</strong> The secret in Tally doesn't match ours, so this
@@ -133,14 +131,45 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
       {d.answers.length > 0 ? (
         <div className="space-y-1 pt-1">
           {d.answers.map((a, i) => (
-            <div key={i} className="flex items-baseline gap-2 text-xs">
-              <span className="text-slate-400 min-w-[40%] shrink-0 truncate" title={a.label}>
-                {a.label}
-              </span>
-              <span className="text-slate-100 font-medium break-words">
-                {a.value || <span className="text-slate-600 italic">(empty)</span>}
-              </span>
-              <span className="text-[9px] text-slate-600 font-mono ml-auto shrink-0">{a.type}</span>
+            <div key={i} className="space-y-0.5">
+              <div className="flex items-baseline gap-2 text-xs">
+                <span className="text-slate-400 min-w-[40%] shrink-0 truncate" title={a.label}>
+                  {a.label}
+                </span>
+                <span className="text-slate-100 font-medium break-words">
+                  {a.value || <span className="text-slate-600 italic">(empty)</span>}
+                </span>
+
+                {/* Where this answer ended up. The arrow is the whole point:
+                    it shows a question becoming a lead field, or not. */}
+                <span className="ml-auto shrink-0 flex items-center gap-1.5">
+                  {a.targetFields.length > 0 ? (
+                    a.targetFields.map(t => (
+                      <span
+                        key={t}
+                        className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                      >
+                        → {t}
+                      </span>
+                    ))
+                  ) : a.mappingOutcome === 'unmapped' ? (
+                    <span
+                      title="Stored on the lead as an extra answer, not as one of our fields"
+                      className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700"
+                    >
+                      extra
+                    </span>
+                  ) : null}
+                  <span className="text-[9px] text-slate-600 font-mono">{a.type}</span>
+                </span>
+              </div>
+
+              {a.warnings.map((w, j) => (
+                <div key={j} className="text-[10px] text-amber-300/90 pl-1 flex items-start gap-1">
+                  <AlertTriangle className="w-2.5 h-2.5 mt-0.5 shrink-0" />
+                  {w}
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -162,6 +191,11 @@ export const LeadSourcesView: React.FC = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [justCreated, setJustCreated] = useState<LeadSourceWithSecret | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showConnect, setShowConnect] = useState(false);
+  const [remoteBusy, setRemoteBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Two-step rather than window.confirm: this app has no confirm dialogs.
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
 
   const loadSources = useCallback(async () => {
     try {
@@ -237,13 +271,28 @@ export const LeadSourcesView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          New lead source
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setShowCreate(true);
+              setShowConnect(false);
+            }}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+          >
+            Set up manually
+          </button>
+          <button
+            onClick={() => {
+              setShowConnect(true);
+              setShowCreate(false);
+              setJustCreated(null);
+            }}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Connect a form
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -259,6 +308,37 @@ export const LeadSourcesView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {notice && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-200 leading-relaxed flex-1">{notice}</div>
+          <button
+            onClick={() => setNotice(null)}
+            className="p-1 rounded-lg text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {showConnect && (
+        <ConnectFormPanel
+          onClose={() => setShowConnect(false)}
+          onConnected={async (id) => {
+            await loadSources();
+            setSelectedId(id);
+          }}
+          onOpenSource={(id) => {
+            setShowConnect(false);
+            setSelectedId(id);
+          }}
+          onSetUpManually={() => {
+            setShowConnect(false);
+            setShowCreate(true);
+          }}
+        />
       )}
 
       {/* Secret reveal — the only time the signing secret is ever shown. */}
@@ -341,7 +421,8 @@ export const LeadSourcesView: React.FC = () => {
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-center space-y-2">
               <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
               <div className="text-xs text-slate-400">
-                No lead sources yet. Create one to get a webhook URL for Tally.
+                No lead sources yet. Connect a form to have the webhook installed for you, or set
+                one up manually to get a URL you paste yourself.
               </div>
             </div>
           ) : (
@@ -361,10 +442,21 @@ export const LeadSourcesView: React.FC = () => {
                     {s.deliveryCount ?? 0}
                   </span>
                 </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <SourceStatusPill source={s} />
+                  <ConnectionPill source={s} />
+                  {s.externalFormName && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[60%]">
+                      {s.externalFormName}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[11px] text-slate-400">
                   {s.lastEventAt
                     ? `Last delivery ${new Date(s.lastEventAt).toLocaleString()}`
-                    : 'Awaiting first submission'}
+                    : (s.mappingStatus ?? '').toUpperCase() !== 'UNCONFIGURED'
+                      ? 'Ready — listening for submissions'
+                      : 'Awaiting first submission'}
                 </div>
               </button>
             ))
@@ -376,7 +468,73 @@ export const LeadSourcesView: React.FC = () => {
           {selected ? (
             <>
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-                <h3 className="text-sm font-bold text-white">{selected.name}</h3>
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-white truncate">{selected.name}</h3>
+                    {selected.externalFormName && (
+                      <div className="text-[11px] text-slate-400 truncate">
+                        {(selected.provider ?? 'form').toLowerCase()} · {selected.externalFormName}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    <SourceStatusPill source={selected} />
+                    <MappingPill status={selected.mappingStatus} />
+                  </div>
+                </div>
+
+                {/* A webhook that vanished on the provider's side is silent
+                    data loss, so it gets a repair button rather than a badge. */}
+                {['UNINSTALLED', 'ORPHANED', 'ERROR', 'DRIFTED'].includes(
+                  (selected.remoteState ?? '').toUpperCase(),
+                ) && (
+                  <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 space-y-2">
+                    <div className="text-[11px] text-rose-200 leading-relaxed">
+                      <strong className="text-rose-100">The webhook is not where we expect it.</strong>{' '}
+                      {selected.remoteErrorMessage ??
+                        'It is no longer on the form. Submissions since then were never sent to us, and cannot be recovered.'}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          setRemoteBusy(true);
+                          try {
+                            const r = await providersApi.resync(selected.id);
+                            setNotice(`Re-sync: ${r.remoteState.toLowerCase()}${r.removedDuplicates ? `, removed ${r.removedDuplicates} duplicate webhook(s)` : ''}.`);
+                            await loadSources();
+                          } catch (e) {
+                            setNotice(e instanceof ApiError ? e.message : String(e));
+                          } finally {
+                            setRemoteBusy(false);
+                          }
+                        }}
+                        disabled={remoteBusy}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Re-sync
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setRemoteBusy(true);
+                          try {
+                            await providersApi.reinstall(selected.id);
+                            setNotice('Webhook reinstalled with the same URL and secret — nothing else to change.');
+                            await loadSources();
+                          } catch (e) {
+                            setNotice(e instanceof ApiError ? e.message : String(e));
+                          } finally {
+                            setRemoteBusy(false);
+                          }
+                        }}
+                        disabled={remoteBusy}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Reinstall webhook
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {selected.webhookUrl && <CopyField label="Webhook URL" value={selected.webhookUrl} />}
                 <div className="text-[11px] text-slate-400">
                   Signing secret:{' '}
@@ -390,6 +548,51 @@ export const LeadSourcesView: React.FC = () => {
                     ? 'required'
                     : 'verified when present, accepted when absent'}
                 </div>
+
+                {/* Only an API-connected source can be removed from the
+                    provider by us; a manual one we have no credential for. */}
+                {(selected.connectionMethod ?? '').toUpperCase() === 'API' && (
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500">
+                      We installed this webhook, so we can remove it for you.
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (confirmDisconnect !== selected.id) {
+                          setConfirmDisconnect(selected.id);
+                          return;
+                        }
+                        setRemoteBusy(true);
+                        try {
+                          const r = await providersApi.disconnectForm(selected.id);
+                          setNotice(
+                            r.warning ??
+                              'Disconnected, and the webhook was removed from your form. Leads already received are untouched.',
+                          );
+                          setConfirmDisconnect(null);
+                          setSelectedId(null);
+                          await loadSources();
+                        } catch (e) {
+                          setNotice(
+                            e instanceof ApiError
+                              ? `${e.message} Use force if you want to disconnect anyway and remove it yourself.`
+                              : String(e),
+                          );
+                        } finally {
+                          setRemoteBusy(false);
+                        }
+                      }}
+                      disabled={remoteBusy}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 ${
+                        confirmDisconnect === selected.id
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {confirmDisconnect === selected.id ? 'Confirm — remove webhook' : 'Disconnect'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
@@ -419,10 +622,20 @@ export const LeadSourcesView: React.FC = () => {
                     <Radio className="w-6 h-6 text-slate-600 mx-auto animate-pulse" />
                     <div className="text-xs text-slate-400">Listening for your first submission…</div>
                     <div className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
-                      Paste the webhook URL into Tally and submit your form. Nothing arriving? The URL
-                      must be publicly reachable — a <code className="font-mono">localhost</code> URL
-                      cannot be called by Tally. Use an ngrok tunnel and set{' '}
-                      <code className="font-mono">PUBLIC_API_BASE_URL</code> to it.
+                      {(selected.connectionMethod ?? '').toUpperCase() === 'API' ? (
+                        <>
+                          The webhook is already installed on your form — just submit it once.
+                          Nothing arriving? Our public URL must be reachable from the internet; a{' '}
+                          <code className="font-mono">localhost</code> address cannot be called.
+                        </>
+                      ) : (
+                        <>
+                          Paste the webhook URL into Tally and submit your form. Nothing arriving? The
+                          URL must be publicly reachable — a <code className="font-mono">localhost</code>{' '}
+                          URL cannot be called by Tally. Use an ngrok tunnel and set{' '}
+                          <code className="font-mono">PUBLIC_API_BASE_URL</code> to it.
+                        </>
+                      )}
                     </div>
                   </div>
                 ) : (

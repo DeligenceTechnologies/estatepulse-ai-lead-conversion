@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Terminal,
   Key,
+  Radio,
   Webhook
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -18,7 +19,7 @@ interface IntegrationsViewProps {
 }
 
 export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhookTester }) => {
-  const { integrations } = useApp();
+  const { integrations, setActiveView } = useApp();
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
@@ -43,6 +44,50 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhoo
 
       {/* Integration Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/*
+          The ONLY real integration on this page.
+
+          Hardcoded rather than added to INITIAL_INTEGRATIONS on purpose: that
+          array is demo seed data in AppContext, and putting a live integration
+          in it would start the demo/live merge the codebase is built to avoid.
+          It is a signpost, not a status display — it deliberately fetches
+          nothing, because reading live state here would mean this view calling
+          the real API.
+        */}
+        <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                Forms
+              </span>
+              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                <Radio className="w-3 h-3" />
+                Live
+              </span>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Tally Forms</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Connect a form with an API key and we install the webhook for you, then map its
+                fields before the first submission arrives.
+              </p>
+            </div>
+            <div className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl text-[11px] text-slate-400 leading-relaxed">
+              This is the only integration on this page backed by the real API — the others are
+              demo data.
+            </div>
+          </div>
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+            <span className="text-slate-500 font-mono text-[11px]">Managed in Lead Sources</span>
+            <button
+              onClick={() => setActiveView('lead_sources')}
+              className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
+            >
+              Connect a form →
+            </button>
+          </div>
+        </div>
+
         {integrations.map(integ => (
           <div
             key={integ.id}

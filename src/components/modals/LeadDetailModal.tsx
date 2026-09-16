@@ -330,6 +330,32 @@ export const LeadDetailModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Everything the prospect said that has no field of its own.
+                  Kept out of the pipeline table on purpose — that shows only
+                  what we act on — but never discarded. */}
+              {lead.customFields && Object.keys(lead.customFields).length > 0 && (
+                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-slate-400" />
+                    Other answers from the form
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Captured verbatim. These did not match one of our lead fields, so they are kept
+                    here rather than dropped.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 pt-1">
+                    {Object.entries(lead.customFields).map(([k, v]) => (
+                      <div key={k} className="flex items-baseline gap-2 text-xs">
+                        <span className="text-slate-500 min-w-[40%] shrink-0 truncate" title={k}>
+                          {k}
+                        </span>
+                        <span className="text-slate-200 break-words">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Quick Consultation Booking Bar */}
               <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
                 <div>

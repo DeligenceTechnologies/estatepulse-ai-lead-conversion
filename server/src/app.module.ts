@@ -6,6 +6,8 @@ import { IngestModule } from './modules/ingest/ingest.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
 import { LeadsModule } from './modules/leads/leads.module';
 import { ProcessingModule } from './modules/processing/processing.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { ProvidersModule } from './modules/providers/providers.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 /**
@@ -25,6 +27,11 @@ const envSchema = z.object({
   WORKER_BATCH_SIZE: z.coerce.number().default(10),
   WORKER_STUCK_AFTER_MS: z.coerce.number().default(300_000),
   INGEST_MAX_BODY_BYTES: z.coerce.number().default(1_048_576),
+
+  // Overridable so scripts/fake-tally.mjs can stand in for the real API —
+  // including the 401/429/5xx paths a real account will not produce on demand.
+  TALLY_API_BASE_URL: z.string().url().default('https://api.tally.so'),
+  PROVIDER_HTTP_TIMEOUT_MS: z.coerce.number().default(10_000),
 });
 
 @Module({
@@ -47,6 +54,8 @@ const envSchema = z.object({
     LeadSourcesModule,
     LeadsModule,
     ProcessingModule,
+    ProvidersModule,
+    IntegrationsModule,
   ],
   controllers: [HealthController],
 })

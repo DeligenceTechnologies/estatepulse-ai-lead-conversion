@@ -1,14 +1,15 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { DeliveryOutcome, QueueState } from '../../common/domain';
+import { DeliveryOutcome, MappingOrigin, MappingStatus, QueueState } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TallyAdapter } from '../ingest/adapters/tally.adapter';
 import type { NormalizedAnswer } from '../ingest/adapters/types';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
-import { applyTransform, type Transform } from './transforms';
+import { applyTransform, isValidEmail, type Transform } from './transforms';
+import { validateCanonicalValues } from './validators';
 
 interface ClaimedEvent {
   id: string;
@@ -178,6 +179,17 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       const mappings = await this.ensureMappings(event.organization_id, source.id, parsed.answers, region);
       const mapped = this.applyMappings(parsed.answers, mappings, region);
 
+      // Last gate before the columns. Anything that fails is demoted into
+      // custom_fields rather than dropped, so the answer survives even though
+      // it never reaches a typed column.
+      const validated = validateCanonicalValues(mapped.values);
+      for (const r of validated.rejected) {
+        const label = CANONICAL_FIELDS[r.field]?.label ?? r.field;
+        if (r.raw) mapped.customFields[`${label} (unvalidated)`] = r.raw;
+      }
+      mapped.values = validated.values;
+      mapped.warnings.push(...validated.warnings);
+
       const phone = typeof mapped.values.phone === 'string' ? mapped.values.phone : null;
       const email = typeof mapped.values.email === 'string' ? mapped.values.email : null;
 
@@ -195,6 +207,15 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      // What a human should actually look at: an answer we could not store, or
+      // a contact detail we could not use. Informational transform notes — an
+      // open-ended budget estimated at 1.5x, say — deliberately do NOT raise
+      // the flag, or it would be raised on almost every lead and mean nothing.
+      const reviewReasons = [...validated.warnings];
+      if (phone && !phone.startsWith('+')) {
+        reviewReasons.push('Phone number could not be parsed — this lead must not be auto-dialled');
+      }
+
       const { leadId, merged } = await this.upsertLead({
         organizationId: event.organization_id,
         leadSourceId: source.id,
@@ -203,6 +224,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         customFields: mapped.customFields,
         phone,
         email,
+        reviewReasons,
       });
 
       await this.prisma.lead_submissions.create({
@@ -287,7 +309,15 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           field_key: a.key,
           label: a.label,
           field_type: a.type,
-          options: (a.optionIds ? a.textValues.map((t, i) => ({ id: a.optionIds![i], text: t })) : null) as never,
+          // `allOptions` is EVERY choice the question offers; textValues holds
+          // only the ones this respondent picked. Storing the latter builds an
+          // option-text -> enum map covering whichever answer happened to
+          // arrive first, and every other choice then silently maps to null.
+          options: (a.allOptions?.length
+            ? a.allOptions
+            : a.optionIds
+              ? a.textValues.map((t, i) => ({ id: a.optionIds![i], text: t }))
+              : null) as never,
           sample_values: [a.scalarText].filter(Boolean) as never,
           status: 'ACTIVE',
         },
@@ -312,7 +342,57 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     const existing = await this.prisma.lead_source_field_mappings.findMany({
       where: { lead_source_id: sourceId, is_active: true },
     });
-    if (existing.length > 0) return existing;
+
+    if (existing.length > 0) {
+      // Top up rather than stopping.
+      //
+      // "Any mappings at all => leave it alone" had two costs. A question added
+      // to a live form was never auto-mapped, however obvious it was. And a
+      // source pre-mapped from its schema at connect time could never recover if
+      // the predicted field keys turned out wrong — it would look configured
+      // while mapping nothing. Suggesting only for answers no mapping covers
+      // fixes both, and cannot disturb a mapping that already exists.
+      const source = await this.prisma.lead_sources.findUnique({
+        where: { id: sourceId },
+        select: { mapping_status: true },
+      });
+      // A human has signed off on this source; never second-guess them.
+      if (source?.mapping_status === MappingStatus.CONFIGURED) return existing;
+
+      const covered = new Set(existing.map((m) => m.source_field_key));
+      const uncovered = answers.filter((a) => !covered.has(a.key));
+      if (uncovered.length === 0) return existing;
+
+      // A target already claimed stays claimed — first mapping wins.
+      const claimed = new Set(existing.map((m) => m.target_field));
+      const additions = suggestMappings(uncovered, region).filter((s) => !claimed.has(s.targetField));
+      if (additions.length === 0) return existing;
+
+      await this.prisma.lead_source_field_mappings.createMany({
+        data: additions.map((s) => ({
+          id: newId(),
+          organization_id: orgId,
+          lead_source_id: sourceId,
+          source_field_key: s.sourceFieldKey,
+          target_field: s.targetField,
+          transform: s.transform as never,
+          is_active: true,
+          confidence: s.confidence,
+          origin: MappingOrigin.HEURISTIC,
+        })),
+        skipDuplicates: true,
+      });
+
+      await this.prisma.lead_sources.update({
+        where: { id: sourceId },
+        data: { mapping_status: MappingStatus.NEEDS_REVIEW, mapping_version: { increment: 1 } },
+      });
+
+      this.logger.log(`Topped up ${additions.length} mapping(s) for source ${sourceId}`);
+      return this.prisma.lead_source_field_mappings.findMany({
+        where: { lead_source_id: sourceId, is_active: true },
+      });
+    }
 
     const suggestions = suggestMappings(answers, region);
     if (suggestions.length === 0) return [];
@@ -431,11 +511,26 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     customFields: Record<string, string>;
     phone: string | null;
     email: string | null;
+    /** Non-empty => something needs a human's eye. See `leads.review_reasons`. */
+    reviewReasons: string[];
   }): Promise<{ leadId: string; merged: boolean }> {
-    const { organizationId, leadSourceId, values, customFields, phone, email } = input;
+    const { organizationId, leadSourceId, values, customFields, phone, email, reviewReasons } = input;
 
     const normalizedPhone = phone && phone.startsWith('+') ? phone : null;
-    const normalizedEmail = email ? email.trim().toLowerCase() : null;
+
+    // Symmetric with phone, and for the same reason.
+    //
+    // `normalized_email` is an IDENTITY column — it is how a second submission
+    // finds an existing lead. A required email box on a form someone else
+    // designed collects "n/a", "none", "-", "test@test" many times a day, and
+    // without this guard every prospect who typed "n/a" resolves to the SAME
+    // normalized_email and merges into one lead, overwriting a real person's
+    // name and budget with a stranger's.
+    //
+    // The raw address is still stored on the lead (an agent may recognise a
+    // typo and fix it); it simply never matches anybody.
+    const emailValid = email ? isValidEmail(email) : false;
+    const normalizedEmail = emailValid ? email!.trim().toLowerCase() : null;
     const identity = normalizedPhone ?? normalizedEmail ?? '';
 
     return this.prisma.$transaction(async (tx) => {
@@ -475,6 +570,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
             phone,
             normalized_phone: normalizedPhone,
             phone_valid: Boolean(normalizedPhone),
+            email_valid: emailValid,
+            needs_review: reviewReasons.length > 0,
+            review_reasons: reviewReasons,
             // Always starts at 'new'. Downstream stages move it forward.
             status: 'new',
             temperature: 'cold',
@@ -522,7 +620,17 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         data.normalized_phone = normalizedPhone;
         data.phone_valid = true;
       }
-      if (!existing.normalized_email && normalizedEmail) data.normalized_email = normalizedEmail;
+      if (!existing.normalized_email && normalizedEmail) {
+        data.normalized_email = normalizedEmail;
+        data.email_valid = true;
+      }
+
+      // Accumulate rather than replace: a concern raised by an earlier
+      // submission is not resolved by a later one that happened to be clean.
+      if (reviewReasons.length > 0) {
+        data.needs_review = true;
+        data.review_reasons = [...new Set([...(existing.review_reasons ?? []), ...reviewReasons])];
+      }
 
       // latest_wins: intent fields legitimately change, and stale values here
       // directly corrupt scoring.

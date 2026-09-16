@@ -12,6 +12,24 @@ export interface CreateLeadSourceInput {
   requireSignature?: boolean;
 }
 
+/** One entry of `webhook_events.mapping_trace`, written by the processing worker. */
+interface TraceEntry {
+  sourceFieldKey: string;
+  targetField: string | null;
+  outcome: 'mapped' | 'unmapped' | 'transform_error';
+  warning?: string | null;
+}
+
+interface DeliveryAnswerDto {
+  label: string;
+  type: string;
+  value: string;
+  /** Usually one; two when a single question feeds a pair (name, budget range). */
+  targetFields: string[];
+  mappingOutcome: string | null;
+  warnings: string[];
+}
+
 @Injectable()
 export class LeadSourcesService {
   private readonly adapter = new TallyAdapter();
@@ -27,8 +45,42 @@ export class LeadSourcesService {
     );
   }
 
-  private ingestUrl(token: string): string {
+  /** Public so the connect flow builds the same URL rather than its own. */
+  ingestUrl(token: string): string {
     return `${this.config.get<string>('PUBLIC_API_BASE_URL')}/ingest/v1/tally/${token}`;
+  }
+
+  /**
+   * A slug unique within the organization, since (organization_id, code) is.
+   *
+   * Shared with the connect flow: two creation paths minting codes by different
+   * rules is how you end up with "buyer_inquiry" and "buyer-inquiry-2".
+   */
+  async uniqueCode(organizationId: string, name: string): Promise<string> {
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 36) || 'webhook';
+
+    let code = base;
+    for (
+      let n = 2;
+      await this.prisma.lead_sources.findFirst({
+        where: { organization_id: organizationId, code },
+        select: { id: true },
+      });
+      n++
+    ) {
+      code = `${base.slice(0, 33)}_${n}`;
+    }
+    return code;
+  }
+
+  /** Public for the connect flow, which returns the same DTO shape. */
+  summarize(row: Parameters<LeadSourcesService['toSummary']>[0], token: string | null) {
+    return this.toSummary(row, token);
   }
 
   /**
@@ -47,20 +99,7 @@ export class LeadSourcesService {
     const token = generateIngestToken('live');
     const secret = generateSigningSecret();
 
-    const baseCode = input.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 36) || 'webhook';
-
-    // (organization_id, code) is unique in the Phase One schema.
-    let code = baseCode;
-    for (let n = 2; await this.prisma.lead_sources.findFirst({
-      where: { organization_id: organizationId, code },
-      select: { id: true },
-    }); n++) {
-      code = `${baseCode.slice(0, 33)}_${n}`;
-    }
+    const code = await this.uniqueCode(organizationId, input.name);
 
     const created = await this.prisma.lead_sources.create({
       data: {
@@ -93,9 +132,15 @@ export class LeadSourcesService {
     };
   }
 
-  async list(organizationId: string) {
+  async list(organizationId: string, includeArchived = false) {
     const rows = await this.prisma.lead_sources.findMany({
-      where: { organization_id: organizationId, source_type: 'webhook' },
+      where: {
+        organization_id: organizationId,
+        source_type: 'webhook',
+        // Disconnected sources are archived, not deleted (lead_submissions has
+        // ON DELETE RESTRICT). Without this they would keep appearing as live.
+        ...(includeArchived ? {} : { archived_at: null }),
+      },
       orderBy: { created_at: 'desc' },
     });
 
@@ -182,23 +227,52 @@ export class LeadSourcesService {
     });
 
     return rows.map((r) => {
-      let answers: { label: string; type: string; value: string }[] = [];
+      let answers: DeliveryAnswerDto[] = [];
       let parseError: string | null = null;
+
+      // What the mapping engine decided about each field, recorded when the
+      // delivery was processed. Joining it onto the answers is what turns
+      // "a webhook arrived" into "and here is which answers became lead fields,
+      // which were kept as extras, and which we could not read".
+      // Keyed by source field, holding EVERY entry for it: one question
+      // legitimately feeds two targets ("Your name" -> first_name + last_name,
+      // one budget question -> min_budget + max_budget). Keeping only the first
+      // would show 5 arrows next to a summary that counted 6.
+      const trace = new Map<string, TraceEntry[]>();
+      if (Array.isArray(r.mapping_trace)) {
+        for (const t of r.mapping_trace as unknown as TraceEntry[]) {
+          if (!t?.sourceFieldKey) continue;
+          const list = trace.get(t.sourceFieldKey) ?? [];
+          list.push(t);
+          trace.set(t.sourceFieldKey, list);
+        }
+      }
 
       if (r.payload) {
         try {
           const parsed = this.adapter.parse(r.payload);
-          answers = parsed.answers.map((a) => ({
-            label: a.label,
-            type: a.type,
-            // Already option-UUID-resolved by the adapter, so a dropdown reads
-            // "ASAP / under 30 days" and not "opt_a".
-            value: a.scalarText,
-          }));
+          answers = parsed.answers.map((a) => {
+            const entries = trace.get(a.key) ?? [];
+            return {
+              label: a.label,
+              type: a.type,
+              // Already option-UUID-resolved by the adapter, so a dropdown reads
+              // "ASAP / under 30 days" and not "opt_a".
+              value: a.scalarText,
+              // Empty when the delivery predates mapping or was never processed.
+              targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
+              mappingOutcome: entries[0]?.outcome ?? null,
+              warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
+            };
+          });
         } catch (e) {
           parseError = e instanceof Error ? e.message : String(e);
         }
       }
+
+      const traceEntries = Array.isArray(r.mapping_trace)
+        ? (r.mapping_trace as unknown as TraceEntry[])
+        : [];
 
       return {
         id: r.id,
@@ -214,6 +288,19 @@ export class LeadSourcesService {
         formName: (r.payload as Record<string, never> | null)?.['data']?.['formName'] ?? null,
         answers,
         parseError,
+        /**
+         * The one-line answer to "did normalization work on this submission?".
+         * Null when the delivery has not been processed yet, which is different
+         * from "processed and mapped nothing".
+         */
+        mapping: traceEntries.length
+          ? {
+              mapped: traceEntries.filter((t) => t.outcome === 'mapped').length,
+              unmapped: traceEntries.filter((t) => t.outcome === 'unmapped').length,
+              errored: traceEntries.filter((t) => t.outcome === 'transform_error').length,
+              warnings: traceEntries.filter((t) => t.warning).length,
+            }
+          : null,
       };
     });
   }
@@ -241,6 +328,12 @@ export class LeadSourcesService {
       external_form_name: string | null;
       last_event_at: Date | null;
       created_at: Date;
+      provider?: string | null;
+      connection_method?: string | null;
+      external_form_id?: string | null;
+      remote_state?: string | null;
+      remote_synced_at?: Date | null;
+      remote_error_message?: string | null;
     },
     token: string | null,
   ) {
@@ -259,6 +352,14 @@ export class LeadSourcesService {
       lastEventAt: row.last_event_at,
       createdAt: row.created_at,
       webhookUrl: token ? this.ingestUrl(token) : null,
+      // Only meaningful for an API-connected source; null on a manual one, which
+      // is exactly what the UI needs to tell them apart.
+      provider: row.provider ?? null,
+      connectionMethod: row.connection_method ?? null,
+      externalFormId: row.external_form_id ?? null,
+      remoteState: row.remote_state ?? null,
+      remoteSyncedAt: row.remote_synced_at ?? null,
+      remoteErrorMessage: row.remote_error_message ?? null,
     };
   }
 }

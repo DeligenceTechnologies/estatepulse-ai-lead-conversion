@@ -124,6 +124,7 @@ const toLead = (l: LiveLead): Lead => ({
   createdAt: l.createdAt,
   updatedAt: l.updatedAt,
   notes: humanize(l.motivation) ?? undefined,
+  customFields: l.customFields,
 });
 
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
@@ -394,6 +395,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               {lead.submissionCount} submissions merged
                             </span>
                           )}
+                          {lead.needsReview && (
+                            <span
+                              title={lead.reviewReasons.join('\n')}
+                              className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            >
+                              review
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
                           {lead.phone ?? DASH}
@@ -404,8 +413,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-500 truncate max-w-[180px]">
+                        <div className="text-[11px] text-slate-500 truncate max-w-[180px] flex items-center gap-1">
                           {lead.email ?? DASH}
+                          {lead.email && !lead.emailValid && (
+                            // Stored, but never used to match this lead to
+                            // another — see the email_valid guard in upsertLead.
+                            <span title="Not a usable address — excluded from matching and email outreach">
+                              <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>

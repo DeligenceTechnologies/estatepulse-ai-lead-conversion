@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -11,12 +12,76 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiKeyGuard, type AuthedRequest } from '../../common/api-key.guard';
+import { ConnectService } from './connect.service';
 import { LeadSourcesService } from './lead-sources.service';
 
 @Controller('v1/lead-sources')
 @UseGuards(ApiKeyGuard)
 export class LeadSourcesController {
-  constructor(private readonly service: LeadSourcesService) {}
+  constructor(
+    private readonly service: LeadSourcesService,
+    private readonly connect: ConnectService,
+  ) {}
+
+  /**
+   * Connect a form through the provider's API: we create the source AND install
+   * the webhook AND map the form from its schema.
+   *
+   * Deliberately returns no signing secret — we installed it, so there is
+   * nothing for the customer to paste anywhere.
+   */
+  @Post('connect')
+  async connectForm(
+    @Req() req: AuthedRequest,
+    @Body()
+    body: {
+      credentialId?: string;
+      externalFormId?: string;
+      name?: string;
+      requireSignature?: boolean;
+      prebuildMapping?: boolean;
+    },
+  ) {
+    if (!body?.credentialId || !body?.externalFormId) {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_FAILED', message: 'credentialId and externalFormId are required' },
+      });
+    }
+    return this.connect.connectForm(req.tenant.organizationId, {
+      credentialId: body.credentialId,
+      externalFormId: body.externalFormId,
+      name: body.name,
+      requireSignature: body.requireSignature,
+      prebuildMapping: body.prebuildMapping,
+    });
+  }
+
+  /** Reconcile what we believe against what the provider actually has. */
+  @Post(':id/resync')
+  resync(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.connect.resync(req.tenant.organizationId, id);
+  }
+
+  /** Re-install a webhook that was deleted on the provider's side. */
+  @Post(':id/reinstall')
+  reinstall(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.connect.reinstall(req.tenant.organizationId, id);
+  }
+
+  @Delete(':id')
+  disconnect(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('removeRemote') removeRemote?: string,
+    @Query('force') force?: string,
+  ) {
+    return this.connect.disconnect(
+      req.tenant.organizationId,
+      id,
+      removeRemote !== 'false',
+      force === 'true',
+    );
+  }
 
   /** The signing secret is present in THIS response only. */
   @Post()

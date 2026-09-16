@@ -27,6 +27,16 @@ export interface CanonicalField {
   providerTypes?: string[];
   /** Normalized label fragments that suggest this target. */
   synonyms?: string[];
+  /**
+   * Fragments that RULE OUT this target, whatever the similarity score says.
+   *
+   * Fuzzy label matching cannot tell near-opposites apart: "first name" scores
+   * 0.78 against "last name" on bigram similarity, which is well above the
+   * threshold. On a form with no surname question that is enough for the first
+   * name to claim `last_name` too, and every lead ends up called "Priya Priya".
+   * One explicit veto is cheaper and far more legible than tuning the score.
+   */
+  disqualifiers?: string[];
   enumValues?: string[];
 }
 
@@ -38,6 +48,7 @@ const FIELDS = {
     dataType: 'string',
     merge: 'fill_if_empty',
     synonyms: ['first name', 'given name', 'name', 'your name', 'full name', 'what should we call you'],
+    disqualifiers: ['last name', 'surname', 'family name'],
   },
   last_name: {
     column: 'last_name',
@@ -46,6 +57,7 @@ const FIELDS = {
     dataType: 'string',
     merge: 'fill_if_empty',
     synonyms: ['last name', 'surname', 'family name'],
+    disqualifiers: ['first name', 'given name'],
   },
   email: {
     column: 'email',

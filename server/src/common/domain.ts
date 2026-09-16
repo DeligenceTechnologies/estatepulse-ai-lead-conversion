@@ -78,8 +78,59 @@ export const MappingOrigin = {
   HEURISTIC: 'HEURISTIC',
   USER: 'USER',
   IMPORTED: 'IMPORTED',
+  /**
+   * Derived from the provider's form SCHEMA at connect time, before any
+   * submission existed. Distinct from HEURISTIC so "mapped from a real answer"
+   * and "mapped from a question definition" stay tellable apart — they carry
+   * different confidence, and only the latter can have a key we predicted
+   * rather than observed.
+   */
+  PREBUILT: 'PREBUILT',
 } as const;
 export type MappingOrigin = (typeof MappingOrigin)[keyof typeof MappingOrigin];
+
+/** Form providers we can drive through their management API. */
+export const Provider = {
+  TALLY: 'TALLY',
+} as const;
+export type Provider = (typeof Provider)[keyof typeof Provider];
+
+/**
+ * How a lead source's webhook got onto the customer's form.
+ *
+ * MANUAL: they pasted our URL and secret themselves. We cannot repair, pause or
+ * remove it remotely — we hold no credential for their account.
+ * API: we installed it with their API key, and can manage it.
+ */
+export const ConnectionMethod = {
+  MANUAL: 'MANUAL',
+  API: 'API',
+} as const;
+export type ConnectionMethod = (typeof ConnectionMethod)[keyof typeof ConnectionMethod];
+
+/** What we believe about the webhook on the provider's side. */
+export const RemoteWebhookState = {
+  /** Row exists, install not yet confirmed. */
+  PENDING: 'PENDING',
+  INSTALLED: 'INSTALLED',
+  /** Installed, but a later update (secret rotation, pause) failed to apply. */
+  DRIFTED: 'DRIFTED',
+  /** Confirmed absent on the provider — deliveries have stopped. */
+  UNINSTALLED: 'UNINSTALLED',
+  /** We disconnected locally but could not remove it remotely. */
+  ORPHANED: 'ORPHANED',
+  /** We could not establish the truth and must not guess. */
+  ERROR: 'ERROR',
+} as const;
+export type RemoteWebhookState = (typeof RemoteWebhookState)[keyof typeof RemoteWebhookState];
+
+export const CredentialStatus = {
+  ACTIVE: 'ACTIVE',
+  /** The provider rejected it; it needs replacing, not retrying. */
+  INVALID: 'INVALID',
+  REVOKED: 'REVOKED',
+} as const;
+export type CredentialStatus = (typeof CredentialStatus)[keyof typeof CredentialStatus];
 
 /**
  * leads.consent_status. Matches the lowercase values the SPA's

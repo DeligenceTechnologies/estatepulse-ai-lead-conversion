@@ -130,6 +130,11 @@ export function suggestMappings(answers: NormalizedAnswer[], defaultRegion: stri
       if (!typeCompatible(target, answer.type)) continue;
 
       const spec = CANONICAL_FIELDS[target];
+
+      // A veto beats any score. Checked before the provider-type shortcut too,
+      // since a "Last name" text field is type-compatible with first_name.
+      if (spec.disqualifiers?.some((d) => normLabel.includes(normalizeLabel(d)))) continue;
+
       let score = 0;
 
       if (spec.providerTypes?.includes(answer.type)) score = 0.99;

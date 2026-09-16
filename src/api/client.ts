@@ -93,6 +93,17 @@ export interface LeadSourceConfig {
   /** Fully built URL, safe to display and copy. */
   webhookUrl: string | null;
   deliveryCount?: number;
+
+  // --- set only on API-connected sources ---
+  /** 'TALLY'. Absent on sources created before providers existed. */
+  provider?: string | null;
+  /** 'MANUAL' (customer pasted our URL) | 'API' (we installed the webhook). */
+  connectionMethod?: string | null;
+  externalFormId?: string | null;
+  /** PENDING | INSTALLED | DRIFTED | UNINSTALLED | ORPHANED | ERROR */
+  remoteState?: string | null;
+  remoteSyncedAt?: string | null;
+  remoteErrorMessage?: string | null;
 }
 
 /** Only ever returned by create/rotate — never by a GET. */
@@ -105,6 +116,23 @@ export interface DeliveryAnswer {
   type: string;
   /** Option UUIDs already resolved to display text by the server. */
   value: string;
+  /**
+   * Canonical lead fields this answer became; empty if it stayed an extra.
+   * Usually one, but a single "Your name" or budget-range question feeds two.
+   */
+  targetFields: string[];
+  /** 'mapped' | 'unmapped' | 'transform_error'; null if not yet processed. */
+  mappingOutcome: string | null;
+  /** e.g. an unrecognised dropdown option, or an unparseable phone. */
+  warnings: string[];
+}
+
+/** Per-delivery normalization summary — null until the delivery is processed. */
+export interface DeliveryMappingSummary {
+  mapped: number;
+  unmapped: number;
+  errored: number;
+  warnings: number;
 }
 
 export interface WebhookDelivery {
@@ -121,6 +149,7 @@ export interface WebhookDelivery {
   formName: string | null;
   answers: DeliveryAnswer[];
   parseError: string | null;
+  mapping: DeliveryMappingSummary | null;
 }
 
 // --- Endpoints -------------------------------------------------------------
@@ -161,6 +190,8 @@ export interface LiveLead {
   email: string | null;
   phone: string | null;
   phoneValid: boolean;
+  /** False => the address is stored but is never used to match this lead to another. */
+  emailValid: boolean;
   status: string;
   temperature: string | null;
   score: number;
@@ -175,6 +206,9 @@ export interface LiveLead {
   consentStatus: string;
   dncStatus: boolean;
   customFields: Record<string, string>;
+  /** An answer we could not store, or a contact detail we could not use. */
+  needsReview: boolean;
+  reviewReasons: string[];
   submissionCount: number;
   /** `type` is the ingestion mechanism ('webhook'); `name` is the form's label. */
   source: { id: string; name: string; type: string } | null;
@@ -186,6 +220,128 @@ export interface LeadStats {
   byStatus: Record<string, number>;
   total: number;
 }
+
+// --- Providers & connections ----------------------------------------------
+
+/**
+ * Capabilities are served by the backend rather than hardcoded here, so a
+ * provider that cannot sign its webhooks (Jotform) or cannot list them changes
+ * what the UI says without a frontend deploy.
+ */
+export interface ProviderInfo {
+  code: string;
+  displayName: string;
+  capabilities: {
+    supportsSigningSecret: boolean;
+    supportsWebhookList: boolean;
+    supportsWebhookUpdate: boolean;
+    supportsExternalRef: boolean;
+    installIsIdempotent: boolean;
+    signatureHeader: string | null;
+    credentialLabel: string;
+    credentialHint: string;
+  };
+}
+
+/** A stored credential. Never carries the key itself. */
+export interface ProviderConnection {
+  id: string;
+  provider: string;
+  label: string | null;
+  /** Non-secret fragment, e.g. "tly-a1b2…7f3d". */
+  credentialPreview: string;
+  accountEmail: string | null;
+  accountName: string | null;
+  /** ACTIVE | INVALID | REVOKED */
+  status: string;
+  lastVerifiedAt: string | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  /** How many lead sources depend on this credential. */
+  leadSourceCount: number;
+}
+
+export interface ProviderForm {
+  externalFormId: string;
+  name: string;
+  status: string | null;
+  submissionCount: number | null;
+  isClosed: boolean;
+  updatedAt: string | null;
+  /** Non-null when one of our lead sources already feeds from this form. */
+  connectedLeadSourceId: string | null;
+}
+
+export interface ConnectFormResult extends LeadSourceConfig {
+  connection: {
+    method: string;
+    provider: string;
+    remoteState: string;
+    externalFormId: string;
+    externalWebhookId: string;
+    credentialId: string;
+  };
+  /** Null when the form's schema could not be read; the first delivery maps it instead. */
+  prebuild: {
+    fields: number;
+    mapped: number;
+    unmapped: number;
+    /** Targets deliberately left for a human — consent, in practice. */
+    needsReview: string[];
+    mappingStatus: string;
+  } | null;
+}
+
+export const providersApi = {
+  list: () => request<ProviderInfo[]>('/v1/integrations/providers'),
+
+  connections: () => request<ProviderConnection[]>('/v1/integrations'),
+
+  /** The only call that carries a raw provider key, and only in a POST body. */
+  connect: (provider: string, apiKey: string, label?: string) =>
+    request<ProviderConnection>('/v1/integrations', {
+      method: 'POST',
+      body: JSON.stringify({ provider, apiKey, label }),
+    }),
+
+  verify: (id: string) => request<ProviderConnection>(`/v1/integrations/${id}/verify`, { method: 'POST' }),
+
+  disconnectAccount: (id: string, force = false) =>
+    request<{ revoked: boolean; orphanedLeadSources: number }>(
+      `/v1/integrations/${id}?force=${force}`,
+      { method: 'DELETE' },
+    ),
+
+  forms: (id: string, cursor?: string | null) =>
+    request<{ items: ProviderForm[]; nextCursor: string | null }>(
+      `/v1/integrations/${id}/forms${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+    ),
+
+  /** Creates the source, installs the webhook, and pre-maps the form. */
+  connectForm: (credentialId: string, externalFormId: string, name?: string) =>
+    request<ConnectFormResult>('/v1/lead-sources/connect', {
+      method: 'POST',
+      body: JSON.stringify({ credentialId, externalFormId, name }),
+    }),
+
+  resync: (leadSourceId: string) =>
+    request<{ remoteState: string; repaired: boolean; removedDuplicates: number }>(
+      `/v1/lead-sources/${leadSourceId}/resync`,
+      { method: 'POST' },
+    ),
+
+  reinstall: (leadSourceId: string) =>
+    request<{ remoteState: string; externalWebhookId: string }>(
+      `/v1/lead-sources/${leadSourceId}/reinstall`,
+      { method: 'POST' },
+    ),
+
+  disconnectForm: (leadSourceId: string, force = false) =>
+    request<{ disconnected: boolean; remoteState: string; warning: string | null }>(
+      `/v1/lead-sources/${leadSourceId}?force=${force}`,
+      { method: 'DELETE' },
+    ),
+};
 
 export const leadsApi = {
   list: (status?: string) =>

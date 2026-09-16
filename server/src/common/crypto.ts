@@ -111,6 +111,17 @@ export function signingSecretAad(organizationId: string, leadSourceId: string): 
 }
 
 /** AAD for a lead source's ingest token. */
+/**
+ * AAD for a form provider's API credential (a Tally key, say).
+ *
+ * Same `<org>:<rowId>:<purpose>` convention as the two below, which is what
+ * stops a ciphertext lifted from one tenant's row from decrypting in another's
+ * — the row id must be generated before the INSERT for this reason.
+ */
+export function providerCredentialAad(organizationId: string, credentialId: string): string {
+  return `${organizationId}:${credentialId}:provider_credential`;
+}
+
 export function ingestTokenAad(organizationId: string, leadSourceId: string): string {
   return `${organizationId}:${leadSourceId}:ingest_token`;
 }

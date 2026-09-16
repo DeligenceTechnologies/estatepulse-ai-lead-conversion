@@ -11,6 +11,7 @@ const TENANT_SCOPED = new Set<string>([
   'agent_territories',
   'agent_availability',
   'lead_sources',
+  'provider_credentials',
   'lead_source_fields',
   'lead_source_field_mappings',
   'webhook_events',

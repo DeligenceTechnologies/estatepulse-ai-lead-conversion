@@ -27,6 +27,22 @@ export interface TransformResult {
 const DEFAULT_TRUTHY = ['yes', 'true', '1', 'on', 'agree', 'i agree', 'ok', 'okay', 'sure', 'consent'];
 
 /**
+ * Deliberately permissive — this is not an RFC 5322 parser.
+ *
+ * Its only job is to separate "an address we can key identity on" from the
+ * things people actually type into a required email box: "n/a", "none", "-",
+ * "asdf". Anything shaped like an address is accepted; delivery is the mail
+ * server's problem, not ours.
+ *
+ * Exported because `upsertLead` must ask the SAME question before using an
+ * address as a merge key. Two callers with two regexes is how "n/a" becomes a
+ * shared identity again six months from now.
+ */
+export function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase());
+}
+
+/**
  * Split a full name.
  *
  * Takes the FIRST token as the first name and everything after as the last
@@ -114,7 +130,9 @@ export function applyTransform(
     case 'email': {
       const e = scalarText.trim().toLowerCase();
       if (!e) return { value: null };
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      if (!isValidEmail(e)) {
+        // Kept, like an unparseable phone: a lead who fat-fingered their address
+        // is still a lead. It just never becomes an identity — see upsertLead.
         return { value: e, warning: `"${e}" does not look like a valid email` };
       }
       return { value: e };
