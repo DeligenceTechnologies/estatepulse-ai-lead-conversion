@@ -55,9 +55,9 @@ async function call(method: string, path: string, opts: { body?: unknown; token?
 
 const errCode = (res: Res): unknown => (res.body['error'] as Record<string, unknown> | undefined)?.['code'];
 
-async function signupUser(tag: string, org: string): Promise<{ token: string; userId: string; orgId: string }> {
+async function signupUser(tag: string, org: string, password: string = PASSWORD): Promise<{ token: string; userId: string; orgId: string }> {
   const res = await call('POST', '/api/auth/signup', {
-    body: { email: emailFor(tag), password: PASSWORD, firstName: 'Test', lastName: 'User', organizationName: org },
+    body: { email: emailFor(tag), password, firstName: 'Test', lastName: 'User', organizationName: org },
   });
   assert.equal(res.status, 201, `signup(${tag}) failed: ${res.text}`);
 
@@ -346,9 +346,14 @@ test('unknown path returns NOT_FOUND, not INTERNAL', async () => {
 
 // --- validation -------------------------------------------------------------
 
-test('signup with a short password returns VALIDATION_ERROR with details', async () => {
+// The minimum is 8, so these two pin the boundary from both sides.
+test('signup with an 8-character password succeeds', async () => {
+  await signupUser('minlen', 'Min Length Brokerage', '8charpw!');
+});
+
+test('signup with a 7-character password returns VALIDATION_ERROR with details', async () => {
   const res = await call('POST', '/api/auth/signup', {
-    body: { email: emailFor('short'), password: 'short', firstName: 'A', lastName: 'B', organizationName: 'C' },
+    body: { email: emailFor('short'), password: 'short12', firstName: 'A', lastName: 'B', organizationName: 'C' },
   });
   assert.equal(res.status, 400);
   assert.equal(errCode(res), 'VALIDATION_ERROR');

@@ -6,7 +6,7 @@ import { z } from 'zod';
  */
 const password = z
   .string()
-  .min(12, 'Password must be at least 12 characters')
+  .min(8, 'Password must be at least 8 characters')
   .refine((v) => Buffer.byteLength(v, 'utf8') <= 72, 'Password must be at most 72 bytes');
 
 const email = z.string().trim().toLowerCase().email('Must be a valid email address').max(255);
