@@ -6,10 +6,10 @@
  * password_hash appears in none of these by construction.
  */
 
-/** Verbatim from organization_members.role_check. Not narrowed. */
-export type Role = 'owner' | 'admin' | 'team_lead' | 'manager' | 'agent' | 'viewer';
+/** Verbatim from organization_members_role_check. */
+export type Role = 'owner' | 'agent';
 
-export const ROLES: readonly Role[] = ['owner', 'admin', 'team_lead', 'manager', 'agent', 'viewer'];
+export const ROLES: readonly Role[] = ['owner', 'agent'];
 
 export interface AuthUserDTO {
   id: string;

@@ -176,11 +176,7 @@ export const initialsFor = (user: AuthUser | null): string => {
 
 const ROLE_LABELS: Record<Role, string> = {
   owner: 'Owner',
-  admin: 'Admin',
-  team_lead: 'Team Lead',
-  manager: 'Manager',
   agent: 'Agent',
-  viewer: 'Viewer',
 };
 
 export const roleLabel = (role: Role | null): string => (role ? ROLE_LABELS[role] ?? role : '');

@@ -45,7 +45,12 @@ function slugify(name: string): string {
   return base.length > 0 ? base : 'org';
 }
 
-const toRole = (value: string): Role => (ROLES.includes(value as Role) ? (value as Role) : 'viewer');
+/**
+ * organization_members_role_check limits the column to 'owner' and 'agent', so
+ * anything else means the constraint moved without this code following. Returns
+ * null rather than guessing a role: the caller fails closed.
+ */
+const toRole = (value: string): Role | null => (ROLES.includes(value as Role) ? (value as Role) : null);
 
 /**
  * Creates three rows - users, organizations, organization_members(owner) - in
@@ -219,7 +224,10 @@ export async function loadAuthContext(userId: string): Promise<AuthContext> {
   // Zero memberships and zero *active* memberships are deliberately the same
   // response. Telling a suspended user they are suspended leaks account state
   // to whoever is holding the token.
-  if (!row.org_id || !row.org_name || !row.org_slug || !row.role) {
+  // An unrecognised role resolves to no usable membership, exactly like a
+  // missing one: same response, so neither leaks which case it was.
+  const role = row.role === null ? null : toRole(row.role);
+  if (!row.org_id || !row.org_name || !row.org_slug || !role) {
     throw new AppError('NO_ORGANIZATION', 'No active organization for this user');
   }
 
@@ -228,7 +236,7 @@ export async function loadAuthContext(userId: string): Promise<AuthContext> {
     user: { id: row.user_id, email: row.email, firstName: row.first_name, lastName: row.last_name },
     organizationId: row.org_id,
     organization: { id: row.org_id, name: row.org_name, slug: row.org_slug },
-    role: toRole(row.role),
+    role,
     agentProfileId: row.agent_profile_id,
   };
 }

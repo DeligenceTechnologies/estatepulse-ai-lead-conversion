@@ -22,8 +22,8 @@ export type ErrorCode =
   | 'INTERNAL'
   | 'NETWORK';
 
-/** Verbatim from organization_members.role_check. */
-export type Role = 'owner' | 'admin' | 'team_lead' | 'manager' | 'agent' | 'viewer';
+/** Verbatim from organization_members_role_check. */
+export type Role = 'owner' | 'agent';
 
 export interface AuthUser {
   id: string;

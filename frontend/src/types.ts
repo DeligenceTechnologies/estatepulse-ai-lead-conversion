@@ -183,7 +183,7 @@ export interface Agent {
   status: 'available' | 'in_call' | 'busy' | 'offline';
   assignedLeadsCount: number;
   conversionRate: number;
-  role: 'owner' | 'admin' | 'agent';
+  role: 'owner' | 'agent';
 }
 
 export interface Appointment {

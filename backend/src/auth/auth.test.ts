@@ -252,7 +252,7 @@ test('an active membership is not shadowed by an older suspended one', async () 
     data: {
       organization_id: second.id,
       user_id: shadow.userId,
-      role: 'admin',
+      role: 'agent',
       status: 'active',
       joined_at: new Date(),
     },
@@ -268,7 +268,7 @@ test('an active membership is not shadowed by an older suspended one', async () 
   const res = await call('GET', '/api/auth/me', { token: shadow.token });
   assert.equal(res.status, 200, res.text);
   assert.equal((res.body['organization'] as { id: string }).id, second.id);
-  assert.equal(res.body['role'], 'admin');
+  assert.equal(res.body['role'], 'agent');
 });
 
 // --- users.status enforcement -----------------------------------------------
