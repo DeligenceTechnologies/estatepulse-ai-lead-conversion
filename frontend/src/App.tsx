@@ -15,6 +15,7 @@ import { AgentsView } from './components/views/AgentsView';
 import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
+import { LeadSourcesView } from './components/views/LeadSourcesView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -32,7 +33,10 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
       {/* Structural Sidebar */}
-      <Sidebar />
+      <Sidebar
+        onOpenNewLead={() => setIsNewLeadOpen(true)}
+        onOpenWebhookTester={() => setIsWebhookTesterOpen(true)}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -52,6 +56,7 @@ const AppContent: React.FC = () => {
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
           )}
+          {activeView === 'lead_sources' && <LeadSourcesView />}
           {activeView === 'ai_settings' && <AISettingsView />}
           {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
           {activeView === 'landing_page' && <ComingSoonView title="Public Landing Page" />}

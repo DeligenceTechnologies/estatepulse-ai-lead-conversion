@@ -16,7 +16,8 @@ import {
   RotateCcw,
   Sparkles,
   Zap,
-  Building2
+  Building2,
+  Webhook
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
 
@@ -75,10 +76,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTe
       label: 'Agent Team & Routing', 
       icon: <UserCheck className="w-4 h-4" /> 
     },
-    { 
-      id: 'integrations', 
-      label: 'Integrations & Webhooks', 
-      icon: <Cpu className="w-4 h-4" /> 
+    {
+      id: 'integrations',
+      label: 'Integrations & Webhooks',
+      icon: <Cpu className="w-4 h-4" />
+    },
+    {
+      id: 'lead_sources',
+      label: 'Lead Sources',
+      icon: <Webhook className="w-4 h-4" />,
+      badge: 'LIVE',
+      badgeColor: 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/40'
     },
     { 
       id: 'ai_settings', 

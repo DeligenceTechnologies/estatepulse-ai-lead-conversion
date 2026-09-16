@@ -36,7 +36,10 @@ export type AppView =
   | 'integrations'
   | 'ai_settings'
   | 'analytics'
-  | 'landing_page';
+  | 'landing_page'
+  // Live-backend screen. Its data comes from the real API, NOT from this
+  // context — see src/api/client.ts. Only the view id lives here.
+  | 'lead_sources';
 
 /**
  * Sections that are navigable but not built yet. Lives beside AppView so the
@@ -72,12 +75,32 @@ interface AppContextType {
   setActiveView: (view: AppView) => void;
   selectedLeadId: string | null;
   setSelectedLeadId: (id: string | null) => void;
+  /**
+   * A lead source the user asked to look at from somewhere else — connecting one
+   * on Integrations, say. Navigation only, never demo data: Lead Sources opens
+   * it and clears the handoff, so nothing here can outlive the jump.
+   */
+  focusLeadSourceId: string | null;
+  setFocusLeadSourceId: (id: string | null) => void;
   preCallLeadId: string | null;
   setPreCallLeadId: (id: string | null) => void;
   isSimulatingCall: boolean;
   activeSimulatedLead: Lead | null;
   startLiveCallSimulation: (lead: Lead) => void;
   closeLiveCallSimulation: () => void;
+
+  /**
+   * Leads that live in Postgres rather than in this demo store. The Leads view
+   * registers the live rows it is rendering so the shared detail and pre-call
+   * modals can resolve them by id. They arrive already shaped as `Lead` because
+   * nothing under src/context/ may import the api client — see src/api/client.ts.
+   *
+   * Deliberately NOT persisted to localStorage: the backend owns these records,
+   * so a stale copy must never outlive the fetch that produced it.
+   */
+  registerExternalLeads: (leads: Lead[]) => void;
+  /** Demo store first, then the live registry. Use instead of leads.find(). */
+  findLead: (id: string | null) => Lead | undefined;
   
   // Actions
   createLead: (leadInput: Partial<Lead>, triggerAutoWorkflow?: boolean) => Lead;
@@ -143,9 +166,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [focusLeadSourceId, setFocusLeadSourceId] = useState<string | null>(null);
   const [preCallLeadId, setPreCallLeadId] = useState<string | null>(null);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [activeSimulatedLead, setActiveSimulatedLead] = useState<Lead | null>(null);
+  const [externalLeads, setExternalLeads] = useState<Record<string, Lead>>({});
 
   // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
   useEffect(() => {
@@ -581,6 +606,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return lead;
   };
 
+  const registerExternalLeads = (incoming: Lead[]) => {
+    setExternalLeads(prev => {
+      const next: Record<string, Lead> = {};
+      for (const l of incoming) next[l.id] = l;
+      // The Leads view re-registers on every poll; bail out when nothing moved so
+      // a 5-second refresh does not re-render the whole app.
+      const sameSize = Object.keys(prev).length === incoming.length;
+      if (sameSize && incoming.every(l => prev[l.id] && prev[l.id].updatedAt === l.updatedAt)) return prev;
+      return next;
+    });
+  };
+
+  const findLead = (id: string | null) =>
+    id ? leads.find(l => l.id === id) ?? externalLeads[id] : undefined;
+
   const startLiveCallSimulation = (lead: Lead) => {
     setActiveSimulatedLead(lead);
     setIsSimulatingCall(true);
@@ -634,10 +674,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveView,
         selectedLeadId,
         setSelectedLeadId,
+        focusLeadSourceId,
+        setFocusLeadSourceId,
         preCallLeadId,
         setPreCallLeadId,
         isSimulatingCall,
         activeSimulatedLead,
+        registerExternalLeads,
+        findLead,
         startLiveCallSimulation,
         closeLiveCallSimulation,
         createLead,

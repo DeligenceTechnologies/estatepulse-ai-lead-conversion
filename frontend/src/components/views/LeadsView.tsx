@@ -1,80 +1,277 @@
-import React, { useState } from 'react';
-import { 
-  Search, 
-  Filter, 
-  Flame, 
-  Phone, 
-  MessageSquare, 
-  Calendar, 
-  Sparkles, 
-  Plus, 
-  ArrowUpDown,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  ChevronRight
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ChevronRight,
+  Flame,
+  Phone,
+  Plus,
+  Radio,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Users,
+  Webhook,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Lead, LeadTemperature, LeadStatus, LeadSource } from '../../types';
+import { ApiError, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { Lead, LeadStatus, LeadTemperature } from '../../types';
+
+/**
+ * Lead pipeline — live rows only.
+ *
+ * The demo pipeline that used to render here came from AppContext's localStorage
+ * store, and a second "Live Leads" panel sat above it. Both are gone: this table
+ * shows exactly what the backend holds. The layout, the filters and the row
+ * actions are unchanged, so a column with nothing behind it yet — assigned agent,
+ * budget on an unqualified lead — renders an em dash instead of being dropped.
+ *
+ * Rows are mapped to `Lead` for the shared detail / pre-call modals and
+ * registered with AppContext, but rendering reads the raw `LiveLead` so a null
+ * stays distinguishable from a zero.
+ */
+
+const DASH = '—';
+
+/** Canonical values arrive underscored (`under_30_days`); the table reads better without them. */
+const humanize = (v: string | null | undefined) => (v ? v.replace(/_/g, ' ') : null);
+
+const fullName = (l: LiveLead) =>
+  [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead';
+
+const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
+
+const budgetRange = (l: LiveLead) => {
+  const { minBudget: lo, maxBudget: hi } = l;
+  if (lo !== null && hi !== null) return lo === hi ? thousands(lo) : `${thousands(lo)} – ${thousands(hi)}`;
+  if (lo !== null) return `${thousands(lo)}+`;
+  if (hi !== null) return `up to ${thousands(hi)}`;
+  return DASH;
+};
+
+/**
+ * What the row is badged with: where the lead actually came from.
+ *
+ * `source.type` is the transport and is 'webhook' for every ingested lead,
+ * which makes it useless as a label the moment a second integration exists —
+ * a form we connected through Tally's API read "webhook" exactly like a URL
+ * pasted by hand. So an API-connected source is badged with its provider
+ * ("tally") and only a manually pasted URL keeps "webhook", which is the same
+ * rule the Lead Sources list uses for its connection pill. The customer's own
+ * label for the form ("Buyer Inquiry") stays on hover.
+ */
+const sourceLabel = (l: LiveLead): string => {
+  const s = l.source;
+  if (!s) return 'manual';
+  if ((s.connectionMethod ?? '').toUpperCase() === 'API' && s.provider) return s.provider.toLowerCase();
+  return s.type ?? 'webhook';
+};
+
+/** The demo store's status vocabulary; the backend calls a booked lead 'booked'. */
+const toDemoStatus = (status: string): LeadStatus =>
+  status === 'booked' ? 'appointment_booked' : (status as LeadStatus);
+
+const statusTone = (status: string) => {
+  switch (status) {
+    case 'booked':
+    case 'appointment_booked':
+      return 'bg-purple-950 text-purple-300 border border-purple-800/40';
+    case 'qualified':
+      return 'bg-emerald-950 text-emerald-300 border border-emerald-800/40';
+    case 'contacted':
+      return 'bg-cyan-950 text-cyan-300 border border-cyan-800/40';
+    case 'nurture':
+      return 'bg-amber-950 text-amber-300 border border-amber-800/40';
+    case 'lost':
+      return 'bg-rose-950 text-rose-300 border border-rose-800/40';
+    default:
+      return 'bg-slate-800 text-slate-300';
+  }
+};
+
+const temperatureTone = (t: string | null) => {
+  switch (t) {
+    case 'hot':
+      return 'bg-rose-500/20 text-rose-300 border border-rose-500/40';
+    case 'warm':
+      return 'bg-amber-500/20 text-amber-300 border border-amber-500/40';
+    case 'cold':
+      return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30';
+    default:
+      return 'bg-slate-800 text-slate-400 border border-slate-700';
+  }
+};
+
+/**
+ * LiveLead -> Lead, for the modals and the call simulator only.
+ *
+ * Every gap becomes the zero value the `Lead` type demands, which is why the
+ * table never renders from this shape: `budgetMin: 0` cannot be told apart from
+ * a lead that genuinely has no budget yet.
+ */
+const toLead = (l: LiveLead): Lead => ({
+  id: l.id,
+  organizationId: 'live',
+  assignedAgentId: '',
+  firstName: l.firstName ?? '',
+  lastName: l.lastName ?? '',
+  email: l.email ?? '',
+  phone: l.phone ?? '',
+  // Same label as the table badge. `LeadSource` is the demo store's closed
+  // union, so an unrecognised provider would widen it — acceptable because
+  // nothing branches on this value; it is displayed and nothing more.
+  source: sourceLabel(l) as Lead['source'],
+  sourceId: l.source?.id,
+  status: toDemoStatus(l.status),
+  leadType: 'buyer',
+  preferredLocation: l.location ?? '',
+  budgetMin: l.minBudget ?? 0,
+  budgetMax: l.maxBudget ?? 0,
+  propertyType: '',
+  bedrooms: l.bedrooms ?? 0,
+  timeline: humanize(l.timeline) ?? '',
+  financingStatus: humanize(l.financingStatus) ?? '',
+  preapprovalStatus: l.financingStatus === 'pre_approved',
+  score: l.score,
+  temperature: (l.temperature as LeadTemperature) ?? 'cold',
+  consentStatus: l.consentStatus as Lead['consentStatus'],
+  dncStatus: l.dncStatus,
+  createdAt: l.createdAt,
+  updatedAt: l.updatedAt,
+  notes: humanize(l.motivation) ?? undefined,
+  customFields: l.customFields,
+});
+
+type Tab = 'all' | LeadTemperature | 'new' | 'booked';
 
 interface LeadsViewProps {
   onOpenNewLead: () => void;
 }
 
 export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
-  const { 
-    leads, 
-    agents, 
-    setSelectedLeadId, 
-    setPreCallLeadId, 
-    startLiveCallSimulation 
+  const {
+    agents,
+    setSelectedLeadId,
+    setPreCallLeadId,
+    startLiveCallSimulation,
+    registerExternalLeads,
   } = useApp();
 
+  const [liveLeads, setLiveLeads] = useState<LiveLead[] | null>(null);
+  const [stats, setStats] = useState<LeadStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTab, setSelectedTab] = useState<'all' | LeadTemperature | 'new' | 'appointment_booked'>('all');
+  const [selectedTab, setSelectedTab] = useState<Tab>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
 
-  const filteredLeads = leads.filter(lead => {
+  const load = useCallback(async () => {
+    setBusy(true);
+    try {
+      const [rows, s] = await Promise.all([leadsApi.list(), leadsApi.stats()]);
+      // Keep the previous array when nothing changed, so a poll that finds no new
+      // leads does not re-render the table (or reset an open row's hover state).
+      setLiveLeads(prev => (prev && JSON.stringify(prev) === JSON.stringify(rows) ? prev : rows));
+      setStats(prev => (prev && JSON.stringify(prev) === JSON.stringify(s) ? prev : s));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+      setLiveLeads([]);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // A form submission becomes a lead about a second after it arrives, so poll
+  // rather than making the user guess when to refresh.
+  useEffect(() => {
+    const t = setInterval(() => void load(), 5000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const rows = liveLeads ?? [];
+
+  const mapped = useMemo(() => {
+    const byId: Record<string, Lead> = {};
+    for (const l of rows) byId[l.id] = toLead(l);
+    return byId;
+  }, [rows]);
+
+  // Register with the context so the detail and pre-call modals — which look a
+  // lead up by id — can resolve a row that is not in the demo store.
+  useEffect(() => {
+    registerExternalLeads(Object.values(mapped));
+  }, [mapped, registerExternalLeads]);
+
+  // Source options come from what has actually arrived rather than a hardcoded
+  // list: a source exists here only once a form has been connected to it.
+  const sourceOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const l of rows) if (l.source) seen.set(l.source.id, l.source.name);
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [rows]);
+
+  const filteredLeads = rows.filter(lead => {
     // Tab filter
     if (selectedTab === 'hot' && lead.temperature !== 'hot') return false;
     if (selectedTab === 'warm' && lead.temperature !== 'warm') return false;
     if (selectedTab === 'cold' && lead.temperature !== 'cold') return false;
     if (selectedTab === 'new' && lead.status !== 'new') return false;
-    if (selectedTab === 'appointment_booked' && lead.status !== 'appointment_booked') return false;
+    if (selectedTab === 'booked' && lead.status !== 'booked') return false;
 
     // Source filter
-    if (sourceFilter !== 'all' && lead.source !== sourceFilter) return false;
+    if (sourceFilter !== 'all' && lead.source?.id !== sourceFilter) return false;
 
-    // Agent filter
-    if (agentFilter !== 'all' && lead.assignedAgentId !== agentFilter) return false;
+    // Agent filter — ingestion does not route yet, so every live lead is unassigned.
+    if (agentFilter !== 'all' && agentFilter !== 'unassigned') return false;
 
     // Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchName = `${lead.firstName} ${lead.lastName}`.toLowerCase().includes(q);
-      const matchPhone = lead.phone.includes(q);
-      const matchEmail = lead.email.toLowerCase().includes(q);
-      const matchLoc = lead.preferredLocation.toLowerCase().includes(q);
-      if (!matchName && !matchPhone && !matchEmail && !matchLoc) return false;
+      const haystack = [fullName(lead), lead.phone, lead.email, lead.location]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
 
     return true;
   });
 
+  const openLead = (lead: LiveLead) => setSelectedLeadId(lead.id);
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
-      
+
       {/* Top Header & Search Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Lead Pipeline Management</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-white tracking-tight">Lead Pipeline Management</h2>
+            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+              <Radio className="w-3 h-3" />
+              Live
+            </span>
+          </div>
           <p className="text-xs text-slate-400">
-            {leads.length} total buyer leads across autonomous qualification stages
+            {stats?.total ?? rows.length} total buyer leads ingested from your connected forms
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => void load()}
+            title="Refresh"
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
+          </button>
+
           <button
             onClick={onOpenNewLead}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -85,22 +282,32 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-rose-200">
+            <div className="font-semibold text-rose-100">Live leads unavailable</div>
+            {error}
+          </div>
+        </div>
+      )}
+
       {/* Filter Tabs & Search Controls */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-4 shadow-lg">
-        
+
         {/* Filter Tabs */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {[
-            { id: 'all', label: `All Leads (${leads.length})` },
-            { id: 'hot', label: `🔥 Hot (${leads.filter(l => l.temperature === 'hot').length})` },
-            { id: 'warm', label: `☀️ Warm (${leads.filter(l => l.temperature === 'warm').length})` },
-            { id: 'cold', label: `❄️ Cold (${leads.filter(l => l.temperature === 'cold').length})` },
-            { id: 'new', label: `New Inbound (${leads.filter(l => l.status === 'new').length})` },
-            { id: 'appointment_booked', label: `Appointments (${leads.filter(l => l.status === 'appointment_booked').length})` },
+            { id: 'all', label: `All Leads (${rows.length})` },
+            { id: 'hot', label: `🔥 Hot (${rows.filter(l => l.temperature === 'hot').length})` },
+            { id: 'warm', label: `☀️ Warm (${rows.filter(l => l.temperature === 'warm').length})` },
+            { id: 'cold', label: `❄️ Cold (${rows.filter(l => l.temperature === 'cold').length})` },
+            { id: 'new', label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
+            { id: 'booked', label: `Appointments (${rows.filter(l => l.status === 'booked').length})` },
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setSelectedTab(tab.id as any)}
+              onClick={() => setSelectedTab(tab.id as Tab)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                 selectedTab === tab.id
                   ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 font-semibold'
@@ -114,7 +321,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
         {/* Search & Select dropdowns */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
-          
+
           <div className="md:col-span-6 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
@@ -133,11 +340,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
             >
               <option value="all">All Lead Sources</option>
-              <option value="facebook">Meta / Facebook Lead Ads</option>
-              <option value="zillow">Zillow Premier Agent</option>
-              <option value="website">Website IDX Search</option>
-              <option value="google">Google Ads PPC</option>
-              <option value="webhook">Generic API Webhooks</option>
+              {sourceOptions.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
             </select>
           </div>
 
@@ -148,6 +353,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
             >
               <option value="all">All Assigned Agents</option>
+              <option value="unassigned">Unassigned</option>
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -174,124 +380,172 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {filteredLeads.length > 0 ? (
-                filteredLeads.map(lead => {
-                  const agent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
-                  return (
-                    <tr 
-                      key={lead.id} 
-                      className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
-                      onClick={() => setSelectedLeadId(lead.id)}
-                    >
-                      {/* Name & Contact */}
-                      <td className="px-4 py-3.5">
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-slate-100 group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
-                            <span>{lead.firstName} {lead.lastName}</span>
-                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                              {lead.source}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-400 font-mono">{lead.phone}</div>
-                        </div>
-                      </td>
-
-                      {/* Score & Temperature */}
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 font-mono ${
-                            lead.temperature === 'hot'
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                              : lead.temperature === 'warm'
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                              : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                          }`}>
-                            {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
-                            {lead.score}
-                          </span>
-                          <span className="text-[11px] text-slate-400 uppercase font-semibold">
-                            {lead.temperature}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Target Budget & Location */}
-                      <td className="px-4 py-3.5">
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-emerald-400 font-mono">
-                            ${(lead.budgetMin / 1000).toFixed(0)}k – ${(lead.budgetMax / 1000).toFixed(0)}k
-                          </div>
-                          <div className="text-[11px] text-slate-300 truncate max-w-[150px]">
-                            {lead.preferredLocation}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Timeline */}
-                      <td className="px-4 py-3.5">
-                        <span className="text-slate-200 font-medium">
-                          {lead.timeline}
-                        </span>
-                      </td>
-
-                      {/* Agent */}
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold text-slate-300 flex items-center justify-center">
-                            {agent.name.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <span className="text-slate-300">{agent.name}</span>
-                        </div>
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-4 py-3.5">
-                        <span className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${
-                          lead.status === 'appointment_booked'
-                            ? 'bg-purple-950 text-purple-300 border border-purple-800/40'
-                            : lead.status === 'qualified'
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/40'
-                            : lead.status === 'contacted'
-                            ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/40'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}>
-                          {lead.status.replace('_', ' ')}
-                        </span>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => startLiveCallSimulation(lead)}
-                            title="Trigger Voice AI Call"
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              {liveLeads === null ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                    Loading…
+                  </td>
+                </tr>
+              ) : filteredLeads.length > 0 ? (
+                filteredLeads.map(lead => (
+                  <tr
+                    key={lead.id}
+                    className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
+                    onClick={() => openLead(lead)}
+                  >
+                    {/* Name & Contact */}
+                    <td className="px-4 py-3.5">
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-slate-100 group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
+                          <span>{fullName(lead)}</span>
+                          <span
+                            title={lead.source?.name ?? undefined}
+                            className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400"
                           >
-                            <Phone className="w-3.5 h-3.5" />
-                          </button>
-
-                          {lead.temperature === 'hot' && (
-                            <button
-                              onClick={() => setPreCallLeadId(lead.id)}
-                              title="Agent Pre-Call Briefing"
-                              className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                            {sourceLabel(lead)}
+                          </span>
+                          {lead.contactLeadCount > 1 && (
+                            // Replaces "N submissions merged". Submissions are
+                            // no longer folded into one lead — a public form is
+                            // filled in by different people, and merging them
+                            // overwrote one prospect's answers with another's.
+                            // Repeats are surfaced instead of resolved: the
+                            // rows stay separate and a human decides.
+                            <span
+                              title={`${lead.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`}
+                              className="text-[10px] text-amber-300 font-normal"
                             >
-                              <Flame className="w-3.5 h-3.5 text-rose-400" />
-                            </button>
+                              repeat contact ({lead.contactLeadCount})
+                            </span>
                           )}
-
-                          <button
-                            onClick={() => setSelectedLeadId(lead.id)}
-                            title="Open Full Dossier"
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                          >
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
+                          {lead.needsReview && (
+                            <span
+                              title={lead.reviewReasons.join('\n')}
+                              className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            >
+                              review
+                            </span>
+                          )}
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                          {lead.phone ?? DASH}
+                          {lead.phone && !lead.phoneValid && (
+                            // Surfaced because such a lead must never be auto-dialed.
+                            <span title="Phone could not be parsed — excluded from dialing">
+                              <ShieldAlert className="w-3 h-3 text-amber-400" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate max-w-[180px] flex items-center gap-1">
+                          {lead.email ?? DASH}
+                          {lead.email && !lead.emailValid && (
+                            // Stored, but never used to match this lead to
+                            // another — see the email_valid guard in createLead.
+                            <span title="Not a usable address — excluded from matching and email outreach">
+                              <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Score & Temperature */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          title={lead.score ? undefined : 'Not scored yet — scoring runs after qualification'}
+                          className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 font-mono ${temperatureTone(lead.temperature)}`}
+                        >
+                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
+                          {lead.score}
+                        </span>
+                        <span className="text-[11px] text-slate-400 uppercase font-semibold">
+                          {lead.temperature ?? DASH}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Target Budget & Location */}
+                    <td className="px-4 py-3.5">
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-emerald-400 font-mono">
+                          {budgetRange(lead)}
+                        </div>
+                        <div className="text-[11px] text-slate-300 truncate max-w-[150px]">
+                          {lead.location ?? DASH}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Timeline */}
+                    <td className="px-4 py-3.5">
+                      <span className="text-slate-200 font-medium">
+                        {humanize(lead.timeline) ?? DASH}
+                      </span>
+                    </td>
+
+                    {/* Agent — ingestion does not route to an agent yet. */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-[10px] font-bold text-slate-500 flex items-center justify-center">
+                          {DASH}
+                        </div>
+                        <span className="text-slate-500">Unassigned</span>
+                      </div>
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-3.5">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}`}>
+                        {humanize(lead.status)}
+                      </span>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-4 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => startLiveCallSimulation(mapped[lead.id])}
+                          disabled={!lead.phoneValid}
+                          title={lead.phoneValid ? 'Trigger Voice AI Call' : 'No dialable phone number on this lead'}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </button>
+
+                        {lead.temperature === 'hot' && (
+                          <button
+                            onClick={() => setPreCallLeadId(lead.id)}
+                            title="Agent Pre-Call Briefing"
+                            className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                          >
+                            <Flame className="w-3.5 h-3.5 text-rose-400" />
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => openLead(lead)}
+                          title="Open Full Dossier"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : rows.length === 0 && !error ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center space-y-2">
+                    <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
+                    <div className="text-xs text-slate-400">No live leads yet.</div>
+                    <div className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                      Connect a form under <strong className="text-slate-400">Lead Sources</strong> and
+                      submit it — a lead appears here within a couple of seconds, with status{' '}
+                      <span className="text-cyan-300 font-semibold">new</span>.
+                    </div>
+                  </td>
+                </tr>
               ) : (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
@@ -301,6 +555,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="px-5 py-2.5 bg-slate-950/60 border-t border-slate-800 text-[10px] text-slate-500 flex items-center gap-1.5">
+          <Users className="w-3 h-3" />
+          Every ingested lead starts at <span className="text-cyan-300 font-semibold">new</span>.
+          Status advances as the SMS, voice-qualification and booking stages are built.
         </div>
       </div>
 

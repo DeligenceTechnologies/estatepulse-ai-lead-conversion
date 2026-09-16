@@ -22,7 +22,7 @@ export const AgentPreCallModal: React.FC = () => {
   const { 
     preCallLeadId, 
     setPreCallLeadId, 
-    leads, 
+    findLead, 
     setSelectedLeadId, 
     takeOverConversation,
     startLiveCallSimulation 
@@ -30,7 +30,7 @@ export const AgentPreCallModal: React.FC = () => {
 
   if (!preCallLeadId) return null;
 
-  const lead = leads.find(l => l.id === preCallLeadId);
+  const lead = findLead(preCallLeadId);
   if (!lead) return null;
 
   const handleOpenDossier = () => {

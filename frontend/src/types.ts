@@ -30,6 +30,9 @@ export type LeadSource =
   | 'google'
   | 'zillow'
   | 'manual'
+  // A form we connected through the provider's own API, as opposed to a
+  // webhook URL the customer pasted somewhere we cannot see.
+  | 'tally'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';
@@ -110,6 +113,14 @@ export interface Lead {
   updatedAt: string;
   notes?: string;
   automationPaused?: boolean;
+  /**
+   * Answers the prospect gave that no canonical field covers, kept verbatim.
+   *
+   * Deliberately absent from the pipeline table — that shows only the fields we
+   * act on. This is where the rest stays visible so nothing a prospect told us
+   * is lost just because we did not have a column for it.
+   */
+  customFields?: Record<string, string>;
 }
 
 export interface Message {

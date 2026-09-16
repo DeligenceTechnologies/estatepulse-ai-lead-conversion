@@ -60,3 +60,22 @@ tallyRouter.delete('/lead-sources/:id', (req, res) => {
   const force = req.query.force === 'true';
   void forward(req, res, `/v1/lead-sources/${encodeURIComponent(req.params.id)}?force=${force}`, 'DELETE');
 });
+
+/**
+ * Transparent passthrough for the rest of the service's /v1 surface.
+ *
+ * The named routes above cover the connect flow the portal's own Tally card
+ * uses. The full dashboard (Lead Sources) needs the rest of it — deliveries,
+ * secret rotation, pause, resync/reinstall, leads, health — and those are a
+ * straight proxy with no reshaping, so they are forwarded wholesale rather than
+ * restated one by one. Mounted last: nothing above it starts with /v1.
+ *
+ * Still behind requireAuth and still server-side, so the org's x-api-key never
+ * reaches the browser.
+ */
+tallyRouter.use('/v1', (req: Request, res: Response) => {
+  // req.url is the remainder after the /v1 mount point, query string included.
+  const path = `/v1${req.url}`;
+  const hasBody = !['GET', 'HEAD', 'DELETE', 'OPTIONS'].includes(req.method);
+  void forward(req, res, path, req.method, hasBody ? (req.body ?? {}) : undefined);
+});
