@@ -151,10 +151,14 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       // Idempotency guard for retries.
       //
       // A delivery can be retried after it already produced a lead — e.g. the
-      // lead write succeeded and a later step (audit log, outbox) threw. Without
-      // this check the retry would re-run the merge, inflating submission_count
-      // and colliding on lead_submissions.webhook_event_id. The unique index on
-      // that column remains the backstop; this makes the common path clean.
+      // lead write succeeded and a later step (audit log, outbox) threw. This
+      // check matters more now than it did under merge semantics: a retry that
+      // slipped past it used to inflate submission_count on one lead, whereas
+      // one lead per submission means it would manufacture a SECOND lead for a
+      // prospect who only ever filled the form once, and the brokerage would
+      // call them twice. The unique lead_submissions.webhook_event_id — written
+      // in the same transaction as the lead itself — is the backstop that makes
+      // that impossible; this check keeps the common path clean.
       const already = await this.prisma.lead_submissions.findUnique({
         where: { webhook_event_id: event.id },
         select: { lead_id: true },
@@ -216,7 +220,8 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         reviewReasons.push('Phone number could not be parsed — this lead must not be auto-dialled');
       }
 
-      const { leadId, merged } = await this.upsertLead({
+      // The lead and its submission are written together — see createLead.
+      const leadId = await this.createLead({
         organizationId: event.organization_id,
         leadSourceId: source.id,
         defaultConsent: source.default_consent_status,
@@ -225,37 +230,31 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         phone,
         email,
         reviewReasons,
-      });
-
-      await this.prisma.lead_submissions.create({
-        data: {
-          id: newId(),
-          organization_id: event.organization_id,
-          lead_id: leadId,
-          lead_source_id: source.id,
-          webhook_event_id: event.id,
-          provider_submission_id: parsed.providerSubmissionId,
-          provider_respondent_id: parsed.providerRespondentId,
-          submitted_at: parsed.submittedAt ?? new Date(),
-          normalized_answers: parsed.answers as never,
-          mapped_values: mapped.values as never,
-          unmapped_keys: Object.keys(mapped.customFields),
-          warnings: mapped.warnings as never,
-          is_first_for_lead: !merged,
+        submission: {
+          webhookEventId: event.id,
+          providerSubmissionId: parsed.providerSubmissionId,
+          providerRespondentId: parsed.providerRespondentId,
+          submittedAt: parsed.submittedAt ?? new Date(),
+          normalizedAnswers: parsed.answers,
+          mappedValues: mapped.values,
+          unmappedKeys: Object.keys(mapped.customFields),
+          warnings: mapped.warnings,
         },
       });
 
       // Outbox. Nothing consumes these yet; they are the seam that lets WF-04
       // (instant SMS) and WF-05 (AI voice) be added later without touching this
-      // transaction. `lead.merged` is distinct so a returning lead is not
-      // re-texted an intro message.
+      // transaction. There is no longer a `lead.merged` counterpart: every
+      // delivery that clears identity produces a new lead, so a consumer can
+      // treat `lead.created` as "someone asked to be contacted" without having
+      // to ask whether this one is a returning prospect.
       await this.prisma.domain_events.create({
         data: {
           id: newId(),
           organization_id: event.organization_id,
           aggregate_type: 'lead',
           aggregate_id: leadId,
-          event_type: merged ? 'lead.merged' : 'lead.created',
+          event_type: 'lead.created',
           payload: { leadId, leadSourceId: source.id, webhookEventId: event.id } as never,
         },
       });
@@ -267,7 +266,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           // Lowercase: audit_logs_actor_type_check allows only
           // user | agent | ai | system | webhook.
           actor_type: 'webhook',
-          action: merged ? 'lead.merged' : 'lead.created',
+          action: 'lead.created',
           entity_type: 'lead',
           entity_id: leadId,
           payload: { source: source.name, webhookEventId: event.id } as never,
@@ -290,7 +289,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         leadId,
       );
 
-      this.logger.log(`${merged ? 'Merged into' : 'Created'} lead ${leadId} from delivery ${event.id}`);
+      this.logger.log(`Created lead ${leadId} from delivery ${event.id}`);
     } catch (err) {
       await this.fail(event, err, startedAt);
     }
@@ -492,18 +491,37 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  // --- identity + merge -----------------------------------------------------
+  // --- lead creation --------------------------------------------------------
 
   /**
-   * Create or merge, serialized on identity.
+   * One submission, one lead. Written with its `lead_submissions` row in a
+   * single transaction.
    *
-   * `pg_advisory_xact_lock` (NOT the session-scoped `pg_advisory_lock`, which
-   * leaks across Supavisor's transaction pooling) closes the gap a unique index
-   * cannot: you cannot row-lock a row that does not exist yet, so two concurrent
-   * first-submissions would otherwise both insert. The partial unique index on
-   * (organization_id, normalized_phone) remains the unbypassable backstop.
+   * This used to be `upsertLead`: it looked for an existing lead with the same
+   * normalized phone (falling back to email) and merged the incoming answers
+   * into it under a per-field policy. That is correct when the only people
+   * feeding a source are the brokerage's own staff, and it is wrong here. A
+   * connected form is published — on a listing page, in an ad, in a link anyone
+   * can forward — so two different prospects sharing one number is ordinary:
+   * a couple, a family line, an assistant filling the form in for a client.
+   * Merging them silently replaced the first prospect's budget, timeline and
+   * location with the second's and left a single row, so the brokerage called
+   * one person and never learned the other had asked to be contacted. Losing a
+   * lead is the one failure this system exists to prevent.
+   *
+   * Duplicates are not ignored, they are reported instead of resolved: the
+   * leads API counts leads sharing a normalized phone or email and the pipeline
+   * badges them "repeat contact". A human can see both rows and decide, which
+   * is the one thing the merge made impossible.
+   *
+   * De-duplication of DELIVERIES is untouched and lives where it belongs — on
+   * the provider's event id (`webhook_events.dedupe_key`) and on
+   * `lead_submissions.webhook_event_id`, whose insert shares this transaction.
+   * A Tally retry therefore still cannot produce a second lead: the submission
+   * insert conflicts and takes the lead row down with it, and the retry after
+   * that finds the original through the guard at the top of `process`.
    */
-  private async upsertLead(input: {
+  private async createLead(input: {
     organizationId: string;
     leadSourceId: string;
     defaultConsent: string;
@@ -513,152 +531,99 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     email: string | null;
     /** Non-empty => something needs a human's eye. See `leads.review_reasons`. */
     reviewReasons: string[];
-  }): Promise<{ leadId: string; merged: boolean }> {
+    submission: {
+      webhookEventId: string;
+      providerSubmissionId: string | null;
+      providerRespondentId: string | null;
+      submittedAt: Date;
+      normalizedAnswers: NormalizedAnswer[];
+      mappedValues: Record<string, unknown>;
+      unmappedKeys: string[];
+      warnings: string[];
+    };
+  }): Promise<string> {
     const { organizationId, leadSourceId, values, customFields, phone, email, reviewReasons } = input;
 
     const normalizedPhone = phone && phone.startsWith('+') ? phone : null;
 
-    // Symmetric with phone, and for the same reason.
-    //
-    // `normalized_email` is an IDENTITY column — it is how a second submission
-    // finds an existing lead. A required email box on a form someone else
-    // designed collects "n/a", "none", "-", "test@test" many times a day, and
-    // without this guard every prospect who typed "n/a" resolves to the SAME
-    // normalized_email and merges into one lead, overwriting a real person's
-    // name and budget with a stranger's.
-    //
-    // The raw address is still stored on the lead (an agent may recognise a
-    // typo and fix it); it simply never matches anybody.
+    // `normalized_phone` and `normalized_email` are no longer merge keys, but
+    // they are still worth computing: they are what the repeat-contact lookup
+    // groups on, and `email_valid` keeps a form's worth of "n/a", "none" and
+    // "-" from being reported as one prospect submitting fifty times.
     const emailValid = email ? isValidEmail(email) : false;
     const normalizedEmail = emailValid ? email!.trim().toLowerCase() : null;
-    const identity = normalizedPhone ?? normalizedEmail ?? '';
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-        `${organizationId}|${identity}`,
-      );
+    const consentGranted = values.consent_status === true;
+    const leadId = newId();
 
-      // Phone is the sole primary identity: it is the channel we dial and the
-      // TCPA-relevant identifier. Email is only a fallback — households share
-      // email addresses far more often than mobile numbers.
-      let existing = normalizedPhone
-        ? await tx.leads.findFirst({
-            where: { organization_id: organizationId, normalized_phone: normalizedPhone },
-          })
-        : null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leads.create({
+        data: {
+          id: leadId,
+          organization_id: organizationId,
+          lead_source_id: leadSourceId,
+          first_name: str(values.first_name),
+          last_name: str(values.last_name),
+          email,
+          normalized_email: normalizedEmail,
+          phone,
+          normalized_phone: normalizedPhone,
+          phone_valid: Boolean(normalizedPhone),
+          email_valid: emailValid,
+          needs_review: reviewReasons.length > 0,
+          review_reasons: reviewReasons,
+          // Always starts at 'new'. Downstream stages move it forward.
+          status: 'new',
+          temperature: 'cold',
+          score: 0,
+          location: str(values.location),
+          timeline: str(values.timeline),
+          buying_intent: str(values.buying_intent),
+          financing_status: str(values.financing_status),
+          min_budget: num(values.min_budget),
+          max_budget: num(values.max_budget),
+          bedrooms: int(values.bedrooms),
+          motivation: str(values.motivation),
+          // Defaults to the source's configured basis, NOT to 'granted'. The
+          // demo's createLead() hardcodes granted for every lead, which would
+          // assert consent we never obtained.
+          consent_status: consentGranted ? 'granted' : input.defaultConsent,
+          consent_source: consentGranted ? 'webhook_form' : null,
+          consent_at: consentGranted ? new Date() : null,
+          custom_fields: customFields as never,
+          // Exactly one, by construction. The column stays because the
+          // submission history hangs off it and because a future import path
+          // may legitimately carry more.
+          submission_count: 1,
+          last_submission_at: input.submission.submittedAt,
+        },
+      });
 
-      if (!existing && normalizedEmail) {
-        existing = await tx.leads.findFirst({
-          where: { organization_id: organizationId, normalized_email: normalizedEmail },
-        });
-      }
-
-      const consentGranted = values.consent_status === true;
-
-      if (!existing) {
-        const id = newId();
-        await tx.leads.create({
-          data: {
-            id,
-            organization_id: organizationId,
-            lead_source_id: leadSourceId,
-            first_name: str(values.first_name),
-            last_name: str(values.last_name),
-            email,
-            normalized_email: normalizedEmail,
-            phone,
-            normalized_phone: normalizedPhone,
-            phone_valid: Boolean(normalizedPhone),
-            email_valid: emailValid,
-            needs_review: reviewReasons.length > 0,
-            review_reasons: reviewReasons,
-            // Always starts at 'new'. Downstream stages move it forward.
-            status: 'new',
-            temperature: 'cold',
-            score: 0,
-            location: str(values.location),
-            timeline: str(values.timeline),
-            buying_intent: str(values.buying_intent),
-            financing_status: str(values.financing_status),
-            min_budget: num(values.min_budget),
-            max_budget: num(values.max_budget),
-            bedrooms: int(values.bedrooms),
-            motivation: str(values.motivation),
-            // Defaults to the source's configured basis, NOT to 'granted'. The
-            // demo's createLead() hardcodes granted for every lead, which would
-            // assert consent we never obtained.
-            consent_status: consentGranted ? 'granted' : input.defaultConsent,
-            consent_source: consentGranted ? 'webhook_form' : null,
-            consent_at: consentGranted ? new Date() : null,
-            custom_fields: customFields as never,
-            submission_count: 1,
-            last_submission_at: new Date(),
-          },
-        });
-        return { leadId: id, merged: false };
-      }
-
-      // --- merge ---
-      const data: Record<string, unknown> = {
-        submission_count: { increment: 1 },
-        last_submission_at: new Date(),
-        custom_fields: { ...(existing.custom_fields as object), ...customFields } as never,
-      };
-
-      // fill_if_empty: a non-empty existing value is never clobbered.
-      for (const [key, col] of [
-        ['first_name', 'first_name'],
-        ['last_name', 'last_name'],
-        ['email', 'email'],
-        ['phone', 'phone'],
-      ] as const) {
-        const incoming = values[key];
-        if (incoming && !(existing as Record<string, unknown>)[col]) data[col] = incoming;
-      }
-      if (!existing.normalized_phone && normalizedPhone) {
-        data.normalized_phone = normalizedPhone;
-        data.phone_valid = true;
-      }
-      if (!existing.normalized_email && normalizedEmail) {
-        data.normalized_email = normalizedEmail;
-        data.email_valid = true;
-      }
-
-      // Accumulate rather than replace: a concern raised by an earlier
-      // submission is not resolved by a later one that happened to be clean.
-      if (reviewReasons.length > 0) {
-        data.needs_review = true;
-        data.review_reasons = [...new Set([...(existing.review_reasons ?? []), ...reviewReasons])];
-      }
-
-      // latest_wins: intent fields legitimately change, and stale values here
-      // directly corrupt scoring.
-      for (const key of ['location', 'timeline', 'buying_intent', 'financing_status', 'motivation'] as const) {
-        if (values[key]) data[key] = values[key];
-      }
-      if (values.min_budget != null) data.min_budget = num(values.min_budget);
-      if (values.max_budget != null) data.max_budget = num(values.max_budget);
-      if (values.bedrooms != null) data.bedrooms = int(values.bedrooms);
-
-      // Compliance is guarded, never a plain overwrite. `revoked` is terminal
-      // from this path: a public web form is attacker-controlled input, so
-      // letting it flip revoked -> granted would let anyone who knows a phone
-      // number re-subscribe someone who opted out.
-      if (consentGranted && existing.consent_status !== 'revoked') {
-        data.consent_status = 'granted';
-        data.consent_source = 'webhook_form';
-        data.consent_at = new Date();
-      }
-
-      // Status never regresses. A dormant lead re-submitting is a high-value
-      // signal, so closed/lost/nurture reopen; anything mid-conversation is left
-      // alone rather than restarting outreach.
-      if (['closed', 'lost', 'nurture'].includes(existing.status)) data.status = 'new';
-
-      await tx.leads.update({ where: { id: existing.id }, data: data as never });
-      return { leadId: existing.id, merged: true };
+      // Same transaction as the lead, deliberately. Apart from being the
+      // idempotency backstop described above, it means a lead can never exist
+      // without the raw answers that produced it — which is what makes a
+      // mapping fix retroactively repairable.
+      await tx.lead_submissions.create({
+        data: {
+          id: newId(),
+          organization_id: organizationId,
+          lead_id: leadId,
+          lead_source_id: leadSourceId,
+          webhook_event_id: input.submission.webhookEventId,
+          provider_submission_id: input.submission.providerSubmissionId,
+          provider_respondent_id: input.submission.providerRespondentId,
+          submitted_at: input.submission.submittedAt,
+          normalized_answers: input.submission.normalizedAnswers as never,
+          mapped_values: input.submission.mappedValues as never,
+          unmapped_keys: input.submission.unmappedKeys,
+          warnings: input.submission.warnings as never,
+          // Every submission is the first for its own lead now.
+          is_first_for_lead: true,
+        },
+      });
     });
+
+    return leadId;
   }
 
   // --- bookkeeping ----------------------------------------------------------

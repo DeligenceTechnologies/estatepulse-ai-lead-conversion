@@ -49,11 +49,22 @@ const budgetRange = (l: LiveLead) => {
 };
 
 /**
- * What the row is badged with. `source.type` is the ingestion mechanism, so a
- * lead that arrived on a webhook URL reads "webhook" — not the customer's label
- * for the form ("Buyer Inquiry"), which is kept on hover.
+ * What the row is badged with: where the lead actually came from.
+ *
+ * `source.type` is the transport and is 'webhook' for every ingested lead,
+ * which makes it useless as a label the moment a second integration exists —
+ * a form we connected through Tally's API read "webhook" exactly like a URL
+ * pasted by hand. So an API-connected source is badged with its provider
+ * ("tally") and only a manually pasted URL keeps "webhook", which is the same
+ * rule the Lead Sources list uses for its connection pill. The customer's own
+ * label for the form ("Buyer Inquiry") stays on hover.
  */
-const sourceLabel = (l: LiveLead) => l.source?.type ?? 'manual';
+const sourceLabel = (l: LiveLead): string => {
+  const s = l.source;
+  if (!s) return 'manual';
+  if ((s.connectionMethod ?? '').toUpperCase() === 'API' && s.provider) return s.provider.toLowerCase();
+  return s.type ?? 'webhook';
+};
 
 /** The demo store's status vocabulary; the backend calls a booked lead 'booked'. */
 const toDemoStatus = (status: string): LeadStatus =>
@@ -105,7 +116,10 @@ const toLead = (l: LiveLead): Lead => ({
   lastName: l.lastName ?? '',
   email: l.email ?? '',
   phone: l.phone ?? '',
-  source: 'webhook',
+  // Same label as the table badge. `LeadSource` is the demo store's closed
+  // union, so an unrecognised provider would widen it — acceptable because
+  // nothing branches on this value; it is displayed and nothing more.
+  source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
   status: toDemoStatus(l.status),
   leadType: 'buyer',
@@ -390,9 +404,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                           >
                             {sourceLabel(lead)}
                           </span>
-                          {lead.submissionCount > 1 && (
-                            <span className="text-[10px] text-amber-300 font-normal">
-                              {lead.submissionCount} submissions merged
+                          {lead.contactLeadCount > 1 && (
+                            // Replaces "N submissions merged". Submissions are
+                            // no longer folded into one lead — a public form is
+                            // filled in by different people, and merging them
+                            // overwrote one prospect's answers with another's.
+                            // Repeats are surfaced instead of resolved: the
+                            // rows stay separate and a human decides.
+                            <span
+                              title={`${lead.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`}
+                              className="text-[10px] text-amber-300 font-normal"
+                            >
+                              repeat contact ({lead.contactLeadCount})
                             </span>
                           )}
                           {lead.needsReview && (
@@ -417,7 +440,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                           {lead.email ?? DASH}
                           {lead.email && !lead.emailValid && (
                             // Stored, but never used to match this lead to
-                            // another — see the email_valid guard in upsertLead.
+                            // another — see the email_valid guard in createLead.
                             <span title="Not a usable address — excluded from matching and email outreach">
                               <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
                             </span>

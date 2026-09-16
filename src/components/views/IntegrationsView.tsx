@@ -13,6 +13,7 @@ import {
   Webhook
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { ConnectionsPanel } from '../integrations/ConnectionsPanel';
 
 interface IntegrationsViewProps {
   onOpenWebhookTester: () => void;
@@ -42,17 +43,28 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhoo
         </button>
       </div>
 
+      {/*
+        The live half of this page.
+
+        Connecting a lead source happens here and nowhere else. It used to sit on
+        Lead Sources, which meant the screen you check every day was fronted by
+        buttons you press twice a year — and it left "how do I connect a form?"
+        answered in two places at once.
+      */}
+      <ConnectionsPanel />
+
       {/* Integration Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/*
-          The ONLY real integration on this page.
+          The only card in this grid describing something real.
 
           Hardcoded rather than added to INITIAL_INTEGRATIONS on purpose: that
           array is demo seed data in AppContext, and putting a live integration
           in it would start the demo/live merge the codebase is built to avoid.
-          It is a signpost, not a status display — it deliberately fetches
-          nothing, because reading live state here would mean this view calling
-          the real API.
+          It is a signpost, not a status display — live state is read by
+          ConnectionsPanel above, which owns its own fetches and never writes
+          into the demo store. The separation is between the two data stores,
+          not between the two halves of this page.
         */}
         <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between">
           <div className="space-y-3">
@@ -69,7 +81,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhoo
               <h3 className="text-base font-bold text-white">Tally Forms</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 Connect a form with an API key and we install the webhook for you, then map its
-                fields before the first submission arrives.
+                fields before the first submission arrives. Use <strong>Connect</strong> above.
               </p>
             </div>
             <div className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl text-[11px] text-slate-400 leading-relaxed">
@@ -78,12 +90,12 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhoo
             </div>
           </div>
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-mono text-[11px]">Managed in Lead Sources</span>
+            <span className="text-slate-500 font-mono text-[11px]">Connected above</span>
             <button
               onClick={() => setActiveView('lead_sources')}
               className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
             >
-              Connect a form →
+              See its leads →
             </button>
           </div>
         </div>

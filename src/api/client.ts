@@ -93,6 +93,12 @@ export interface LeadSourceConfig {
   /** Fully built URL, safe to display and copy. */
   webhookUrl: string | null;
   deliveryCount?: number;
+  /**
+   * Leads this source produced. Not the same as `deliveryCount`: a delivery
+   * carrying neither a usable phone nor email is stored and replayable but
+   * never becomes a lead, so the two numbers disagreeing is information.
+   */
+  leadCount?: number;
 
   // --- set only on API-connected sources ---
   /** 'TALLY'. Absent on sources created before providers existed. */
@@ -210,8 +216,25 @@ export interface LiveLead {
   needsReview: boolean;
   reviewReasons: string[];
   submissionCount: number;
-  /** `type` is the ingestion mechanism ('webhook'); `name` is the form's label. */
-  source: { id: string; name: string; type: string } | null;
+  /**
+   * Leads in this organization sharing this one's phone (or email, when there is
+   * no phone), itself included. >1 means the same contact details reached the
+   * pipeline more than once — kept as separate leads on purpose, flagged so
+   * nobody calls the same number twice without knowing.
+   */
+  contactLeadCount: number;
+  /**
+   * `name` is the form's label ('Buyer Inquiry'). `type` is the transport and is
+   * always 'webhook'; the badge reads `provider`/`connectionMethod` instead, so
+   * a form connected through Tally's API says so.
+   */
+  source: {
+    id: string;
+    name: string;
+    type: string;
+    provider: string | null;
+    connectionMethod: string | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -344,7 +367,12 @@ export const providersApi = {
 };
 
 export const leadsApi = {
-  list: (status?: string) =>
-    request<LiveLead[]>(`/v1/leads${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  list: (filter: { status?: string; sourceId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.status) q.set('status', filter.status);
+    if (filter.sourceId) q.set('sourceId', filter.sourceId);
+    const qs = q.toString();
+    return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
+  },
   stats: () => request<LeadStats>('/v1/leads/stats'),
 };

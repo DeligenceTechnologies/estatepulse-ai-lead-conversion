@@ -34,9 +34,10 @@ const DEFAULT_TRUTHY = ['yes', 'true', '1', 'on', 'agree', 'i agree', 'ok', 'oka
  * "asdf". Anything shaped like an address is accepted; delivery is the mail
  * server's problem, not ours.
  *
- * Exported because `upsertLead` must ask the SAME question before using an
- * address as a merge key. Two callers with two regexes is how "n/a" becomes a
- * shared identity again six months from now.
+ * Exported because `createLead` must ask the SAME question before storing an
+ * address as `normalized_email`. Two callers with two regexes is how "n/a"
+ * becomes a shared identity again six months from now — fifty strangers
+ * reported as one prospect who submitted fifty times.
  */
 export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase());
@@ -132,7 +133,8 @@ export function applyTransform(
       if (!e) return { value: null };
       if (!isValidEmail(e)) {
         // Kept, like an unparseable phone: a lead who fat-fingered their address
-        // is still a lead. It just never becomes an identity — see upsertLead.
+        // is still a lead. It just never counts as a repeat contact — see
+        // createLead and LeadsController.countLeadsPerContact.
         return { value: e, warning: `"${e}" does not look like a valid email` };
       }
       return { value: e };

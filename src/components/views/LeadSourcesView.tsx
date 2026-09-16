@@ -1,37 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
-  Copy,
-  Check,
-  KeyRound,
   Loader2,
-  Plus,
-  RefreshCw,
   Radio,
+  RefreshCw,
+  Settings2,
   ShieldAlert,
   ShieldCheck,
+  Users,
   Webhook,
-  X,
 } from 'lucide-react';
 import {
   ApiError,
   api,
-  providersApi,
+  leadsApi,
   type LeadSourceConfig,
-  type LeadSourceWithSecret,
+  type LiveLead,
   type WebhookDelivery,
 } from '../../api/client';
-import { ConnectFormPanel } from '../leadsources/ConnectFormPanel';
-import { CopyField } from '../leadsources/CopyField';
-import { ConnectionPill, MappingPill, SourceStatusPill } from '../leadsources/StatusPills';
+import { useApp } from '../../context/AppContext';
+import { ConnectionPill, SourceStatusPill } from '../leadsources/StatusPills';
 
-/**
- * Live backend screen — the ONLY view in this app that talks to the real API.
- * Every other view reads the in-browser demo store in AppContext. This one
- * deliberately holds its own fetch state rather than putting async data into
- * that context, so the two can never be accidentally merged.
- */
 
 const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> = ({
   state,
@@ -180,22 +169,71 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
   );
 };
 
+const DASH = '—';
+
+const fullName = (l: LiveLead) =>
+  [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead';
+
+/** One lead this source produced. Read-only — the pipeline is where you work them. */
+const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
+  <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 flex items-start justify-between gap-3">
+    <div className="min-w-0">
+      <div className="text-xs font-bold text-slate-100 truncate">{fullName(lead)}</div>
+      <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+        {lead.phone ?? DASH}
+        {lead.phone && !lead.phoneValid && (
+          <span title="Phone could not be parsed — excluded from dialing">
+            <ShieldAlert className="w-3 h-3 text-amber-400" />
+          </span>
+        )}
+      </div>
+      <div className="text-[11px] text-slate-500 truncate">{lead.email ?? DASH}</div>
+    </div>
+    <div className="text-right shrink-0 space-y-1">
+      <div className="text-[10px] text-slate-500">
+        {new Date(lead.createdAt).toLocaleString()}
+      </div>
+      <div className="flex items-center gap-1 justify-end">
+        {lead.contactLeadCount > 1 && (
+          <span
+            title={`${lead.contactLeadCount} leads share this phone number or email. Each submission is kept as its own lead.`}
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30"
+          >
+            repeat
+          </span>
+        )}
+        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+          {lead.status}
+        </span>
+      </div>
+    </div>
+  </div>
+);
+
+/**
+ * What each connected form has actually brought in.
+ *
+ * Connecting a source is NOT done here any more — it lives on Integrations &
+ * Webhooks, along with webhook URLs, signing secrets and disconnect. That split
+ * is the point of this screen: setup is a once-per-form act, while this is the
+ * page you open to ask "is the form working, and what came through it?". Mixing
+ * the two put a wall of buttons in front of the answer.
+ *
+ * Still the only view in this app that talks to the real API besides that panel.
+ * Every other screen reads the in-browser demo store in AppContext; this one
+ * deliberately holds its own fetch state so the two can never merge.
+ */
 export const LeadSourcesView: React.FC = () => {
+  const { setActiveView, focusLeadSourceId, setFocusLeadSourceId } = useApp();
+
   const [sources, setSources] = useState<LeadSourceConfig[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
-  const [justCreated, setJustCreated] = useState<LeadSourceWithSecret | null>(null);
+  const [leads, setLeads] = useState<LiveLead[] | null>(null);
+  const [loadingLeads, setLoadingLeads] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [showConnect, setShowConnect] = useState(false);
-  const [remoteBusy, setRemoteBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Two-step rather than window.confirm: this app has no confirm dialogs.
-  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
 
   const loadSources = useCallback(async () => {
     try {
@@ -207,50 +245,45 @@ export const LeadSourcesView: React.FC = () => {
     }
   }, []);
 
-  const loadDeliveries = useCallback(async (id: string) => {
+  const loadDetail = useCallback(async (id: string) => {
     setLoadingDeliveries(true);
-    try {
-      setDeliveries(await api.deliveries(id));
-    } catch {
-      setDeliveries([]);
-    } finally {
-      setLoadingDeliveries(false);
-    }
+    setLoadingLeads(true);
+    // Settled, not all: a failing deliveries call must not blank the leads list
+    // and leave the screen looking like the source produced nothing.
+    const [d, l] = await Promise.allSettled([api.deliveries(id), leadsApi.list({ sourceId: id })]);
+    setDeliveries(d.status === 'fulfilled' ? d.value : []);
+    setLeads(l.status === 'fulfilled' ? l.value : []);
+    setLoadingDeliveries(false);
+    setLoadingLeads(false);
   }, []);
 
   useEffect(() => {
     void loadSources();
   }, [loadSources]);
 
+  // Arriving from Integrations after connecting something — open it and drop
+  // the handoff, so a later visit does not re-select a stale source.
   useEffect(() => {
-    if (selectedId) void loadDeliveries(selectedId);
-  }, [selectedId, loadDeliveries]);
+    if (!focusLeadSourceId) return;
+    setSelectedId(focusLeadSourceId);
+    setFocusLeadSourceId(null);
+  }, [focusLeadSourceId, setFocusLeadSourceId]);
+
+  useEffect(() => {
+    if (selectedId) void loadDetail(selectedId);
+  }, [selectedId, loadDetail]);
 
   // Poll while a source is open so a Tally submission appears without the user
   // having to guess when to refresh — this is what makes "did it arrive?"
   // answerable at a glance.
   useEffect(() => {
     if (!selectedId || !autoRefresh) return;
-    const t = setInterval(() => void loadDeliveries(selectedId), 4000);
+    const t = setInterval(() => {
+      void loadDetail(selectedId);
+      void loadSources();
+    }, 4000);
     return () => clearInterval(t);
-  }, [selectedId, autoRefresh, loadDeliveries]);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const created = await api.createLeadSource(newName.trim());
-      setJustCreated(created);
-      setShowCreate(false);
-      setNewName('');
-      await loadSources();
-      setSelectedId(created.id);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setCreating(false);
-    }
-  };
+  }, [selectedId, autoRefresh, loadDetail, loadSources]);
 
   const selected = sources?.find((s) => s.id === selectedId) ?? null;
 
@@ -266,33 +299,18 @@ export const LeadSourcesView: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-400">
-            Real webhook endpoints backed by Postgres. Every other screen in this app uses in-browser
-            demo data — this one does not.
+            What each connected form has brought in. Real data from Postgres — every other screen in
+            this app uses in-browser demo data.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setShowCreate(true);
-              setShowConnect(false);
-            }}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-          >
-            Set up manually
-          </button>
-          <button
-            onClick={() => {
-              setShowConnect(true);
-              setShowCreate(false);
-              setJustCreated(null);
-            }}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Connect a form
-          </button>
-        </div>
+        <button
+          onClick={() => setActiveView('integrations')}
+          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          Manage connections
+        </button>
       </div>
 
       {error && (
@@ -310,106 +328,6 @@ export const LeadSourcesView: React.FC = () => {
         </div>
       )}
 
-      {notice && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3">
-          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-amber-200 leading-relaxed flex-1">{notice}</div>
-          <button
-            onClick={() => setNotice(null)}
-            className="p-1 rounded-lg text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {showConnect && (
-        <ConnectFormPanel
-          onClose={() => setShowConnect(false)}
-          onConnected={async (id) => {
-            await loadSources();
-            setSelectedId(id);
-          }}
-          onOpenSource={(id) => {
-            setShowConnect(false);
-            setSelectedId(id);
-          }}
-          onSetUpManually={() => {
-            setShowConnect(false);
-            setShowCreate(true);
-          }}
-        />
-      )}
-
-      {/* Secret reveal — the only time the signing secret is ever shown. */}
-      {justCreated && (
-        <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-5 space-y-4 shadow-xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-bold text-white">
-                "{justCreated.name}" created — paste these into Tally
-              </h3>
-            </div>
-            <button
-              onClick={() => setJustCreated(null)}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <CopyField label="Webhook URL" value={justCreated.webhookUrl ?? ''} />
-          <CopyField label="Signing secret" value={justCreated.signingSecret} />
-
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 leading-relaxed flex gap-2">
-            <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-            <span>
-              <strong>The signing secret is shown once.</strong> It is encrypted at rest and no API
-              response will ever return it again — if you lose it, rotate to get a new one. The
-              webhook URL can always be recovered from this screen.
-            </span>
-          </div>
-
-          <ol className="text-[11px] text-slate-300 space-y-1 list-decimal list-inside leading-relaxed">
-            <li>In Tally, open your form → <strong>Integrations</strong> → <strong>Webhooks</strong> → Add webhook.</li>
-            <li>Paste the <strong>Webhook URL</strong>.</li>
-            <li>Expand <strong>Signing secret</strong> and paste the secret.</li>
-            <li>Connect, then submit a test response — it appears below within a few seconds.</li>
-          </ol>
-        </div>
-      )}
-
-      {showCreate && (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
-          <h3 className="text-sm font-bold text-white">New lead source</h3>
-          <input
-            autoFocus
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void handleCreate()}
-            placeholder="e.g. Buyer Intake Form (Tally)"
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setShowCreate(false)}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => void handleCreate()}
-              disabled={creating || !newName.trim()}
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Create & show secret
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sources list */}
         <div className="lg:col-span-1 space-y-3">
@@ -418,12 +336,17 @@ export const LeadSourcesView: React.FC = () => {
               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
             </div>
           ) : sources.length === 0 ? (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-center space-y-2">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-center space-y-3">
               <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
-              <div className="text-xs text-slate-400">
-                No lead sources yet. Connect a form to have the webhook installed for you, or set
-                one up manually to get a URL you paste yourself.
+              <div className="text-xs text-slate-400 leading-relaxed">
+                No lead sources yet. Connecting a form happens on Integrations &amp; Webhooks.
               </div>
+              <button
+                onClick={() => setActiveView('integrations')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Connect a form
+              </button>
             </div>
           ) : (
             sources.map((s) => (
@@ -438,8 +361,15 @@ export const LeadSourcesView: React.FC = () => {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-bold text-white truncate">{s.name}</span>
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0">
-                    {s.deliveryCount ?? 0}
+                  {/* Leads, not deliveries: a delivery with no usable phone or
+                      email never becomes one, so the counts can disagree and
+                      this is the number the question is actually about. */}
+                  <span
+                    title={`${s.leadCount ?? 0} leads from ${s.deliveryCount ?? 0} deliveries`}
+                    className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0 flex items-center gap-1"
+                  >
+                    <Users className="w-2.5 h-2.5" />
+                    {s.leadCount ?? 0}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -467,134 +397,61 @@ export const LeadSourcesView: React.FC = () => {
         <div className="lg:col-span-2 space-y-4">
           {selected ? (
             <>
-              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-white truncate">{selected.name}</h3>
-                    {selected.externalFormName && (
-                      <div className="text-[11px] text-slate-400 truncate">
-                        {(selected.provider ?? 'form').toLowerCase()} · {selected.externalFormName}
-                      </div>
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">{selected.name}</h3>
+                  <div className="text-[11px] text-slate-400 truncate">
+                    {selected.externalFormName
+                      ? `${(selected.provider ?? 'form').toLowerCase()} · ${selected.externalFormName}`
+                      : `${selected.leadCount ?? 0} leads · ${selected.deliveryCount ?? 0} deliveries`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                  <SourceStatusPill source={selected} />
+                  <ConnectionPill source={selected} />
+                </div>
+              </div>
+
+              {/* Leads from this source */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-bold text-white">Leads from this source</h3>
+                    {leads !== null && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                        {leads.length}
+                      </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                    <SourceStatusPill source={selected} />
-                    <MappingPill status={selected.mappingStatus} />
-                  </div>
+                  <button
+                    onClick={() => setActiveView('leads')}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
+                  >
+                    Open pipeline →
+                  </button>
                 </div>
 
-                {/* A webhook that vanished on the provider's side is silent
-                    data loss, so it gets a repair button rather than a badge. */}
-                {['UNINSTALLED', 'ORPHANED', 'ERROR', 'DRIFTED'].includes(
-                  (selected.remoteState ?? '').toUpperCase(),
-                ) && (
-                  <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 space-y-2">
-                    <div className="text-[11px] text-rose-200 leading-relaxed">
-                      <strong className="text-rose-100">The webhook is not where we expect it.</strong>{' '}
-                      {selected.remoteErrorMessage ??
-                        'It is no longer on the form. Submissions since then were never sent to us, and cannot be recovered.'}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async () => {
-                          setRemoteBusy(true);
-                          try {
-                            const r = await providersApi.resync(selected.id);
-                            setNotice(`Re-sync: ${r.remoteState.toLowerCase()}${r.removedDuplicates ? `, removed ${r.removedDuplicates} duplicate webhook(s)` : ''}.`);
-                            await loadSources();
-                          } catch (e) {
-                            setNotice(e instanceof ApiError ? e.message : String(e));
-                          } finally {
-                            setRemoteBusy(false);
-                          }
-                        }}
-                        disabled={remoteBusy}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
-                      >
-                        Re-sync
-                      </button>
-                      <button
-                        onClick={async () => {
-                          setRemoteBusy(true);
-                          try {
-                            await providersApi.reinstall(selected.id);
-                            setNotice('Webhook reinstalled with the same URL and secret — nothing else to change.');
-                            await loadSources();
-                          } catch (e) {
-                            setNotice(e instanceof ApiError ? e.message : String(e));
-                          } finally {
-                            setRemoteBusy(false);
-                          }
-                        }}
-                        disabled={remoteBusy}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
-                      >
-                        Reinstall webhook
-                      </button>
-                    </div>
+                {loadingLeads && leads === null ? (
+                  <div className="text-xs text-slate-400 flex items-center gap-2 py-4">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
                   </div>
-                )}
-
-                {selected.webhookUrl && <CopyField label="Webhook URL" value={selected.webhookUrl} />}
-                <div className="text-[11px] text-slate-400">
-                  Signing secret:{' '}
-                  {selected.signingSecretPreview ? (
-                    <span className="font-mono text-slate-300">{selected.signingSecretPreview}</span>
-                  ) : (
-                    'not configured'
-                  )}
-                  {' · '}
-                  {selected.requireSignature
-                    ? 'required'
-                    : 'verified when present, accepted when absent'}
-                </div>
-
-                {/* Only an API-connected source can be removed from the
-                    provider by us; a manual one we have no credential for. */}
-                {(selected.connectionMethod ?? '').toUpperCase() === 'API' && (
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-slate-500">
-                      We installed this webhook, so we can remove it for you.
-                    </span>
-                    <button
-                      onClick={async () => {
-                        if (confirmDisconnect !== selected.id) {
-                          setConfirmDisconnect(selected.id);
-                          return;
-                        }
-                        setRemoteBusy(true);
-                        try {
-                          const r = await providersApi.disconnectForm(selected.id);
-                          setNotice(
-                            r.warning ??
-                              'Disconnected, and the webhook was removed from your form. Leads already received are untouched.',
-                          );
-                          setConfirmDisconnect(null);
-                          setSelectedId(null);
-                          await loadSources();
-                        } catch (e) {
-                          setNotice(
-                            e instanceof ApiError
-                              ? `${e.message} Use force if you want to disconnect anyway and remove it yourself.`
-                              : String(e),
-                          );
-                        } finally {
-                          setRemoteBusy(false);
-                        }
-                      }}
-                      disabled={remoteBusy}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 ${
-                        confirmDisconnect === selected.id
-                          ? 'bg-rose-600 hover:bg-rose-500 text-white'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                      }`}
-                    >
-                      {confirmDisconnect === selected.id ? 'Confirm — remove webhook' : 'Disconnect'}
-                    </button>
+                ) : leads && leads.length > 0 ? (
+                  <div className="space-y-2">
+                    {leads.map((l) => (
+                      <LeadRow key={l.id} lead={l} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-slate-500 text-center py-6 leading-relaxed max-w-md mx-auto">
+                    No leads from this source yet. Every submission carrying a usable phone or email
+                    becomes its own lead — a delivery with neither is stored below and stays
+                    replayable once the mapping is fixed.
                   </div>
                 )}
               </div>
 
+              {/* Deliveries */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-white">Deliveries</h3>
@@ -609,7 +466,7 @@ export const LeadSourcesView: React.FC = () => {
                       Auto-refresh
                     </label>
                     <button
-                      onClick={() => selectedId && void loadDeliveries(selectedId)}
+                      onClick={() => selectedId && void loadDetail(selectedId)}
                       className="text-slate-400 hover:text-white transition-colors cursor-pointer"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingDeliveries ? 'animate-spin' : ''}`} />
@@ -630,10 +487,10 @@ export const LeadSourcesView: React.FC = () => {
                         </>
                       ) : (
                         <>
-                          Paste the webhook URL into Tally and submit your form. Nothing arriving? The
-                          URL must be publicly reachable — a <code className="font-mono">localhost</code>{' '}
-                          URL cannot be called by Tally. Use an ngrok tunnel and set{' '}
-                          <code className="font-mono">PUBLIC_API_BASE_URL</code> to it.
+                          Paste the webhook URL into Tally and submit your form. The URL is on
+                          Integrations &amp; Webhooks. Nothing arriving? It must be publicly
+                          reachable — a <code className="font-mono">localhost</code> URL cannot be
+                          called by Tally.
                         </>
                       )}
                     </div>
@@ -649,7 +506,7 @@ export const LeadSourcesView: React.FC = () => {
             </>
           ) : (
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
-              Select a lead source to see its webhook URL and incoming deliveries.
+              Select a lead source to see the leads it produced and the deliveries behind them.
             </div>
           )}
         </div>

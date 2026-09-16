@@ -30,6 +30,9 @@ export type LeadSource =
   | 'google'
   | 'zillow'
   | 'manual'
+  // A form we connected through the provider's own API, as opposed to a
+  // webhook URL the customer pasted somewhere we cannot see.
+  | 'tally'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';

@@ -57,6 +57,13 @@ interface AppContextType {
   setActiveView: (view: AppView) => void;
   selectedLeadId: string | null;
   setSelectedLeadId: (id: string | null) => void;
+  /**
+   * A lead source the user asked to look at from somewhere else — connecting one
+   * on Integrations, say. Navigation only, never demo data: Lead Sources opens
+   * it and clears the handoff, so nothing here can outlive the jump.
+   */
+  focusLeadSourceId: string | null;
+  setFocusLeadSourceId: (id: string | null) => void;
   preCallLeadId: string | null;
   setPreCallLeadId: (id: string | null) => void;
   isSimulatingCall: boolean;
@@ -141,6 +148,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [focusLeadSourceId, setFocusLeadSourceId] = useState<string | null>(null);
   const [preCallLeadId, setPreCallLeadId] = useState<string | null>(null);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [activeSimulatedLead, setActiveSimulatedLead] = useState<Lead | null>(null);
@@ -628,6 +636,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveView,
         selectedLeadId,
         setSelectedLeadId,
+        focusLeadSourceId,
+        setFocusLeadSourceId,
         preCallLeadId,
         setPreCallLeadId,
         isSimulatingCall,

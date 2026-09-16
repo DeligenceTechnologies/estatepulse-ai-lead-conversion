@@ -86,7 +86,7 @@ describe('validateCanonicalValues', () => {
 
 /**
  * The predicate that decides whether an address may act as an identity.
- * `upsertLead` calls the same function, which is the point.
+ * `createLead` calls the same function, which is the point.
  */
 describe('isValidEmail', () => {
   it.each(['priya.r@outlook.com', 'b.hayes+tag@example.co.uk', 'A@B.IO'])('accepts %s', (v) => {

@@ -144,16 +144,28 @@ export class LeadSourcesService {
       orderBy: { created_at: 'desc' },
     });
 
-    const counts = await this.prisma.webhook_events.groupBy({
-      by: ['lead_source_id'],
-      where: { organization_id: organizationId },
-      _count: { _all: true },
-    });
-    const bySource = new Map(counts.map((c) => [c.lead_source_id, c._count._all]));
+    const [deliveries, leads] = await Promise.all([
+      this.prisma.webhook_events.groupBy({
+        by: ['lead_source_id'],
+        where: { organization_id: organizationId },
+        _count: { _all: true },
+      }),
+      // Deliveries and leads are no longer the same number — a delivery with no
+      // usable phone or email is stored without producing a lead — so the list
+      // reports both rather than letting one stand in for the other.
+      this.prisma.leads.groupBy({
+        by: ['lead_source_id'],
+        where: { organization_id: organizationId },
+        _count: { _all: true },
+      }),
+    ]);
+    const deliveriesBySource = new Map(deliveries.map((c) => [c.lead_source_id, c._count._all]));
+    const leadsBySource = new Map(leads.map((c) => [c.lead_source_id, c._count._all]));
 
     return rows.map((r) => ({
       ...this.toSummary(r, this.decryptToken(r)),
-      deliveryCount: bySource.get(r.id) ?? 0,
+      deliveryCount: deliveriesBySource.get(r.id) ?? 0,
+      leadCount: leadsBySource.get(r.id) ?? 0,
     }));
   }
 
