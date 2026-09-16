@@ -13,3 +13,4 @@ coverage/
 # Backend build output
 backend/dist/
 backend/src/generated/
+.vite/

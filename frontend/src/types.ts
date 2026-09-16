@@ -272,6 +272,7 @@ export interface OrganizationSettings {
   };
   aiAgentName: string;
   aiTone: 'Conversational' | 'Professional' | 'Friendly' | 'Concise';
+  aiSystemPrompt: string;
   serviceAreas: string[];
   autoCallOnLeadArrival: boolean;
   maxCallsPerDay: number;

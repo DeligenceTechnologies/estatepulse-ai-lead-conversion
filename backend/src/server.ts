@@ -1,9 +1,11 @@
 import { createApp } from './app.js';
 import { prisma } from './db.js';
 import { env } from './env.js';
+import { startLeadWatcher } from './telnyx/leadWatcher.js';
 
 const server = createApp().listen(env.PORT, () => {
   console.log(`API listening on http://localhost:${env.PORT} (${env.NODE_ENV})`);
+  startLeadWatcher();
 });
 
 const shutdown = (signal: string): void => {

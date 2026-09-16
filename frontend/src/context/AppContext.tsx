@@ -12,6 +12,7 @@ import {
   LeadStatus,
   Message,
 } from '../types';
+import { apiFetch, getToken } from '../lib/api';
 import {
   INITIAL_ORG_SETTINGS,
   INITIAL_AGENTS,
@@ -128,6 +129,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [preCallLeadId, setPreCallLeadId] = useState<string | null>(null);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [activeSimulatedLead, setActiveSimulatedLead] = useState<Lead | null>(null);
+
+  // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
+  useEffect(() => {
+    if (!getToken()) return;
+    apiFetch<{ leads: Lead[] }>('/leads', { auth: true })
+      .then((d) => { if (Array.isArray(d.leads)) setLeads(d.leads); })
+      .catch(() => { /* backend unreachable — keep whatever is cached */ });
+  }, []);
 
   // Persistence to local storage
   useEffect(() => {

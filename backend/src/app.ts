@@ -3,6 +3,8 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { authRouter } from './auth/routes.js';
+import { telnyxRouter } from './telnyx/routes.js';
+import { webhookRouter } from './telnyx/webhook.js';
 import { env } from './env.js';
 import { AppError, errorHandler, notFoundHandler } from './errors.js';
 
@@ -54,6 +56,8 @@ export function createApp(): express.Express {
   });
 
   app.use('/api/auth', authRouter);
+  app.use('/api/webhooks/telnyx', webhookRouter); // unauthenticated — Telnyx posts here
+  app.use('/api', telnyxRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -23,6 +23,7 @@ export const INITIAL_ORG_SETTINGS: OrganizationSettings = {
   },
   aiAgentName: 'Alex',
   aiTone: 'Conversational',
+  aiSystemPrompt: 'You are Alex, a warm AI assistant for a real estate brokerage. Qualify inbound home-buyer leads: budget, timeline, financing, beds, location. Keep replies short and human.',
   serviceAreas: ['North Austin', 'Round Rock', 'Cedar Park', 'Downtown Austin', 'Lake Travis'],
   autoCallOnLeadArrival: true,
   maxCallsPerDay: 2,
