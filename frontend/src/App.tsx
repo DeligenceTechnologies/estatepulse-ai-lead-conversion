@@ -8,18 +8,13 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 
-// Views
-import { DashboardView } from './components/views/DashboardView';
+// Views. Only the sections under active development are imported; the rest
+// render ComingSoonView, so their prototype dummy data never reaches the UI.
 import { LeadsView } from './components/views/LeadsView';
-import { ConversationsView } from './components/views/ConversationsView';
-import { CallsView } from './components/views/CallsView';
-import { AppointmentsView } from './components/views/AppointmentsView';
-import { FollowUpsView } from './components/views/FollowUpsView';
 import { AgentsView } from './components/views/AgentsView';
 import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
-import { AnalyticsView } from './components/views/AnalyticsView';
-import { PublicLandingPageView } from './components/views/PublicLandingPageView';
+import { ComingSoonView } from './components/views/ComingSoonView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -34,19 +29,6 @@ const AppContent: React.FC = () => {
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
   const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
 
-  // If the user wants to view the public conversion landing page (PRD Section 59)
-  if (activeView === 'landing' || (activeView as string) === 'landing_page') {
-    return (
-      <>
-        <PublicLandingPageView />
-        {/* Global modals for interactive preview */}
-        <LiveCallSimulatorModal />
-        <LeadDetailModal />
-        <AgentPreCallModal />
-      </>
-    );
-  }
-
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
       {/* Structural Sidebar */}
@@ -60,18 +42,19 @@ const AppContent: React.FC = () => {
         />
 
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
-          {activeView === 'dashboard' && <DashboardView />}
+          {activeView === 'dashboard' && <ComingSoonView title="Dashboard" />}
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
-          {activeView === 'conversations' && <ConversationsView />}
-          {activeView === 'calls' && <CallsView />}
-          {activeView === 'appointments' && <AppointmentsView />}
-          {activeView === 'followups' && <FollowUpsView />}
+          {activeView === 'conversations' && <ComingSoonView title="Conversations & SMS" />}
+          {activeView === 'calls' && <ComingSoonView title="AI Voice Calls" />}
+          {activeView === 'appointments' && <ComingSoonView title="Appointments" />}
+          {activeView === 'followups' && <ComingSoonView title="Follow-Up Sequences" />}
           {activeView === 'agents' && <AgentsView />}
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
           )}
           {activeView === 'ai_settings' && <AISettingsView />}
-          {activeView === 'analytics' && <AnalyticsView />}
+          {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
+          {activeView === 'landing_page' && <ComingSoonView title="Public Landing Page" />}
         </main>
       </div>
 

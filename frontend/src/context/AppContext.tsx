@@ -38,6 +38,23 @@ export type AppView =
   | 'analytics'
   | 'landing_page';
 
+/**
+ * Sections that are navigable but not built yet. Lives beside AppView so the
+ * locked list cannot drift from the view union: App.tsx renders ComingSoonView
+ * for these, and Header/Sidebar hide their demo chrome while one is open.
+ */
+const LOCKED_VIEWS: readonly AppView[] = [
+  'dashboard',
+  'conversations',
+  'calls',
+  'appointments',
+  'followups',
+  'analytics',
+  'landing_page',
+];
+
+export const isLockedView = (view: AppView): boolean => LOCKED_VIEWS.includes(view);
+
 interface AppContextType {
   orgSettings: OrganizationSettings;
   updateOrgSettings: (settings: Partial<OrganizationSettings>) => void;

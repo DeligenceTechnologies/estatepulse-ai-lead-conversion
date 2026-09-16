@@ -90,7 +90,7 @@ export const SignupPage: React.FC = () => {
           autoComplete="new-password"
           onChange={setPassword}
           disabled={busy}
-          hint="At least 12 characters."
+          hint="At least 8 characters."
         />
         <SubmitButton busy={busy}>Create account</SubmitButton>
       </form>

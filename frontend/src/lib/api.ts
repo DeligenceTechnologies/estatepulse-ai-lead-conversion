@@ -22,8 +22,8 @@ export type ErrorCode =
   | 'INTERNAL'
   | 'NETWORK';
 
-/** Verbatim from organization_members.role_check. */
-export type Role = 'owner' | 'admin' | 'team_lead' | 'manager' | 'agent' | 'viewer';
+/** Verbatim from organization_members_role_check. */
+export type Role = 'owner' | 'agent';
 
 export interface AuthUser {
   id: string;
@@ -90,7 +90,7 @@ const MESSAGES: Record<ErrorCode, string> = {
 
 /**
  * Prefers the server's per-field message when there is exactly one, since
- * "Password must be at least 12 characters" beats a generic form-level error.
+ * "Password must be at least 8 characters" beats a generic form-level error.
  */
 export function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
