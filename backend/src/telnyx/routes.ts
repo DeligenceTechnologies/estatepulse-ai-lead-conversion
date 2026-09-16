@@ -5,6 +5,7 @@ import * as assistant from './assistant.js';
 import * as numbers from './numbers.js';
 import * as strategyStore from './strategyStore.js';
 import * as engine from './engine.js';
+import * as ingest from '../ingest/service.js';
 import { prisma } from '../db.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -207,4 +208,29 @@ telnyxRouter.post('/leads/:id/qualified', h(async (req, res) => {
   }
   await engine.qualified(orgOf(req), String(req.params.id), temperature, summary);
   res.json({ ok: true });
+}));
+
+// ---- Lead ingestion sources (dashboard: mint/list/toggle webhook tokens) ----
+telnyxRouter.get('/ingest/sources', h(async (req, res) => {
+  res.json({ sources: await ingest.listSources(orgOf(req)) });
+}));
+
+// The plaintext token is returned ONCE here; only its hash is stored.
+telnyxRouter.post('/ingest/sources', h(async (req, res) => {
+  const label = String(req.body?.label ?? '').trim();
+  if (!label) {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'label is required' } });
+    return;
+  }
+  res.status(201).json(await ingest.createSource(orgOf(req), label));
+}));
+
+telnyxRouter.patch('/ingest/sources/:id', h(async (req, res) => {
+  const active = Boolean(req.body?.active);
+  const ok = await ingest.setSourceActive(orgOf(req), String(req.params.id), active);
+  if (!ok) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Source not found' } });
+    return;
+  }
+  res.json({ ok: true, active });
 }));

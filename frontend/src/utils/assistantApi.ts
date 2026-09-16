@@ -175,3 +175,67 @@ export function applyTone(prompt: string, tone: string): string {
   const desc = TONE_DIRECTIVE[tone];
   return desc ? `${base}\n\nTone directive: ${tone} — speak in a ${desc} manner.` : base;
 }
+
+// ---- Lead ingestion sources (mint/list/toggle webhook tokens) ----
+export interface IngestSource {
+  id: string;
+  label: string;
+  code: string;
+  prefix: string | null;
+  active: boolean;
+  sourceType: string;
+  hasToken: boolean;
+  createdAt: string;
+}
+export interface NewIngestSource {
+  id: string;
+  label: string;
+  token: string; // shown ONCE
+  prefix: string;
+  webhookUrl: string;
+  tallyUrl: string;
+}
+export const listIngestSources = () =>
+  apiFetch<{ sources: IngestSource[] }>('/ingest/sources', { auth: true }).then((r) => r.sources);
+export const createIngestSource = (label: string) =>
+  apiFetch<NewIngestSource>('/ingest/sources', { method: 'POST', body: { label }, auth: true });
+export const setIngestSourceActive = (id: string, active: boolean) =>
+  apiFetch<{ ok: boolean; active: boolean }>(`/ingest/sources/${id}`, { method: 'PATCH', body: { active }, auth: true });
+
+// ---- Tally connection (bridge to the ingestion service via /api/tally/*) ----
+export interface TallyConnection {
+  id: string;
+  provider: string;
+  label?: string | null;
+  accountEmail?: string | null;
+  displayName?: string | null;
+  verificationState?: string | null;
+  status?: string | null;
+}
+export interface TallyForm {
+  externalFormId: string;
+  name: string;
+  status?: string | null;
+  submissionCount?: number | null;
+  isClosed?: boolean;
+}
+export interface TallyLeadSource {
+  id: string;
+  name: string;
+  externalFormId?: string | null;
+  webhookUrl?: string | null;
+  remoteState?: string | null;
+  ingestStatus?: string | null;
+  isActive?: boolean;
+}
+export const tallyProviders = () => apiFetch<unknown>('/tally/providers', { auth: true });
+export const tallyConnections = () => apiFetch<TallyConnection[]>('/tally/connections', { auth: true });
+export const tallyConnect = (apiKey: string, label?: string) =>
+  apiFetch<TallyConnection>('/tally/connect', { method: 'POST', body: { apiKey, label }, auth: true });
+export const tallyVerify = (id: string) =>
+  apiFetch<TallyConnection>(`/tally/connections/${id}/verify`, { method: 'POST', auth: true });
+export const tallyForms = (id: string) =>
+  apiFetch<{ items: TallyForm[]; nextCursor: string | null }>(`/tally/connections/${id}/forms`, { auth: true });
+export const tallyConnectForm = (credentialId: string, externalFormId: string, name?: string) =>
+  apiFetch<unknown>('/tally/lead-sources/connect', { method: 'POST', body: { credentialId, externalFormId, name }, auth: true });
+export const tallyLeadSources = () => apiFetch<TallyLeadSource[]>('/tally/lead-sources', { auth: true });

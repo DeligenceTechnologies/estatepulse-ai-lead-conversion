@@ -44,8 +44,11 @@ export async function enroll(orgId: string, leadId: string): Promise<void> {
   const lead = await prisma.leads.findUnique({ where: { id: leadId } });
   if (!lead || lead.dnc_status || lead.automation_paused) return;
 
-  // Claim it immediately so the watcher's next tick skips it.
-  await prisma.leads.update({ where: { id: leadId }, data: { first_contact_at: new Date() } });
+  // Claim atomically: only the caller that flips first_contact_at from null wins.
+  // This closes the race where ingestion and the poll watcher both enroll the
+  // same fresh lead (both would otherwise pass the in-memory active.has check).
+  const claim = await prisma.leads.updateMany({ where: { id: leadId, first_contact_at: null }, data: { first_contact_at: new Date() } });
+  if (claim.count === 0) return;
 
   const strategy = await getStrategy(orgId);
   const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true, timezone: true } });

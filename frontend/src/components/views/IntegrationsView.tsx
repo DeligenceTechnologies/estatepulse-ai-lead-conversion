@@ -9,11 +9,12 @@ import {
   RefreshCw,
   Terminal,
   Key,
-  Webhook,
   Phone
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getIntegrations, disconnectTelnyx, reconnectTelnyx, type OrgIntegration } from '../../utils/assistantApi';
+import { IngestSourcesCard } from './IngestSourcesCard';
+import { ConnectTallyPanel } from './ConnectTallyPanel';
 
 interface IntegrationsViewProps {
   onOpenWebhookTester: () => void;
@@ -164,44 +165,13 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhoo
             </div>
           </div>
         ))}
+
+        {/* Tally connection card — sits in the same grid as the other integrations */}
+        <ConnectTallyPanel />
       </div>
 
-      {/* Generic Webhook Endpoints Documentation (PRD Section 15 & 66) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Webhook className="w-4 h-4 text-amber-400" />
-            <h3 className="text-sm font-bold text-white">Generic Ingestion & Outbound Webhooks</h3>
-          </div>
-          <span className="text-xs text-slate-400 font-mono">REST JSON API</span>
-        </div>
-
-        <p className="text-xs text-slate-300">
-          Any lead provider, CRM, Meta Lead Ad, or Zapier/Make workflow can trigger lead creation or receive real-time status changes:
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
-          <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-1">
-            <div className="text-emerald-400 font-bold">POST /api/webhooks/leads</div>
-            <div className="text-[11px] text-slate-400 font-sans">Ingest new buyer lead with auto-response trigger</div>
-          </div>
-
-          <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-1">
-            <div className="text-cyan-400 font-bold">POST /api/webhooks/lead-status</div>
-            <div className="text-[11px] text-slate-400 font-sans">CRM push callback for stage updates or agent assignment</div>
-          </div>
-
-          <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-1">
-            <div className="text-purple-400 font-bold">POST /api/webhooks/appointment</div>
-            <div className="text-[11px] text-slate-400 font-sans">Calendly booking, cancellation, or reschedule payload</div>
-          </div>
-
-          <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-1">
-            <div className="text-amber-400 font-bold">POST /api/webhooks/conversation</div>
-            <div className="text-[11px] text-slate-400 font-sans">Twilio inbound SMS delivery and STOP/DNC opt-out handling</div>
-          </div>
-        </div>
-      </div>
+      {/* Generic lead-ingestion source manager (manual webhook token for any provider) */}
+      <IngestSourcesCard />
 
     </div>
   );

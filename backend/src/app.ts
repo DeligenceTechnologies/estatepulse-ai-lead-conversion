@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import { authRouter } from './auth/routes.js';
 import { telnyxRouter } from './telnyx/routes.js';
 import { webhookRouter } from './telnyx/webhook.js';
+import { ingestPublicRouter, ingestLeadsAliasRouter } from './ingest/routes.js';
+import { tallyRouter } from './tally/routes.js';
 import { env } from './env.js';
 import { AppError, errorHandler, notFoundHandler } from './errors.js';
 
@@ -25,7 +27,8 @@ export function createApp(): express.Express {
     app.use(cors({ origin: env.corsOrigins, credentials: false }));
   }
 
-  app.use(express.json({ limit: '10kb' }));
+  // Form webhooks (Tally et al.) can be larger than a login body.
+  app.use(express.json({ limit: '512kb' }));
 
   app.use(
     rateLimit({
@@ -57,6 +60,9 @@ export function createApp(): express.Express {
 
   app.use('/api/auth', authRouter);
   app.use('/api/webhooks/telnyx', webhookRouter); // unauthenticated — Telnyx posts here
+  app.use('/api/ingest', ingestPublicRouter); // unauthenticated — token in URL identifies the org
+  app.use('/api/webhooks/leads', ingestLeadsAliasRouter); // unauthenticated alias
+  app.use('/api/tally', tallyRouter); // JWT-authed bridge to the Tally-connection service
   app.use('/api', telnyxRouter);
 
   app.use(notFoundHandler);
