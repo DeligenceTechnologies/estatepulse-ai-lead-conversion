@@ -18,7 +18,7 @@ import {
   Zap,
   Building2
 } from 'lucide-react';
-import { useApp, AppView } from '../../context/AppContext';
+import { useApp, AppView, isLockedView } from '../../context/AppContext';
 
 interface SidebarProps {
   onOpenNewLead: () => void;
@@ -35,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTe
     setPreCallLeadId 
   } = useApp();
 
+  const locked = isLockedView(activeView);
   const hotLeadsCount = leads.filter(l => l.temperature === 'hot').length;
   const newLeadsCount = leads.filter(l => l.status === 'new').length;
 
@@ -110,6 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTe
       </div>
 
       {/* System Status Pill */}
+      {!locked && (
       <div className="px-4 pt-3 pb-1">
         <div className="bg-slate-950/60 rounded-lg p-2.5 border border-slate-800/60 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -122,9 +124,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTe
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">24/7 LIVE</span>
         </div>
       </div>
+      )}
 
       {/* Hot Lead Alert Banner if Hot Leads Exist */}
-      {hotLeadsCount > 0 && (
+      {!locked && hotLeadsCount > 0 && (
         <div className="px-4 py-2">
           <button
             onClick={() => {

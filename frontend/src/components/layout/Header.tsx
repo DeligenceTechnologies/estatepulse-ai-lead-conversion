@@ -12,7 +12,7 @@ import {
   Globe,
   LogOut
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { isLockedView, useApp } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
 
 interface HeaderProps {
@@ -33,6 +33,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
 
   const hotLead = leads.find(l => l.temperature === 'hot');
   const demoLead = leads[0];
+  // Locked sections show ComingSoonView, so the demo KPIs would be the only
+  // numbers on screen and would read as real.
+  const locked = isLockedView(activeView);
 
   const viewTitles: Record<string, { title: string; subtitle: string }> = {
     dashboard: { 
@@ -101,6 +104,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
       </div>
 
       {/* Center Live Ticker (Speed & Qualification KPIs) */}
+      {!locked && (
       <div className="hidden lg:flex items-center gap-3 text-xs bg-slate-950/70 px-3 py-1.5 rounded-full border border-slate-800/80">
         <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
           <Clock className="w-3.5 h-3.5" />
@@ -117,11 +121,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
           <span>Hot Leads: <strong className="text-white font-mono">{leads.filter(l => l.temperature === 'hot').length}</strong></span>
         </div>
       </div>
+      )}
 
       {/* Right Controls */}
       <div className="flex items-center gap-2.5">
         {/* Agent Pre-Call Screen Trigger */}
-        {hotLead && (
+        {!locked && hotLead && (
           <button
             onClick={() => setPreCallLeadId(hotLead.id)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold hover:border-amber-400 transition-all cursor-pointer shadow-sm shadow-amber-950/50"
@@ -132,7 +137,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
         )}
 
         {/* Live Interactive Voice Call Simulator */}
-        {demoLead && (
+        {!locked && demoLead && (
           <button
             onClick={() => startLiveCallSimulation(demoLead)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium transition-all cursor-pointer"
