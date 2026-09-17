@@ -72,14 +72,44 @@ telnyxRouter.put('/telnyx/credentials', h(async (req, res) => {
     res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'A valid Telnyx API key (starts with "KEY") is required.' } });
     return;
   }
-  const patch: Record<string, string> = {};
+
+  const orgId = orgOf(req);
+  const current = await credStore.getCreds(orgId); // null when connecting fresh
+  const effectiveApiKey = (apiKey as string) || current?.apiKey || '';
+
+  // Mandatory: a From Number to place calls from (E.164).
+  const effectiveFrom = fromNumber !== undefined ? String(fromNumber) : current?.fromNumber || '';
+  if (!/^\+?[0-9]{7,15}$/.test(effectiveFrom.replace(/[\s()-]/g, ''))) {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'A From Number in E.164 format (e.g. +12025550123) is required to place calls.' } });
+    return;
+  }
+
+  // Mandatory: a Call Control Application must exist on the account (that's the
+  // connection outbound calls dial through). Auto-detected from the API key.
+  if (!effectiveApiKey) {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'A Telnyx API key is required.' } });
+    return;
+  }
+  const ccApp = (typeof connectionId === 'string' && connectionId) || (await credStore.findCallControlApp(effectiveApiKey));
+  if (!ccApp) {
+    res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'No Call Control Application found on your Telnyx account. Create one in Telnyx → Voice → Call Control → Applications (with a webhook URL), then connect again.',
+      },
+    });
+    return;
+  }
+
+  // Auto-detect the messaging profile for SMS (the profile the from-number is on,
+  // else the account's first enabled one). Not blocking — an org can be voice-only.
+  const msgProfile = (typeof messagingProfileId === 'string' && messagingProfileId) || (await credStore.findMessagingProfile(effectiveApiKey, effectiveFrom));
+
+  const patch: Record<string, string> = { connectionId: ccApp, fromNumber: effectiveFrom, messagingProfileId: msgProfile };
   if (apiKey) patch.apiKey = apiKey;
   if (publicKey !== undefined) patch.publicKey = publicKey;
-  if (connectionId !== undefined) patch.connectionId = connectionId;
-  if (messagingProfileId !== undefined) patch.messagingProfileId = messagingProfileId;
-  if (fromNumber !== undefined) patch.fromNumber = fromNumber;
-  await credStore.saveCreds(orgOf(req), patch);
-  res.json(await credStore.publicStatus(orgOf(req)));
+  await credStore.saveCreds(orgId, patch);
+  res.json(await credStore.publicStatus(orgId));
 }));
 
 telnyxRouter.delete('/telnyx/credentials', h(async (req, res) => {
@@ -233,4 +263,77 @@ telnyxRouter.patch('/ingest/sources/:id', h(async (req, res) => {
     return;
   }
   res.json({ ok: true, active });
+}));
+
+// ---- Lead flow: where is this lead in the journey (strategy step vs follow-up)? ----
+telnyxRouter.get('/leads/:id/flow', h(async (req, res) => {
+  const orgId = orgOf(req);
+  const leadId = String(req.params.id);
+  const lead = await prisma.leads.findFirst({ where: { id: leadId, organization_id: orgId } });
+  if (!lead) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Lead not found' } }); return; }
+
+  const strategy = await strategyStore.getStrategy(orgId);
+  const steps = strategy.steps ?? [];
+
+  // Real outcomes, in order, so each step shows what actually happened.
+  const calls = await prisma.voice_calls.findMany({ where: { organization_id: orgId, lead_id: leadId }, orderBy: { created_at: 'asc' }, select: { status: true } });
+  const convs = await prisma.conversations.findMany({ where: { organization_id: orgId, lead_id: leadId, channel: 'sms' }, select: { id: true } });
+  const msgs = convs.length
+    ? await prisma.messages.findMany({ where: { conversation_id: { in: convs.map((c) => c.id) }, direction: 'outbound' }, orderBy: { created_at: 'asc' }, select: { delivery_status: true } })
+    : [];
+
+  // A voice_call status -> human outcome; likewise for an SMS delivery_status.
+  const callOutcome = (s: string): { state: string; label: string } =>
+    s === 'no_answer' ? { state: 'failed', label: 'No answer' }
+    : s === 'failed' ? { state: 'failed', label: 'Call failed' }
+    : s === 'completed' || s === 'in_progress' ? { state: 'done', label: 'Answered' }
+    : { state: 'current', label: 'Ringing' };
+  const smsOutcome = (s: string): { state: string; label: string } =>
+    s === 'failed' ? { state: 'failed', label: 'SMS failed' } : { state: 'done', label: 'SMS sent' };
+
+  // Walk the steps, consuming the matching activity per channel.
+  let ci = 0;
+  let mi = 0;
+  const stepsOut = steps.map((s, i) => {
+    let outcome: string | null = null;
+    let state = 'pending';
+    if (s.channel === 'voice') {
+      if (ci < calls.length) { const o = callOutcome(calls[ci++].status); state = o.state; outcome = o.label; }
+    } else if (mi < msgs.length) { const o = smsOutcome(msgs[mi++].delivery_status ?? ''); state = o.state; outcome = o.label; }
+    return { index: i, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
+  });
+  const nextIndex = stepsOut.findIndex((s) => s.outcome === null);
+  if (nextIndex >= 0) stepsOut[nextIndex].state = 'current';
+  const fired = calls.length + msgs.length;
+
+  const DONE = ['qualified', 'booked', 'closed', 'lost'];
+  let phase: 'not_started' | 'strategy' | 'exited' | 'done';
+  if (DONE.includes(lead.status)) phase = 'done';
+  else if (lead.status === 'nurture') phase = 'exited';
+  else if (lead.first_contact_at) phase = 'strategy';
+  else phase = 'not_started';
+
+  // The lead's real-world outcome label (what the user asked for): the best result so far.
+  const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
+  const smsSent = msgs.some((m) => m.delivery_status === 'sent');
+  let outcome: string;
+  if (lead.status === 'qualified') outcome = 'Qualified';
+  else if (lead.status === 'booked') outcome = 'Appointment booked';
+  else if (lead.status === 'nurture') outcome = 'Exited strategy — follow-up needed';
+  else if (answered) outcome = 'Call answered';
+  else if (smsSent) outcome = 'SMS sent';
+  else if (fired > 0) outcome = 'Attempted — no success yet';
+  else phase === 'not_started' ? (outcome = 'Not started') : (outcome = 'In strategy');
+
+  res.json({
+    phase,
+    leadStatus: lead.status,
+    outcome,
+    strategyName: strategy.name,
+    stepsTotal: steps.length,
+    completed: Math.min(fired, steps.length),
+    currentStep: phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null,
+    steps: stepsOut,
+    reason: lead.ai_summary ?? null,
+  });
 }));

@@ -18,6 +18,8 @@ interface Enrollment {
   voiceAttempts: number;
   timers: NodeJS.Timeout[];
   stopped: boolean;
+  ran: number;   // steps actually executed (not counting quiet-hours deferrals)
+  total: number; // steps in the strategy
 }
 const active = new Map<string, Enrollment>(); // leadId -> enrollment
 
@@ -55,7 +57,7 @@ export async function enroll(orgId: string, leadId: string): Promise<void> {
   const brokerage = org?.name ?? 'our team';
   const tz = org?.timezone ?? 'America/Chicago';
 
-  const enrollment: Enrollment = { orgId, leadId, voiceAttempts: 0, timers: [], stopped: false };
+  const enrollment: Enrollment = { orgId, leadId, voiceAttempts: 0, timers: [], stopped: false, ran: 0, total: strategy.steps.length };
   active.set(leadId, enrollment);
   log(`enrolled lead ${leadId} (${lead.first_name ?? ''}) into "${strategy.name}" — ${strategy.steps.length} steps`);
 
@@ -91,21 +93,55 @@ async function fireStep(e: Enrollment, step: StrategyStep, brokerage: string, tz
       await activity.recordSms(e.orgId, e.leadId, text, true, r?.id); // -> message 'sent', lead 'contacted'
       log(`SMS sent to lead ${e.leadId}`);
     } catch (err) {
-      await activity.recordSms(e.orgId, e.leadId, text, false); // -> message 'failed', lead unchanged
+      await activity.recordSms(e.orgId, e.leadId, text, false, (err as Error).message); // -> message 'failed', lead 'nurture'
       log(`SMS FAILED for lead ${e.leadId}: ${(err as Error).message}`);
     }
   } else if (step.channel === 'voice') {
-    if ((guardrails?.maxVoiceAttempts ?? 99) <= e.voiceAttempts) { log(`skip call (max attempts) lead ${e.leadId}`); return; }
-    e.voiceAttempts += 1;
-    try {
-      const r: any = await placeCall(e.orgId, lead.phone ?? '', { leadId: e.leadId, orgId: e.orgId });
-      await activity.startCall(e.orgId, e.leadId, r?.call_control_id); // -> voice_call 'ringing'; webhook sets the outcome
-      log(`AI call dialed to lead ${e.leadId}`);
-    } catch (err) {
-      await activity.recordCallFailed(e.orgId, e.leadId); // -> voice_call 'failed'
-      log(`call FAILED for lead ${e.leadId}: ${(err as Error).message}`);
+    if ((guardrails?.maxVoiceAttempts ?? 99) <= e.voiceAttempts) {
+      log(`skip call (max attempts) lead ${e.leadId}`);
+    } else {
+      e.voiceAttempts += 1;
+      try {
+        const r: any = await placeCall(e.orgId, lead.phone ?? '', { leadId: e.leadId, orgId: e.orgId });
+        await activity.startCall(e.orgId, e.leadId, r?.call_control_id); // -> voice_call 'ringing'; webhook sets the outcome
+        log(`AI call dialed to lead ${e.leadId}`);
+      } catch (err) {
+        await activity.recordCallFailed(e.orgId, e.leadId, (err as Error).message); // -> voice_call 'failed' (does NOT exit)
+        log(`call FAILED for lead ${e.leadId}: ${(err as Error).message}`);
+      }
     }
   }
+
+  // This step is done (executed or skipped — a quiet-hours deferral returned earlier
+  // and never reaches here). A single step failing never ends the strategy; the lead
+  // runs every step and only leaves once they're all exhausted.
+  e.ran += 1;
+  if (e.ran >= e.total) scheduleFinalize(e);
+}
+
+/** After the last step, give a voice call a moment to resolve via webhook, then finalize. */
+function scheduleFinalize(e: Enrollment): void {
+  const t = setTimeout(() => { void finalize(e); }, 90 * 1000);
+  if (t.unref) t.unref();
+  e.timers.push(t);
+}
+
+/**
+ * Every step has run. If the lead didn't become hot/qualified (or booked/closed/lost),
+ * it exits the strategy into follow-up (nurture) — this is the ONLY place a lead leaves
+ * the strategy for not converting. A qualified/booked lead is already handled and stopped.
+ */
+async function finalize(e: Enrollment): Promise<void> {
+  if (e.stopped) return;
+  const lead = await prisma.leads.findUnique({ where: { id: e.leadId } });
+  if (!lead) return stop(e);
+  const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
+  if (!CONVERTED.includes(lead.status) && !lead.dnc_status) {
+    const why = `Strategy complete after ${e.total} step(s) — ${lead.ai_summary || 'lead not converted'}`;
+    await activity.exitStrategy(e.leadId, why.slice(0, 2000));
+    log(`lead ${e.leadId} exited strategy (all ${e.total} steps done, not converted)`);
+  }
+  stop(e);
 }
 
 function stop(e: Enrollment): void {

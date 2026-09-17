@@ -216,6 +216,8 @@ export interface LiveLead {
   /** False => the address is stored but is never used to match this lead to another. */
   emailValid: boolean;
   status: string;
+  /** Why the lead is in this status (e.g. "Call failed: …", "No answer …"); shown on hover. */
+  statusReason: string | null;
   temperature: string | null;
   score: number;
   location: string | null;

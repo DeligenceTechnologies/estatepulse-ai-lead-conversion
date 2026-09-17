@@ -68,6 +68,7 @@ export class LeadsController {
       needsReview: l.needs_review,
       reviewReasons: l.review_reasons,
       status: l.status,
+      statusReason: l.ai_summary, // why it's in this status (e.g. "Call attempt failed: …") — shown on hover
       temperature: l.temperature,
       score: l.score ? Number(l.score) : 0,
       location: l.location,
