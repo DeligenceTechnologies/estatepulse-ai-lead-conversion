@@ -176,7 +176,10 @@ export class IntegrationsService {
       throw new ConflictException({
         error: {
           code: 'CREDENTIAL_IN_USE',
-          message: `${sources.length} lead source(s) were connected with this key. Disconnect them first, or pass force=true.`,
+          message:
+            `${sources.length} connected form${sources.length === 1 ? '' : 's'} still ` +
+            `${sources.length === 1 ? 'uses' : 'use'} this key. Removing it leaves ` +
+            `${sources.length === 1 ? 'that form' : 'those forms'} delivering leads that we can no longer manage or repair.`,
           leadSources: sources,
         },
       });

@@ -98,6 +98,14 @@ function mapError(e: unknown): PanelError {
       hint: 'Check the key belongs to an account that owns the form.',
     };
   }
+  if (code === 'CREDENTIAL_IN_USE') {
+    return {
+      tone: 'amber',
+      title: 'Forms are still using this key',
+      body: err?.message ?? '',
+      hint: 'Press again to remove it anyway. Those forms keep delivering leads — we just lose the ability to repair or remove their webhooks for you.',
+    };
+  }
   return {
     tone: 'rose',
     title: 'Something went wrong',
@@ -135,6 +143,8 @@ export const ConnectFormPanel: React.FC<{
 
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const [confirmForget, setConfirmForget] = useState(false);
 
   const [forms, setForms] = useState<ProviderForm[] | null>(null);
   const [loadingForms, setLoadingForms] = useState(false);
@@ -216,15 +226,31 @@ export const ConnectFormPanel: React.FC<{
     }
   };
 
-  const disconnectAccount = async () => {
-    if (!connection) return;
+  /**
+   * Removes the stored key so a different one can be pasted.
+   *
+   * Two presses when forms are connected, because the first attempt is refused
+   * on purpose: those forms go on delivering leads afterwards, and all that is
+   * lost is our ability to repair or remove their webhooks. That is worth
+   * reading once before it happens, and worth doing when the answer is "this
+   * key is wrong" — which is the only reason anyone opens this.
+   */
+  const forgetAccount = async () => {
+    if (!connection || busy) return;
+    setBusy(true);
     try {
-      await providersApi.disconnectAccount(connection.id);
+      await providersApi.disconnectAccount(connection.id, confirmForget);
       setConnection(null);
       setForms(null);
+      setConfirmForget(false);
+      setApiKey('');
+      setError(null);
       setStep({ k: 'credential' });
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'CREDENTIAL_IN_USE') setConfirmForget(true);
       setError(mapError(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -306,10 +332,15 @@ export const ConnectFormPanel: React.FC<{
               </span>
             </div>
             <button
-              onClick={disconnectAccount}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer shrink-0"
+              onClick={forgetAccount}
+              disabled={busy}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 disabled:opacity-50 ${
+                confirmForget
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              }`}
             >
-              Disconnect
+              {confirmForget ? 'Remove it anyway' : 'Use a different key'}
             </button>
           </div>
 
