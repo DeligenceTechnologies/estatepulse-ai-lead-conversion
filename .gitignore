@@ -17,3 +17,6 @@ backend/src/generated/
 
 # tsc incremental cache — stale copies silently skip emitting files
 *.tsbuildinfo
+
+# compiled test output (see tsconfig.test.json)
+dist-test/

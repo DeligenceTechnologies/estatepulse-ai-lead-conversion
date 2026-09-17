@@ -52,8 +52,15 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
   private stopped = false;
+  /** The tick currently in flight, so shutdown can wait for it. */
+  private inFlight: Promise<void> | null = null;
 
   constructor(
+    // Unguarded by design. This worker is a system sweeper: it claims pending
+    // deliveries across EVERY tenant with one raw UPDATE ... RETURNING, so
+    // there is no single organization id to scope it by. Each claimed row then
+    // carries its own organization_id, which the work below stays inside.
+    // Adding a tenant predicate here would mean one query per tenant per tick.
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
@@ -68,9 +75,24 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Worker started (poll ${interval}ms, instance ${this.instanceId.slice(0, 8)})`);
   }
 
-  onModuleDestroy(): void {
+  /**
+   * Stop accepting work, then let the tick that is already running finish.
+   *
+   * Without the wait, Nest disconnects Prisma while a claim is mid-flight and
+   * every rolling deploy logs "Response from the Engine was empty" — noise that
+   * is indistinguishable from a real failure. The race caps it so a genuinely
+   * stuck tick cannot hold the shutdown open; the claim is transactional, so
+   * abandoning it re-queues rather than loses the delivery.
+   */
+  async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.inFlight) {
+      await Promise.race([
+        this.inFlight,
+        new Promise<void>((resolve) => setTimeout(resolve, 5000).unref()),
+      ]);
+    }
   }
 
   /** Called by the ingest path so a delivery is usually processed in ~20ms. */
@@ -81,6 +103,11 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private async tick(): Promise<void> {
     if (this.running || this.stopped) return;
     this.running = true;
+    this.inFlight = this.runTick();
+    await this.inFlight;
+  }
+
+  private async runTick(): Promise<void> {
     try {
       await this.requeueStuck();
       const batch = await this.claim();

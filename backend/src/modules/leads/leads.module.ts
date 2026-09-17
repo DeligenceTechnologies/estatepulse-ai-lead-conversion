@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ApiKeyGuard } from '../../common/api-key.guard';
+import { AuthModule } from '../../auth/auth.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { LeadsController } from './leads.controller';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AuthModule],
   controllers: [LeadsController],
-  providers: [ApiKeyGuard],
 })
 export class LeadsModule {}

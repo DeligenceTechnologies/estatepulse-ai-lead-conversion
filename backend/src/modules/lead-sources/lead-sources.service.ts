@@ -1,10 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SecretBox, ingestTokenAad, signingSecretAad } from '../../common/crypto';
 import { IngestStatus, MappingStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { generateIngestToken, generateSigningSecret, secretPreview } from '../../common/tokens';
-import { PrismaService } from '../../prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { TallyAdapter } from '../ingest/adapters/tally.adapter';
 
 export interface CreateLeadSourceInput {
@@ -36,7 +36,7 @@ export class LeadSourcesService {
   private readonly secretBox: SecretBox;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     private readonly config: ConfigService,
   ) {
     this.secretBox = new SecretBox(

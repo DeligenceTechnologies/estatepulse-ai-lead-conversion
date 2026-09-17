@@ -9,7 +9,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:auth": "node --env-file=.env --import tsx --import ./src/test-setup.ts --test src/auth/auth.test.ts",
+    "test:auth": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/auth/auth.test.js",
     "db:pull": "prisma db pull",
     "db:generate": "prisma generate",
     "prisma:generate": "prisma generate",

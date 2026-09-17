@@ -16,7 +16,7 @@
  * So: never leave a live webhook pointing at a token we have deleted.
  */
 
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SecretBox, ingestTokenAad, signingSecretAad } from '../../common/crypto';
 import {
@@ -28,7 +28,7 @@ import {
 } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { generateIngestToken, generateSigningSecret } from '../../common/tokens';
-import { PrismaService } from '../../prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { IntegrationsService } from '../integrations/integrations.service';
 import { ProviderRegistry } from '../providers/provider.registry';
 import { ProviderApiError, type FormProviderAdapter, type ProviderCredential } from '../providers/types';
@@ -49,7 +49,7 @@ export class ConnectService {
   private readonly secretBox: SecretBox;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     private readonly config: ConfigService,
     private readonly registry: ProviderRegistry,
     private readonly integrations: IntegrationsService,

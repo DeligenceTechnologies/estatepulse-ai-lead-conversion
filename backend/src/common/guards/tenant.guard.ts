@@ -1,9 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import type { Request } from 'express';
-import { verifyToken } from '../auth/jwt';
-import { loadAuthContext } from '../auth/service';
-import { PrismaService } from '../prisma/prisma.service';
-import { hashCredential } from './tokens';
+import { AuthService } from '../../auth/auth.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AppError } from '../errors';
+import { hashCredential } from '../tokens';
 
 /** Attached to the request once a caller resolves to an organization. */
 export interface TenantContext {
@@ -15,7 +15,7 @@ export interface TenantContext {
   userId: string | null;
 }
 
-export interface AuthedRequest extends Request {
+export interface TenantRequest extends Request {
   tenant: TenantContext;
 }
 
@@ -24,27 +24,31 @@ const BEARER = 'Bearer ';
 /**
  * Resolves a caller to an organization by either credential the product issues:
  *
- *   X-Api-Key            machine callers — form providers' own integrations,
- *                        scripts, and anything server-to-server
- *   Authorization: Bearer  the dashboard, carrying the portal's session token
+ *   X-Api-Key             machine callers — server-to-server, scripts
+ *   Authorization: Bearer the dashboard, carrying the user's session token
  *
- * Both paths end at an organization id and nothing else is trusted for tenancy.
- * The org is ALWAYS derived from the presented credential, never from the
+ * Both paths end at an organization id, and tenancy is NEVER read from the
  * request body. The demo's fake contract put `organization_key` in the payload
  * (see frontend/src/components/modals/WebhookSimulatorModal.tsx) — that field is
  * attacker-controlled and would let any caller write into any tenant.
  *
- * Accepting the session token is what lets the browser call these routes
- * directly. Before the two backends merged, the dashboard reached them through
- * a proxy that swapped its JWT for a per-org API key; that hop existed only to
- * bridge two processes and is gone with them.
+ * Accepting the session token is what lets the browser call the ingestion routes
+ * directly. An ingestion key can read a whole tenant, so it must never be shipped
+ * to a browser; deriving the org from the session instead also means two
+ * logged-in organizations can never share one credential.
  */
 @Injectable()
-export class ApiKeyGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+export class TenantGuard implements CanActivate {
+  constructor(
+    // Unguarded by necessity: api_keys is looked up by key_hash to discover
+    // WHICH tenant is calling. There is no organization id to scope by yet —
+    // that is the question this query answers. key_hash is globally unique.
+    private readonly prisma: PrismaService,
+    private readonly auth: AuthService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const req = context.switchToHttp().getRequest<TenantRequest>();
 
     const presented = req.header('x-api-key');
     if (presented) {
@@ -58,7 +62,7 @@ export class ApiKeyGuard implements CanActivate {
       return true;
     }
 
-    throw new UnauthorizedException({ error: { code: 'API_KEY_MISSING' } });
+    throw new AppError('UNAUTHENTICATED', 'An API key or a signed-in session is required');
   }
 
   private async fromApiKey(presented: string): Promise<TenantContext> {
@@ -66,17 +70,11 @@ export class ApiKeyGuard implements CanActivate {
     // to anyone who reads the table.
     const key = await this.prisma.api_keys.findUnique({
       where: { key_hash: hashCredential(presented) },
-      select: {
-        id: true,
-        organization_id: true,
-        scopes: true,
-        revoked_at: true,
-        expires_at: true,
-      },
+      select: { id: true, organization_id: true, scopes: true, revoked_at: true, expires_at: true },
     });
 
     if (!key || key.revoked_at || (key.expires_at && key.expires_at < new Date())) {
-      throw new UnauthorizedException({ error: { code: 'API_KEY_INVALID' } });
+      throw new AppError('UNAUTHENTICATED', 'API key is invalid, revoked or expired');
     }
 
     // Fire-and-forget: last_used_at is for support triage, and awaiting a write
@@ -95,27 +93,11 @@ export class ApiKeyGuard implements CanActivate {
 
   private async fromSession(token: string): Promise<TenantContext> {
     if (token.length === 0) {
-      throw new UnauthorizedException({ error: { code: 'UNAUTHENTICATED' } });
+      throw new AppError('UNAUTHENTICATED', 'Missing or malformed Authorization header');
     }
 
-    let userId: string;
-    try {
-      userId = verifyToken(token);
-    } catch {
-      // Deliberately not reflecting the portal's TOKEN_EXPIRED / malformed
-      // distinction: these routes answer one question, which org is asking.
-      throw new UnauthorizedException({ error: { code: 'UNAUTHENTICATED' } });
-    }
-
-    // Membership is read per request, not carried in the token, so a removed
-    // or suspended member loses access on the next call rather than whenever
-    // the token happens to expire.
-    let auth;
-    try {
-      auth = await loadAuthContext(userId);
-    } catch {
-      throw new UnauthorizedException({ error: { code: 'NO_ORGANIZATION' } });
-    }
+    const userId = this.auth.verifyToken(token);
+    const auth = await this.auth.loadAuthContext(userId);
 
     return {
       organizationId: auth.organizationId,

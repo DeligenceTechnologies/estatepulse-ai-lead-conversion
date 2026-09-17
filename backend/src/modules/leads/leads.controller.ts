@@ -1,6 +1,6 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiKeyGuard, type AuthedRequest } from '../../common/api-key.guard';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Controller, Get, Inject, Query, Req, UseGuards } from '@nestjs/common';
+import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guard';
+import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 
 /**
  * Read-only. There is deliberately no POST or PATCH here.
@@ -10,14 +10,14 @@ import { PrismaService } from '../../prisma/prisma.service';
  * AppContext keeps exclusive ownership of its own localStorage leads. The two
  * cannot collide because neither can write to the other.
  */
-@Controller('v1/leads')
-@UseGuards(ApiKeyGuard)
+@Controller('api/v1/leads')
+@UseGuards(TenantGuard)
 export class LeadsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
 
   @Get()
   async list(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
     // Which form produced the lead. The Lead Sources screen answers "what has
@@ -167,7 +167,7 @@ export class LeadsController {
 
   /** Stage counts for the pipeline header. */
   @Get('stats')
-  async stats(@Req() req: AuthedRequest) {
+  async stats(@Req() req: TenantRequest) {
     const grouped = await this.prisma.leads.groupBy({
       by: ['status'],
       where: { organization_id: req.tenant.organizationId },

@@ -1,21 +1,29 @@
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
-import { createApp } from '../app';
-import { prisma } from '../db';
+import type { INestApplication } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
+import { AllExceptionsFilter } from '../common/filters/all-exceptions.filter';
+import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuthModule } from './auth.module';
 
 /**
  * Integration suite against the real database. Every row it creates is torn
  * down in the after() hook; emails are namespaced per run so a crashed run
  * cannot collide with the next one.
+ *
+ * Boots AuthModule rather than AppModule: the full graph would also start the
+ * delivery worker and the lead watcher, which would poll a shared database for
+ * the length of the run.
  */
 
 const RUN = Date.now().toString(36);
 const emailFor = (tag: string): string => `authtest-${RUN}-${tag}@example.invalid`;
 const PASSWORD = 'correct-horse-battery-staple';
 
-let server: Server;
+let app: INestApplication;
+let prisma: PrismaService;
 let base: string;
 
 const createdUserIds: string[] = [];
@@ -69,9 +77,19 @@ async function signupUser(tag: string, org: string, password: string = PASSWORD)
 }
 
 before(async () => {
-  server = createApp().listen(0);
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const moduleRef = await Test.createTestingModule({
+    imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule],
+  }).compile();
+
+  app = moduleRef.createNestApplication();
+  // The filter is what turns AppError into the {error:{code}} envelope every
+  // assertion below reads, so the suite must install it exactly as main does.
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await app.init();
+  await app.listen(0, '127.0.0.1');
+
+  base = await app.getUrl();
+  prisma = app.get(PrismaService);
 });
 
 after(async () => {
@@ -81,8 +99,7 @@ after(async () => {
   if (createdUserIds.length > 0) {
     await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
   }
-  await prisma.$disconnect();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await app.close();
 });
 
 // --- happy path -------------------------------------------------------------

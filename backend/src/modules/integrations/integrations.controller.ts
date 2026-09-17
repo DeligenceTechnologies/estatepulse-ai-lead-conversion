@@ -10,7 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiKeyGuard, type AuthedRequest } from '../../common/api-key.guard';
+import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guard';
 import { ProviderRegistry } from '../providers/provider.registry';
 import { IntegrationsService } from './integrations.service';
 
@@ -21,8 +21,8 @@ import { IntegrationsService } from './integrations.service';
  * credential, and it is the only place the plaintext exists in a request. No
  * response here ever contains it — see ProviderCredentialSummary.
  */
-@Controller('v1/integrations')
-@UseGuards(ApiKeyGuard)
+@Controller('api/v1/integrations')
+@UseGuards(TenantGuard)
 export class IntegrationsController {
   constructor(
     private readonly service: IntegrationsService,
@@ -40,7 +40,7 @@ export class IntegrationsController {
 
   @Post()
   connect(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Body() body: { provider?: string; apiKey?: string; label?: string },
   ) {
     return this.service.connect(
@@ -52,18 +52,18 @@ export class IntegrationsController {
   }
 
   @Get()
-  list(@Req() req: AuthedRequest, @Query('provider') provider?: string) {
+  list(@Req() req: TenantRequest, @Query('provider') provider?: string) {
     return this.service.list(req.tenant.organizationId, provider);
   }
 
   @Post(':id/verify')
-  verify(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  verify(@Req() req: TenantRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.verify(req.tenant.organizationId, id);
   }
 
   @Delete(':id')
   revoke(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('force') force?: string,
   ) {
@@ -78,7 +78,7 @@ export class IntegrationsController {
    */
   @Get(':id/forms')
   async forms(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('cursor') cursor?: string,
   ) {

@@ -11,12 +11,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiKeyGuard, type AuthedRequest } from '../../common/api-key.guard';
+import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guard';
 import { ConnectService } from './connect.service';
 import { LeadSourcesService } from './lead-sources.service';
 
-@Controller('v1/lead-sources')
-@UseGuards(ApiKeyGuard)
+@Controller('api/v1/lead-sources')
+@UseGuards(TenantGuard)
 export class LeadSourcesController {
   constructor(
     private readonly service: LeadSourcesService,
@@ -32,7 +32,7 @@ export class LeadSourcesController {
    */
   @Post('connect')
   async connectForm(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Body()
     body: {
       credentialId?: string;
@@ -58,19 +58,19 @@ export class LeadSourcesController {
 
   /** Reconcile what we believe against what the provider actually has. */
   @Post(':id/resync')
-  resync(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  resync(@Req() req: TenantRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.connect.resync(req.tenant.organizationId, id);
   }
 
   /** Re-install a webhook that was deleted on the provider's side. */
   @Post(':id/reinstall')
-  reinstall(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  reinstall(@Req() req: TenantRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.connect.reinstall(req.tenant.organizationId, id);
   }
 
   @Delete(':id')
   disconnect(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('removeRemote') removeRemote?: string,
     @Query('force') force?: string,
@@ -85,7 +85,7 @@ export class LeadSourcesController {
 
   /** The signing secret is present in THIS response only. */
   @Post()
-  async create(@Req() req: AuthedRequest, @Body() body: { name?: string; requireSignature?: boolean }) {
+  async create(@Req() req: TenantRequest, @Body() body: { name?: string; requireSignature?: boolean }) {
     const name = (body?.name ?? '').trim();
     if (!name) {
       throw new BadRequestException({
@@ -99,18 +99,18 @@ export class LeadSourcesController {
   }
 
   @Get()
-  list(@Req() req: AuthedRequest) {
+  list(@Req() req: TenantRequest) {
     return this.service.list(req.tenant.organizationId);
   }
 
   @Get(':id')
-  get(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  get(@Req() req: TenantRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(req.tenant.organizationId, id);
   }
 
   @Get(':id/deliveries')
   deliveries(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('limit') limit?: string,
   ) {
@@ -119,7 +119,7 @@ export class LeadSourcesController {
 
   @Post(':id/rotate-secret')
   rotate(
-    @Req() req: AuthedRequest,
+    @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { graceMinutes?: number },
   ) {
@@ -127,7 +127,7 @@ export class LeadSourcesController {
   }
 
   @Post(':id/pause')
-  pause(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: { paused?: boolean }) {
+  pause(@Req() req: TenantRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: { paused?: boolean }) {
     return this.service.setPaused(req.tenant.organizationId, id, body?.paused ?? true);
   }
 }

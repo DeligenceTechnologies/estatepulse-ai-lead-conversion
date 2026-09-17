@@ -12,12 +12,12 @@
  *     a prefix and last four so support can still answer "which key is this?".
  */
 
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SecretBox, providerCredentialAad, sha256Hex } from '../../common/crypto';
 import { CredentialStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
-import { PrismaService } from '../../prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { ProviderRegistry } from '../providers/provider.registry';
 import { ProviderApiError, type ProviderCredential } from '../providers/types';
 
@@ -43,7 +43,7 @@ export class IntegrationsService {
   private readonly secretBox: SecretBox;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     private readonly config: ConfigService,
     private readonly registry: ProviderRegistry,
   ) {

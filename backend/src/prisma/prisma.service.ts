@@ -147,4 +147,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 }
 
 export type GuardedPrisma = ReturnType<PrismaService['withTenancyGuard']>;
+
+/**
+ * Injection token for the tenancy-guarded client. See prisma.module.ts for when
+ * to use this versus the raw PrismaService.
+ */
+export const TENANT_PRISMA = Symbol('TENANT_PRISMA');
 export { Prisma };

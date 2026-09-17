@@ -8,46 +8,50 @@ frontend/   Vite + React SPA   :3000   the dashboard
 backend/    Node + TypeScript  :4000   everything server-side
 ```
 
-## The backend is one process, two frameworks
+## The backend is one NestJS application
 
-`backend/` serves two route families from a single Express instance:
+`backend/` is a single NestJS app. Express appears only as the HTTP adapter
+(`@nestjs/platform-express`, which is what every Nest app on this adapter uses)
+and as three pieces of middleware — helmet, CORS and a rate limiter. There are
+no hand-written routers: every endpoint is a controller, every dependency is
+injected, and there is one way to do each thing.
 
-| | framework | what it owns |
-|---|---|---|
-| **portal** | Express routers | auth (JWT), Telnyx AI calling, the strategy engine, a simple lead webhook |
-| **ingestion** | NestJS modules | form-provider webhooks, signature verification, field mapping, the processing worker |
+| area | module |
+|---|---|
+| auth (JWT, signup/login/me) | `src/auth` |
+| AI calling — Telnyx, assistant, numbers, strategy, engine | `src/telnyx` |
+| the portal's simple lead webhook | `src/ingest` |
+| form-provider ingestion, mapping, the delivery worker | `src/modules` |
 
-They are different frameworks because they were built separately, and rewriting
-either would have meant rewriting working, tested code. They share one HTTP
-listener, one middleware chain, one database connection and one deployment, so
-the split costs nothing at runtime.
+### Two things to know before adding code
 
-`src/server.ts` composes them, and **the order is load-bearing** — NestJS
-registers a catch-all 404 during `init()`, so the Express routes must be mounted
-before it. `src/app.ts` documents the sequence.
+**Write new backend code as NestJS.** A controller, a provider, a module. If you
+find yourself reaching for `express.Router`, that is the signal to write a
+controller instead.
 
-### Routes
+**Route paths are declared in full** (`@Controller('api/auth')`) rather than via
+`setGlobalPrefix`. That is deliberate: the portal webhook and the provider
+webhook both declare `ingest/v1/tally/:token`, and a prefix exclusion matches on
+the declared path — it would silently unprefix both and collapse them onto one
+route.
 
-```
-/api/auth/*           portal — signup, login, me
-/api/telnyx/*         portal — AI voice agent, numbers, assistants
-/api/leads, /api/strategy, /api/ingest/sources
-/api/v1/*             ingestion — lead-sources, integrations, leads
-/ingest/v1/tally/:token   public form webhook (no /api prefix, see below)
-```
+## Multi-tenancy
 
-The browser calls relative `/api/...` paths; Vite proxies them to `:4000` in
-development and `VITE_API_URL` points at the backend in production.
+There is no row-level security: the API connects as a privileged role, so the
+tenancy guard in `src/prisma/prisma.service.ts` **is** the isolation boundary
+between customers. It refuses any read or write against a tenant-scoped table
+that has no organization id (or globally-unique key) in its `where`.
 
-Two things worth knowing:
+Two clients, one connection pool:
 
-- **One credential story.** The ingestion routes accept either an `X-Api-Key`
-  (machine callers) or the portal's session token (the dashboard). Both resolve
-  to an organization id, and tenancy is never read from a request body. The
-  browser therefore holds no API key — an ingestion key can read a whole tenant.
-- **The form webhook is deliberately outside `/api`.** Its URL is already
-  installed on forms at the provider, so moving it would silently break every
-  connected form until each was reinstalled.
+- **`TENANT_PRISMA`** — the guarded client. Inject this. Almost everything does.
+- **`PrismaService`** — unguarded. Injecting it directly is a deliberate,
+  reviewable act, correct only for system processes that sweep every tenant by
+  design: the delivery worker, the lead watcher, and the two credential lookups
+  that resolve *which* tenant is calling. Each one carries a comment saying so.
+
+The organization is always derived from the presented credential — an
+`X-Api-Key` or the session token — and never from a request body.
 
 ## Run locally
 
@@ -75,11 +79,17 @@ Open http://localhost:3000 and create an account.
 ## Tests and type-checking
 
 ```bash
-cd backend  && npm test       # vitest — 85 unit tests: mapping, transforms, Tally, crypto
-cd backend  && npm run test:auth   # node:test — auth, against the real database
-cd backend  && npm run lint   # tsc --noEmit
-cd frontend && npm run lint   # tsc --noEmit
+cd backend  && npm test            # vitest — 85 unit tests: mapping, transforms, Tally, crypto
+cd backend  && npm run test:auth   # node:test — 22 auth tests against the real database
+cd backend  && npm run lint        # tsc --noEmit
+cd frontend && npm run lint        # tsc --noEmit
 ```
+
+`test:auth` compiles to `dist-test/` before running, and has to: it boots the
+Nest container, and Nest's dependency injection needs `emitDecoratorMetadata`,
+which esbuild-based loaders (tsx, and so vitest's default transform) cannot
+emit. A test that boots Nest must run compiled, or every injected dependency
+arrives as `undefined`.
 
 ## What each part does
 
@@ -92,7 +102,10 @@ built yet render `ComingSoonView` rather than prototype data.
 
 **`backend/src/{auth,telnyx,ingest}/`** — the portal. Signup/login/`me` with
 per-request role resolution, the Telnyx bring-your-own-account integration, the
-outbound strategy engine and call outcomes, and a generic lead webhook.
+outbound strategy engine and call outcomes, and a generic lead webhook. The
+engine's scheduler is in-process (`setTimeout`), so a restart drops pending
+steps; enrollment is idempotent and the lead watcher re-enrols anything still
+untouched, but this is the piece that wants a durable queue before real volume.
 
 **`backend/src/modules/`** — the ingestion service. Receives form-provider
 webhooks, verifies signatures against the raw request bytes, stores every
