@@ -109,7 +109,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(port, '0.0.0.0');
 
   logger.log(`API listening on http://localhost:${port} (${nodeEnv})`);
-  logger.log(`Portal:    /api/auth, /api/telnyx, /api/leads, /api/strategy, /api/ingest/sources`);
+  logger.log(`Portal:    /api/auth, /api/agents, /api/telnyx, /api/leads, /api/strategy, /api/ingest/sources`);
   logger.log(`Ingestion: /api/v1/lead-sources, /api/v1/integrations, /api/v1/leads`);
   logger.log(`Webhook:   ${config.get('PUBLIC_API_BASE_URL')}/ingest/v1/tally/:token`);
   logger.log(`Worker:    ${config.get('WORKER_ENABLED') === 'false' ? 'disabled' : 'enabled'}`);

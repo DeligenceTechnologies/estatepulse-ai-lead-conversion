@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health.controller';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
+import { AgentsModule } from './modules/agents/agents.module';
 import { IngestModule } from './modules/ingest/ingest.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
@@ -87,8 +88,9 @@ const envSchema = z.object({
     }),
     PrismaModule,
 
-    // Portal: auth, AI calling, the simple lead webhook.
+    // Portal: auth, agent management, AI calling, the simple lead webhook.
     AuthModule,
+    AgentsModule,
     TelnyxModule,
     PortalIngestModule,
 
