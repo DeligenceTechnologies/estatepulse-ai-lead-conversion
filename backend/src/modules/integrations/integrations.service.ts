@@ -89,7 +89,7 @@ export class IntegrationsService {
           updated_at: new Date(),
         },
       });
-      return this.toSummary(refreshed, await this.countSources(refreshed.id));
+      return this.toSummary(refreshed, await this.countSources(organizationId, refreshed.id));
     }
 
     // The id must exist before encrypting: the AAD binds ciphertext to the row.
@@ -121,7 +121,9 @@ export class IntegrationsService {
       where: { organization_id: organizationId, revoked_at: null, ...(provider ? { provider } : {}) },
       orderBy: { created_at: 'desc' },
     });
-    return Promise.all(rows.map(async (r) => this.toSummary(r, await this.countSources(r.id))));
+    return Promise.all(
+      rows.map(async (r) => this.toSummary(r, await this.countSources(organizationId, r.id))),
+    );
   }
 
   /** Re-checks a stored credential against the provider and records the verdict. */
@@ -142,11 +144,11 @@ export class IntegrationsService {
           account_name: account.displayName,
         },
       });
-      return this.toSummary(ok, await this.countSources(row.id));
+      return this.toSummary(ok, await this.countSources(organizationId, row.id));
     } catch (e) {
       if (e instanceof ProviderApiError && e.kind === 'INVALID_CREDENTIAL') {
         const bad = await this.markInvalid(row.id, e.kind);
-        return this.toSummary(bad, await this.countSources(row.id));
+        return this.toSummary(bad, await this.countSources(organizationId, row.id));
       }
       throw this.toHttp(e);
     }
@@ -259,8 +261,17 @@ export class IntegrationsService {
     return this.secretBox.decrypt(row.credential_enc, providerCredentialAad(row.organization_id, row.id));
   }
 
-  private countSources(credentialId: string) {
-    return this.prisma.lead_sources.count({ where: { provider_credential_id: credentialId, archived_at: null } });
+  /**
+   * Scoped by organization as well as credential. The credential id alone would
+   * be enough to identify the rows, but lead_sources is tenant-scoped and the
+   * tenancy guard refuses any query on it without an organization predicate —
+   * correctly, since "count by a foreign key" is exactly the shape that leaks
+   * across tenants when the foreign key is ever guessed or reused.
+   */
+  private countSources(organizationId: string, credentialId: string) {
+    return this.prisma.lead_sources.count({
+      where: { organization_id: organizationId, provider_credential_id: credentialId, archived_at: null },
+    });
   }
 
   private toSummary(
