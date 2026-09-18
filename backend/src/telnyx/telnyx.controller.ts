@@ -43,6 +43,15 @@ export class TelnyxController {
     return this.creds.publicStatus(orgId);
   }
 
+  /**
+   * Connect or update the org's Telnyx account.
+   *
+   * Validates up front rather than letting the first real call fail: a missing
+   * From Number or a Telnyx account with no Call Control Application both
+   * produce a connect that looks successful and an outbound call that never
+   * happens. The Call Control app and the messaging profile are detected from
+   * the key, so the user is not asked for ids they would have to go and find.
+   */
   @Put('credentials')
   async saveCredentials(@OrgId() orgId: string, @Body() body: any): Promise<TelnyxPublicStatus> {
     const { apiKey, publicKey, connectionId, messagingProfileId, fromNumber } = body ?? {};
@@ -50,12 +59,46 @@ export class TelnyxController {
       throw new AppError('VALIDATION_ERROR', 'A valid Telnyx API key (starts with "KEY") is required.');
     }
 
-    const patch: Partial<Creds> = {};
+    const current = await this.creds.getCreds(orgId); // null when connecting fresh
+    const effectiveApiKey = (apiKey as string) || current?.apiKey || '';
+    if (!effectiveApiKey) {
+      throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
+    }
+
+    // Required: a From Number to place calls from.
+    const effectiveFrom = fromNumber !== undefined ? String(fromNumber) : current?.fromNumber || '';
+    if (!/^\+?[0-9]{7,15}$/.test(effectiveFrom.replace(/[\s()-]/g, ''))) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'A From Number in E.164 format (e.g. +12025550123) is required to place calls.',
+      );
+    }
+
+    // Required: the Call Control Application outbound calls dial through.
+    const ccApp =
+      (typeof connectionId === 'string' && connectionId) ||
+      (await this.creds.findCallControlApp(effectiveApiKey));
+    if (!ccApp) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'No Call Control Application found on your Telnyx account. Create one in ' +
+          'Telnyx → Voice → Call Control → Applications (with a webhook URL), then connect again.',
+      );
+    }
+
+    // Not required: an org can be voice-only, so a missing messaging profile is
+    // recorded rather than refused.
+    const msgProfile =
+      (typeof messagingProfileId === 'string' && messagingProfileId) ||
+      (await this.creds.findMessagingProfile(effectiveApiKey, effectiveFrom));
+
+    const patch: Partial<Creds> = {
+      connectionId: ccApp,
+      fromNumber: effectiveFrom,
+      messagingProfileId: msgProfile,
+    };
     if (apiKey) patch.apiKey = apiKey;
     if (publicKey !== undefined) patch.publicKey = publicKey;
-    if (connectionId !== undefined) patch.connectionId = connectionId;
-    if (messagingProfileId !== undefined) patch.messagingProfileId = messagingProfileId;
-    if (fromNumber !== undefined) patch.fromNumber = fromNumber;
 
     await this.creds.saveCreds(orgId, patch);
     return this.creds.publicStatus(orgId);

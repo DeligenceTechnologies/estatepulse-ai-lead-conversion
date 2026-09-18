@@ -517,9 +517,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       </div>
                     </td>
 
-                    {/* Status */}
+                    {/* Status — hover shows why (e.g. a failed/unanswered call) */}
                     <td className="px-4 py-3.5">
-                      <span className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}`}>
+                      <span
+                        title={lead.statusReason || undefined}
+                        className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                      >
                         {humanize(lead.status)}
                       </span>
                     </td>

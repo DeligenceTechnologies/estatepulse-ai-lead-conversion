@@ -32,6 +32,10 @@ interface Enrollment {
   voiceAttempts: number;
   timers: NodeJS.Timeout[];
   stopped: boolean;
+  /** Steps actually executed. A quiet-hours deferral does not count. */
+  ran: number;
+  /** Steps in the strategy, so the engine knows when it has finished. */
+  total: number;
 }
 
 @Injectable()
@@ -101,7 +105,15 @@ export class EngineService implements OnModuleDestroy {
     const brokerage = org?.name ?? 'our team';
     const tz = org?.timezone ?? 'America/Chicago';
 
-    const enrollment: Enrollment = { orgId, leadId, voiceAttempts: 0, timers: [], stopped: false };
+    const enrollment: Enrollment = {
+      orgId,
+      leadId,
+      voiceAttempts: 0,
+      timers: [],
+      stopped: false,
+      ran: 0,
+      total: strategy.steps.length,
+    };
     this.active.set(leadId, enrollment);
     this.logger.log(
       `enrolled lead ${leadId} (${lead.first_name ?? ''}) into "${strategy.name}" — ${strategy.steps.length} steps`,
@@ -164,29 +176,68 @@ export class EngineService implements OnModuleDestroy {
         await this.activity.recordSms(e.orgId, e.leadId, text, true, r?.id);
         this.logger.log(`SMS sent to lead ${e.leadId}`);
       } catch (err) {
-        // -> message 'failed', lead unchanged
-        await this.activity.recordSms(e.orgId, e.leadId, text, false);
+        // -> message 'failed', and the reason noted on the lead
+        await this.activity.recordSms(e.orgId, e.leadId, text, false, (err as Error).message);
         this.logger.warn(`SMS FAILED for lead ${e.leadId}: ${(err as Error).message}`);
       }
     } else if (step.channel === 'voice') {
       if ((guardrails?.maxVoiceAttempts ?? 99) <= e.voiceAttempts) {
         this.logger.log(`skip call (max attempts) lead ${e.leadId}`);
-        return;
-      }
-      e.voiceAttempts += 1;
-      try {
-        const r: any = await this.voice.placeCall(e.orgId, lead.phone ?? '', {
-          leadId: e.leadId,
-          orgId: e.orgId,
-        });
-        // -> voice_call 'ringing'; the webhook sets the outcome
-        await this.activity.startCall(e.orgId, e.leadId, r?.call_control_id);
-        this.logger.log(`AI call dialed to lead ${e.leadId}`);
-      } catch (err) {
-        await this.activity.recordCallFailed(e.orgId, e.leadId); // -> voice_call 'failed'
-        this.logger.warn(`call FAILED for lead ${e.leadId}: ${(err as Error).message}`);
+      } else {
+        e.voiceAttempts += 1;
+        try {
+          const r: any = await this.voice.placeCall(e.orgId, lead.phone ?? '', {
+            leadId: e.leadId,
+            orgId: e.orgId,
+          });
+          // -> voice_call 'ringing'; the webhook sets the outcome
+          await this.activity.startCall(e.orgId, e.leadId, r?.call_control_id);
+          this.logger.log(`AI call dialed to lead ${e.leadId}`);
+        } catch (err) {
+          // -> voice_call 'failed'. Does NOT exit the strategy.
+          await this.activity.recordCallFailed(e.orgId, e.leadId, (err as Error).message);
+          this.logger.warn(`call FAILED for lead ${e.leadId}: ${(err as Error).message}`);
+        }
       }
     }
+
+    // This step is done, whether it fired or was skipped — a quiet-hours deferral
+    // returned earlier and never reaches here. One step failing never ends the
+    // strategy: the lead runs every step and leaves only once all are exhausted.
+    e.ran += 1;
+    if (e.ran >= e.total) this.scheduleFinalize(e);
+  }
+
+  /**
+   * After the last step, wait before deciding. A voice call resolves through the
+   * Call Control webhook, which arrives seconds later — finalizing immediately
+   * would park a lead who is, at that moment, mid-conversation.
+   */
+  private scheduleFinalize(e: Enrollment): void {
+    const t = setTimeout(() => {
+      void this.finalize(e);
+    }, 90 * 1000);
+    if (t.unref) t.unref();
+    e.timers.push(t);
+  }
+
+  /**
+   * Every step has run. A lead that did not convert exits into follow-up, and
+   * this is the ONLY place that happens for not converting — a qualified or
+   * booked lead was already stopped by qualified().
+   */
+  private async finalize(e: Enrollment): Promise<void> {
+    if (e.stopped) return;
+    const lead = await this.prisma.leads.findUnique({ where: { id: e.leadId } });
+    if (!lead) return this.stop(e);
+
+    const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
+    if (!CONVERTED.includes(lead.status) && !lead.dnc_status) {
+      const why = `Strategy complete after ${e.total} step(s) — ${lead.ai_summary || 'lead not converted'}`;
+      await this.activity.exitStrategy(e.leadId, why.slice(0, 2000));
+      this.logger.log(`lead ${e.leadId} exited strategy (all ${e.total} steps done, not converted)`);
+    }
+    this.stop(e);
   }
 
   private stop(e: Enrollment): void {
