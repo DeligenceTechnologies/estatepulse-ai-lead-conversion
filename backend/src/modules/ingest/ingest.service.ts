@@ -5,6 +5,7 @@ import { SecretBox, sha256Hex, signingSecretAad, verifyTallySignature } from '..
 import { newId } from '../../common/ids';
 import { hashCredential, looksLikeIngestToken } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EventsBus } from '../events/events.bus';
 import { TallyAdapter } from './adapters/tally.adapter';
 import { InvalidPayloadError } from './adapters/types';
 
@@ -53,6 +54,7 @@ export class IngestService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly config: ConfigService,
+    private readonly events: EventsBus,
   ) {
     this.secretBox = new SecretBox(
       this.config.getOrThrow<string>('ENCRYPTION_KEYS'),
@@ -226,6 +228,19 @@ export class IngestService {
     await this.prisma.lead_sources.update({
       where: { id: source.id },
       data: { last_event_at: new Date() },
+    });
+
+    // Tell the open dashboards, now that the delivery is durable.
+    //
+    // Published for quarantined and unparseable deliveries too, not just clean
+    // ones: "a submission arrived and its signature did not match" is exactly
+    // the thing someone watching this screen needs to see immediately. The
+    // duplicate path above returns before this point, which is correct — a
+    // retry of a delivery we already have changes nothing on screen.
+    this.events.publish({
+      organizationId: source.organization_id,
+      type: 'delivery.received',
+      leadSourceId: source.id,
     });
 
     if (sig.quarantine) {

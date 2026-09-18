@@ -13,7 +13,9 @@ import {
   Webhook,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { ApiError, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { useLiveEvents } from '../../lib/liveEvents';
+import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadStatus, LeadTemperature } from '../../types';
 
 /**
@@ -156,45 +158,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     registerExternalLeads,
   } = useApp();
 
-  const [liveLeads, setLiveLeads] = useState<LiveLead[] | null>(null);
-  const [stats, setStats] = useState<LeadStats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState<Tab>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
 
+  // One fetch, both payloads. They are always read together, so a failure in
+  // either has to be a failure of the pair — a lead list rendered beside counts
+  // from a minute ago is worse than a moment of staleness in both.
   const load = useCallback(async () => {
-    setBusy(true);
-    try {
-      const [rows, s] = await Promise.all([leadsApi.list(), leadsApi.stats()]);
-      // Keep the previous array when nothing changed, so a poll that finds no new
-      // leads does not re-render the table (or reset an open row's hover state).
-      setLiveLeads(prev => (prev && JSON.stringify(prev) === JSON.stringify(rows) ? prev : rows));
-      setStats(prev => (prev && JSON.stringify(prev) === JSON.stringify(s) ? prev : s));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
-      setLiveLeads([]);
-    } finally {
-      setBusy(false);
-    }
+    const [leads, stats] = await Promise.all([leadsApi.list(), leadsApi.stats()]);
+    return { leads, stats };
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(load);
 
-  // A form submission becomes a lead about a second after it arrives, so poll
-  // rather than making the user guess when to refresh.
-  useEffect(() => {
-    const t = setInterval(() => void load(), 5000);
-    return () => clearInterval(t);
-  }, [load]);
+  // The push path. The backend knows the moment a submission becomes a lead, so
+  // this screen is told rather than asked to guess. The poll above stays as the
+  // fallback and, finding nothing to report, backs off to its ceiling — the two
+  // together cost far less than the old 5-second interval did alone.
+  const { connected } = useLiveEvents(
+    useCallback((e) => {
+      if (e.type === 'lead.created') invalidate();
+    }, [invalidate]),
+  );
 
-  const rows = liveLeads ?? [];
+  const rows = data?.leads ?? [];
+  const stats: LeadStats | null = data?.stats ?? null;
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -253,9 +243,27 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">Lead Pipeline Management</h2>
-            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-              <Radio className="w-3 h-3" />
-              Live
+            {/*
+              Says which mechanism is actually feeding the table. "Live" means the
+              event stream is open and a new lead lands here the moment it is
+              created; "Polling" means we fell back and it may take up to a
+              minute. Worth showing, because the difference is visible to the
+              user as latency and would otherwise look like a bug.
+            */}
+            <span
+              title={
+                connected
+                  ? 'Connected to the live event stream — new leads appear as they arrive.'
+                  : 'Event stream not connected; falling back to periodic refresh.'
+              }
+              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                connected
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              <Radio className={`w-3 h-3 ${connected ? '' : 'opacity-60'}`} />
+              {connected ? 'Live' : 'Polling'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
@@ -265,11 +273,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => void load()}
+            onClick={refresh}
             title="Refresh"
             className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
           <button
@@ -282,7 +290,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
         </div>
       </div>
 
-      {error && (
+      {/*
+        Two different failures, deliberately shown differently.
+
+        `stale` means the table below is real data that simply stopped updating —
+        a quiet amber line, because the screen is still usable and shouting about
+        it is what made a transient blip read as an outage. The rose block is
+        reserved for having nothing to show at all.
+      */}
+      {stale ? (
+        <div className="flex items-center gap-2 text-[11px] text-amber-300/90 px-1">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            Showing the last data we loaded — reconnecting. ({error})
+          </span>
+        </div>
+      ) : error ? (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
           <div className="text-xs text-rose-200">
@@ -290,7 +313,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             {error}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Filter Tabs & Search Controls */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-4 shadow-lg">
@@ -380,7 +403,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {liveLeads === null ? (
+              {data === null ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     Loading…

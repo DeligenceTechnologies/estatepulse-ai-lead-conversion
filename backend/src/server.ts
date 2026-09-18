@@ -7,9 +7,10 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { sha256Hex } from './common/crypto';
 import { AppError } from './common/errors';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -56,15 +57,75 @@ async function bootstrap(): Promise<void> {
   const maxBytes = config.get<number>('INGEST_MAX_BODY_BYTES') ?? 1_048_576;
   app.useBodyParser('json', { limit: maxBytes });
 
+  // --- Rate limiting --------------------------------------------------------
+  //
+  // Two limiters, because the three kinds of traffic here have nothing in common.
+  //
+  // The single 300-per-15-minutes-per-IP limiter this replaces was wrong in
+  // three separate ways, each of which we hit:
+  //
+  //  1. 300/15min is 20 requests a minute. The dashboard's own polling was
+  //     designed above that, so the app rate-limited ITSELF after ~12 minutes.
+  //  2. Keyed by IP, so a brokerage behind one office NAT shares one bucket and
+  //     the tenth user to sign in is the one who gets locked out.
+  //  3. It covered /ingest. Tally delivers from a small pool of shared
+  //     addresses, so at any real volume we would 429 THEM — which starts their
+  //     5m/30m/1h/6h/1d retry ladder and ends in an email to our customer saying
+  //     our integration is broken.
+  //
+  // The window is also a minute rather than fifteen: tripping a limit should
+  // cost seconds, not a quarter of an hour of a dead dashboard.
+  const unlimited = nodeEnv === 'test';
+  const limited = (message: string) => (_req: express.Request, _res: express.Response, next: express.NextFunction) =>
+    next(new AppError('RATE_LIMITED', message));
+
+  /**
+   * One bucket per SESSION where there is one, falling back to per-IP.
+   *
+   * Keyed on a hash of the bearer token rather than on a user id parsed out of
+   * it: parsing means trusting an unverified JWT (the guard has not run yet), and
+   * a forged `sub` would then choose its own bucket. The token is opaque here and
+   * only ever hashed, so it never reaches a log or a store in the clear.
+   *
+   * Someone spraying fresh fake tokens does get a fresh bucket each time — those
+   * requests all die at the guard, and the generous per-IP ceiling below is what
+   * bounds that case.
+   */
   app.use(
     rateLimit({
-      windowMs: 15 * 60 * 1000,
-      limit: nodeEnv === 'test' ? Number.MAX_SAFE_INTEGER : 300,
+      windowMs: 60_000,
+      limit: unlimited ? Number.MAX_SAFE_INTEGER : 120,
       standardHeaders: 'draft-7',
       legacyHeaders: false,
-      handler: (_req, _res, next) => {
-        next(new AppError('RATE_LIMITED', 'Too many requests, please try again later'));
+      keyGenerator: (req) => {
+        const auth = req.headers.authorization;
+        if (auth?.startsWith('Bearer ')) return `s:${sha256Hex(auth.slice(7)).slice(0, 32)}`;
+        return `i:${ipKeyGenerator(req.ip ?? '')}`;
       },
+      // Ingest has its own limiter below. The event stream is one long-lived
+      // connection per tab and must never be counted as request volume.
+      skip: (req) => req.path.startsWith('/ingest/') || req.path === '/api/v1/events',
+      handler: limited('Too many requests, please try again later'),
+    }),
+  );
+
+  /**
+   * Ingest, per IP, with a lot of headroom.
+   *
+   * The ceiling exists only to stop someone spraying `/ingest/v1/tally/<random>`;
+   * a legitimate provider never approaches it. Deliberately generous in the
+   * direction of accepting a real delivery: dropping one costs a customer a
+   * lead, while an extra 404 lookup costs one indexed query.
+   */
+  app.use(
+    '/ingest',
+    rateLimit({
+      windowMs: 60_000,
+      limit: unlimited ? Number.MAX_SAFE_INTEGER : 600,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''),
+      handler: limited('Too many deliveries, please retry shortly'),
     }),
   );
 

@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { z } from 'zod';
 import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health.controller';
+import { EventsModule } from './modules/events/events.module';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { IngestModule } from './modules/ingest/ingest.module';
@@ -88,7 +89,15 @@ const envSchema = z.object({
     }),
     PrismaModule,
 
+<<<<<<< HEAD
     // Portal: auth, agent management, AI calling, the simple lead webhook.
+=======
+    // Global: the live event stream every screen listens on. Registered before
+    // its publishers so the bus exists whichever of them boots first.
+    EventsModule,
+
+    // Portal: auth, AI calling, the simple lead webhook.
+>>>>>>> origin/sunny-webkook
     AuthModule,
     AgentsModule,
     TelnyxModule,

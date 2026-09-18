@@ -32,8 +32,15 @@ interface Enrollment {
   voiceAttempts: number;
   timers: NodeJS.Timeout[];
   stopped: boolean;
+<<<<<<< HEAD
   ran: number; // steps actually executed (not counting quiet-hours deferrals)
   total: number; // steps in the strategy
+=======
+  /** Steps actually executed. A quiet-hours deferral does not count. */
+  ran: number;
+  /** Steps in the strategy, so the engine knows when it has finished. */
+  total: number;
+>>>>>>> origin/sunny-webkook
 }
 
 @Injectable()
@@ -174,7 +181,11 @@ export class EngineService implements OnModuleDestroy {
         await this.activity.recordSms(e.orgId, e.leadId, text, true, r?.id);
         this.logger.log(`SMS sent to lead ${e.leadId}`);
       } catch (err) {
+<<<<<<< HEAD
         // -> message 'failed', attempt reason noted; the strategy continues
+=======
+        // -> message 'failed', and the reason noted on the lead
+>>>>>>> origin/sunny-webkook
         await this.activity.recordSms(e.orgId, e.leadId, text, false, (err as Error).message);
         this.logger.warn(`SMS FAILED for lead ${e.leadId}: ${(err as Error).message}`);
       }
@@ -192,21 +203,39 @@ export class EngineService implements OnModuleDestroy {
           await this.activity.startCall(e.orgId, e.leadId, r?.call_control_id);
           this.logger.log(`AI call dialed to lead ${e.leadId}`);
         } catch (err) {
+<<<<<<< HEAD
           // -> voice_call 'failed' (does NOT exit the strategy)
+=======
+          // -> voice_call 'failed'. Does NOT exit the strategy.
+>>>>>>> origin/sunny-webkook
           await this.activity.recordCallFailed(e.orgId, e.leadId, (err as Error).message);
           this.logger.warn(`call FAILED for lead ${e.leadId}: ${(err as Error).message}`);
         }
       }
     }
 
+<<<<<<< HEAD
     // This step is done (executed or skipped - a quiet-hours deferral returned earlier
     // and never reaches here). A single step failing never ends the strategy; the lead
     // runs every step and only leaves once they're all exhausted.
+=======
+    // This step is done, whether it fired or was skipped — a quiet-hours deferral
+    // returned earlier and never reaches here. One step failing never ends the
+    // strategy: the lead runs every step and leaves only once all are exhausted.
+>>>>>>> origin/sunny-webkook
     e.ran += 1;
     if (e.ran >= e.total) this.scheduleFinalize(e);
   }
 
+<<<<<<< HEAD
   /** After the last step, give a voice call a moment to resolve via webhook, then finalize. */
+=======
+  /**
+   * After the last step, wait before deciding. A voice call resolves through the
+   * Call Control webhook, which arrives seconds later — finalizing immediately
+   * would park a lead who is, at that moment, mid-conversation.
+   */
+>>>>>>> origin/sunny-webkook
   private scheduleFinalize(e: Enrollment): void {
     const t = setTimeout(() => {
       void this.finalize(e);
@@ -216,17 +245,30 @@ export class EngineService implements OnModuleDestroy {
   }
 
   /**
+<<<<<<< HEAD
    * Every step has run. If the lead didn't become hot/qualified (or booked/closed/lost),
    * it exits the strategy into follow-up (nurture) - this is the ONLY place a lead leaves
    * the strategy for not converting. A qualified/booked lead is already handled and stopped.
+=======
+   * Every step has run. A lead that did not convert exits into follow-up, and
+   * this is the ONLY place that happens for not converting — a qualified or
+   * booked lead was already stopped by qualified().
+>>>>>>> origin/sunny-webkook
    */
   private async finalize(e: Enrollment): Promise<void> {
     if (e.stopped) return;
     const lead = await this.prisma.leads.findUnique({ where: { id: e.leadId } });
     if (!lead) return this.stop(e);
+<<<<<<< HEAD
     const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
     if (!CONVERTED.includes(lead.status) && !lead.dnc_status) {
       const why = `Strategy complete after ${e.total} step(s) - ${lead.ai_summary || 'lead not converted'}`;
+=======
+
+    const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
+    if (!CONVERTED.includes(lead.status) && !lead.dnc_status) {
+      const why = `Strategy complete after ${e.total} step(s) — ${lead.ai_summary || 'lead not converted'}`;
+>>>>>>> origin/sunny-webkook
       await this.activity.exitStrategy(e.leadId, why.slice(0, 2000));
       this.logger.log(`lead ${e.leadId} exited strategy (all ${e.total} steps done, not converted)`);
     }

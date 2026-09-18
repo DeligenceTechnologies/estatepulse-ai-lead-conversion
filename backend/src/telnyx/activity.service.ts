@@ -44,6 +44,11 @@ export class ActivityService {
       .catch(() => undefined);
   }
 
+  /**
+   * The last argument is the provider's message id on success, and the failure
+   * reason on failure — one parameter because the caller has exactly one of
+   * them and never both.
+   */
   async recordSms(
     orgId: string,
     leadId: string,
@@ -73,6 +78,7 @@ export class ActivityService {
       this.logger.error(`recordSms: ${(e as Error).message}`);
     }
     if (ok) await this.markContacted(leadId);
+<<<<<<< HEAD
     // A failed text is recorded but does NOT end the strategy - the lead keeps going.
     else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
   }
@@ -115,6 +121,10 @@ export class ActivityService {
   /** The whole strategy ran without converting the lead -> park it in follow-up (nurture). */
   async exitStrategy(leadId: string, reason: string): Promise<void> {
     await this.moveToFollowup(leadId, reason);
+=======
+    // A failed text is recorded but does NOT end the strategy — the lead keeps going.
+    else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
+>>>>>>> origin/sunny-webkook
   }
 
   async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {
@@ -138,7 +148,56 @@ export class ActivityService {
     await this.markContacted(leadId);
   }
 
+<<<<<<< HEAD
   /** The call could not be placed at all (provider error). Does NOT exit the strategy. */
+=======
+  /**
+   * Park a lead in 'nurture' (follow-up needed) with a human reason, so a lead
+   * we could not reach reads as attempted rather than untouched. Per the state
+   * machine: no answer / not ready -> Nurture. The reason surfaces in the UI on
+   * hover (leads.ai_summary -> statusReason).
+   *
+   * Only 'new' and 'contacted' move: a lead that already reached qualified,
+   * booked, closed or lost has a further status that this must never walk back.
+   */
+  private async moveToFollowup(leadId: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.leads.updateMany({
+        where: { id: leadId, status: { in: ['new', 'contacted'] } },
+        data: { status: 'nurture', ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`moveToFollowup: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Record one failed attempt WITHOUT ending the strategy. The lead keeps its
+   * status and continues to the next step; only the latest reason is noted, so
+   * the UI can say "last attempt failed: …" while the lead is still in strategy.
+   * A lead leaves the strategy only via exitStrategy, once every step has run.
+   */
+  private async noteAttemptFailure(leadId: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.leads.updateMany({
+        where: { id: leadId },
+        data: { ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`noteAttemptFailure: ${(e as Error).message}`);
+    }
+  }
+
+  /** The whole strategy ran without converting -> park the lead in follow-up. */
+  async exitStrategy(leadId: string, reason: string): Promise<void> {
+    await this.moveToFollowup(leadId, reason);
+  }
+
+  /**
+   * The call could not be placed at all (a provider error). Notes the reason and
+   * does NOT exit the strategy.
+   */
+>>>>>>> origin/sunny-webkook
   async recordCallFailed(orgId: string, leadId: string, reason?: string): Promise<void> {
     try {
       await this.prisma.voice_calls.create({
@@ -196,8 +255,16 @@ export class ActivityService {
       where: { id: call.id },
       data: { status: answered ? 'completed' : 'no_answer', ended_at: new Date(), duration_seconds: dur },
     });
+<<<<<<< HEAD
     // No answer is recorded but does NOT end the strategy - the lead continues to its
     // next step. It leaves the strategy only once all steps are exhausted (engine).
     if (!answered && call.lead_id) await this.noteAttemptFailure(call.lead_id, 'No answer on the last call');
+=======
+    // No answer is recorded but does NOT end the strategy — the lead continues to
+    // its next step, and leaves only once every step is exhausted (see the engine).
+    if (!answered && call.lead_id) {
+      await this.noteAttemptFailure(call.lead_id, 'No answer on the last call');
+    }
+>>>>>>> origin/sunny-webkook
   }
 }

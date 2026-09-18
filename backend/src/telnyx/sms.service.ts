@@ -9,9 +9,17 @@ export class SmsService {
 
   /**
    * Send an SMS from the org's own Telnyx number (standard long-code send).
+<<<<<<< HEAD
    * We send with `from` only - the number already carries its own Messaging
    * Profile, so passing messaging_profile_id too makes Telnyx try the profile's
    * alphanumeric sender and fail with 40306 when none is configured.
+=======
+   *
+   * `from` only, deliberately. The number already carries its own Messaging
+   * Profile, and passing messaging_profile_id as well makes Telnyx try the
+   * profile's alphanumeric sender — which fails with 40306 when none is
+   * configured.
+>>>>>>> origin/sunny-webkook
    */
   async sendSms(orgId: string, to: string, text: string): Promise<any> {
     const c = await this.creds.getCreds(orgId);

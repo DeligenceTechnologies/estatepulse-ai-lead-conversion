@@ -11,7 +11,6 @@ import {
   Webhook,
 } from 'lucide-react';
 import {
-  ApiError,
   api,
   leadsApi,
   type LeadSourceConfig,
@@ -19,6 +18,8 @@ import {
   type WebhookDelivery,
 } from '../../api/client';
 import { useApp } from '../../context/AppContext';
+import { useLiveEvents } from '../../lib/liveEvents';
+import { useLiveQuery } from '../../lib/useLiveQuery';
 import { ConnectionPill, SourceStatusPill } from '../leadsources/StatusPills';
 
 
@@ -226,40 +227,46 @@ const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
 export const LeadSourcesView: React.FC = () => {
   const { setActiveView, focusLeadSourceId, setFocusLeadSourceId } = useApp();
 
-  const [sources, setSources] = useState<LeadSourceConfig[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
-  const [loadingDeliveries, setLoadingDeliveries] = useState(false);
-  const [leads, setLeads] = useState<LiveLead[] | null>(null);
-  const [loadingLeads, setLoadingLeads] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const loadSources = useCallback(async () => {
-    try {
-      setSources(await api.listLeadSources());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
-      setSources([]);
-    }
-  }, []);
+  const fetchSources = useCallback(() => api.listLeadSources(), []);
 
-  const loadDetail = useCallback(async (id: string) => {
-    setLoadingDeliveries(true);
-    setLoadingLeads(true);
-    // Settled, not all: a failing deliveries call must not blank the leads list
-    // and leave the screen looking like the source produced nothing.
-    const [d, l] = await Promise.allSettled([api.deliveries(id), leadsApi.list({ sourceId: id })]);
-    setDeliveries(d.status === 'fulfilled' ? d.value : []);
-    setLeads(l.status === 'fulfilled' ? l.value : []);
-    setLoadingDeliveries(false);
-    setLoadingLeads(false);
-  }, []);
+  /**
+   * Deliveries and the leads they produced, as one fact.
+   *
+   * `allSettled` then rethrow, rather than letting one rejection cancel the
+   * other: we want to know whether the OTHER call succeeded before deciding what
+   * to do. If either failed we throw, which makes useLiveQuery keep the last
+   * good pair on screen and mark it stale — better than the old behaviour of
+   * substituting `[]` for the failed half, which made a transient error look
+   * like a source that had produced nothing.
+   */
+  const fetchDetail = useCallback(async () => {
+    if (!selectedId) return null;
+    const [d, l] = await Promise.allSettled([
+      api.deliveries(selectedId),
+      leadsApi.list({ sourceId: selectedId }),
+    ]);
+    if (d.status === 'rejected') throw d.reason;
+    if (l.status === 'rejected') throw l.reason;
+    return { deliveries: d.value, leads: l.value };
+  }, [selectedId]);
 
-  useEffect(() => {
-    void loadSources();
-  }, [loadSources]);
+  const sourcesQuery = useLiveQuery(fetchSources, { enabled: autoRefresh });
+
+  // Keyed by the selected source: switching selection discards the previous
+  // source's rows immediately rather than showing them under the new header.
+  const detailQuery = useLiveQuery(fetchDetail, {
+    enabled: autoRefresh && selectedId !== null,
+    refreshKey: selectedId,
+  });
+
+  const sources = sourcesQuery.data;
+  const deliveries = detailQuery.data?.deliveries ?? [];
+  const leads = detailQuery.data?.leads ?? null;
+  const error = sourcesQuery.error ?? detailQuery.error;
+  const stale = sourcesQuery.stale || detailQuery.stale;
 
   // Arriving from Integrations after connecting something — open it and drop
   // the handoff, so a later visit does not re-select a stale source.
@@ -269,21 +276,32 @@ export const LeadSourcesView: React.FC = () => {
     setFocusLeadSourceId(null);
   }, [focusLeadSourceId, setFocusLeadSourceId]);
 
-  useEffect(() => {
-    if (selectedId) void loadDetail(selectedId);
-  }, [selectedId, loadDetail]);
+  const refreshAll = useCallback(() => {
+    sourcesQuery.refresh();
+    detailQuery.refresh();
+  }, [sourcesQuery, detailQuery]);
 
-  // Poll while a source is open so a Tally submission appears without the user
-  // having to guess when to refresh — this is what makes "did it arrive?"
-  // answerable at a glance.
-  useEffect(() => {
-    if (!selectedId || !autoRefresh) return;
-    const t = setInterval(() => {
-      void loadDetail(selectedId);
-      void loadSources();
-    }, 4000);
-    return () => clearInterval(t);
-  }, [selectedId, autoRefresh, loadDetail, loadSources]);
+  /*
+   * Push. This screen exists to answer "did my submission arrive?", so it
+   * listens for the delivery itself rather than only for the lead that comes out
+   * of it — a quarantined or unparseable delivery never becomes a lead, and
+   * those are exactly the ones someone is sitting here waiting to see.
+   *
+   * Both queries are invalidated because one delivery moves both panels: the
+   * counts in the source list and the cards in the detail.
+   */
+  const onLiveEvent = useCallback(
+    (e: { type: string; leadSourceId: string | null }) => {
+      sourcesQuery.invalidate();
+      // Ignore traffic belonging to a form the user is not looking at.
+      if (selectedId && (e.leadSourceId === null || e.leadSourceId === selectedId)) {
+        detailQuery.invalidate();
+      }
+    },
+    [sourcesQuery, detailQuery, selectedId],
+  );
+
+  const { connected } = useLiveEvents(onLiveEvent, autoRefresh);
 
   const selected = sources?.find((s) => s.id === selectedId) ?? null;
 
@@ -293,9 +311,20 @@ export const LeadSourcesView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">Lead Sources</h2>
-            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-              <Radio className="w-3 h-3" />
-              Live API
+            <span
+              title={
+                connected
+                  ? 'Connected to the live event stream — deliveries appear as they arrive.'
+                  : 'Event stream not connected; falling back to periodic refresh.'
+              }
+              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                connected
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              <Radio className={`w-3 h-3 ${connected ? '' : 'opacity-60'}`} />
+              {connected ? 'Live API' : 'Polling'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
@@ -313,7 +342,17 @@ export const LeadSourcesView: React.FC = () => {
         </button>
       </div>
 
-      {error && (
+      {/*
+        Stale means what is rendered below is real, just not moving — one amber
+        line. The rose block is only for having nothing to show, which is the
+        case that actually needs the troubleshooting steps.
+      */}
+      {stale ? (
+        <div className="flex items-center gap-2 text-[11px] text-amber-300/90 px-1">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>Showing the last data we loaded — reconnecting. ({error})</span>
+        </div>
+      ) : error ? (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
           <div className="text-xs text-rose-200 leading-relaxed">
@@ -326,7 +365,7 @@ export const LeadSourcesView: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sources list */}
@@ -432,7 +471,7 @@ export const LeadSourcesView: React.FC = () => {
                   </button>
                 </div>
 
-                {loadingLeads && leads === null ? (
+                {leads === null ? (
                   <div className="text-xs text-slate-400 flex items-center gap-2 py-4">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
                   </div>
@@ -466,10 +505,12 @@ export const LeadSourcesView: React.FC = () => {
                       Auto-refresh
                     </label>
                     <button
-                      onClick={() => selectedId && void loadDetail(selectedId)}
+                      onClick={refreshAll}
                       className="text-slate-400 hover:text-white transition-colors cursor-pointer"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${loadingDeliveries ? 'animate-spin' : ''}`} />
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${detailQuery.refreshing ? 'animate-spin' : ''}`}
+                      />
                     </button>
                   </div>
                 </div>

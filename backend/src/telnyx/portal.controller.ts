@@ -232,6 +232,116 @@ export class PortalLeadsController {
     return { ok: true };
   }
 
+  /**
+   * Where is this lead in the journey?
+   *
+   * Reads the strategy's steps and walks them against what actually happened —
+   * the voice_calls and outbound messages on record — so each step shows its
+   * real outcome rather than a guess. Derived on read rather than stored,
+   * because the engine's schedule lives in memory and a restart would make any
+   * stored progress a lie.
+   */
+  @Get(':id/flow')
+  async flow(@OrgId() orgId: string, @Param('id') leadId: string) {
+    const lead = await this.prisma.leads.findFirst({
+      where: { id: leadId, organization_id: orgId },
+    });
+    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
+
+    const strategy = await this.strategies.getStrategy(orgId);
+    const steps = strategy.steps ?? [];
+
+    // Real outcomes, in order, so each step shows what actually happened.
+    const calls = await this.prisma.voice_calls.findMany({
+      where: { organization_id: orgId, lead_id: leadId },
+      orderBy: { created_at: 'asc' },
+      select: { status: true },
+    });
+    const convs = await this.prisma.conversations.findMany({
+      where: { organization_id: orgId, lead_id: leadId, channel: 'sms' },
+      select: { id: true },
+    });
+    const msgs = convs.length
+      ? await this.prisma.messages.findMany({
+          // organization_id as well as the conversation ids: messages is
+          // tenant-scoped, and a foreign key alone does not satisfy the
+          // tenancy guard (nor should it).
+          where: {
+            organization_id: orgId,
+            conversation_id: { in: convs.map((c) => c.id) },
+            direction: 'outbound',
+          },
+          orderBy: { created_at: 'asc' },
+          select: { delivery_status: true },
+        })
+      : [];
+
+    const callOutcome = (s: string): { state: string; label: string } =>
+      s === 'no_answer'
+        ? { state: 'failed', label: 'No answer' }
+        : s === 'failed'
+          ? { state: 'failed', label: 'Call failed' }
+          : s === 'completed' || s === 'in_progress'
+            ? { state: 'done', label: 'Answered' }
+            : { state: 'current', label: 'Ringing' };
+    const smsOutcome = (s: string): { state: string; label: string } =>
+      s === 'failed' ? { state: 'failed', label: 'SMS failed' } : { state: 'done', label: 'SMS sent' };
+
+    // Walk the steps, consuming the matching activity per channel.
+    let ci = 0;
+    let mi = 0;
+    const stepsOut = steps.map((s, i) => {
+      let outcome: string | null = null;
+      let state = 'pending';
+      if (s.channel === 'voice') {
+        if (ci < calls.length) {
+          const o = callOutcome(calls[ci++]!.status ?? '');
+          state = o.state;
+          outcome = o.label;
+        }
+      } else if (mi < msgs.length) {
+        const o = smsOutcome(msgs[mi++]!.delivery_status ?? '');
+        state = o.state;
+        outcome = o.label;
+      }
+      return { index: i, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
+    });
+    const nextIndex = stepsOut.findIndex((s) => s.outcome === null);
+    if (nextIndex >= 0) stepsOut[nextIndex]!.state = 'current';
+    const fired = calls.length + msgs.length;
+
+    const DONE = ['qualified', 'booked', 'closed', 'lost'];
+    let phase: 'not_started' | 'strategy' | 'exited' | 'done';
+    if (DONE.includes(lead.status ?? '')) phase = 'done';
+    else if (lead.status === 'nurture') phase = 'exited';
+    else if (lead.first_contact_at) phase = 'strategy';
+    else phase = 'not_started';
+
+    // The best real-world result so far, as a sentence.
+    const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
+    const smsSent = msgs.some((m) => m.delivery_status === 'sent');
+    let outcome: string;
+    if (lead.status === 'qualified') outcome = 'Qualified';
+    else if (lead.status === 'booked') outcome = 'Appointment booked';
+    else if (lead.status === 'nurture') outcome = 'Exited strategy — follow-up needed';
+    else if (answered) outcome = 'Call answered';
+    else if (smsSent) outcome = 'SMS sent';
+    else if (fired > 0) outcome = 'Attempted — no success yet';
+    else outcome = phase === 'not_started' ? 'Not started' : 'In strategy';
+
+    return {
+      phase,
+      leadStatus: lead.status,
+      outcome,
+      strategyName: strategy.name,
+      stepsTotal: steps.length,
+      completed: Math.min(fired, steps.length),
+      currentStep: phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null,
+      steps: stepsOut,
+      reason: lead.ai_summary ?? null,
+    };
+  }
+
   /** The AI call reports the qualification result -> stop the strategy, hand off. */
   @Post(':id/qualified')
   @HttpCode(HttpStatus.OK)
