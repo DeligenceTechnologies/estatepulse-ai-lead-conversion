@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DeliveryOutcome, MappingOrigin, MappingStatus, QueueState } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EventsBus } from '../events/events.bus';
 import { TallyAdapter } from '../ingest/adapters/tally.adapter';
 import type { NormalizedAnswer } from '../ingest/adapters/types';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
@@ -63,6 +64,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     // Adding a tenant predicate here would mean one query per tenant per tick.
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly events: EventsBus,
   ) {}
 
   onModuleInit(): void {
@@ -315,6 +317,15 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         mapped.trace,
         leadId,
       );
+
+      // After `finish`, so the browser that refetches on this event cannot beat
+      // the delivery's own row into its final state and render it as still
+      // pending. The publish is the last thing the happy path does.
+      this.events.publish({
+        organizationId: event.organization_id,
+        type: 'lead.created',
+        leadSourceId: source.id,
+      });
 
       this.logger.log(`Created lead ${leadId} from delivery ${event.id}`);
     } catch (err) {
