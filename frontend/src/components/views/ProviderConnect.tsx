@@ -87,29 +87,42 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="KEY0123…" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
           </div>
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">Voice Connection ID <span className="text-slate-500 font-normal">(optional)</span></label>
-            <input value={connectionId} onChange={(e) => setConnectionId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
+            <label className="block text-slate-300 font-semibold mb-1">Voice Connection ID <span className="text-slate-500 font-normal">(auto-detected — leave blank)</span></label>
+            <input value={connectionId} onChange={(e) => setConnectionId(e.target.value)} placeholder="Auto-detected from your account" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
           </div>
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-slate-500 font-normal">(optional)</span></label>
-            <input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+1…" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
+            <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-rose-400 font-normal">* required</span></label>
+            <input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+12025550123" className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 ${fromNumber.trim() ? 'border-slate-800' : 'border-rose-900/60'}`} />
+            <p className="text-[10px] text-slate-500 mt-1">The Telnyx number calls are placed from. Required to dial leads.</p>
           </div>
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">Messaging Profile ID <span className="text-slate-500 font-normal">(optional)</span></label>
-            <input value={messagingProfileId} onChange={(e) => setMessagingProfileId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
+            <label className="block text-slate-300 font-semibold mb-1">Messaging Profile ID <span className="text-slate-500 font-normal">(auto-detected for SMS)</span></label>
+            <input value={messagingProfileId} onChange={(e) => setMessagingProfileId(e.target.value)} placeholder="Auto-detected from your number" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" />
           </div>
         </div>
+
+        {status.connected && (
+          <div className="pl-7 flex flex-wrap items-center gap-3 text-[11px]">
+            <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Voice calling ready</span>
+            {status.hasMessaging ? (
+              <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> SMS messaging ready</span>
+            ) : (
+              <span className="flex items-center gap-1 text-amber-400"><AlertTriangle className="w-3.5 h-3.5" /> SMS not available — assign your number to a Telnyx Messaging Profile to enable texting</span>
+            )}
+          </div>
+        )}
 
         <div className="pl-7">
           <button
             type="button"
-            disabled={busy !== null || (!apiKey && !status.connected)}
+            disabled={busy !== null || (!apiKey && !status.connected) || !fromNumber.trim()}
             onClick={() => run('save', () => saveTelnyxCredentials({ apiKey: apiKey || undefined as any, connectionId, messagingProfileId, fromNumber }))}
             className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5"
           >
             {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
             Save credentials
           </button>
+          {!fromNumber.trim() && <p className="text-[10px] text-rose-400 mt-1.5">A From Number is required before you can save.</p>}
         </div>
       </div>
 

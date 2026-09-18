@@ -13,14 +13,21 @@ export class VoiceService {
 
   /**
    * Place an outbound AI qualification call from the org's Telnyx number.
-   * Requires a Call Control connection id. On answer the AI assistant is
-   * attached via the Call Control webhook.
+   * The Call Control connection id is derived from the connected number if the
+   * org never set one explicitly. On answer the AI assistant is attached via the
+   * Call Control webhook.
    */
   async placeCall(orgId: string, to: string, clientState: Record<string, unknown>): Promise<any> {
     const c = await this.creds.getCreds(orgId);
     if (!c?.apiKey) throw new Error('No provider connected');
-    if (!c.connectionId) throw new Error('No voice connection configured');
     if (!c.fromNumber) throw new Error('No from number configured');
+
+    // Always resolve via the resolver: it keeps a valid Call Control app or repairs
+    // a stale/invalid one (e.g. an assistant connection Telnyx rejects with 10015).
+    const connectionId = await this.creds.ensureConnectionId(orgId, c);
+    if (!connectionId) {
+      throw new Error('No Call Control application found on the Telnyx account for outbound calls');
+    }
 
     const publicUrl = this.config.get<string>('PUBLIC_API_URL');
 
@@ -28,7 +35,7 @@ export class VoiceService {
       method: 'POST',
       headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        connection_id: c.connectionId,
+        connection_id: connectionId,
         to,
         from: c.fromNumber,
         client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),

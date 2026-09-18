@@ -28,6 +28,7 @@ export interface TelnyxPublicStatus {
   apiKeyMasked: string;
   connectionId: string;
   messagingProfileId: string;
+  hasMessaging: boolean;
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
@@ -83,6 +84,85 @@ export class CredStoreService {
   async getCreds(orgId: string): Promise<Creds | null> {
     const r = await this.rowFor(orgId);
     return r && this.isActive(r) ? this.fromRow(r) : null;
+  }
+
+  /** Fetch the account's Call Control applications for the given API key. */
+  private async listCallControlApps(apiKey: string): Promise<any[]> {
+    try {
+      const res = await fetch('https://api.telnyx.com/v2/call_control_applications?page[size]=50', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return [];
+      return ((await res.json()) as any).data ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Pick a usable Call Control app id (active, webhook URL preferred). '' if none. */
+  private pickCallControlApp(apps: any[]): string {
+    const pick =
+      apps.find((a) => a.active && a.webhook_event_url) ?? apps.find((a) => a.active) ?? apps[0];
+    return pick?.id ? String(pick.id) : '';
+  }
+
+  /**
+   * Validation for the connect flow: does this API key have a Call Control app we
+   * can place outbound calls through? Returns the id, or '' if the account has none.
+   */
+  async findCallControlApp(apiKey: string): Promise<string> {
+    if (!apiKey) return '';
+    return this.pickCallControlApp(await this.listCallControlApps(apiKey));
+  }
+
+  /**
+   * Messaging (SMS) needs a Messaging Profile. Prefer the profile the from-number
+   * is already assigned to; otherwise fall back to the account's first enabled
+   * profile. '' if the account has no messaging profile at all.
+   */
+  async findMessagingProfile(apiKey: string, fromNumber: string): Promise<string> {
+    if (!apiKey) return '';
+    try {
+      if (fromNumber) {
+        const r = await fetch(
+          `https://api.telnyx.com/v2/phone_numbers?filter[phone_number]=${encodeURIComponent(fromNumber)}`,
+          { headers: { Authorization: `Bearer ${apiKey}` } },
+        );
+        if (r.ok) {
+          const id = ((await r.json()) as any).data?.[0]?.messaging_profile_id;
+          if (id) return String(id);
+        }
+      }
+      const r2 = await fetch('https://api.telnyx.com/v2/messaging_profiles?page[size]=50', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!r2.ok) return '';
+      const profs: any[] = ((await r2.json()) as any).data ?? [];
+      const pick = profs.find((x) => x.enabled) ?? profs[0];
+      return pick?.id ? String(pick.id) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Outbound calls (/v2/calls) require a **Call Control Application** id with a
+   * webhook URL - NOT the number's connection (that one is the AI assistant's
+   * inbound connection, which Telnyx rejects with error 10015). The connect flow
+   * never captured a Call Control app, so resolve one from the account and cache
+   * it, so the user never has to enter a connection id by hand.
+   *
+   * A stored connectionId is kept only if it is genuinely a Call Control app;
+   * otherwise (e.g. a previously mis-derived assistant connection) it is replaced.
+   */
+  async ensureConnectionId(orgId: string, c: Creds): Promise<string> {
+    if (!c.apiKey) return c.connectionId || '';
+    const apps = await this.listCallControlApps(c.apiKey);
+    if (!apps.length) return c.connectionId || '';
+    if (c.connectionId && apps.some((a) => String(a.id) === c.connectionId)) return c.connectionId; // already valid
+    const id = this.pickCallControlApp(apps);
+    if (id && id !== c.connectionId) await this.saveCreds(orgId, { connectionId: id }); // cache/repair
+    return id || c.connectionId || '';
   }
 
   async saveCreds(orgId: string, patch: Partial<Creds>): Promise<Creds> {
@@ -142,6 +222,7 @@ export class CredStoreService {
       apiKeyMasked: c && active ? mask(c.apiKey) : '',
       connectionId: c ? c.connectionId : '',
       messagingProfileId: c ? c.messagingProfileId : '',
+      hasMessaging: !!(c && active && c.messagingProfileId), // SMS ready (profile resolved)
       fromNumber: c ? c.fromNumber : '',
       assistantId: c && active ? c.assistantId : '',
       connectedAt: c ? c.connectedAt : null,

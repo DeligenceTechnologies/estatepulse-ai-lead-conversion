@@ -134,9 +134,11 @@ export class AuthService {
             select: { id: true, email: true, first_name: true, last_name: true },
           });
 
-          // timezone, status and routing_policy all carry database defaults.
+          // status and routing_policy carry database defaults; timezone is set
+          // explicitly to India so new orgs' calling hours (quiet-hours gate) match
+          // the operator's day out of the box, instead of the DB default America/Chicago.
           const organization = await tx.organizations.create({
-            data: { name: input.organizationName, slug },
+            data: { name: input.organizationName, slug, timezone: 'Asia/Kolkata' },
             select: { id: true, name: true, slug: true },
           });
 

@@ -49,6 +49,7 @@ export interface TelnyxStatus {
   apiKeyMasked: string;
   connectionId: string;
   messagingProfileId: string;
+  hasMessaging?: boolean;
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
@@ -244,3 +245,25 @@ export const tallyForms = (id: string) =>
 export const tallyConnectForm = (credentialId: string, externalFormId: string, name?: string) =>
   apiFetch<unknown>('/v1/lead-sources/connect', { method: 'POST', body: { credentialId, externalFormId, name }, auth: true });
 export const tallyLeadSources = () => apiFetch<TallyLeadSource[]>('/v1/lead-sources', { auth: true });
+
+// ---- Lead flow: where the lead is in its journey (strategy step vs follow-up) ----
+export interface LeadFlowStep {
+  index: number;
+  channel: string;   // 'sms' | 'voice'
+  action: string;    // 'send_sms' | 'ai_call' | ...
+  after: { value: number; unit: string };
+  state: 'done' | 'failed' | 'current' | 'pending';
+  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Call failed' | null
+}
+export interface LeadFlow {
+  phase: 'not_started' | 'strategy' | 'exited' | 'done';
+  leadStatus: string;
+  outcome: string; // best real-world result so far: 'Call answered' | 'SMS sent' | 'Exited strategy…' | …
+  strategyName: string;
+  stepsTotal: number;
+  completed: number;
+  currentStep: LeadFlowStep | null;
+  steps: LeadFlowStep[];
+  reason: string | null;
+}
+export const getLeadFlow = (id: string) => apiFetch<LeadFlow>(`/leads/${id}/flow`, { auth: true });

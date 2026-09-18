@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Flame, 
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Lead, Channel } from '../../types';
+import { getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 
 export const LeadDetailModal: React.FC = () => {
   const { 
@@ -47,6 +48,16 @@ export const LeadDetailModal: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments' | 'audit'>('overview');
   const [smsInput, setSmsInput] = useState('');
+
+  // Where the lead is in its journey (strategy step vs follow-up), from the API.
+  const [flow, setFlow] = useState<LeadFlow | null>(null);
+  useEffect(() => {
+    setFlow(null);
+    if (!selectedLeadId) return;
+    let alive = true;
+    getLeadFlow(selectedLeadId).then((f) => { if (alive) setFlow(f); }).catch(() => {});
+    return () => { alive = false; };
+  }, [selectedLeadId]);
 
   if (!selectedLeadId) return null;
 
@@ -179,6 +190,64 @@ export const LeadDetailModal: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Flow status — where this lead is in its journey (strategy step vs follow-up) */}
+        {flow && (
+          <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+            <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">Flow</span>
+            {(() => {
+              const map = {
+                strategy: { label: 'In Strategy', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+                exited: { label: 'Exited Strategy', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/40' },
+                done: { label: 'Completed', cls: 'bg-slate-700/40 text-slate-300 border-slate-600/50' },
+                not_started: { label: 'Not started', cls: 'bg-slate-800 text-slate-400 border-slate-700' },
+              } as const;
+              const m = map[flow.phase];
+              return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-[10px] ${m.cls}`}>{m.label}</span>;
+            })()}
+
+            {/* The real-world outcome (SMS sent / Call answered / Exited …) */}
+            <span className="font-semibold text-slate-200">{flow.outcome}</span>
+
+            {flow.phase === 'strategy' && flow.steps.length > 0 && (
+              <>
+                <span className="text-slate-400">{flow.strategyName}</span>
+                <div className="flex items-center gap-1">
+                  {flow.steps.map((s) => {
+                    const name = s.channel === 'voice' ? 'Call' : 'SMS';
+                    const cls =
+                      s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
+                      : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
+                      : s.state === 'current' ? 'bg-emerald-500 text-white border-emerald-400 shadow shadow-emerald-950'
+                      : 'bg-slate-800 text-slate-500 border-slate-700';
+                    return (
+                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${cls}`}>
+                        {s.index + 1}·{s.outcome ?? name}
+                      </span>
+                    );
+                  })}
+                </div>
+                {flow.currentStep ? (
+                  <span className="text-emerald-300 font-medium">
+                    Current: Step {flow.currentStep.index + 1} of {flow.stepsTotal} — {flow.currentStep.channel === 'voice' ? 'AI Call' : 'SMS'}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">All {flow.stepsTotal} steps sent — awaiting outcome</span>
+                )}
+                {flow.reason && (
+                  <span className="text-slate-500" title={flow.reason}>· last attempt: {flow.reason.replace(/\s+/g, ' ').slice(0, 45)}</span>
+                )}
+              </>
+            )}
+
+            {flow.phase === 'exited' && (
+              <span className="text-rose-300" title={flow.reason ?? undefined}>
+                Left the strategy — not reached{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
+              </span>
+            )}
+            {flow.phase === 'not_started' && <span className="text-slate-500">Waiting to enter the strategy</span>}
+          </div>
+        )}
 
         {/* Tab Navigation */}
         <div className="flex border-b border-slate-800 px-5 bg-slate-950/40 gap-4 text-xs font-medium">

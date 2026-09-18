@@ -49,8 +49,10 @@ export class ActivityService {
     leadId: string,
     text: string,
     ok: boolean,
-    providerId?: string | null,
+    providerIdOrReason?: string | null,
   ): Promise<void> {
+    const providerId = ok ? providerIdOrReason : null;
+    const reason = ok ? undefined : providerIdOrReason || undefined;
     try {
       const conv = await this.findOrCreateConversation(orgId, leadId, 'sms');
       await this.prisma.messages.create({
@@ -71,6 +73,48 @@ export class ActivityService {
       this.logger.error(`recordSms: ${(e as Error).message}`);
     }
     if (ok) await this.markContacted(leadId);
+    // A failed text is recorded but does NOT end the strategy - the lead keeps going.
+    else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
+  }
+
+  /**
+   * Park a lead in 'nurture' (follow-up needed) with a human reason, so a call that
+   * didn't reach the lead is visible instead of looking untouched. docs/04 state
+   * machine: "no answer / not ready -> Nurture". The reason surfaces in the UI on
+   * hover (leads.ai_summary -> /v1/leads statusReason). Never overrides a further
+   * status (qualified/booked/closed/lost) - only 'new'/'contacted' move.
+   */
+  private async moveToFollowup(leadId: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.leads.updateMany({
+        where: { id: leadId, status: { in: ['new', 'contacted'] } },
+        data: { status: 'nurture', ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`moveToFollowup: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Record a single failed attempt WITHOUT ending the strategy. The lead keeps its
+   * status and continues to the next step; we just note the latest reason so the UI
+   * can show "last attempt failed: ..." while still In Strategy. The lead only leaves
+   * the strategy via exitStrategy() once every step is exhausted (see the engine).
+   */
+  private async noteAttemptFailure(leadId: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.leads.updateMany({
+        where: { id: leadId },
+        data: { ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`noteAttemptFailure: ${(e as Error).message}`);
+    }
+  }
+
+  /** The whole strategy ran without converting the lead -> park it in follow-up (nurture). */
+  async exitStrategy(leadId: string, reason: string): Promise<void> {
+    await this.moveToFollowup(leadId, reason);
   }
 
   async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {
@@ -94,7 +138,8 @@ export class ActivityService {
     await this.markContacted(leadId);
   }
 
-  async recordCallFailed(orgId: string, leadId: string): Promise<void> {
+  /** The call could not be placed at all (provider error). Does NOT exit the strategy. */
+  async recordCallFailed(orgId: string, leadId: string, reason?: string): Promise<void> {
     try {
       await this.prisma.voice_calls.create({
         data: {
@@ -110,6 +155,7 @@ export class ActivityService {
     } catch (e) {
       this.logger.error(`recordCallFailed: ${(e as Error).message}`);
     }
+    await this.noteAttemptFailure(leadId, reason ? `Call failed: ${reason}` : 'Call failed');
   }
 
   /** See the `unscoped` note on the constructor: this resolves the tenant. */
@@ -150,5 +196,8 @@ export class ActivityService {
       where: { id: call.id },
       data: { status: answered ? 'completed' : 'no_answer', ended_at: new Date(), duration_seconds: dur },
     });
+    // No answer is recorded but does NOT end the strategy - the lead continues to its
+    // next step. It leaves the strategy only once all steps are exhausted (engine).
+    if (!answered && call.lead_id) await this.noteAttemptFailure(call.lead_id, 'No answer on the last call');
   }
 }
