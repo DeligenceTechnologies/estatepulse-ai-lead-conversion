@@ -118,11 +118,13 @@ export class AuthService {
             select: { id: true, email: true, first_name: true, last_name: true },
           });
 
-          // status and routing_policy carry database defaults; timezone is set
-          // explicitly so a new org's calling hours (the quiet-hours gate) match
-          // the operator's day out of the box rather than the schema default.
+          // status and routing_policy carry database defaults, and so does
+          // timezone when the client sent none: passing undefined leaves the
+          // column out of the INSERT. When the client did detect one, a new
+          // org's calling hours (the quiet-hours gate) match the operator's
+          // day out of the box instead of a guess.
           const organization = await tx.organizations.create({
-            data: { name: input.organizationName, slug, timezone: 'Asia/Kolkata' },
+            data: { name: input.organizationName, slug, timezone: input.timezone },
             select: { id: true, name: true, slug: true },
           });
 

@@ -15,12 +15,37 @@ export const passwordSchema = z
 
 export const emailSchema = z.string().trim().toLowerCase().email('Must be a valid email address').max(255);
 
+/**
+ * The IANA list worth trusting is the one the runtime actually has: ICU throws
+ * RangeError for a zone it does not know. No table to keep in sync.
+ */
+const isValidTimeZone = (tz: string): boolean => {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Detected by the browser, never asked for, so a client that cannot supply one
+ * (no ICU data, a non-browser caller, an older client) must not be turned away:
+ * anything absent or unrecognised collapses to undefined and the caller's own
+ * fallback stands. max(100) matches both timezone columns.
+ *
+ * Exported because every place that SETS a timezone must apply the same rule -
+ * signup here, and an owner creating an agent in modules/agents.
+ */
+export const timezoneSchema = z.string().trim().max(100).refine(isValidTimeZone).optional().catch(undefined);
+
 export const signupSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   firstName: z.string().trim().min(1, 'First name is required').max(100),
   lastName: z.string().trim().min(1, 'Last name is required').max(100),
   organizationName: z.string().trim().min(1, 'Organization name is required').max(255),
+  timezone: timezoneSchema,
 });
 
 export const loginSchema = z.object({
