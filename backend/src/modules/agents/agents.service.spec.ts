@@ -59,6 +59,7 @@ interface Tables {
   agent_profiles: ProfileRow[];
   agent_availability: unknown[];
   agent_territories: unknown[];
+  audit_logs: Array<Record<string, unknown>>;
 }
 
 let seq = 0;
@@ -84,6 +85,7 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     agent_profiles: [],
     agent_availability: [],
     agent_territories: [],
+    audit_logs: [],
   };
 
   /** Every `where` the service handed to a read or an update, in order. */
@@ -176,6 +178,12 @@ function build(options: { failProfileCreate?: boolean } = {}) {
         return { id: row.id, timezone: row.timezone };
       },
     },
+    audit_logs: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        db.audit_logs.push(data);
+        return data;
+      },
+    },
     // The lower(email) pre-check. Tagged-template call, so the email is
     // values[0] — parameterised, never interpolated into the SQL text.
     $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -196,6 +204,7 @@ function build(options: { failProfileCreate?: boolean } = {}) {
           updated_at: new Date(m.updated_at),
         }));
         db.agent_profiles = snapshot.agent_profiles.map((p) => ({ ...p }));
+        db.audit_logs = snapshot.audit_logs.map((a) => ({ ...a }));
         throw err;
       }
     },
@@ -252,7 +261,7 @@ describe('AgentsService.list', () => {
 
   it("uses the agent's own profile timezone once one exists", async () => {
     const { service } = build();
-    await service.create(ORG_A, VALID);
+    await service.create(ORG_A, OWNER_A, VALID);
 
     const created = (await service.list(ORG_A)).find((m) => m.email === VALID.email)!;
 
@@ -310,7 +319,7 @@ describe('AgentsService.create', () => {
   it('creates user + membership + profile in the calling organization', async () => {
     const { service, db } = build();
 
-    const created = await service.create(ORG_A, VALID);
+    const created = await service.create(ORG_A, OWNER_A, VALID);
 
     const user = db.users.find((u) => u.email === VALID.email)!;
     const member = db.organization_members.find((m) => m.user_id === user.id)!;
@@ -327,7 +336,7 @@ describe('AgentsService.create', () => {
 
     // The strict schema rejects a role field outright; this asserts the second
     // line of defence — the service does not read one even if it arrived.
-    await service.create(ORG_A, { ...VALID, role: 'owner', organizationId: ORG_B } as never);
+    await service.create(ORG_A, OWNER_A, { ...VALID, role: 'owner', organizationId: ORG_B } as never);
 
     const user = db.users.find((u) => u.email === VALID.email)!;
     const member = db.organization_members.find((m) => m.user_id === user.id)!;
@@ -339,7 +348,7 @@ describe('AgentsService.create', () => {
   it('creates no availability and no territory rows', async () => {
     const { service, db } = build();
 
-    await service.create(ORG_A, VALID);
+    await service.create(ORG_A, OWNER_A, VALID);
 
     expect(db.agent_availability).toHaveLength(0);
     expect(db.agent_territories).toHaveLength(0);
@@ -348,7 +357,7 @@ describe('AgentsService.create', () => {
   it('stores the password as a bcrypt hash and never returns it', async () => {
     const { service, db } = build();
 
-    const created = await service.create(ORG_A, VALID);
+    const created = await service.create(ORG_A, OWNER_A, VALID);
     const user = db.users.find((u) => u.email === VALID.email)!;
 
     expect(user.password_hash).not.toBe(VALID.password);
@@ -361,7 +370,7 @@ describe('AgentsService.create', () => {
   it('rejects a duplicate email with a 409', async () => {
     const { service } = build();
 
-    await expect(service.create(ORG_A, { ...VALID, email: 'agent-a@example.test' })).rejects.toMatchObject({
+    await expect(service.create(ORG_A, OWNER_A, { ...VALID, email: 'agent-a@example.test' })).rejects.toMatchObject({
       code: 'EMAIL_TAKEN',
       status: 409,
     });
@@ -373,7 +382,7 @@ describe('AgentsService.create', () => {
 
     // The schema lower-cases before this point; the service compares on
     // lower(email) regardless, which is what the database index does.
-    await expect(service.create(ORG_A, { ...VALID, email: 'Agent-A@Example.test' })).rejects.toBeInstanceOf(AppError);
+    await expect(service.create(ORG_A, OWNER_A, { ...VALID, email: 'Agent-A@Example.test' })).rejects.toBeInstanceOf(AppError);
     expect(db.users).toHaveLength(before);
   });
 
@@ -382,7 +391,7 @@ describe('AgentsService.create', () => {
     const users = db.users.length;
     const members = db.organization_members.length;
 
-    await expect(service.create(ORG_A, VALID)).rejects.toThrow('agent_profiles insert failed');
+    await expect(service.create(ORG_A, OWNER_A, VALID)).rejects.toThrow('agent_profiles insert failed');
 
     // No orphan user, and no membership for an account that no longer exists.
     expect(db.users).toHaveLength(users);
@@ -391,13 +400,79 @@ describe('AgentsService.create', () => {
   });
 });
 
+// --- audit trail -------------------------------------------------------------
+
+describe('audit logging', () => {
+  it('records who created a member, without the password', async () => {
+    const { service, db } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, {
+      email: 'audited@example.test',
+      password: 'correct horse battery staple',
+      firstName: 'Aud',
+      lastName: 'Ited',
+    });
+
+    const row = db.audit_logs.find((a) => a['action'] === 'member.created')!;
+    expect(row).toBeDefined();
+    expect(row['organization_id']).toBe(ORG_A);
+    expect(row['actor_type']).toBe('user');
+    expect(row['actor_id']).toBe(OWNER_A);
+    expect(row['entity_type']).toBe('member');
+    expect(row['entity_id']).toBe(created.id);
+    // The one thing that must never reach an audit row.
+    expect(JSON.stringify(row)).not.toContain('correct horse battery staple');
+    expect(JSON.stringify(row)).not.toContain('password_hash');
+  });
+
+  it('leaves no audit row behind when the creation rolls back', async () => {
+    const { service, db } = build({ failProfileCreate: true });
+
+    await expect(
+      service.create(ORG_A, OWNER_A, {
+        email: 'rolled-back@example.test',
+        password: 'correct horse battery staple',
+        firstName: 'Roll',
+        lastName: 'Back',
+      }),
+    ).rejects.toThrow();
+
+    expect(db.audit_logs).toHaveLength(0);
+  });
+
+  it('records both directions of the status switch', async () => {
+    const { service, db } = build();
+
+    await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
+    await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'active');
+
+    const actions = db.audit_logs.map((a) => a['action']);
+    expect(actions).toEqual(['member.suspended', 'member.reactivated']);
+
+    const suspended = db.audit_logs[0]!;
+    expect(suspended['actor_id']).toBe(OWNER_A);
+    expect(suspended['entity_id']).toBe(AGENT_A);
+    expect(suspended['payload']).toMatchObject({ from: 'active', to: 'suspended' });
+  });
+
+  it('writes no audit row when the suspension is refused', async () => {
+    const { service, db } = build();
+
+    await expect(service.setStatus(ORG_A, OWNER_A, OWNER_A, 'suspended')).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+
+    expect(db.audit_logs).toHaveLength(0);
+  });
+});
+
 // --- suspension --------------------------------------------------------------
 
-describe('AgentsService.suspend', () => {
+describe('AgentsService.setStatus', () => {
   it('sets the membership status to suspended and leaves the user intact', async () => {
     const { service, db } = build();
 
-    const result = await service.suspend(ORG_A, OWNER_A, AGENT_A);
+    const result = await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
 
     expect(result.status).toBe('suspended');
     expect(db.organization_members.find((m) => m.user_id === AGENT_A)!.status).toBe('suspended');
@@ -408,7 +483,7 @@ describe('AgentsService.suspend', () => {
   it('refuses to suspend the caller', async () => {
     const { service, db } = build();
 
-    await expect(service.suspend(ORG_A, OWNER_A, OWNER_A)).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
+    await expect(service.setStatus(ORG_A, OWNER_A, OWNER_A, 'suspended')).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
     expect(db.organization_members.find((m) => m.user_id === OWNER_A)!.status).toBe('active');
   });
 
@@ -435,21 +510,33 @@ describe('AgentsService.suspend', () => {
       phone: null,
     });
 
-    await expect(service.suspend(ORG_A, AGENT_A, OWNER_A)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(service.setStatus(ORG_A, AGENT_A, OWNER_A, 'suspended')).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('cannot reach a member of another organization', async () => {
     const { service, db } = build();
 
     // OWNER_B is a real, existing user — just not in ORG_A.
-    await expect(service.suspend(ORG_A, OWNER_A, OWNER_B)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    await expect(service.setStatus(ORG_A, OWNER_A, OWNER_B, 'suspended')).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
     expect(db.organization_members.find((m) => m.user_id === OWNER_B)!.status).toBe('active');
+  });
+
+  it('reinstates a suspended member, so a suspension is recoverable', async () => {
+    const { service, db } = build();
+
+    await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
+    expect(db.organization_members.find((m) => m.user_id === AGENT_A)!.status).toBe('suspended');
+
+    const result = await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'active');
+
+    expect(result.status).toBe('active');
+    expect(db.organization_members.find((m) => m.user_id === AGENT_A)!.status).toBe('active');
   });
 
   it('scopes the lookup by the authenticated organization, not the target id', async () => {
     const { service, wheres } = build();
 
-    await service.suspend(ORG_A, OWNER_A, AGENT_A);
+    await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
 
     const lookup = wheres.find((w) => w.op === 'organization_members.findFirst')!;
     expect(lookup.where['organization_id']).toBe(ORG_A);
@@ -491,9 +578,10 @@ describe('createAgentSchema', () => {
 });
 
 describe('updateAgentSchema', () => {
-  it('accepts only status: suspended', () => {
+  it('accepts suspended and active, and nothing else', () => {
     expect(updateAgentSchema.safeParse({ status: 'suspended' }).success).toBe(true);
-    expect(updateAgentSchema.safeParse({ status: 'active' }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ status: 'active' }).success).toBe(true);
+    expect(updateAgentSchema.safeParse({ status: 'invited' }).success).toBe(false);
     expect(updateAgentSchema.safeParse({ status: 'suspended', role: 'owner' }).success).toBe(false);
   });
 });

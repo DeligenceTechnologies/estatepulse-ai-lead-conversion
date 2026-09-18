@@ -52,10 +52,18 @@ export const listMembers = (): Promise<OrganizationMember[]> =>
 export const createAgent = (input: NewAgentInput): Promise<OrganizationMember> =>
   apiFetch<OrganizationMember>('/agents', { method: 'POST', body: input, auth: true });
 
-export const suspendAgent = (userId: string): Promise<OrganizationMember> =>
+/**
+ * Both directions of the membership switch. 'suspended' locks the agent out on
+ * their next request; 'active' puts them back. Reinstating is what keeps a
+ * misclick from needing direct SQL.
+ */
+export const setAgentStatus = (
+  userId: string,
+  status: 'suspended' | 'active',
+): Promise<OrganizationMember> =>
   apiFetch<OrganizationMember>(`/agents/${userId}`, {
     method: 'PATCH',
-    body: { status: 'suspended' },
+    body: { status },
     auth: true,
   });
 

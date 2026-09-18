@@ -12,6 +12,7 @@ import {
   RefreshCw,
   ShieldCheck,
   UserMinus,
+  UserPlus,
   Users,
 } from 'lucide-react';
 import { ApiError, messageFor } from '../../lib/api';
@@ -20,7 +21,7 @@ import {
   listMembers,
   memberInitials,
   memberName,
-  suspendAgent,
+  setAgentStatus,
   type OrganizationMember,
 } from '../../utils/agentsApi';
 import { AddAgentModal } from '../modals/AddAgentModal';
@@ -52,8 +53,8 @@ export const AgentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  /** The member whose suspend request is in flight, so only that card spins. */
-  const [suspendingId, setSuspendingId] = useState<string | null>(null);
+  /** The member whose status request is in flight, so only that card spins. */
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -81,16 +82,31 @@ export const AgentsView: React.FC = () => {
    */
   const agents = members === null ? null : members.filter((m) => m.role === 'agent');
 
-  const handleSuspend = async (member: OrganizationMember): Promise<void> => {
-    setSuspendingId(member.id);
+  const handleSetStatus = async (
+    member: OrganizationMember,
+    status: 'suspended' | 'active',
+  ): Promise<void> => {
+    // Only the lockout asks. Reinstating is the undo, and putting a dialog in
+    // front of the undo is how people stay stuck.
+    if (
+      status === 'suspended' &&
+      !window.confirm(
+        `Suspend ${memberName(member)}? They are signed out immediately and ` +
+          `cannot sign in until you reactivate them.`,
+      )
+    ) {
+      return;
+    }
+
+    setPendingId(member.id);
     setError(null);
     try {
-      await suspendAgent(member.id);
+      await setAgentStatus(member.id, status);
       await load();
     } catch (e) {
       setError(messageFor(e));
     } finally {
-      setSuspendingId(null);
+      setPendingId(null);
     }
   };
 
@@ -200,7 +216,7 @@ export const AgentsView: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {agents.map((member) => {
-            const suspending = suspendingId === member.id;
+            const pending = pendingId === member.id;
             const canSuspend =
               isOwner && member.role !== 'owner' && member.id !== user?.id && member.status !== 'suspended';
 
@@ -292,13 +308,13 @@ export const AgentsView: React.FC = () => {
 
                   {isOwner && canSuspend && (
                     <button
-                      onClick={() => void handleSuspend(member)}
-                      disabled={suspending}
+                      onClick={() => void handleSetStatus(member, 'suspended')}
+                      disabled={pending}
                       title="Suspend this agent"
                       aria-label={`Suspend ${memberName(member)}`}
                       className="p-2 bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-300 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
                     >
-                      {suspending ? (
+                      {pending ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <UserMinus className="w-3.5 h-3.5" />
@@ -308,9 +324,25 @@ export const AgentsView: React.FC = () => {
                 </div>
 
                 {isOwner && member.status === 'suspended' && (
-                  <p className="text-[11px] text-slate-500 text-center -mt-2">
-                    Suspended — this member can no longer sign in.
-                  </p>
+                  <div className="-mt-2 space-y-2">
+                    <p className="text-[11px] text-slate-500 text-center">
+                      Suspended — this member can no longer sign in.
+                    </p>
+                    <button
+                      onClick={() => void handleSetStatus(member, 'active')}
+                      disabled={pending}
+                      title="Reactivate this agent"
+                      aria-label={`Reactivate ${memberName(member)}`}
+                      className="w-full py-2 bg-slate-800 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {pending ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <UserPlus className="w-3.5 h-3.5" />
+                      )}
+                      <span>Reactivate</span>
+                    </button>
+                  </div>
                 )}
               </div>
             );

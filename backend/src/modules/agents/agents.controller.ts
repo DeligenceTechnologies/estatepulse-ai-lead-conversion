@@ -57,7 +57,7 @@ export class AgentsController {
     @CurrentUser() auth: AuthContext,
     @Body(new ZodValidationPipe(createAgentSchema, 'Invalid agent details')) body: CreateAgentInput,
   ): Promise<OrganizationMemberDTO> {
-    return this.agents.create(auth.organizationId, body);
+    return this.agents.create(auth.organizationId, auth.userId, body);
   }
 
   /**
@@ -69,11 +69,8 @@ export class AgentsController {
     @CurrentUser() auth: AuthContext,
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body(new ZodValidationPipe(updateAgentSchema, 'Invalid agent update'))
-    _body: UpdateAgentInput,
+    body: UpdateAgentInput,
   ): Promise<OrganizationMemberDTO> {
-    // The body is validated but carries no choice: 'suspended' is the only value
-    // the schema admits, so there is nothing to branch on yet. A reinstate flow
-    // would widen the schema and turn this into a switch.
-    return this.agents.suspend(auth.organizationId, auth.userId, userId);
+    return this.agents.setStatus(auth.organizationId, auth.userId, userId, body.status);
   }
 }

@@ -22,19 +22,7 @@ import { AssistantService } from './assistant.service';
 import { EngineService } from './engine.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
-/** A voice_call status -> the human outcome shown against its strategy step. */
-const callOutcome = (s: string): { state: string; label: string } =>
-  s === 'no_answer'
-    ? { state: 'failed', label: 'No answer' }
-    : s === 'failed'
-      ? { state: 'failed', label: 'Call failed' }
-      : s === 'completed' || s === 'in_progress'
-        ? { state: 'done', label: 'Answered' }
-        : { state: 'current', label: 'Ringing' };
 
-/** Likewise for an outbound SMS delivery_status. */
-const smsOutcome = (s: string): { state: string; label: string } =>
-  s === 'failed' ? { state: 'failed', label: 'SMS failed' } : { state: 'done', label: 'SMS sent' };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -139,91 +127,6 @@ export class PortalLeadsController {
   }
 
   /** Where is this lead in the journey: which strategy step, with what real outcome? */
-  @Get(':id/flow')
-  async flow(@OrgId() orgId: string, @Param('id') leadId: string) {
-    const lead = await this.prisma.leads.findFirst({ where: { id: leadId, organization_id: orgId } });
-    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-
-    const strategy = await this.strategies.getStrategy(orgId);
-    const steps = strategy.steps ?? [];
-
-    // Real outcomes, in order, so each step shows what actually happened.
-    const calls = await this.prisma.voice_calls.findMany({
-      where: { organization_id: orgId, lead_id: leadId },
-      orderBy: { created_at: 'asc' },
-      select: { status: true },
-    });
-    const convs = await this.prisma.conversations.findMany({
-      where: { organization_id: orgId, lead_id: leadId, channel: 'sms' },
-      select: { id: true },
-    });
-    const msgs = convs.length
-      ? await this.prisma.messages.findMany({
-          where: {
-            organization_id: orgId, // the tenancy guard requires the scope explicitly
-            conversation_id: { in: convs.map((c) => c.id) },
-            direction: 'outbound',
-          },
-          orderBy: { created_at: 'asc' },
-          select: { delivery_status: true },
-        })
-      : [];
-
-    // Walk the steps, consuming the matching activity per channel.
-    let ci = 0;
-    let mi = 0;
-    const stepsOut = steps.map((s, i) => {
-      let outcome: string | null = null;
-      let state = 'pending';
-      if (s.channel === 'voice') {
-        if (ci < calls.length) {
-          const o = callOutcome(calls[ci++].status);
-          state = o.state;
-          outcome = o.label;
-        }
-      } else if (mi < msgs.length) {
-        const o = smsOutcome(msgs[mi++].delivery_status ?? '');
-        state = o.state;
-        outcome = o.label;
-      }
-      return { index: i, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
-    });
-    const nextIndex = stepsOut.findIndex((s) => s.outcome === null);
-    if (nextIndex >= 0) stepsOut[nextIndex].state = 'current';
-    const fired = calls.length + msgs.length;
-
-    const DONE = ['qualified', 'booked', 'closed', 'lost'];
-    let phase: 'not_started' | 'strategy' | 'exited' | 'done';
-    if (DONE.includes(lead.status)) phase = 'done';
-    else if (lead.status === 'nurture') phase = 'exited';
-    else if (lead.first_contact_at) phase = 'strategy';
-    else phase = 'not_started';
-
-    // The lead's real-world outcome label: the best result so far.
-    const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
-    const smsSent = msgs.some((m) => m.delivery_status === 'sent');
-    let outcome: string;
-    if (lead.status === 'qualified') outcome = 'Qualified';
-    else if (lead.status === 'booked') outcome = 'Appointment booked';
-    else if (lead.status === 'nurture') outcome = 'Exited strategy - follow-up needed';
-    else if (answered) outcome = 'Call answered';
-    else if (smsSent) outcome = 'SMS sent';
-    else if (fired > 0) outcome = 'Attempted - no success yet';
-    else outcome = phase === 'not_started' ? 'Not started' : 'In strategy';
-
-    return {
-      phase,
-      leadStatus: lead.status,
-      outcome,
-      strategyName: strategy.name,
-      stepsTotal: steps.length,
-      completed: Math.min(fired, steps.length),
-      currentStep: phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null,
-      steps: stepsOut,
-      reason: lead.ai_summary ?? null,
-    };
-  }
-
   /** Enroll a lead now, instead of waiting for the watcher's next poll. */
   @Post(':id/enroll')
   @HttpCode(HttpStatus.ACCEPTED)

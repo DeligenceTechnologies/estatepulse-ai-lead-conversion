@@ -77,51 +77,12 @@ export class ActivityService {
     } catch (e) {
       this.logger.error(`recordSms: ${(e as Error).message}`);
     }
-    if (ok) await this.markContacted(leadId);
-    // A failed text is recorded but does NOT end the strategy - the lead keeps going.
-    else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
-  }
-
-  /**
-   * Park a lead in 'nurture' (follow-up needed) with a human reason, so a call that
-   * didn't reach the lead is visible instead of looking untouched. docs/04 state
-   * machine: "no answer / not ready -> Nurture". The reason surfaces in the UI on
-   * hover (leads.ai_summary -> /v1/leads statusReason). Never overrides a further
-   * status (qualified/booked/closed/lost) - only 'new'/'contacted' move.
-   */
-  private async moveToFollowup(leadId: string, reason: string): Promise<void> {
-    try {
-      await this.prisma.leads.updateMany({
-        where: { id: leadId, status: { in: ['new', 'contacted'] } },
-        data: { status: 'nurture', ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
-      });
-    } catch (e) {
-      this.logger.error(`moveToFollowup: ${(e as Error).message}`);
+    if (ok) {
+      await this.markContacted(leadId);
+    } else {
+      // A failed text is recorded but does NOT end the strategy - the lead keeps going.
+      await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
     }
-  }
-
-  /**
-   * Record a single failed attempt WITHOUT ending the strategy. The lead keeps its
-   * status and continues to the next step; we just note the latest reason so the UI
-   * can show "last attempt failed: ..." while still In Strategy. The lead only leaves
-   * the strategy via exitStrategy() once every step is exhausted (see the engine).
-   */
-  private async noteAttemptFailure(leadId: string, reason: string): Promise<void> {
-    try {
-      await this.prisma.leads.updateMany({
-        where: { id: leadId },
-        data: { ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
-      });
-    } catch (e) {
-      this.logger.error(`noteAttemptFailure: ${(e as Error).message}`);
-    }
-  }
-
-  /** The whole strategy ran without converting the lead -> park it in follow-up (nurture). */
-  async exitStrategy(leadId: string, reason: string): Promise<void> {
-    await this.moveToFollowup(leadId, reason);
-    // A failed text is recorded but does NOT end the strategy — the lead keeps going.
-    else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
   }
 
   async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {

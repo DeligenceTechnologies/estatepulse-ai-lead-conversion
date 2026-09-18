@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { hashPassword } from '../../auth/password';
 import { ROLES, type Role } from '../../auth/types';
 import { AppError } from '../../common/errors';
+import { newId } from '../../common/ids';
+import { isDuplicateEmail } from '../../common/prisma-errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { CreateAgentInput } from './schemas';
 import type { OrganizationMemberDTO } from './types';
@@ -10,19 +12,6 @@ import type { OrganizationMemberDTO } from './types';
 /** Verbatim from organization_members_status_check. */
 const ACTIVE = 'active';
 const SUSPENDED = 'suspended';
-
-/**
- * Prisma reports a unique violation's target as a string[], a string, or nothing
- * at all. The email constraint is an EXPRESSION index on lower(email) that
- * Prisma cannot model, so it arrives as a raw constraint name. Same handling as
- * AuthService.signup — see the comment there.
- */
-function isDuplicateEmail(err: unknown): boolean {
-  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
-  const target = err.meta?.['target'];
-  const targets = Array.isArray(target) ? target.map(String) : typeof target === 'string' ? [target] : [];
-  return targets.some((t) => ['idx_users_email_unique', 'users_email_key', 'email'].some((n) => t.includes(n)));
-}
 
 const toRole = (value: string): Role => (ROLES.includes(value as Role) ? (value as Role) : 'agent');
 
@@ -164,7 +153,11 @@ export class AgentsService {
    * The bcrypt hash is computed before the transaction opens so a ~250ms CPU burn
    * never holds a database connection idle. Same shape as signup.
    */
-  async create(organizationId: string, input: CreateAgentInput): Promise<OrganizationMemberDTO> {
+  async create(
+    organizationId: string,
+    callerUserId: string,
+    input: CreateAgentInput,
+  ): Promise<OrganizationMemberDTO> {
     const passwordHash = await hashPassword(input.password);
     const phone = input.phone && input.phone.length > 0 ? input.phone : null;
     const displayName = `${input.firstName} ${input.lastName}`.trim();
@@ -222,6 +215,26 @@ export class AgentsService {
           select: { id: true, timezone: true },
         });
 
+        // Inside the transaction on purpose: the doc comment above promises all
+        // of these rows or none, and an audit row for a member that rolled back
+        // would be a record of something that never happened.
+        await tx.audit_logs.create({
+          data: {
+            id: newId(),
+            organization_id: organizationId,
+            // Lowercase: audit_logs_actor_type_check allows only
+            // user | agent | ai | system | webhook.
+            actor_type: 'user',
+            actor_id: callerUserId,
+            action: 'member.created',
+            entity_type: 'member',
+            entity_id: user.id,
+            // Never the password or its hash. Email and role are what an audit
+            // of "who was given access" has to answer.
+            payload: { email: user.email, role: member.role } as never,
+          },
+        });
+
         return {
           id: user.id,
           firstName: user.first_name,
@@ -250,21 +263,21 @@ export class AgentsService {
   }
 
   /**
-   * Sets organization_members.status = 'suspended'. Nothing is deleted: the user
+   * Sets organization_members.status. Nothing is deleted either way: the user
    * row, the agent profile and everything already assigned to them stay exactly
-   * as they are, and the membership can be reinstated by flipping the column back
-   * when that flow is built.
+   * as they are, so a suspension is a reversible lockout rather than a removal.
    *
    * The effect on an existing session is inherited, not reimplemented.
    * AuthService.loadAuthContext joins organization_members ON status = 'active'
    * on EVERY request, so the token a suspended agent is already holding stops
-   * resolving on their next call. There is no second auth mechanism here and no
-   * token to revoke.
+   * resolving on their next call - and resolves again once they are reinstated.
+   * There is no second auth mechanism here and no token to revoke.
    */
-  async suspend(
+  async setStatus(
     organizationId: string,
     callerUserId: string,
     targetUserId: string,
+    status: typeof ACTIVE | typeof SUSPENDED,
   ): Promise<OrganizationMemberDTO> {
     // findFirst, not findUnique on the composite key: the tenancy guard only
     // recognises `organization_id` (or a globally-unique key) at the top level of
@@ -290,17 +303,22 @@ export class AgentsService {
       throw new AppError('NOT_FOUND', 'No such member in this organization');
     }
 
-    // Checked before the role check: an owner suspending themselves would
-    // otherwise get the "owners cannot be suspended" message, which is the right
-    // outcome by accident and the wrong one the moment a second owner exists.
-    if (member.users.id === callerUserId) {
-      throw new AppError('FORBIDDEN', 'You cannot suspend your own membership');
-    }
+    // Only a lockout needs guarding. Reinstating is safe by construction: a
+    // suspended caller's token stops resolving, so they cannot reach this at
+    // all, and an owner can never have been suspended in the first place.
+    if (status === SUSPENDED) {
+      // Checked before the role check: an owner suspending themselves would
+      // otherwise get the "owners cannot be suspended" message, which is the
+      // right outcome by accident and the wrong one once a second owner exists.
+      if (member.users.id === callerUserId) {
+        throw new AppError('FORBIDDEN', 'You cannot suspend your own membership');
+      }
 
-    // Suspending the owner is how an organization loses its last administrator
-    // and becomes unmanageable. There is no reinstate flow to recover from it.
-    if (member.role === 'owner') {
-      throw new AppError('FORBIDDEN', 'An organization owner cannot be suspended');
+      // Suspending the owner is how an organization loses its last administrator
+      // and becomes unmanageable.
+      if (member.role === 'owner') {
+        throw new AppError('FORBIDDEN', 'An organization owner cannot be suspended');
+      }
     }
 
     const updated = await this.prisma.organization_members.update({
@@ -309,8 +327,23 @@ export class AgentsService {
       where: { id: member.id },
       // updated_at carries a default but is not @updatedAt, so it is set here or
       // it never moves.
-      data: { status: SUSPENDED, updated_at: new Date() },
+      data: { status, updated_at: new Date() },
       select: { status: true },
+    });
+
+    await this.prisma.audit_logs.create({
+      data: {
+        id: newId(),
+        organization_id: organizationId,
+        actor_type: 'user',
+        actor_id: callerUserId,
+        // Reinstatement is as audit-worthy as the lockout: both change who can
+        // reach the tenant, so both leave a row.
+        action: status === SUSPENDED ? 'member.suspended' : 'member.reactivated',
+        entity_type: 'member',
+        entity_id: targetUserId,
+        payload: { from: member.status, to: updated.status } as never,
+      },
     });
 
     // Everything but the status is unchanged by the update, so the row already

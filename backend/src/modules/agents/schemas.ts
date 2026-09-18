@@ -29,14 +29,17 @@ export const createAgentSchema = z
   .strict();
 
 /**
- * Suspension is the only membership mutation in this phase. A literal rather
- * than an enum of every status the column permits: 'active' would be a
- * reinstate flow and 'invited' an invitation flow, and neither is built, so
- * neither is accepted.
+ * The two membership mutations that exist: 'suspended' locks a member out,
+ * 'active' puts them back. An enum of exactly these two rather than of every
+ * status the column permits - 'invited' would be an invitation flow, which is
+ * not built, so it is not accepted.
+ *
+ * Reinstatement matters as much as suspension: without it a misclick is only
+ * recoverable with direct SQL.
  */
 export const updateAgentSchema = z
   .object({
-    status: z.literal('suspended'),
+    status: z.enum(['suspended', 'active']),
   })
   .strict();
 
