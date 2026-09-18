@@ -13,29 +13,18 @@ export class VoiceService {
 
   /**
    * Place an outbound AI qualification call from the org's Telnyx number.
-<<<<<<< HEAD
-   * The Call Control connection id is derived from the connected number if the
-   * org never set one explicitly. On answer the AI assistant is attached via the
-   * Call Control webhook.
-=======
    *
    * The Call Control connection id is resolved rather than required: an org
    * that never set one gets it derived from the account, and a stale or wrong
    * one — an assistant connection, which Telnyx rejects with 10015 — is
    * repaired. On answer the AI assistant is attached via the Call Control
    * webhook.
->>>>>>> origin/sunny-webkook
    */
   async placeCall(orgId: string, to: string, clientState: Record<string, unknown>): Promise<any> {
     const c = await this.creds.getCreds(orgId);
     if (!c?.apiKey) throw new Error('No provider connected');
     if (!c.fromNumber) throw new Error('No from number configured');
 
-<<<<<<< HEAD
-    // Always resolve via the resolver: it keeps a valid Call Control app or repairs
-    // a stale/invalid one (e.g. an assistant connection Telnyx rejects with 10015).
-=======
->>>>>>> origin/sunny-webkook
     const connectionId = await this.creds.ensureConnectionId(orgId, c);
     if (!connectionId) {
       throw new Error('No Call Control application found on the Telnyx account for outbound calls');

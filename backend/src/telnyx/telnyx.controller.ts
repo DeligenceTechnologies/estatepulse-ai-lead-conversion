@@ -61,17 +61,11 @@ export class TelnyxController {
 
     const current = await this.creds.getCreds(orgId); // null when connecting fresh
     const effectiveApiKey = (apiKey as string) || current?.apiKey || '';
-<<<<<<< HEAD
-    if (!effectiveApiKey) throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
-
-    // Mandatory: a From Number to place calls from (E.164).
-=======
     if (!effectiveApiKey) {
       throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
     }
 
     // Required: a From Number to place calls from.
->>>>>>> origin/sunny-webkook
     const effectiveFrom = fromNumber !== undefined ? String(fromNumber) : current?.fromNumber || '';
     if (!/^\+?[0-9]{7,15}$/.test(effectiveFrom.replace(/[\s()-]/g, ''))) {
       throw new AppError(
@@ -80,26 +74,13 @@ export class TelnyxController {
       );
     }
 
-<<<<<<< HEAD
-    // Mandatory: a Call Control Application must exist on the account (that's the
-    // connection outbound calls dial through). Auto-detected from the API key.
-=======
     // Required: the Call Control Application outbound calls dial through.
->>>>>>> origin/sunny-webkook
     const ccApp =
       (typeof connectionId === 'string' && connectionId) ||
       (await this.creds.findCallControlApp(effectiveApiKey));
     if (!ccApp) {
       throw new AppError(
         'VALIDATION_ERROR',
-<<<<<<< HEAD
-        'No Call Control Application found on your Telnyx account. Create one in Telnyx -> Voice -> Call Control -> Applications (with a webhook URL), then connect again.',
-      );
-    }
-
-    // Auto-detect the messaging profile for SMS (the profile the from-number is on,
-    // else the account's first enabled one). Not blocking - an org can be voice-only.
-=======
         'No Call Control Application found on your Telnyx account. Create one in ' +
           'Telnyx → Voice → Call Control → Applications (with a webhook URL), then connect again.',
       );
@@ -107,7 +88,6 @@ export class TelnyxController {
 
     // Not required: an org can be voice-only, so a missing messaging profile is
     // recorded rather than refused.
->>>>>>> origin/sunny-webkook
     const msgProfile =
       (typeof messagingProfileId === 'string' && messagingProfileId) ||
       (await this.creds.findMessagingProfile(effectiveApiKey, effectiveFrom));

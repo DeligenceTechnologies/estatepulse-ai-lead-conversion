@@ -28,10 +28,7 @@ export interface TelnyxPublicStatus {
   apiKeyMasked: string;
   connectionId: string;
   messagingProfileId: string;
-<<<<<<< HEAD
-=======
   /** True once a messaging profile is resolved — i.e. SMS can actually send. */
->>>>>>> origin/sunny-webkook
   hasMessaging: boolean;
   fromNumber: string;
   assistantId: string;
@@ -90,9 +87,6 @@ export class CredStoreService {
     return r && this.isActive(r) ? this.fromRow(r) : null;
   }
 
-<<<<<<< HEAD
-  /** Fetch the account's Call Control applications for the given API key. */
-=======
   /**
    * Outbound calls (/v2/calls) require a **Call Control Application** id with a
    * webhook URL — NOT the number's connection, which is the AI assistant's
@@ -100,7 +94,6 @@ export class CredStoreService {
    * flow never captured a Call Control app, so it is resolved from the account
    * and cached, and the user never has to enter a connection id by hand.
    */
->>>>>>> origin/sunny-webkook
   private async listCallControlApps(apiKey: string): Promise<any[]> {
     try {
       const res = await fetch('https://api.telnyx.com/v2/call_control_applications?page[size]=50', {
@@ -121,13 +114,8 @@ export class CredStoreService {
   }
 
   /**
-<<<<<<< HEAD
-   * Validation for the connect flow: does this API key have a Call Control app we
-   * can place outbound calls through? Returns the id, or '' if the account has none.
-=======
    * Validation for the connect flow: does this API key have a Call Control app
    * we can place outbound calls through? Returns the id, or '' if it has none.
->>>>>>> origin/sunny-webkook
    */
   async findCallControlApp(apiKey: string): Promise<string> {
     if (!apiKey) return '';
@@ -164,17 +152,6 @@ export class CredStoreService {
     }
   }
 
-<<<<<<< HEAD
-  /**
-   * Outbound calls (/v2/calls) require a **Call Control Application** id with a
-   * webhook URL - NOT the number's connection (that one is the AI assistant's
-   * inbound connection, which Telnyx rejects with error 10015). The connect flow
-   * never captured a Call Control app, so resolve one from the account and cache
-   * it, so the user never has to enter a connection id by hand.
-   *
-   * A stored connectionId is kept only if it is genuinely a Call Control app;
-   * otherwise (e.g. a previously mis-derived assistant connection) it is replaced.
-=======
   /** The org's messaging profile, deriving and caching it from the number if unset. */
   async ensureMessagingProfile(orgId: string, c: Creds): Promise<string> {
     if (c.messagingProfileId) return c.messagingProfileId;
@@ -186,18 +163,13 @@ export class CredStoreService {
   /**
    * Keeps a valid Call Control app, or repairs a stale/invalid one — which is
    * what a previously mis-derived assistant connection is.
->>>>>>> origin/sunny-webkook
    */
   async ensureConnectionId(orgId: string, c: Creds): Promise<string> {
     if (!c.apiKey) return c.connectionId || '';
     const apps = await this.listCallControlApps(c.apiKey);
     if (!apps.length) return c.connectionId || '';
-<<<<<<< HEAD
-    if (c.connectionId && apps.some((a) => String(a.id) === c.connectionId)) return c.connectionId; // already valid
-=======
     // already valid
     if (c.connectionId && apps.some((a) => String(a.id) === c.connectionId)) return c.connectionId;
->>>>>>> origin/sunny-webkook
     const id = this.pickCallControlApp(apps);
     if (id && id !== c.connectionId) await this.saveCreds(orgId, { connectionId: id }); // cache/repair
     return id || c.connectionId || '';

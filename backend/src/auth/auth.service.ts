@@ -135,13 +135,8 @@ export class AuthService {
           });
 
           // status and routing_policy carry database defaults; timezone is set
-<<<<<<< HEAD
-          // explicitly to India so new orgs' calling hours (quiet-hours gate) match
-          // the operator's day out of the box, instead of the DB default America/Chicago.
-=======
           // explicitly so a new org's calling hours (the quiet-hours gate) match
           // the operator's day out of the box rather than the schema default.
->>>>>>> origin/sunny-webkook
           const organization = await tx.organizations.create({
             data: { name: input.organizationName, slug, timezone: 'Asia/Kolkata' },
             select: { id: true, name: true, slug: true },
