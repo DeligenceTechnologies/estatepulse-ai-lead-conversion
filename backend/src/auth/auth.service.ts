@@ -1,8 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { AppError } from '../common/errors';
+import {
+  EMAIL_CONSTRAINTS,
+  SLUG_CONSTRAINTS,
+  matchesConstraint,
+  uniqueViolationTargets,
+} from '../common/prisma-errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { hashPassword, verifyPassword } from './password';
 import type { LoginInput, SignupInput } from './schemas';
@@ -16,27 +21,6 @@ const TOKEN_EXPIRES_IN = '7d';
  * (on users) 'inactive'; none of those may hold a session.
  */
 const ACTIVE = 'active';
-
-/**
- * Prisma reports a unique violation's target as a string[], a string, or
- * nothing at all depending on whether the index is modelled. The email
- * constraint is an EXPRESSION index on lower(email) which Prisma cannot model,
- * so it arrives as a raw constraint name rather than a field list. Match on
- * every spelling.
- */
-function uniqueViolationTargets(err: unknown): string[] {
-  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return [];
-  const target = err.meta?.['target'];
-  if (Array.isArray(target)) return target.map(String);
-  if (typeof target === 'string') return [target];
-  return [];
-}
-
-const hits = (targets: string[], names: string[]): boolean =>
-  targets.some((t) => names.some((n) => t === n || t.includes(n)));
-
-const EMAIL_CONSTRAINTS = ['idx_users_email_unique', 'users_email_key', 'email'];
-const SLUG_CONSTRAINTS = ['organizations_slug_key', 'slug'];
 
 function slugify(name: string): string {
   const base = name
@@ -167,10 +151,10 @@ export class AuthService {
         });
       } catch (err) {
         const targets = uniqueViolationTargets(err);
-        if (hits(targets, EMAIL_CONSTRAINTS)) {
+        if (matchesConstraint(targets, EMAIL_CONSTRAINTS)) {
           throw new AppError('EMAIL_TAKEN', 'An account with that email already exists');
         }
-        if (hits(targets, SLUG_CONSTRAINTS)) continue; // retry with a suffixed slug
+        if (matchesConstraint(targets, SLUG_CONSTRAINTS)) continue; // retry with a suffixed slug
         throw err;
       }
     }

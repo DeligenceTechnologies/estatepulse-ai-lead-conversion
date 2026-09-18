@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:auth": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/auth/auth.test.js",
+    "test:agents": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agents.test.js",
     "db:pull": "prisma db pull",
     "db:generate": "prisma generate",
     "prisma:generate": "prisma generate",

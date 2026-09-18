@@ -22,6 +22,8 @@ import { AssistantService } from './assistant.service';
 import { EngineService } from './engine.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
+
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
@@ -124,6 +126,7 @@ export class PortalLeadsController {
     return { leads: rows.map(mapLead) };
   }
 
+  /** Where is this lead in the journey: which strategy step, with what real outcome? */
   /** Enroll a lead now, instead of waiting for the watcher's next poll. */
   @Post(':id/enroll')
   @HttpCode(HttpStatus.ACCEPTED)

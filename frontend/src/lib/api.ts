@@ -17,7 +17,9 @@ export type ErrorCode =
   | 'TOKEN_EXPIRED'
   | 'EMAIL_TAKEN'
   | 'NO_ORGANIZATION'
+  | 'FORBIDDEN'
   | 'NOT_FOUND'
+  | 'CONFLICT'
   | 'RATE_LIMITED'
   | 'INTERNAL'
   | 'NETWORK';
@@ -82,7 +84,9 @@ const MESSAGES: Record<ErrorCode, string> = {
   TOKEN_EXPIRED: 'Your session has expired. Please sign in again.',
   EMAIL_TAKEN: 'An account with that email already exists.',
   NO_ORGANIZATION: 'Your account is not attached to an active organization. Contact your administrator.',
+  FORBIDDEN: 'Only the organization owner can do that.',
   NOT_FOUND: 'That page or resource does not exist.',
+  CONFLICT: 'That conflicts with something that already exists.',
   RATE_LIMITED: 'Too many attempts. Please wait a minute and try again.',
   INTERNAL: 'Something went wrong on our end. Please try again.',
   NETWORK: 'Cannot reach the server. Check that the API is running.',

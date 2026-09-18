@@ -77,9 +77,12 @@ export class ActivityService {
     } catch (e) {
       this.logger.error(`recordSms: ${(e as Error).message}`);
     }
-    if (ok) await this.markContacted(leadId);
-    // A failed text is recorded but does NOT end the strategy — the lead keeps going.
-    else await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
+    if (ok) {
+      await this.markContacted(leadId);
+    } else {
+      // A failed text is recorded but does NOT end the strategy - the lead keeps going.
+      await this.noteAttemptFailure(leadId, reason ? `SMS failed: ${reason}` : 'SMS failed');
+    }
   }
 
   async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {
@@ -103,6 +106,7 @@ export class ActivityService {
     await this.markContacted(leadId);
   }
 
+  /** The call could not be placed at all (provider error). Does NOT exit the strategy. */
   /**
    * Park a lead in 'nurture' (follow-up needed) with a human reason, so a lead
    * we could not reach reads as attempted rather than untouched. Per the state
