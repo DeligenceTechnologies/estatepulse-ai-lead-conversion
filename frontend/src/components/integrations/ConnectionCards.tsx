@@ -20,9 +20,11 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { IntegrationCard } from './IntegrationCard';
+import { TelnyxCard } from './TelnyxCard';
 
 /**
- * Integrations & Webhooks, in exactly two cards.
+ * Integrations & Webhooks: every connection the account has, one card each.
  *
  * This screen answers one question — what is connected, and how do I connect
  * another — so it shows connections and nothing else. Everything about what a
@@ -30,9 +32,12 @@ import { SourceStatusPill } from '../leadsources/StatusPills';
  * lives on Lead Sources, the screen people actually watch. Showing it in both
  * places made a page you visit twice a year look like a dashboard.
  *
- * Both cards read the same endpoint and differ only in how the webhook got onto
- * the form: API means we installed it with a key and can repair it, MANUAL
- * means the customer pasted our URL in themselves and only they can.
+ * Telnyx comes first because it is the one connection the product cannot run
+ * without — no Telnyx account, no calls — and it owns its own status, so it is
+ * self-loading. The two lead-source cards read the same endpoint as each other
+ * and differ only in how the webhook got onto the form: API means we installed
+ * it with a key and can repair it, MANUAL means the customer pasted our URL in
+ * themselves and only they can.
  */
 
 const norm = (s: string | null | undefined) => (s ?? '').toUpperCase();
@@ -155,54 +160,6 @@ const SourceRow: React.FC<{
   );
 };
 
-/** Shared shell so the two cards are the same object with different contents. */
-const IntegrationCard: React.FC<{
-  icon: React.ReactNode;
-  title: string;
-  blurb: string;
-  connected: boolean;
-  accent: string;
-  action: { label: string; icon: React.ReactNode; onClick: () => void; className: string };
-  children: React.ReactNode;
-}> = ({ icon, title, blurb, connected, accent, action, children }) => (
-  <div
-    className={`bg-slate-900/90 border rounded-2xl p-5 shadow-xl flex flex-col gap-4 ${
-      connected ? accent : 'border-slate-800'
-    }`}
-  >
-    <div className="flex items-start justify-between gap-3">
-      <div className="flex items-center gap-2.5 min-w-0">
-        {icon}
-        <div className="min-w-0">
-          <h3 className="text-base font-bold text-white">{title}</h3>
-          <p className="text-[11px] text-slate-400 truncate">{blurb}</p>
-        </div>
-      </div>
-      <span
-        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 shrink-0 ${
-          connected
-            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-            : 'bg-slate-800 text-slate-400 border-slate-700'
-        }`}
-      >
-        {connected && <Check className="w-3 h-3" />}
-        {connected ? 'Connected' : 'Not connected'}
-      </span>
-    </div>
-
-    <div className="flex-1 space-y-2">{children}</div>
-
-    <button
-      type="button"
-      onClick={action.onClick}
-      className={`w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${action.className}`}
-    >
-      {action.icon}
-      {action.label}
-    </button>
-  </div>
-);
-
 export const ConnectionCards: React.FC = () => {
   const { setActiveView, setFocusLeadSourceId } = useApp();
 
@@ -303,13 +260,23 @@ export const ConnectionCards: React.FC = () => {
   const tallySources = (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API');
   const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API');
 
-  if (sources === null) {
-    return (
-      <div className="text-xs text-slate-400 flex items-center gap-2 py-8 justify-center">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading connections…
-      </div>
-    );
-  }
+  /**
+   * The body of a card whose data has not arrived. Named after the card it sits
+   * in, because two identical "Loading connections…" spinners tell you only
+   * that something is happening — not which connection is still unknown.
+   *
+   * The cards render throughout rather than being replaced by a spinner: the
+   * grid used to disappear entirely while lead sources loaded, which kept
+   * TelnyxCard — it loads itself — from mounting until they had arrived, so its
+   * request started after theirs finished instead of alongside.
+   */
+  const LoadingBody: React.FC<{ what: string }> = ({ what }) => (
+    <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400 flex items-center gap-2">
+      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Checking your {what} connection…
+    </div>
+  );
+
+  const loading = sources === null;
 
   return (
     <div className="space-y-4">
@@ -338,6 +305,9 @@ export const ConnectionCards: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Telnyx — the outbound side: the account the AI agent calls from. */}
+        <TelnyxCard />
+
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard
           icon={
@@ -348,6 +318,7 @@ export const ConnectionCards: React.FC = () => {
           title="Tally"
           blurb="Pick a form — we install the webhook for you"
           connected={tallySources.length > 0 || connections.length > 0}
+          loading={loading}
           accent="border-emerald-500/40"
           action={{
             // An account with no form yet gets its own label: "Connect Tally"
@@ -363,7 +334,9 @@ export const ConnectionCards: React.FC = () => {
             className: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950',
           }}
         >
-          {tallySources.length > 0 ? (
+          {loading ? (
+            <LoadingBody what="Tally" />
+          ) : tallySources.length > 0 ? (
             tallySources.map((s) => <SourceRow {...rowProps(s)} />)
           ) : connections.length > 0 ? (
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400 leading-relaxed">
@@ -391,6 +364,7 @@ export const ConnectionCards: React.FC = () => {
           title="Webhook"
           blurb="A URL and signing secret you paste in yourself"
           connected={webhookSources.length > 0}
+          loading={loading}
           accent="border-amber-500/40"
           action={{
             label: webhookSources.length > 0 ? 'Add webhook' : 'Create a webhook',
@@ -399,7 +373,9 @@ export const ConnectionCards: React.FC = () => {
             className: 'bg-slate-800 hover:bg-slate-700 text-slate-100',
           }}
         >
-          {webhookSources.length > 0 ? (
+          {loading ? (
+            <LoadingBody what="webhook" />
+          ) : webhookSources.length > 0 ? (
             webhookSources.map((s) => <SourceRow {...rowProps(s)} />)
           ) : (
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400 leading-relaxed">

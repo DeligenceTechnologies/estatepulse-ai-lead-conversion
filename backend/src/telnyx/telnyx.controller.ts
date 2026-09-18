@@ -5,6 +5,8 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -18,7 +20,12 @@ import { SessionGuard } from '../common/guards/session.guard';
 import { UpstreamErrorInterceptor } from '../common/interceptors/upstream-error.interceptor';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { AssistantService } from './assistant.service';
-import { CredStoreService, type Creds, type TelnyxPublicStatus } from './cred-store.service';
+import {
+  CredStoreService,
+  type Creds,
+  type TelnyxAccount,
+  type TelnyxPublicStatus,
+} from './cred-store.service';
 import { NumbersService } from './numbers.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -44,22 +51,24 @@ export class TelnyxController {
   }
 
   /**
-   * Connect or update the org's Telnyx account.
+   * Validate a set of credentials and fill in what the account can tell us.
    *
-   * Validates up front rather than letting the first real call fail: a missing
-   * From Number or a Telnyx account with no Call Control Application both
-   * produce a connect that looks successful and an outbound call that never
-   * happens. The Call Control app and the messaging profile are detected from
-   * the key, so the user is not asked for ids they would have to go and find.
+   * Shared by "edit the account in use" and "add another account" so the two
+   * cannot drift: a missing From Number or a Telnyx account with no Call
+   * Control Application both produce a connect that looks successful and an
+   * outbound call that never happens. The Call Control app and the messaging
+   * profile are detected from the key, so the user is not asked for ids they
+   * would have to go and find.
    */
-  @Put('credentials')
-  async saveCredentials(@OrgId() orgId: string, @Body() body: any): Promise<TelnyxPublicStatus> {
-    const { apiKey, publicKey, connectionId, messagingProfileId, fromNumber } = body ?? {};
+  private async validated(
+    body: any,
+    current: Creds | null,
+  ): Promise<{ patch: Partial<Creds>; apiKey: string }> {
+    const { apiKey, publicKey, connectionId, messagingProfileId, fromNumber, label } = body ?? {};
     if (apiKey !== undefined && (typeof apiKey !== 'string' || !/^KEY/.test(apiKey))) {
       throw new AppError('VALIDATION_ERROR', 'A valid Telnyx API key (starts with "KEY") is required.');
     }
 
-    const current = await this.creds.getCreds(orgId); // null when connecting fresh
     const effectiveApiKey = (apiKey as string) || current?.apiKey || '';
     if (!effectiveApiKey) {
       throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
@@ -82,7 +91,7 @@ export class TelnyxController {
       throw new AppError(
         'VALIDATION_ERROR',
         'No Call Control Application found on your Telnyx account. Create one in ' +
-          'Telnyx → Voice → Call Control → Applications (with a webhook URL), then connect again.',
+          'Telnyx \u2192 Voice \u2192 Call Control \u2192 Applications (with a webhook URL), then connect again.',
       );
     }
 
@@ -99,8 +108,76 @@ export class TelnyxController {
     };
     if (apiKey) patch.apiKey = apiKey;
     if (publicKey !== undefined) patch.publicKey = publicKey;
+    if (typeof label === 'string') patch.label = label.trim();
 
+    return { patch, apiKey: effectiveApiKey };
+  }
+
+  /** Connect, or update the account currently in use. */
+  @Put('credentials')
+  async saveCredentials(@OrgId() orgId: string, @Body() body: any): Promise<TelnyxPublicStatus> {
+    const current = await this.creds.getCreds(orgId); // null when connecting fresh
+    const { patch } = await this.validated(body, current);
     await this.creds.saveCreds(orgId, patch);
+    return this.creds.publicStatus(orgId);
+  }
+
+  // ---- Multiple accounts -------------------------------------------------
+  //
+  // An org can keep several Telnyx accounts on file and switch between them,
+  // but only one is ever active, and the active one is what places every call.
+  // These routes manage the shelf; everything else in the app reads whichever
+  // account is active and never learns the others exist.
+
+  @Get('accounts')
+  async listAccounts(@OrgId() orgId: string): Promise<{ accounts: TelnyxAccount[] }> {
+    return { accounts: await this.creds.listAccounts(orgId) };
+  }
+
+  /**
+   * Add another account and switch to it. A fresh API key is mandatory here —
+   * unlike PUT /credentials there is no existing account to inherit one from,
+   * and falling back would silently clone the account already on file.
+   */
+  @Post('accounts')
+  @HttpCode(HttpStatus.CREATED)
+  async addAccount(@OrgId() orgId: string, @Body() body: any): Promise<TelnyxPublicStatus> {
+    if (!body?.apiKey) {
+      throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required to add an account.');
+    }
+    const { patch } = await this.validated(body, null);
+    await this.creds.createAccount(orgId, patch);
+    return this.creds.publicStatus(orgId);
+  }
+
+  @Post('accounts/:id/activate')
+  @HttpCode(HttpStatus.OK)
+  async activateAccount(
+    @OrgId() orgId: string,
+    @Param('id') id: string,
+  ): Promise<TelnyxPublicStatus> {
+    await this.creds.activateAccount(orgId, id);
+    return this.creds.publicStatus(orgId);
+  }
+
+  @Patch('accounts/:id')
+  async renameAccount(
+    @OrgId() orgId: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ): Promise<{ accounts: TelnyxAccount[] }> {
+    const label = typeof body?.label === 'string' ? body.label.trim() : '';
+    if (!label) throw new AppError('VALIDATION_ERROR', 'A name is required.');
+    await this.creds.renameAccount(orgId, id, label);
+    return { accounts: await this.creds.listAccounts(orgId) };
+  }
+
+  @Delete('accounts/:id')
+  async deleteAccount(
+    @OrgId() orgId: string,
+    @Param('id') id: string,
+  ): Promise<TelnyxPublicStatus> {
+    await this.creds.deleteAccount(orgId, id);
     return this.creds.publicStatus(orgId);
   }
 
@@ -114,8 +191,8 @@ export class TelnyxController {
   /** Re-activate the stored integration without re-entering the key. */
   @Post('reconnect')
   @HttpCode(HttpStatus.OK)
-  async reconnect(@OrgId() orgId: string): Promise<TelnyxPublicStatus> {
-    await this.creds.reconnect(orgId);
+  async reconnect(@OrgId() orgId: string, @Body() body?: any): Promise<TelnyxPublicStatus> {
+    await this.creds.reconnect(orgId, body?.accountId);
     return this.creds.publicStatus(orgId);
   }
 
