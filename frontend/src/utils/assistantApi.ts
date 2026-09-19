@@ -42,6 +42,10 @@ export interface AssistantConfig {
 export type AssistantPatch = Partial<Omit<AssistantConfig, 'id' | 'name'>>;
 
 export interface TelnyxStatus {
+  /** The active account: its row id, its name, and how many are on file. */
+  accountId: string;
+  label: string;
+  accountCount: number;
   connected: boolean;
   hasAssistant: boolean;
   hasIntegration?: boolean;
@@ -71,6 +75,7 @@ export const reconnectTelnyx = () =>
   apiFetch<TelnyxStatus>('/telnyx/reconnect', { method: 'POST', auth: true });
 
 export interface TelnyxCredentials {
+  label?: string;
   apiKey?: string;
   publicKey?: string;
   connectionId?: string;
@@ -98,8 +103,36 @@ export interface AssistantSummary {
   model: string;
 }
 
+/**
+ * One Telnyx account on the shelf. An org may keep several — one per market,
+ * say — but exactly one is active at a time, and the active one places every
+ * call and message. Switching is the only way another account does anything.
+ */
+export interface TelnyxAccount {
+  id: string;
+  label: string;
+  apiKeyMasked: string;
+  fromNumber: string;
+  assistantId: string;
+  connectionId: string;
+  messagingProfileId: string;
+  hasMessaging: boolean;
+  active: boolean;
+  connectedAt: string | null;
+}
+
 // ---- Connection ----
 export const getTelnyxStatus = () => apiFetch<TelnyxStatus>('/telnyx/status', { auth: true });
+export const listTelnyxAccounts = () =>
+  apiFetch<{ accounts: TelnyxAccount[] }>('/telnyx/accounts', { auth: true }).then((d) => d.accounts);
+export const addTelnyxAccount = (creds: TelnyxCredentials & { label?: string }) =>
+  apiFetch<TelnyxStatus>('/telnyx/accounts', { method: 'POST', body: creds, auth: true });
+export const activateTelnyxAccount = (id: string) =>
+  apiFetch<TelnyxStatus>(`/telnyx/accounts/${id}/activate`, { method: 'POST', auth: true });
+export const renameTelnyxAccount = (id: string, label: string) =>
+  apiFetch<{ accounts: TelnyxAccount[] }>(`/telnyx/accounts/${id}`, { method: 'PATCH', body: { label }, auth: true });
+export const deleteTelnyxAccount = (id: string) =>
+  apiFetch<TelnyxStatus>(`/telnyx/accounts/${id}`, { method: 'DELETE', auth: true });
 export const saveTelnyxCredentials = (creds: TelnyxCredentials) =>
   apiFetch<TelnyxStatus>('/telnyx/credentials', { method: 'PUT', body: creds, auth: true });
 export const disconnectTelnyx = () =>

@@ -12,7 +12,10 @@ import {
   Save,
   Wand2,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  PhoneCall,
+  Plug,
+  ArrowRight
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -20,7 +23,6 @@ import {
   updateAssistant,
   listModels,
   getTelnyxStatus,
-  disconnectTelnyx,
   listAssistants,
   attachAssistant,
   AssistantSummary,
@@ -34,11 +36,10 @@ import {
   toolLabel,
 } from '../../utils/assistantApi';
 import { StrategyEditor } from './StrategyEditor';
-import { ProviderConnect } from './ProviderConnect';
 import { PhoneNumberCard } from './PhoneNumberCard';
 
 export const AISettingsView: React.FC = () => {
-  const { orgSettings, updateOrgSettings } = useApp();
+  const { orgSettings, updateOrgSettings, setActiveView } = useApp();
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
@@ -240,23 +241,134 @@ export const AISettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* Connect the tenant's own provider (BYO-Telnyx) */}
+      {/* The connection itself is made on Integrations & Webhooks. This page
+          only reports what that connection is, and sends you there if there
+          isn't one — a prompt editor should not open on a credentials form. */}
+      {status === null && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl text-xs text-slate-400 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" /> Checking your Telnyx connection…
+        </div>
+      )}
+
       {status && !(status.connected && status.hasAssistant) && (
-        <ProviderConnect status={status} onChange={refreshStatus} />
+        <div className="bg-slate-900/90 border border-amber-500/40 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-500/30 shrink-0">
+            <Plug className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-bold text-white">
+              {status.connected
+                ? 'No AI assistant on your Telnyx account yet'
+                : 'Telnyx account not connected'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              {status.connected ? (
+                <>
+                  Your Telnyx credentials are saved, but there is no assistant to configure. Create
+                  or attach one on{' '}
+                  <span className="text-slate-200">Integrations &amp; Webhooks</span>, then come back
+                  to write its prompt and tone.
+                </>
+              ) : (
+                <>
+                  Please connect your Telnyx account from the{' '}
+                  <span className="text-slate-200">Integrations &amp; Webhooks</span> page. Prompt,
+                  tone and voice settings are written straight to the live agent, so there is nothing
+                  to edit until it exists.
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveView('integrations')}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-950 transition-colors cursor-pointer shrink-0"
+          >
+            Go to Integrations &amp; Webhooks
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       )}
 
       {status && status.connected && status.hasAssistant && (
       <form onSubmit={handleSave} className="space-y-6">
 
-        {/* A compact "connected" strip: agent switcher + disconnect */}
-        <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-2 text-[11px]">
-          <span className="text-emerald-400 flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Connected ({status.apiKeyMasked})
-          </span>
-          <div className="flex items-center gap-2 ml-auto">
+        {/* What the agent is actually running on. Read-only: the credentials
+            are edited on Integrations & Webhooks, and showing a Disconnect
+            here would be a second, competing place to break the connection.
+            The agent switcher stays — picking which assistant you are editing
+            is part of editing it. */}
+        <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-violet-600/20 text-violet-300 flex items-center justify-center border border-violet-500/30 shrink-0">
+                <PhoneCall className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  {status.label || 'Telnyx connected'}
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {status.accountCount > 1
+                    ? `This agent runs on the active one of your ${status.accountCount} Telnyx accounts.`
+                    : 'This agent calls and texts from your own Telnyx account.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveView('integrations')}
+              className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            >
+              Manage connection
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-[11px]">
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
+              <div className="text-slate-500">API key</div>
+              <div className="text-slate-200 font-mono truncate">{status.apiKeyMasked || '—'}</div>
+            </div>
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
+              <div className="text-slate-500">From number</div>
+              <div className="text-slate-200 font-mono truncate">{status.fromNumber || 'none assigned'}</div>
+            </div>
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
+              <div className="text-slate-500">Assistant ID</div>
+              <div className="text-slate-200 font-mono truncate" title={status.assistantId}>
+                {status.assistantId || '—'}
+              </div>
+            </div>
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
+              <div className="text-slate-500">Connected</div>
+              <div className="text-slate-200 truncate">
+                {status.connectedAt ? new Date(status.connectedAt).toLocaleDateString() : '—'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex flex-wrap items-center gap-3 text-[11px]">
+              <span className="flex items-center gap-1 text-emerald-400">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Voice calling ready
+              </span>
+              {status.hasMessaging ? (
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> SMS messaging ready
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-amber-400">
+                  <AlertTriangle className="w-3.5 h-3.5" /> SMS unavailable — assign your number to a
+                  Telnyx Messaging Profile
+                </span>
+              )}
+            </div>
+
             {assistants.length > 0 && (
-              <>
-                <span className="text-slate-400">Agent:</span>
+              <div className="flex items-center gap-2 text-[11px] ml-auto">
+                <span className="text-slate-400">Editing agent:</span>
                 <select
                   value={status.assistantId}
                   onChange={(e) => switchAgent(e.target.value)}
@@ -268,15 +380,8 @@ export const AISettingsView: React.FC = () => {
                   ))}
                 </select>
                 {switching && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
-              </>
+              </div>
             )}
-            <button
-              type="button"
-              onClick={() => { disconnectTelnyx().then(refreshStatus).catch(() => refreshStatus()); }}
-              className="text-rose-400 hover:text-rose-300 font-semibold"
-            >
-              Disconnect
-            </button>
           </div>
         </div>
 
