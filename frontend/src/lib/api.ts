@@ -178,6 +178,21 @@ export async function apiFetch<T>(
   return payload as T;
 }
 
+/**
+ * No form asks for a timezone - the device already knows it. An environment
+ * without ICU data returns '' here, and JSON.stringify drops the undefined key,
+ * so the request simply omits it and the backend fallback stands.
+ *
+ * Exported for agentsApi: two copies of this would be two answers.
+ */
+export const localTimeZone = (): string | undefined => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const api = {
   signup: (body: {
     email: string;
@@ -185,7 +200,11 @@ export const api = {
     firstName: string;
     lastName: string;
     organizationName: string;
-  }) => apiFetch<AuthSession>('/auth/signup', { method: 'POST', body }),
+  }) =>
+    apiFetch<AuthSession>('/auth/signup', {
+      method: 'POST',
+      body: { ...body, timezone: localTimeZone() },
+    }),
 
   login: (body: { email: string; password: string }) =>
     apiFetch<AuthSession>('/auth/login', { method: 'POST', body }),

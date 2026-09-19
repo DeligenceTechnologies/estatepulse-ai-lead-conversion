@@ -200,6 +200,20 @@ export class AgentsService {
           select: { role: true, status: true, joined_at: true, created_at: true },
         });
 
+        // The creating owner's detected timezone, or failing that the
+        // organization's - which list() already treats as a member's default, so
+        // inheriting it here is what stops the roster disagreeing with itself.
+        // The column default is a US zone and would be wrong for every org that
+        // is not; it is reached now only when the organization row is gone.
+        const timezone =
+          input.timezone ??
+          (
+            await tx.organizations.findUnique({
+              where: { id: organizationId },
+              select: { timezone: true },
+            })
+          )?.timezone;
+
         const profile = await tx.agent_profiles.create({
           data: {
             organization_id: organizationId,
@@ -207,11 +221,13 @@ export class AgentsService {
             display_name: displayName,
             email: user.email,
             phone,
-            // status, timezone, max_active_leads and routing_enabled all carry
-            // database defaults. Restating them here would fork the defaults.
+            timezone,
+            // status, max_active_leads and routing_enabled all carry database
+            // defaults. Restating them here would fork the defaults.
           },
-          // The timezone comes back rather than being assumed: it is a database
-          // default, and reading it is how the response stays right if it moves.
+          // The timezone comes back rather than being assumed: undefined above
+          // leaves it to the default, and reading it is how the response stays
+          // right if that moves.
           select: { id: true, timezone: true },
         });
 

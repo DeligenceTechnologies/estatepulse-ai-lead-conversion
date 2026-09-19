@@ -1,4 +1,4 @@
-import { apiFetch, type Role } from '../lib/api';
+import { apiFetch, localTimeZone, type Role } from '../lib/api';
 
 /**
  * Agent management. Same shape as strategiesApi: a thin wrapper over apiFetch,
@@ -50,7 +50,13 @@ export const listMembers = (): Promise<OrganizationMember[]> =>
  * 400 if it is sent.
  */
 export const createAgent = (input: NewAgentInput): Promise<OrganizationMember> =>
-  apiFetch<OrganizationMember>('/agents', { method: 'POST', body: input, auth: true });
+  apiFetch<OrganizationMember>('/agents', {
+    method: 'POST',
+    // Detected, never a field on the form. Omitted when the browser cannot say,
+    // and the new agent then inherits the organization's timezone.
+    body: { ...input, timezone: localTimeZone() },
+    auth: true,
+  });
 
 /**
  * Both directions of the membership switch. 'suspended' locks the agent out on

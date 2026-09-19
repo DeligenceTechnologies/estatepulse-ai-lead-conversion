@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { emailSchema, passwordSchema } from '../../auth/schemas';
+import { emailSchema, passwordSchema, timezoneSchema } from '../../auth/schemas';
 
 /**
  * zod rather than class-validator, matching auth/schemas.ts: these shapes are
@@ -25,6 +25,9 @@ export const createAgentSchema = z
     // Display only — nothing dials it — so it is stored as typed rather than
     // normalised through libphonenumber the way an inbound lead's phone is.
     phone: z.string().trim().max(50).optional(),
+    // Detected from the creating owner's browser, not typed in. Absent is fine:
+    // the service then inherits the organization's timezone.
+    timezone: timezoneSchema,
   })
   .strict();
 

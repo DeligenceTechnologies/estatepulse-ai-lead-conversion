@@ -147,6 +147,51 @@ test('signup creates user + organization + owner membership', async () => {
   assert.equal(members[0]?.organization_id, org.id);
 });
 
+test('signup stores the timezone the client detected, and falls back when it cannot', async () => {
+  const detected = await call('POST', '/api/auth/signup', {
+    body: {
+      email: emailFor('tz-detected'),
+      password: PASSWORD,
+      firstName: 'Tz',
+      lastName: 'Detected',
+      organizationName: 'Timezone Detected Test',
+      timezone: 'Asia/Kolkata',
+    },
+  });
+  assert.equal(detected.status, 201, detected.text);
+  const detectedOrg = detected.body['organization'] as { id: string };
+  createdUserIds.push((detected.body['user'] as { id: string }).id);
+  createdOrgIds.push(detectedOrg.id);
+  const stored = await prisma.organizations.findUnique({
+    where: { id: detectedOrg.id },
+    select: { timezone: true },
+  });
+  assert.equal(stored?.timezone, 'Asia/Kolkata');
+
+  // A zone ICU does not know must not cost the user their signup - it drops to
+  // the column default, which is whatever the database says and not a guess.
+  const garbage = await call('POST', '/api/auth/signup', {
+    body: {
+      email: emailFor('tz-garbage'),
+      password: PASSWORD,
+      firstName: 'Tz',
+      lastName: 'Garbage',
+      organizationName: 'Timezone Garbage Test',
+      timezone: 'Mars/Olympus_Mons',
+    },
+  });
+  assert.equal(garbage.status, 201, garbage.text);
+  const garbageOrg = garbage.body['organization'] as { id: string };
+  createdUserIds.push((garbage.body['user'] as { id: string }).id);
+  createdOrgIds.push(garbageOrg.id);
+  const fallback = await prisma.organizations.findUnique({
+    where: { id: garbageOrg.id },
+    select: { timezone: true },
+  });
+  assert.notEqual(fallback?.timezone, 'Mars/Olympus_Mons');
+  assert.ok((fallback?.timezone ?? '').length > 0);
+});
+
 test('signup does NOT create an agent_profiles row', async () => {
   const profiles = await prisma.agent_profiles.count({ where: { user_id: primaryUserId } });
   assert.equal(profiles, 0);

@@ -169,11 +169,12 @@ function build(options: { failProfileCreate?: boolean } = {}) {
       },
     },
     agent_profiles: {
-      create: async ({ data }: { data: Omit<ProfileRow, 'id' | 'status' | 'timezone'> }) => {
+      create: async ({ data }: { data: Omit<ProfileRow, 'id' | 'status'> & { timezone?: string } }) => {
         if (options.failProfileCreate) throw new Error('boom: agent_profiles insert failed');
-        // timezone is a database default, so the fake supplies it the way
-        // Postgres would rather than the service passing one.
-        const row = { ...data, id: nextId(), status: 'available', timezone: 'America/Chicago' };
+        // Honours a supplied timezone and falls back to the column default the
+        // way Postgres would - a fake that always answered the default could
+        // not tell a service that passes one from a service that does not.
+        const row = { ...data, id: nextId(), status: 'available', timezone: data.timezone ?? 'America/Chicago' };
         db.agent_profiles.push(row);
         return { id: row.id, timezone: row.timezone };
       },
@@ -261,12 +262,14 @@ describe('AgentsService.list', () => {
 
   it("uses the agent's own profile timezone once one exists", async () => {
     const { service } = build();
-    await service.create(ORG_A, OWNER_A, VALID);
+    // Deliberately not the organization's America/New_York: a profile timezone
+    // that matched it could not show which of the two the roster read.
+    await service.create(ORG_A, OWNER_A, { ...VALID, timezone: 'Asia/Kolkata' });
 
     const created = (await service.list(ORG_A)).find((m) => m.email === VALID.email)!;
 
     expect(created.hasProfile).toBe(true);
-    expect(created.timezone).toBe('America/Chicago');
+    expect(created.timezone).toBe('Asia/Kolkata');
   });
 
   it('reports zero active leads and no calendar, because nothing writes those tables', async () => {
@@ -329,6 +332,26 @@ describe('AgentsService.create', () => {
     expect(member.organization_id).toBe(ORG_A);
     expect(profile.organization_id).toBe(ORG_A);
     expect(profile.display_name).toBe('Nia Newton');
+  });
+
+  it("stores the timezone the owner's browser detected", async () => {
+    const { service, db } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, { ...VALID, timezone: 'Asia/Kolkata' });
+
+    expect(created.timezone).toBe('Asia/Kolkata');
+    expect(db.agent_profiles.find((p) => p.user_id === created.id)!.timezone).toBe('Asia/Kolkata');
+  });
+
+  it("inherits the organization's timezone when the client detected none", async () => {
+    const { service, db } = build();
+
+    // Never the America/Chicago column default: an org outside it would get a
+    // roster whose agents all disagree with the organization they belong to.
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(created.timezone).toBe('America/New_York');
+    expect(db.agent_profiles.find((p) => p.user_id === created.id)!.timezone).toBe('America/New_York');
   });
 
   it('always writes role=agent and status=active, whatever the caller sent', async () => {
