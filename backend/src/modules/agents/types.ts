@@ -27,6 +27,14 @@ export interface OrganizationMemberDTO {
    * no agent profile, so the organization's value is the only true answer.
    */
   timezone: string;
+  /** agent_profiles.title. Null when unset, and for a member with no profile. */
+  title: string | null;
+  /**
+   * agent_profiles.max_active_leads — how many open leads this agent may hold.
+   * Null for a member with no profile: an owner is not a routing target, so
+   * there is no cap to report rather than a default to pretend about.
+   */
+  maxActiveLeads: number | null;
   /**
    * Whether an agent_profiles row exists for this member in this organization.
    * False for an owner created by signup, which deliberately creates no profile.

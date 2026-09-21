@@ -93,13 +93,49 @@ before(async () => {
 });
 
 after(async () => {
-  if (createdOrgIds.length > 0) {
-    await prisma.organizations.deleteMany({ where: { id: { in: createdOrgIds } } });
+  try {
+    // Users first, and the order is load-bearing. organization_members and
+    // agent_profiles both cascade from users, and audit_logs.actor_id carries no
+    // foreign key, so this removes everything the run owns without ever touching
+    // an audit row. Deleting organizations first — as this hook used to — throws
+    // before reaching here and leaves the users behind.
+    if (createdUserIds.length > 0) {
+      await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
+    }
+
+    // An organization is only deletable while it has no audit rows: dropping one
+    // sets audit_logs.organization_id to NULL (ON DELETE SET NULL), and
+    // trg_audit_logs_immutable rejects every UPDATE on that table. So an
+    // organization this run wrote an audit row for cannot be removed, by design,
+    // and is deliberately left behind rather than worked around.
+    //
+    // Asked rather than caught: swallowing the exception would also swallow a
+    // genuine teardown failure.
+    const audited =
+      createdOrgIds.length === 0
+        ? []
+        : await prisma.audit_logs.findMany({
+            where: { organization_id: { in: createdOrgIds } },
+            select: { organization_id: true },
+            distinct: ['organization_id'],
+          });
+    const auditedOrgIds = new Set(audited.map((row) => row.organization_id));
+    const deletableOrgIds = createdOrgIds.filter((id) => !auditedOrgIds.has(id));
+
+    if (deletableOrgIds.length > 0) {
+      await prisma.organizations.deleteMany({ where: { id: { in: deletableOrgIds } } });
+    }
+
+    // Proves the cleanup ran, instead of leaving a silent leak for the next run
+    // to inherit — which is how the old hook failed unnoticed.
+    const leaked = await prisma.users.count({ where: { id: { in: createdUserIds } } });
+    assert.equal(leaked, 0, `${leaked} user(s) from run ${RUN} survived teardown`);
+  } finally {
+    // In a finally so a teardown failure can never again leave the Nest server
+    // and the Prisma pool open, which is what made the runner hang rather than
+    // report.
+    await app.close();
   }
-  if (createdUserIds.length > 0) {
-    await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
-  }
-  await app.close();
 });
 
 // --- happy path -------------------------------------------------------------

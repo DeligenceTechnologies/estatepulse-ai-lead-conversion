@@ -24,6 +24,9 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  // The agent_profiles.max_active_leads column default, shown rather than left
+  // blank so the owner can see the value they are accepting.
+  const [leadCap, setLeadCap] = useState('25');
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +39,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
     setLastName('');
     setEmail('');
     setPhone('');
+    setLeadCap('25');
     setPassword('');
     setError(null);
     onClose();
@@ -43,6 +47,15 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+
+    const cap = Number(leadCap);
+    if (!Number.isInteger(cap) || cap < 1) {
+      // agent_profiles has CHECK (max_active_leads > 0), so 0 and decimals are
+      // rejected here rather than on a round trip.
+      setError('Max active leads must be a whole number of 1 or more.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -53,6 +66,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
         email: email.trim(),
         ...(phone.trim() ? { phone: phone.trim() } : {}),
         password,
+        maxActiveLeads: cap,
       });
       onCreated();
       close();
@@ -154,6 +168,26 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               onChange={(e) => setPhone(e.target.value)}
               className={field}
             />
+          </div>
+
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1" htmlFor="add-lead-cap">
+              Max Active Leads
+            </label>
+            <input
+              id="add-lead-cap"
+              type="number"
+              required
+              min={1}
+              step={1}
+              disabled={saving}
+              value={leadCap}
+              onChange={(e) => setLeadCap(e.target.value)}
+              className={`${field} font-mono`}
+            />
+            <p className="text-[10px] text-slate-500 mt-1">
+              The most open leads this agent may hold. Stored now; nothing assigns leads yet.
+            </p>
           </div>
 
           <div>

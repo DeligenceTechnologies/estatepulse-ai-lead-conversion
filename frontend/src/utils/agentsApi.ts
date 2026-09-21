@@ -24,6 +24,13 @@ export interface OrganizationMember {
   memberSince: string | null;
   /** The member's agent profile timezone, or the organization's. */
   timezone: string;
+  /** agent_profiles.title. Null when unset, and for a member with no profile. */
+  title: string | null;
+  /**
+   * agent_profiles.max_active_leads. Null for a member with no profile — an
+   * owner is not a routing target, so there is no cap to show.
+   */
+  maxActiveLeads: number | null;
   /** False for an owner: signup deliberately creates no agent_profiles row. */
   hasProfile: boolean;
   /** Real count from lead_assignments. 0 until lead assignment is built. */
@@ -39,6 +46,8 @@ export interface NewAgentInput {
   phone?: string;
   /** The initial password the owner sets. Never stored or echoed anywhere. */
   password: string;
+  /** Omitted leaves the column default (25) standing. */
+  maxActiveLeads?: number;
 }
 
 export const listMembers = (): Promise<OrganizationMember[]> =>
@@ -55,6 +64,35 @@ export const createAgent = (input: NewAgentInput): Promise<OrganizationMember> =
     // Detected, never a field on the form. Omitted when the browser cannot say,
     // and the new agent then inherits the organization's timezone.
     body: { ...input, timezone: localTimeZone() },
+    auth: true,
+  });
+
+/**
+ * The editable half of an agent. Every key is optional: the server applies only
+ * what it is sent, so a title-only edit leaves the rest untouched. `null` on
+ * phone or title clears it, which absent cannot express.
+ *
+ * There is deliberately no role, organization, status or password here — the
+ * server rejects all four with a 400, and they are changed (or not) elsewhere.
+ */
+export interface AgentProfileUpdate {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string | null;
+  title?: string | null;
+  timezone?: string;
+  maxActiveLeads?: number;
+}
+
+/** Saves the Edit Agent form. Same PATCH route as the membership switch below. */
+export const updateAgentProfile = (
+  userId: string,
+  input: AgentProfileUpdate,
+): Promise<OrganizationMember> =>
+  apiFetch<OrganizationMember>(`/agents/${userId}`, {
+    method: 'PATCH',
+    body: input,
     auth: true,
   });
 

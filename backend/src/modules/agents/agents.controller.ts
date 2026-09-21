@@ -18,6 +18,7 @@ import type { AuthContext } from '../../auth/types';
 import { AgentsService } from './agents.service';
 import {
   createAgentSchema,
+  isStatusUpdate,
   updateAgentSchema,
   type CreateAgentInput,
   type UpdateAgentInput,
@@ -63,6 +64,11 @@ export class AgentsController {
   /**
    * :userId is users.id. ParseUUIDPipe rejects a malformed id with a 400 before
    * any query runs, which keeps a garbage path out of the database entirely.
+   *
+   * Two edits behind one route, because they address one resource: the
+   * membership switch (`status`) and the agent's profile. The schema refuses a
+   * body carrying both, so this branch is total — see updateAgentSchema for why
+   * they are not combinable.
    */
   @Patch(':userId')
   update(
@@ -71,6 +77,9 @@ export class AgentsController {
     @Body(new ZodValidationPipe(updateAgentSchema, 'Invalid agent update'))
     body: UpdateAgentInput,
   ): Promise<OrganizationMemberDTO> {
-    return this.agents.setStatus(auth.organizationId, auth.userId, userId, body.status);
+    return isStatusUpdate(body)
+      ? this.agents.setStatus(auth.organizationId, auth.userId, userId, body.status)
+      : this.agents.updateProfile(auth.organizationId, auth.userId, userId, body);
   }
+
 }

@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  Briefcase,
   Calendar,
   Clock,
   GitBranch,
   Loader2,
   Mail,
+  Pencil,
   Phone,
   Plus,
   Radio,
@@ -25,6 +27,7 @@ import {
   type OrganizationMember,
 } from '../../utils/agentsApi';
 import { AddAgentModal } from '../modals/AddAgentModal';
+import { EditAgentModal } from '../modals/EditAgentModal';
 
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
@@ -53,6 +56,12 @@ export const AgentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /**
+   * The id of the agent being edited, or null. An id rather than a copy of the
+   * row: the member is re-resolved from the roster below on every render, so a
+   * reload underneath an open modal cannot leave it showing stale values.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
   /** The member whose status request is in flight, so only that card spins. */
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -81,6 +90,11 @@ export const AgentsView: React.FC = () => {
    * than in the query so the endpoint stays the organization's full member list.
    */
   const agents = members === null ? null : members.filter((m) => m.role === 'agent');
+
+  // Resolved from the current roster rather than stored as a snapshot: if the
+  // list reloads underneath an open modal, the modal is looking at the same row
+  // the server last returned. A member who disappeared closes it.
+  const editing = agents?.find((m) => m.id === editingId) ?? null;
 
   const handleSetStatus = async (
     member: OrganizationMember,
@@ -123,7 +137,8 @@ export const AgentsView: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-400">
-            The agents in your organization. Owners can add one or suspend one.
+            The agents in your organization. Owners can add one, edit their details, or suspend
+            one.
           </p>
         </div>
 
@@ -278,6 +293,14 @@ export const AgentsView: React.FC = () => {
                       <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                       <span>{member.timezone}</span>
                     </div>
+                    <div className="flex items-center gap-2 text-slate-300 min-w-0">
+                      <Briefcase className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                      {member.title ? (
+                        <span className="truncate">{member.title}</span>
+                      ) : (
+                        <span className="text-slate-600">No title</span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Stats. Both are read from real tables; they are zero and
@@ -286,7 +309,16 @@ export const AgentsView: React.FC = () => {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[10px]">Active Leads</span>
-                      <span className="font-bold text-white font-mono text-sm">{member.activeLeads}</span>
+                      <span className="font-bold text-white font-mono text-sm">
+                        {member.activeLeads}
+                        {/* The cap is a real stored column, so it is shown next
+                            to the real count. Nothing routes leads yet, which is
+                            why the left number is 0 — the limit is still the
+                            owner's setting rather than a guess. */}
+                        {member.maxActiveLeads !== null && (
+                          <span className="text-slate-500"> / {member.maxActiveLeads}</span>
+                        )}
+                      </span>
                     </div>
                     <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[10px]">Member Since</span>
@@ -305,6 +337,18 @@ export const AgentsView: React.FC = () => {
                         yet, so this is a fact rather than a placeholder. */}
                     <span>{member.calendarConnected ? 'Calendar connected' : 'No calendar connected'}</span>
                   </div>
+
+                  {isOwner && (
+                    <button
+                      onClick={() => setEditingId(member.id)}
+                      disabled={pending}
+                      title="Edit this agent"
+                      aria-label={`Edit ${memberName(member)}`}
+                      className="p-2 bg-slate-800 hover:bg-emerald-600/20 text-slate-400 hover:text-emerald-300 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
 
                   {isOwner && canSuspend && (
                     <button
@@ -351,6 +395,16 @@ export const AgentsView: React.FC = () => {
       )}
 
       <AddAgentModal isOpen={addOpen} onClose={() => setAddOpen(false)} onCreated={() => void load()} />
+
+      {/* Mounted only while editing, so the form always opens on fresh values. */}
+      {editing && (
+        <EditAgentModal
+          key={editing.id}
+          member={editing}
+          onClose={() => setEditingId(null)}
+          onSaved={() => void load()}
+        />
+      )}
     </div>
   );
 };
