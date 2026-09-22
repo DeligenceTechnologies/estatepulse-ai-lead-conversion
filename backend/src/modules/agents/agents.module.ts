@@ -3,6 +3,7 @@ import { AuthModule } from '../../auth/auth.module';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import { MailModule } from '../../mail/mail.module';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { AgentMeController } from './agent-me.controller';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 
@@ -12,10 +13,10 @@ import { AgentsService } from './agents.service';
  * container can construct it for @UseGuards.
  */
 @Module({
-  // MailModule is imported for the credentials email sent when an owner
-  // creates an agent. It is inert unless SMTP_HOST is configured.
-  imports: [PrismaModule, AuthModule, MailModule],
-  controllers: [AgentsController],
+  imports: [PrismaModule, AuthModule,MailModule],
+  // AgentMeController is the agent's own read-only surface; AgentsController
+  // is the owner's roster management. Different audiences, different guards.
+  controllers: [AgentsController, AgentMeController],
   providers: [AgentsService, OwnerGuard],
 })
 export class AgentsModule {}
