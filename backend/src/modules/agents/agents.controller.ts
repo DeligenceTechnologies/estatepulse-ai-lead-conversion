@@ -23,7 +23,7 @@ import {
   type CreateAgentInput,
   type UpdateAgentInput,
 } from './schemas';
-import type { OrganizationMemberDTO } from './types';
+import type { CreateAgentResultDTO, OrganizationMemberDTO } from './types';
 
 /**
  * Owner-only management of the organization's people.
@@ -57,7 +57,7 @@ export class AgentsController {
   create(
     @CurrentUser() auth: AuthContext,
     @Body(new ZodValidationPipe(createAgentSchema, 'Invalid agent details')) body: CreateAgentInput,
-  ): Promise<OrganizationMemberDTO> {
+  ): Promise<CreateAgentResultDTO> {
     return this.agents.create(auth.organizationId, auth.userId, body);
   }
 

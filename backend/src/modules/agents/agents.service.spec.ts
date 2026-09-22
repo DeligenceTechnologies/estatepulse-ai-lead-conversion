@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { AppError } from '../../common/errors';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import type { GuardedPrisma } from '../../prisma/prisma.service';
+import type { MailService } from '../../mail/mail.service';
 import { AgentsService } from './agents.service';
 import { createAgentSchema, updateAgentSchema } from './schemas';
 
@@ -72,7 +73,9 @@ const nextId = (): string => `gen-${(seq += 1)}`;
  * ORG_A (an owner and an agent) and ORG_B (an owner). Two tenants is the
  * minimum that can prove isolation — with one, every query trivially passes.
  */
-function build(options: { failProfileCreate?: boolean } = {}) {
+function build(
+  options: { failProfileCreate?: boolean; mailDisabled?: boolean; mailThrows?: boolean } = {},
+) {
   const db: Tables = {
     users: [
       { id: OWNER_A, email: 'owner-a@example.test', password_hash: 'x', first_name: 'Ada', last_name: 'Owner', phone: null },
@@ -121,7 +124,9 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     organizations: {
       findUnique: async ({ where }: { where: Record<string, unknown> }) => {
         wheres.push({ op: 'organizations.findUnique', where });
-        return where['id'] === ORG_A || where['id'] === ORG_B ? { timezone: 'America/New_York' } : null;
+        if (where['id'] === ORG_A) return { timezone: 'America/New_York', name: 'Org A Realty' };
+        if (where['id'] === ORG_B) return { timezone: 'America/New_York', name: 'Org B Realty' };
+        return null;
       },
     },
     organization_members: {
@@ -246,7 +251,28 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     },
   };
 
-  return { service: new AgentsService(client as unknown as GuardedPrisma), db, wheres };
+  /**
+   * A stand-in mailer. Records what it was asked to send so the tests can assert
+   * on the content, and can be told to fail so "the agent is still created when
+   * the email does not go out" is a real assertion rather than a hope.
+   */
+  const sent: Array<Record<string, unknown>> = [];
+  const mail = {
+    enabled: !options.mailDisabled,
+    sendAgentWelcome: async (input: Record<string, unknown>) => {
+      if (options.mailThrows) throw new Error('boom: smtp exploded');
+      if (options.mailDisabled) return { sent: false, reason: 'Email is not configured on this server' };
+      sent.push(input);
+      return { sent: true };
+    },
+  };
+
+  return {
+    service: new AgentsService(client as unknown as GuardedPrisma, mail as unknown as MailService),
+    db,
+    wheres,
+    sent,
+  };
 }
 
 const VALID = {
@@ -1009,6 +1035,90 @@ describe('createAgentSchema — max active leads', () => {
         createAgentSchema.safeParse({ ...VALID, maxActiveLeads: bad }).success,
         String(bad),
       ).toBe(false);
+    }
+  });
+});
+
+// --- emailing the new agent their credentials --------------------------------
+
+describe('AgentsService.create — credentials email', () => {
+  it('emails the new agent the password the owner set', async () => {
+    const { service, sent } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      to: VALID.email,
+      firstName: VALID.firstName,
+      password: VALID.password,
+    });
+    expect(created.credentialsEmail).toEqual({ sent: true, to: VALID.email });
+  });
+
+  it('names the organization the agent was added to', async () => {
+    const { service, sent } = build();
+
+    await service.create(ORG_A, OWNER_A, VALID);
+
+    // Read back after the commit, so it is the office the rows actually landed
+    // in rather than anything the request supplied.
+    expect(sent[0]['organizationName']).toBe('Org A Realty');
+  });
+
+  it('creates the agent anyway when the mailer is switched off', async () => {
+    const { service, db } = build({ mailDisabled: true });
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    // The account is the point; the email is how the password travels. Losing
+    // the second must not lose the first.
+    expect(db.users.some((u) => u.email === VALID.email)).toBe(true);
+    expect(created.credentialsEmail.sent).toBe(false);
+    expect(created.credentialsEmail.reason).toBeTruthy();
+  });
+
+  it('still answers 201 when the mailer throws unexpectedly', async () => {
+    const { service, db } = build({ mailThrows: true });
+
+    // The account is already committed by this point, so an exploding mailer
+    // must not turn a created agent into a 500 — it turns into "not sent".
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(db.users.some((u) => u.email === VALID.email)).toBe(true);
+    expect(created.credentialsEmail.sent).toBe(false);
+    expect(created.credentialsEmail.reason).toBeTruthy();
+  });
+
+  it('sends only after the write commits, so a rolled-back agent gets no email', async () => {
+    const { service, sent } = build({ failProfileCreate: true });
+
+    await expect(service.create(ORG_A, OWNER_A, VALID)).rejects.toThrow('boom');
+
+    // An email naming an account that does not exist is worse than none.
+    expect(sent).toHaveLength(0);
+  });
+
+  it('never returns the password or its hash to the caller', async () => {
+    const { service } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    const body = JSON.stringify(created);
+    expect(body).not.toContain(VALID.password);
+    expect(body).not.toContain('password_hash');
+    expect(body).not.toContain('$2b$');
+  });
+
+  it('reports delivery on the create response only, not on the roster', async () => {
+    const { service } = build();
+    await service.create(ORG_A, OWNER_A, VALID);
+
+    const roster = await service.list(ORG_A);
+
+    // Delivery is a fact about one request, not a property of a member.
+    for (const member of roster) {
+      expect(member).not.toHaveProperty('credentialsEmail');
     }
   });
 });

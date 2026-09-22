@@ -68,6 +68,18 @@ const envSchema = z.object({
 
   // Overridable so scripts/fake-tally.mjs can stand in for the real API —
   // including the 401/429/5xx paths a real account will not produce on demand.
+  // Outbound email. All optional: with no SMTP_HOST the mailer is disabled and
+  // every send reports itself as not sent, which is the normal state in
+  // development and in the integration suites.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  SMTP_SECURE: z.string().optional(),
+  // Where the SPA is served, used only to put a sign-in link in outbound email.
+  // Absent simply omits the link.
+  APP_BASE_URL: z.string().optional(),
   TALLY_API_BASE_URL: z.string().url().default('https://api.tally.so'),
   PROVIDER_HTTP_TIMEOUT_MS: z.coerce.number().default(10_000),
 });

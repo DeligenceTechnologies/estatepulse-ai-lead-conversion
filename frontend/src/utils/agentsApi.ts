@@ -58,8 +58,22 @@ export const listMembers = (): Promise<OrganizationMember[]> =>
  * and takes the organization from the session, and rejects either field with a
  * 400 if it is sent.
  */
-export const createAgent = (input: NewAgentInput): Promise<OrganizationMember> =>
-  apiFetch<OrganizationMember>('/agents', {
+/**
+ * POST /api/agents answers the new member plus whether their credentials
+ * actually reached them. Delivery belongs to the request, not to the member, so
+ * it is not on OrganizationMember.
+ */
+export interface CreateAgentResult extends OrganizationMember {
+  credentialsEmail: {
+    sent: boolean;
+    to: string;
+    /** Present only when `sent` is false. */
+    reason?: string;
+  };
+}
+
+export const createAgent = (input: NewAgentInput): Promise<CreateAgentResult> =>
+  apiFetch<CreateAgentResult>('/agents', {
     method: 'POST',
     // Detected, never a field on the form. Omitted when the browser cannot say,
     // and the new agent then inherits the organization's timezone.

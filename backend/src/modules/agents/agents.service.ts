@@ -5,9 +5,10 @@ import { ROLES, type Role } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { newId } from '../../common/ids';
 import { isDuplicateEmail } from '../../common/prisma-errors';
+import { MailService } from '../../mail/mail.service';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { CreateAgentInput, UpdateAgentInput } from './schemas';
-import type { OrganizationMemberDTO } from './types';
+import type { CreateAgentResultDTO, OrganizationMemberDTO } from './types';
 
 /** Verbatim from organization_members_status_check. */
 const ACTIVE = 'active';
@@ -124,7 +125,10 @@ function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMe
  */
 @Injectable()
 export class AgentsService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
+    private readonly mail: MailService,
+  ) {}
 
   /**
    * Every member of the calling organization, owner first.
@@ -170,13 +174,14 @@ export class AgentsService {
     organizationId: string,
     callerUserId: string,
     input: CreateAgentInput,
-  ): Promise<OrganizationMemberDTO> {
+  ): Promise<CreateAgentResultDTO> {
     const passwordHash = await hashPassword(input.password);
     const phone = input.phone && input.phone.length > 0 ? input.phone : null;
     const displayName = `${input.firstName} ${input.lastName}`.trim();
 
+    let member: OrganizationMemberDTO;
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      member = await this.prisma.$transaction(async (tx) => {
         // The email arrives lower-cased from the schema and the database's
         // uniqueness index is on lower(email), so this is the same comparison the
         // constraint makes — Test@Example.com cannot slip past test@example.com.
@@ -294,6 +299,37 @@ export class AgentsService {
       }
       throw err;
     }
+
+    // AFTER the commit, deliberately. The agent exists whether or not the email
+    // goes out, so a dead SMTP server must not roll back an account that was
+    // successfully created — the owner just has to hand the password over
+    // themselves instead, which is what this result tells them.
+    //
+    // Not fire-and-forget either: the owner is standing in front of the form
+    // and needs the answer before they decide whether to pick up the phone.
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+    const appBaseUrl = process.env['APP_BASE_URL'];
+
+    // .catch as well as MailService's own try/catch: that one covers a failed
+    // SEND, this one covers the mailer failing in some way it did not
+    // anticipate. Either way the account is already real, so the request must
+    // still answer 201 and say the password did not go out.
+    const delivery = await this.mail
+      .sendAgentWelcome({
+        to: member.email,
+        firstName: member.firstName,
+        organizationName: organization?.name ?? 'your team',
+        // The only place the plaintext password travels after hashing. It is
+        // not stored, not logged, and not echoed back in the response below.
+        password: input.password,
+        signInUrl: appBaseUrl ? `${appBaseUrl.replace(/\/$/, '')}/login` : null,
+      })
+      .catch(() => ({ sent: false, reason: 'The email could not be delivered' }));
+
+    return { ...member, credentialsEmail: { ...delivery, to: member.email } };
   }
 
   /**

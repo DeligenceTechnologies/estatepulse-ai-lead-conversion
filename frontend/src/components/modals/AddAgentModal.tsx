@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Loader2, UserPlus, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, MailWarning, UserPlus, X } from 'lucide-react';
 import { messageFor } from '../../lib/api';
-import { createAgent } from '../../utils/agentsApi';
+import { createAgent, memberName, type CreateAgentResult } from '../../utils/agentsApi';
 
 interface AddAgentModalProps {
   isOpen: boolean;
@@ -11,9 +11,11 @@ interface AddAgentModalProps {
 }
 
 /**
- * The owner sets the agent's first password here, and that is the whole
- * credential flow for now — there is no invitation email and no reset link, so
- * the owner has to hand the password over by some other channel.
+ * The owner sets the agent's first password here, and it is emailed to the
+ * agent when the server has SMTP configured. There is still no reset link, and
+ * delivery is not guaranteed — so the modal reports whether the email actually
+ * went out rather than assuming it did, and tells the owner to hand the
+ * password over themselves when it did not.
  *
  * The fields are empty on purpose. Every other modal in this app prefills demo
  * values; this one creates a real account with a real password, and a prefilled
@@ -30,6 +32,8 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set once the server confirms the creation; the form is replaced by it. */
+  const [result, setResult] = useState<CreateAgentResult | null>(null);
 
   if (!isOpen) return null;
 
@@ -42,6 +46,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
     setLeadCap('25');
     setPassword('');
     setError(null);
+    setResult(null);
     onClose();
   };
 
@@ -60,7 +65,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
     setError(null);
 
     try {
-      await createAgent({
+      const created = await createAgent({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
@@ -68,8 +73,11 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
         password,
         maxActiveLeads: cap,
       });
+      // The roster reloads straight away, but the modal stays open: whether the
+      // password reached the agent is the one thing the owner has to see, and
+      // closing over it would leave them assuming it did.
       onCreated();
-      close();
+      setResult(created);
     } catch (err) {
       // The server's own message is preferred where it has one — "Password must
       // be at least 8 characters" beats a generic form error.
@@ -107,6 +115,69 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
           </button>
         </div>
 
+        {result ? (
+          /* What actually happened, rather than a modal that just vanishes.
+             The two outcomes need different things from the owner: one is done,
+             the other means they still have to pass the password on. */
+          <div className="p-5 space-y-4 text-xs">
+            <div className="flex items-start gap-2.5">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center border shrink-0 ${
+                  result.credentialsEmail.sent
+                    ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}
+              >
+                {result.credentialsEmail.sent ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : (
+                  <MailWarning className="w-5 h-5" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-white">
+                  {memberName(result)} was added
+                </h4>
+                <p className="text-slate-400 leading-relaxed mt-0.5">
+                  {result.credentialsEmail.sent ? (
+                    <>
+                      Their sign-in details were emailed to{' '}
+                      <span className="text-slate-200 font-mono">{result.credentialsEmail.to}</span>.
+                    </>
+                  ) : (
+                    <>
+                      The account is ready, but the email did not go out
+                      {result.credentialsEmail.reason
+                        ? ` — ${result.credentialsEmail.reason.toLowerCase()}`
+                        : ''}
+                      .
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {!result.credentialsEmail.sent && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+                <span className="text-amber-100 leading-relaxed">
+                  Give {result.firstName ?? 'them'} the password you just set, by some other
+                  channel. It is not stored anywhere and cannot be shown again.
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end pt-1">
+              <button
+                type="button"
+                onClick={close}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={(e) => void handleSubmit(e)} className="p-5 space-y-4 text-xs">
           {error && (
             <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
@@ -203,8 +274,8 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               className={field}
             />
             <p className="text-[10px] text-slate-500 mt-1">
-              At least 8 characters. There is no invitation email yet, so share it with them
-              directly — and they cannot change it from the app.
+              At least 8 characters. It is emailed to the agent when this server has email
+              configured — you will be told either way. They cannot change it from the app yet.
             </p>
           </div>
 
@@ -227,6 +298,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );
