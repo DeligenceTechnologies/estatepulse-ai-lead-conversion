@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../auth/auth.module';
 import { OwnerGuard } from '../../common/guards/owner.guard';
+import { MailModule } from '../../mail/mail.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AgentMeController } from './agent-me.controller';
 import { AgentsController } from './agents.controller';
@@ -12,9 +13,9 @@ import { AgentsService } from './agents.service';
  * container can construct it for @UseGuards.
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
-  // AgentMeController is the agent's own read-only surface; AgentsController
-  // is the owner's roster management. Different audiences, different guards.
+  // MailModule is imported for the credentials email sent when an owner
+  // creates an agent. It is inert unless SMTP_HOST is configured.
+  imports: [PrismaModule, AuthModule, MailModule],
   controllers: [AgentsController, AgentMeController],
   providers: [AgentsService, OwnerGuard],
 })

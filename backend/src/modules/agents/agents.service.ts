@@ -5,9 +5,10 @@ import { ROLES, type Role } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { newId } from '../../common/ids';
 import { isDuplicateEmail } from '../../common/prisma-errors';
+import { MailService } from '../../mail/mail.service';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
-import type { CreateAgentInput } from './schemas';
-import type { OrganizationMemberDTO } from './types';
+import type { CreateAgentInput, UpdateAgentInput } from './schemas';
+import type { CreateAgentResultDTO, OrganizationMemberDTO } from './types';
 
 /** Verbatim from organization_members_status_check. */
 const ACTIVE = 'active';
@@ -46,7 +47,12 @@ const memberSelect = (organizationId: string) =>
         agent_profiles: {
           where: { organization_id: organizationId },
           select: {
+            // The profile's own id, so an edit can address the row it just read
+            // by primary key instead of re-finding it.
+            id: true,
+            title: true,
             timezone: true,
+            max_active_leads: true,
             _count: {
               select: {
                 calendar_connections: true,
@@ -71,7 +77,10 @@ type MemberRow = {
     last_name: string | null;
     phone: string | null;
     agent_profiles: Array<{
+      id: string;
+      title: string | null;
       timezone: string;
+      max_active_leads: number;
       _count: { calendar_connections: number; lead_assignments: number };
     }>;
   };
@@ -91,6 +100,11 @@ function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMe
     status: m.status,
     memberSince: m.joined_at ?? m.created_at,
     timezone: profile?.timezone ?? organizationTimezone,
+    title: profile?.title ?? null,
+    // Null rather than a stand-in number for a member with no profile: an owner
+    // has no lead cap because nothing routes leads to them, and 0 or 25 would
+    // both be an invented answer to a question that does not apply.
+    maxActiveLeads: profile?.max_active_leads ?? null,
     hasProfile: profile !== undefined,
     activeLeads: profile?._count.lead_assignments ?? 0,
     calendarConnected: (profile?._count.calendar_connections ?? 0) > 0,
@@ -111,7 +125,10 @@ function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMe
  */
 @Injectable()
 export class AgentsService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
+    private readonly mail: MailService,
+  ) {}
 
   /**
    * Every member of the calling organization, owner first.
@@ -157,13 +174,14 @@ export class AgentsService {
     organizationId: string,
     callerUserId: string,
     input: CreateAgentInput,
-  ): Promise<OrganizationMemberDTO> {
+  ): Promise<CreateAgentResultDTO> {
     const passwordHash = await hashPassword(input.password);
     const phone = input.phone && input.phone.length > 0 ? input.phone : null;
     const displayName = `${input.firstName} ${input.lastName}`.trim();
 
+    let member: OrganizationMemberDTO;
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      member = await this.prisma.$transaction(async (tx) => {
         // The email arrives lower-cased from the schema and the database's
         // uniqueness index is on lower(email), so this is the same comparison the
         // constraint makes — Test@Example.com cannot slip past test@example.com.
@@ -222,13 +240,16 @@ export class AgentsService {
             email: user.email,
             phone,
             timezone,
-            // status, max_active_leads and routing_enabled all carry database
-            // defaults. Restating them here would fork the defaults.
+            // Absent leaves the column default (25) standing, which is the value
+            // the form already shows.
+            ...(input.maxActiveLeads !== undefined ? { max_active_leads: input.maxActiveLeads } : {}),
+            // status and routing_enabled carry database defaults. Restating them
+            // here would fork the defaults.
           },
-          // The timezone comes back rather than being assumed: undefined above
-          // leaves it to the default, and reading it is how the response stays
-          // right if that moves.
-          select: { id: true, timezone: true },
+          // These come back rather than being assumed: undefined above leaves
+          // each to its column default, and reading them is how the response
+          // stays right if a default moves.
+          select: { id: true, title: true, timezone: true, max_active_leads: true },
         });
 
         // Inside the transaction on purpose: the doc comment above promises all
@@ -261,6 +282,8 @@ export class AgentsService {
           status: member.status,
           memberSince: member.joined_at ?? member.created_at,
           timezone: profile.timezone,
+          title: profile.title,
+          maxActiveLeads: profile.max_active_leads,
           hasProfile: true,
           // Brand new: nothing can be assigned to them and no calendar can be
           // connected yet. Both are facts about the rows just written, not
@@ -276,6 +299,218 @@ export class AgentsService {
       }
       throw err;
     }
+
+    // AFTER the commit, deliberately. The agent exists whether or not the email
+    // goes out, so a dead SMTP server must not roll back an account that was
+    // successfully created — the owner just has to hand the password over
+    // themselves instead, which is what this result tells them.
+    //
+    // Not fire-and-forget either: the owner is standing in front of the form
+    // and needs the answer before they decide whether to pick up the phone.
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+    const appBaseUrl = process.env['APP_BASE_URL'];
+
+    // .catch as well as MailService's own try/catch: that one covers a failed
+    // SEND, this one covers the mailer failing in some way it did not
+    // anticipate. Either way the account is already real, so the request must
+    // still answer 201 and say the password did not go out.
+    const delivery = await this.mail
+      .sendAgentWelcome({
+        to: member.email,
+        firstName: member.firstName,
+        organizationName: organization?.name ?? 'your team',
+        // The only place the plaintext password travels after hashing. It is
+        // not stored, not logged, and not echoed back in the response below.
+        password: input.password,
+        signInUrl: appBaseUrl ? `${appBaseUrl.replace(/\/$/, '')}/login` : null,
+      })
+      .catch(() => ({ sent: false, reason: 'The email could not be delivered' }));
+
+    return { ...member, credentialsEmail: { ...delivery, to: member.email } };
+  }
+
+  /**
+   * Edits an existing agent's profile: the two name columns, the sign-in email
+   * and the phone on `users`, and the title, timezone and lead cap on
+   * `agent_profiles`. One PATCH, two tables, one transaction.
+   *
+   * What it deliberately CANNOT change, and why each is absent rather than
+   * merely ignored — updateAgentSchema is .strict(), so every one of these is a
+   * 400 rather than a silent no-op:
+   *   role                — an agent promoting themselves is the whole reason
+   *                         POST hardcodes role='agent'
+   *   organization        — always the session's, never the body's
+   *   membership status   — that is setStatus below, with rules of its own
+   *   password            — set at creation and nowhere else
+   *   routing_enabled,
+   *   agent status        — routing is not built; writing either here would be
+   *                         configuring a feature that does not exist yet
+   *
+   * Only an agent's profile is editable through this route. An owner has no
+   * agent_profiles row by design (signup creates none), so "edit the owner"
+   * would mean minting one, turning that account into a routing target as a
+   * side effect of a name change.
+   */
+  async updateProfile(
+    organizationId: string,
+    callerUserId: string,
+    targetUserId: string,
+    input: UpdateAgentInput,
+  ): Promise<OrganizationMemberDTO> {
+    // The same two reads, the same shape and the same scoping as setStatus
+    // below — see the comment there for why this is findFirst rather than a
+    // composite findUnique.
+    const [organization, member] = await Promise.all([
+      this.prisma.organizations.findUnique({
+        where: { id: organizationId },
+        select: { timezone: true },
+      }),
+      this.prisma.organization_members.findFirst({
+        where: { organization_id: organizationId, user_id: targetUserId },
+        select: { id: true, ...memberSelect(organizationId) },
+      }),
+    ]);
+
+    // A member of another organization and a user id that does not exist are
+    // the same 404, for the same reason as setStatus: telling them apart
+    // confirms the existence of accounts in other tenants.
+    if (!member) {
+      throw new AppError('NOT_FOUND', 'No such member in this organization');
+    }
+
+    if (member.role !== 'agent') {
+      throw new AppError('FORBIDDEN', 'Only an agent profile can be edited here');
+    }
+
+    // At most one, guaranteed by the (organization_id, user_id) unique index.
+    const profile = member.users.agent_profiles[0];
+
+    // '' means "clear it" — the same fold create() applies to a blank phone.
+    // undefined still means "leave it alone", which is why this cannot collapse
+    // into a single `?? null`.
+    const blankToNull = (v: string | null | undefined): string | null | undefined =>
+      v === undefined ? undefined : v === null || v.length === 0 ? null : v;
+
+    const phone = blankToNull(input.phone);
+    const title = blankToNull(input.title);
+
+    // Resolved before the transaction so display_name and the profile's mirror
+    // columns are computed from the values that will actually be stored.
+    const firstName = input.firstName ?? member.users.first_name;
+    const lastName = input.lastName ?? member.users.last_name;
+    const email = input.email ?? member.users.email;
+
+    const changed = Object.keys(input);
+    const emailChanged = input.email !== undefined && input.email !== member.users.email;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // The same lower(email) comparison the database's expression index
+        // makes, so Test@Example.com cannot slip past test@example.com. The
+        // P2002 catch below is still the authority; this exists so a clash is a
+        // clean 409 rather than a raw Prisma error. Scoped to OTHER users:
+        // re-saving the form without touching the email must not 409 against
+        // the agent's own row.
+        if (emailChanged) {
+          const taken = await tx.$queryRaw<Array<{ id: string }>>`
+            select id from users where lower(email) = ${email} limit 1
+          `;
+          if (taken.some((u) => u.id !== targetUserId)) {
+            throw new AppError('EMAIL_TAKEN', 'An account with that email already exists');
+          }
+        }
+
+        // users.id is a primary key, and the row was just read under the
+        // organization scope, so this cannot address a user in another tenant.
+        await tx.users.update({
+          where: { id: targetUserId },
+          data: {
+            ...(input.firstName !== undefined ? { first_name: input.firstName } : {}),
+            ...(input.lastName !== undefined ? { last_name: input.lastName } : {}),
+            ...(input.email !== undefined ? { email } : {}),
+            ...(phone !== undefined ? { phone } : {}),
+            // Not @updatedAt in the schema, so it moves here or it never moves.
+            updated_at: new Date(),
+          },
+        });
+
+        // agent_profiles carries its own copies of the name, email and phone,
+        // written by create(). They are kept in step here rather than left to
+        // drift: nothing reads them today, but a stale copy is a bug waiting
+        // for the first feature that does.
+        const displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || email;
+
+        const profileData = {
+          display_name: displayName,
+          email,
+          ...(phone !== undefined ? { phone } : {}),
+          ...(title !== undefined ? { title } : {}),
+          ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+          ...(input.maxActiveLeads !== undefined ? { max_active_leads: input.maxActiveLeads } : {}),
+          updated_at: new Date(),
+        };
+
+        if (profile) {
+          // By primary key: agent_profiles is tenant-scoped, and `id` is one of
+          // the globally-unique keys the tenancy guard accepts.
+          await tx.agent_profiles.update({ where: { id: profile.id }, data: profileData });
+        } else {
+          // An agent whose profile row is missing. create() has always written
+          // one, but rows predating it exist. Backfilling here is what makes the
+          // edit succeed instead of silently dropping half of it; every column
+          // not supplied keeps its database default.
+          await tx.agent_profiles.create({
+            data: {
+              organization_id: organizationId,
+              user_id: targetUserId,
+              ...profileData,
+              ...(phone === undefined ? { phone: member.users.phone } : {}),
+            },
+          });
+        }
+
+        await tx.audit_logs.create({
+          data: {
+            id: newId(),
+            organization_id: organizationId,
+            actor_type: 'user',
+            actor_id: callerUserId,
+            action: 'member.updated',
+            entity_type: 'member',
+            entity_id: targetUserId,
+            // Field NAMES, not values: the current values are readable from the
+            // row, and an audit table is the last place to accumulate a second
+            // copy of everyone's phone number. The email is the exception, for
+            // the same reason member.created records it — it is the credential,
+            // so "who could sign in as this account, and when did that change"
+            // must be answerable from the log alone.
+            payload: {
+              changed,
+              ...(emailChanged ? { email: { from: member.users.email, to: email } } : {}),
+            } as never,
+          },
+        });
+      });
+    } catch (err) {
+      // Lost the race against a concurrent signup or edit for the same address.
+      if (isDuplicateEmail(err)) {
+        throw new AppError('EMAIL_TAKEN', 'An account with that email already exists');
+      }
+      throw err;
+    }
+
+    // Re-read rather than patching the row already in hand: the write touched
+    // two tables and may have created a third row, and a hand-assembled answer
+    // is exactly where a response drifts from what was actually stored.
+    const updated = await this.prisma.organization_members.findFirst({
+      where: { organization_id: organizationId, user_id: targetUserId },
+      select: memberSelect(organizationId),
+    });
+
+    return toMemberDTO(updated ?? member, organization?.timezone ?? DEFAULT_TIMEZONE);
   }
 
   /**

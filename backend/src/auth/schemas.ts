@@ -39,6 +39,23 @@ const isValidTimeZone = (tz: string): boolean => {
  */
 export const timezoneSchema = z.string().trim().max(100).refine(isValidTimeZone).optional().catch(undefined);
 
+/**
+ * The same validity rule, without the swallow.
+ *
+ * `timezoneSchema` above is for a timezone the BROWSER detected and the user
+ * never saw: silently dropping one the runtime cannot name is right there,
+ * because the caller's fallback is a better answer than a 400 about a field
+ * nobody filled in. A timezone the owner PICKED from a form is the opposite —
+ * quietly ignoring it would save the agent's profile, report success, and leave
+ * the old zone in place, which is the kind of lie that is only discovered when
+ * routing calls someone at 3am.
+ */
+export const requiredTimezoneSchema = z
+  .string()
+  .trim()
+  .max(100)
+  .refine(isValidTimeZone, 'Must be a valid IANA timezone, e.g. America/Chicago');
+
 export const signupSchema = z.object({
   email: emailSchema,
   password: passwordSchema,

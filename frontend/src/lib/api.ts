@@ -10,6 +10,9 @@ const BASE = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_KEY = 'ep_auth_token';
 
+/** Fired on the window whenever the stored token is dropped. */
+export const SESSION_ENDED_EVENT = 'ep:session-ended';
+
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'INVALID_CREDENTIALS'
@@ -129,7 +132,43 @@ export const clearToken = (): void => {
   } catch {
     /* nothing to clear */
   }
+  // Removing the token is not the same as leaving the authed UI: React is
+  // holding the session in state and nothing re-reads localStorage until the
+  // next reload. AuthProvider listens for this and resets, so a session that
+  // dies mid-use lands on the login page instead of on a shell that 401s.
+  try {
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+  } catch {
+    /* no window (tests, SSR): the token is still gone, which is the point */
+  }
 };
+
+/**
+ * Codes that mean "this token is finished". INVALID_CREDENTIALS is also a 401
+ * but comes from the login form, where there is no session to end - treating it
+ * as one would clear a token the user is about to replace anyway, and would
+ * bounce a signed-in user who mistyped a password on a re-auth prompt.
+ */
+const SESSION_ENDING_CODES = ['UNAUTHENTICATED', 'TOKEN_EXPIRED'];
+
+/**
+ * The one place a dead session is recognised, for every fetch wrapper in the
+ * app: this module's apiFetch, api/client.ts and lib/liveEvents.ts. Put the
+ * decision in each caller instead and they drift, which is exactly how
+ * client.ts and liveEvents.ts ended up leaving a dead token in localStorage.
+ *
+ * A 403 is a permission error on a perfectly good session and never ends it;
+ * neither does a 404, a 429 or a 500. Returns whether the session was ended.
+ */
+export function endSessionIfUnauthenticated(status: number, code?: string): boolean {
+  if (status !== 401) return false;
+  // A 401 whose envelope we could not read (a proxy's HTML error page) is still
+  // a rejected token: fail towards the login page rather than towards a loop.
+  if (code !== undefined && !SESSION_ENDING_CODES.includes(code)) return false;
+
+  clearToken();
+  return true;
+}
 
 export async function apiFetch<T>(
   path: string,
@@ -170,7 +209,7 @@ export async function apiFetch<T>(
 
     // An expired token is not an error the user needs to read — it is just a
     // session that ended. Drop it so the guard falls through to the login page.
-    if (code === 'TOKEN_EXPIRED') clearToken();
+    endSessionIfUnauthenticated(response.status, code);
 
     throw new ApiError(code, envelope?.message ?? MESSAGES[code] ?? MESSAGES.INTERNAL, response.status, envelope?.details);
   }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   ApiError,
+  SESSION_ENDED_EVENT,
   api,
   clearToken,
   getToken,
@@ -10,6 +11,7 @@ import {
   type MeResponse,
   type Role,
 } from '../lib/api';
+import { startIdleWatch } from '../lib/idle';
 
 type AuthStatus = 'loading' | 'authed' | 'anon';
 
@@ -104,6 +106,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [restoreNonce]);
 
   /**
+   * Any fetch wrapper that drops a rejected token (endSessionIfUnauthenticated)
+   * ends the session here too. Without this the token is gone from localStorage
+   * but the shell keeps rendering as 'authed' until the next reload, which is
+   * the state a 24-hour expiry now puts users in daily rather than weekly.
+   *
+   * Mount-once: the handler only calls setState setters, which are stable.
+   */
+  useEffect(() => {
+    const onSessionEnded = (): void => reset();
+    window.addEventListener(SESSION_ENDED_EVENT, onSessionEnded);
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, onSessionEnded);
+  }, []);
+
+  /**
    * signup and login return {token, user, organization, role} — agentProfileId
    * is a /me field only, so it stays null until the next session restore.
    * Nothing in this slice reads it; refetching purely to fill it in would be a
@@ -127,6 +143,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRestoreError(null);
     reset();
   };
+
+  /**
+   * Idle timeout. Signing in flips status to 'authed' and starts a fresh
+   * 30-minute watch; logging out (or an idle logout itself) flips it back and
+   * the cleanup clears the timer and the listeners. Nothing here touches the
+   * JWT - the token's own 24-hour expiry is still the session ceiling.
+   */
+  useEffect(() => startIdleWatch(status, logout), [status]);
 
   const retryRestore = (): void => setRestoreNonce((n) => n + 1);
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getToken } from './api';
+import { endSessionIfUnauthenticated, getToken } from './api';
 
 /**
  * The push side of the live screens: a stream that says "something changed",
@@ -58,8 +58,11 @@ function parseFrame(frame: string): unknown | null {
  *
  * Resolves on a clean end (the server closed, a proxy reaped an idle
  * connection); throws on anything else, which the caller turns into a retry.
+ *
+ * Exported for the session tests: useLiveEvents would need a React renderer and
+ * a fake timer for the backoff loop to reach the same two lines.
  */
-async function pump(
+export async function pump(
   signal: AbortSignal,
   onEvent: (e: LiveEvent) => void,
   onOpen: () => void,
@@ -72,9 +75,11 @@ async function pump(
     signal,
   });
 
-  // 401/403 means the session is gone. Distinguished here because retrying it
-  // on a timer forever is pure noise — the poll will surface the real error.
+  // 401/403 both stop the retry loop: retrying either on a timer forever is
+  // pure noise, and the poll will surface the real error. Only the 401 ends the
+  // session though — a 403 is a permission error on a token that is still good.
   if (res.status === 401 || res.status === 403) {
+    endSessionIfUnauthenticated(res.status);
     throw Object.assign(new Error('session rejected'), { fatal: true });
   }
   if (!res.ok || !res.body) throw new Error(`stream failed (${res.status})`);

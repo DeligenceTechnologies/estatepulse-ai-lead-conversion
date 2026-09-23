@@ -1,4 +1,4 @@
-import { getToken } from '../lib/api';
+import { endSessionIfUnauthenticated, getToken } from '../lib/api';
 
 /**
  * Typed client for the EstatePulse ingestion API.
@@ -67,6 +67,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = (body as { error?: { code?: string; message?: string } } | null)?.error;
+
+    // A rejected session ends here exactly as it does in lib/api's apiFetch.
+    // Without this the view showed "your session has expired" inside a shell
+    // that still believed it was signed in, until the user reloaded by hand.
+    endSessionIfUnauthenticated(res.status, err?.code);
+
     throw new ApiError(
       res.status,
       err?.code ?? `HTTP_${res.status}`,
