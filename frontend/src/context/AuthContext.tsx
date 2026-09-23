@@ -4,7 +4,7 @@ import {
   SESSION_ENDED_EVENT,
   api,
   clearToken,
-  getToken,
+  restorableToken,
   setToken,
   type AuthOrganization,
   type AuthUser,
@@ -39,11 +39,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   /**
-   * Computed synchronously on the very first render. With no token there is
-   * nothing to restore, so the answer is 'anon' immediately — no fetch, no
-   * spinner, and no flash of the login page for a user who is signed in.
+   * Computed synchronously on the very first render. With no restorable token
+   * there is nothing to restore, so the answer is 'anon' immediately — no
+   * fetch, no spinner, and no flash of the login page for a user who is signed
+   * in. A token the persisted idle deadline has already outlived is not
+   * restorable, and restorableToken has dropped it by the time this reads.
    */
-  const [status, setStatus] = useState<AuthStatus>(() => (getToken() ? 'loading' : 'anon'));
+  const [status, setStatus] = useState<AuthStatus>(() => (restorableToken() ? 'loading' : 'anon'));
   const [user, setUser] = useState<AuthUser | null>(null);
   const [organization, setOrganization] = useState<AuthOrganization | null>(null);
   const [role, setRole] = useState<Role | null>(null);
@@ -69,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    if (!getToken()) {
+    if (!restorableToken()) {
       reset();
       return;
     }

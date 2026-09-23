@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearToken, getToken, setToken } from './api';
-import { IDLE_TIMEOUT_MS, startIdleWatch } from './idle';
+import { IDLE_TIMEOUT_MS, markActivity, readActivity, startIdleWatch } from './idle';
 
 /**
  * Same plain-node setup as session.spec.ts: the code under test needs a
@@ -131,6 +131,11 @@ describe('idle session timeout', () => {
 
     vi.advanceTimersByTime(nearly);
 
+    // What logging in does, and the reason the second watcher does not inherit
+    // the first one's deadline: a watcher now reads the persisted stamp, and
+    // signing in writes a new one.
+    setToken('a-second-token');
+
     const second = vi.fn();
     startIdleWatch('authed', second);
 
@@ -184,5 +189,97 @@ describe('idle session timeout', () => {
     // storage, so the JWT's own 24-hour expiry is untouched.
     expect(getToken()).toBeNull();
     expect(localStorageStub.setItem).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The half of the timeout that outlives the tab. What the boot check makes of a
+ * stored stamp is restorableToken's, and lives in session.spec.ts; this is the
+ * watcher's own end - writing the stamp, and reading back one it did not write.
+ */
+describe('persisted idle deadline', () => {
+  it('records activity so the deadline survives the tab', () => {
+    startIdleWatch('authed', vi.fn());
+
+    vi.advanceTimersByTime(20 * 60_000);
+    activity('keydown');
+
+    expect(readActivity()).toBe(Date.now());
+  });
+
+  it('throttles the write rather than persisting every mouse movement', () => {
+    startIdleWatch('authed', vi.fn());
+    localStorageStub.setItem.mockClear();
+
+    for (let i = 0; i < 500; i += 1) activity('mousemove');
+    expect(localStorageStub.setItem).not.toHaveBeenCalled();
+
+    // One write per throttle window, however many events land inside it.
+    vi.advanceTimersByTime(1000);
+    for (let i = 0; i < 500; i += 1) activity('mousemove');
+    expect(localStorageStub.setItem).toHaveBeenCalledOnce();
+  });
+
+  it('continues the stored deadline across a reload', () => {
+    // A tab closed after 25 idle minutes: the watcher is torn down, the stamp
+    // stays behind.
+    startIdleWatch('authed', vi.fn())?.();
+    vi.advanceTimersByTime(25 * 60_000);
+
+    const onIdle = vi.fn();
+    startIdleWatch('authed', onIdle);
+
+    // Five minutes of the original thirty are left, not a fresh thirty.
+    vi.advanceTimersByTime(5 * 60_000 - 1000);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it('keeps this tab alive while another tab is being used', () => {
+    const onIdle = vi.fn();
+    startIdleWatch('authed', onIdle);
+
+    // The other tab is another watcher writing the same key.
+    vi.advanceTimersByTime(25 * 60_000);
+    markActivity();
+
+    // This tab's own deadline passes without a logout...
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(onIdle).not.toHaveBeenCalled();
+
+    // ...and the new one lands 30 minutes after the other tab's activity.
+    vi.advanceTimersByTime(25 * 60_000 - 1000);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it('stamps the deadline when a session begins', () => {
+    store.clear();
+
+    setToken('a-fresh-token');
+
+    expect(readActivity()).toBe(Date.now());
+  });
+
+  it('clears the stamp along with the token', () => {
+    expect(readActivity()).not.toBeNull();
+
+    clearToken();
+
+    expect(getToken()).toBeNull();
+    expect(readActivity()).toBeNull();
+    // Both keys, and nothing of the session left behind.
+    expect(store.size).toBe(0);
+  });
+
+  it('clears both keys when the idle timeout is what ends the session', () => {
+    startIdleWatch('authed', idleLogout(() => {}));
+
+    vi.advanceTimersByTime(IDLE_TIMEOUT_MS);
+
+    expect(getToken()).toBeNull();
+    expect(readActivity()).toBeNull();
   });
 });
