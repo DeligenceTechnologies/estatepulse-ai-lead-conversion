@@ -10,31 +10,24 @@ import {
   Cpu, 
   Sliders, 
   BarChart3, 
-  Globe, 
-  PlusCircle, 
   Flame, 
-  RotateCcw,
   Sparkles,
-  Zap,
   Building2,
+  LogOut,
   Webhook
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
+import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
 
-interface SidebarProps {
-  onOpenNewLead: () => void;
-  onOpenWebhookTester: () => void;
-}
-
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTester }) => {
+export const Sidebar: React.FC = () => {
   const { 
     activeView, 
     setActiveView, 
     leads, 
     orgSettings, 
-    resetDemoData, 
     setPreCallLeadId 
   } = useApp();
+  const { user, role, logout } = useAuth();
 
   const locked = isLockedView(activeView);
   const hotLeadsCount = leads.filter(l => l.temperature === 'hot').length;
@@ -186,52 +179,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenNewLead, onOpenWebhookTe
           );
         })}
 
-        <div className="pt-3 pb-1 text-[10px] uppercase tracking-wider font-semibold text-slate-300 px-3">
-          Public Experience
-        </div>
-        <button
-          onClick={() => setActiveView('landing_page')}
-          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-            activeView === 'landing_page' 
-              ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30' 
-              : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/60'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            <Globe className="w-4 h-4 text-emerald-400" />
-            <span>Public Landing Page</span>
-          </div>
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">Demo Mode</span>
-        </button>
       </nav>
 
-      {/* Action Buttons & Footer */}
-      <div className="p-3 border-t border-slate-800/80 space-y-2 bg-slate-950/40">
+      {/* Who is signed in, and the way out. */}
+      <div className="p-3 border-t border-slate-800/80 bg-slate-950/40 flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 font-mono shrink-0">
+          {initialsFor(user)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-slate-200 truncate">{displayName(user)}</div>
+          <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
+        </div>
         <button
-          onClick={onOpenNewLead}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-950 transition-all cursor-pointer"
+          onClick={logout}
+          title="Sign out"
+          aria-label="Sign out"
+          className="p-2 bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-300 rounded-lg transition-colors cursor-pointer shrink-0"
         >
-          <PlusCircle className="w-3.5 h-3.5" />
-          <span>New Inbound Lead</span>
-        </button>
-
-        <button
-          onClick={onOpenWebhookTester}
-          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-xs font-medium border border-slate-700/60 transition-all cursor-pointer"
-        >
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span>Test Webhook Payload</span>
-        </button>
-
-        <button
-          onClick={resetDemoData}
-          title="Reset to Austin Home Advisors seed demo state"
-          className="w-full flex items-center justify-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 py-1 transition-colors cursor-pointer"
-        >
-          <RotateCcw className="w-3 h-3" />
-          <span>Reset Demo Scenario</span>
+          <LogOut className="w-3.5 h-3.5" />
         </button>
       </div>
+
     </aside>
   );
 };
