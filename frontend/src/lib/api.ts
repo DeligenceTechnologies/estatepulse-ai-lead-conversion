@@ -6,6 +6,8 @@
  * generated Prisma types, which must not leak into the browser bundle.
  */
 
+import { IDLE_TIMEOUT_MS, clearActivity, markActivity, readActivity } from './idle';
+
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_KEY = 'ep_auth_token';
@@ -124,6 +126,35 @@ export const setToken = (token: string): void => {
   } catch {
     /* session simply will not survive a reload */
   }
+  // Signing in is activity, and starts the idle deadline here rather than on
+  // the first mousemove: a tab closed straight after login is still subject to
+  // it when it reopens.
+  markActivity();
+};
+
+/**
+ * The token a session restore may use, or null. The one place the persisted
+ * idle deadline is judged, and it runs before GET /api/auth/me, which would
+ * restore any token inside its 24 hours without knowing about idleness.
+ *
+ * A missing stamp is initialised rather than treated as expired: it is what
+ * every session predating this feature looks like. A stamp inside the window
+ * is read but never rewritten, so a reload continues the deadline instead of
+ * being granted a fresh 30 minutes.
+ */
+export const restorableToken = (): string | null => {
+  const token = getToken();
+  if (token === null) return null;
+
+  const activity = readActivity();
+  if (activity === null) {
+    markActivity();
+    return token;
+  }
+  if (Date.now() - activity < IDLE_TIMEOUT_MS) return token;
+
+  clearToken();
+  return null;
 };
 
 export const clearToken = (): void => {
@@ -132,6 +163,11 @@ export const clearToken = (): void => {
   } catch {
     /* nothing to clear */
   }
+  // The deadline belongs to the session, so it goes with it. Every way a
+  // session ends - sign out, idle timeout, a 401 from any fetch wrapper -
+  // already comes through here, which is why there is nothing to clean up
+  // anywhere else.
+  clearActivity();
   // Removing the token is not the same as leaving the authed UI: React is
   // holding the session in state and nothing re-reads localStorage until the
   // next reload. AuthProvider listens for this and resets, so a session that

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api as ingestApi } from '../api/client';
-import { SESSION_ENDED_EVENT, api, getToken, setToken } from './api';
+import { SESSION_ENDED_EVENT, api, clearToken, getToken, restorableToken, setToken } from './api';
+import { IDLE_TIMEOUT_MS, clearActivity, markActivity, readActivity } from './idle';
 import { pump } from './liveEvents';
 
 /**
@@ -12,6 +13,7 @@ import { pump } from './liveEvents';
  * and a jsdom dependency to supply them would be the larger half of this file.
  */
 const TOKEN_KEY = 'ep_auth_token';
+const ACTIVITY_KEY = 'ep_last_activity';
 const store = new Map<string, string>();
 
 vi.stubGlobal('localStorage', {
@@ -145,5 +147,68 @@ describe('lib/liveEvents pump', () => {
 
     await expect(pump(new AbortController().signal, noop, noop)).rejects.toThrow('stream failed');
     expect(getToken()).toBe('a-live-token');
+  });
+});
+
+/**
+ * The other way a session ends: not an HTTP failure, but the persisted idle
+ * deadline having passed while the app was not running. This is the boot check
+ * AuthProvider makes before it calls /api/auth/me.
+ */
+describe('lib/api restorableToken', () => {
+  it('restores a token whose last activity is inside the idle window', () => {
+    const at = Date.now() - 29 * 60_000;
+    markActivity(at);
+
+    expect(restorableToken()).toBe('a-live-token');
+    expect(getToken()).toBe('a-live-token');
+    // Booting is not by itself 30 more minutes: one of them is still left.
+    expect(readActivity()).toBe(at);
+  });
+
+  it('drops a token whose last activity is outside the idle window', () => {
+    markActivity(Date.now() - (IDLE_TIMEOUT_MS + 1));
+
+    // Refused before /me is ever called: /me would restore this token happily,
+    // since the JWT itself is good for 24 hours.
+    expect(restorableToken()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(readActivity()).toBeNull();
+  });
+
+  it('is deterministic at exactly 30 minutes', () => {
+    // The deadline is inclusive, matching watchIdle, which fires the moment the
+    // remaining time reaches zero rather than after it.
+    markActivity(Date.now() - IDLE_TIMEOUT_MS);
+    expect(restorableToken()).toBeNull();
+
+    setToken('a-live-token');
+    markActivity(Date.now() - (IDLE_TIMEOUT_MS - 1));
+    expect(restorableToken()).toBe('a-live-token');
+  });
+
+  it.each([
+    ['not-a-number', 'unparseable'],
+    ['0', 'out of range'],
+  ])('treats %o in storage as no stamp rather than an expired one', (raw) => {
+    store.set(ACTIVITY_KEY, raw);
+
+    // Corrupt is not evidence that anyone was idle.
+    expect(restorableToken()).toBe('a-live-token');
+    expect(readActivity()).not.toBeNull();
+  });
+
+  it('initialises the stamp for a session that predates the feature', () => {
+    clearActivity();
+
+    expect(restorableToken()).toBe('a-live-token');
+    expect(readActivity()).not.toBeNull();
+  });
+
+  it('reports no token when there is none, without writing a stamp', () => {
+    clearToken();
+
+    expect(restorableToken()).toBeNull();
+    expect(readActivity()).toBeNull();
   });
 });
