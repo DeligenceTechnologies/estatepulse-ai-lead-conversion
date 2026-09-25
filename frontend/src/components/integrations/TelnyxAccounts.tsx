@@ -116,7 +116,11 @@ export const TelnyxAccounts: React.FC<{
                       {a.label || 'Unnamed account'}
                     </div>
                     <div className="text-[11px] text-slate-500 truncate font-mono">
-                      {a.apiKeyMasked || 'no key'} · {a.fromNumber || 'no number'}
+                      {/* The masked key used to sit here as a way to tell two
+                          accounts apart. The number does that job without
+                          putting a credential fragment on screen, and the label
+                          above it is the real identifier. */}
+                      {a.fromNumber || 'no number assigned'}
                     </div>
                   </>
                 )}

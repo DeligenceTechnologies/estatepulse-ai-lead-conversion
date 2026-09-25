@@ -15,7 +15,13 @@ import {
   RefreshCw,
   PhoneCall,
   Plug,
-  ArrowRight
+  ArrowRight,
+  Plus,
+  Pencil,
+  Trash2,
+  Voicemail,
+  MessageSquare,
+  Lock
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -32,11 +38,19 @@ import {
   extractTone,
   BACKGROUND_AUDIO_OPTIONS,
   LANGUAGE_BOOST_OPTIONS,
+  NOISE_SUPPRESSION_OPTIONS,
+  LEAD_VARIABLES,
   AssistantTool,
+  NoiseSuppression,
+  VoicemailAction,
   toolLabel,
+  setTools as saveTools,
+  detachTool,
 } from '../../utils/assistantApi';
 import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
+import { ContactWindowCard } from './ContactWindowCard';
+import { ToolEditorModal } from '../modals/ToolEditorModal';
 
 export const AISettingsView: React.FC = () => {
   const { orgSettings, updateOrgSettings, setActiveView } = useApp();
@@ -44,8 +58,6 @@ export const AISettingsView: React.FC = () => {
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
   const [systemPrompt, setSystemPrompt] = useState(orgSettings.aiSystemPrompt);
-  const [startHour, setStartHour] = useState(orgSettings.businessHours.start);
-  const [endHour, setEndHour] = useState(orgSettings.businessHours.end);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Provider connection (Bring-Your-Own-Telnyx).
@@ -101,8 +113,28 @@ export const AISettingsView: React.FC = () => {
   const [eotTimeoutMs, setEotTimeoutMs] = useState(5000);
   const [userIdleSecs, setUserIdleSecs] = useState(0);
   const [postCall, setPostCall] = useState(false);
+  // Call quality and behaviour
+  const [userIdleReplySecs, setUserIdleReplySecs] = useState(10);
+  const [noiseSuppression, setNoiseSuppression] = useState<NoiseSuppression>('disabled');
+  const [fallbackDestination, setFallbackDestination] = useState('');
+  const [voicemailDetection, setVoicemailDetection] = useState(false);
+  const [voicemailAction, setVoicemailAction] = useState<VoicemailAction>('hangup');
+  const [disableDtmf, setDisableDtmf] = useState(false);
+  const [disableGreetingInterruption, setDisableGreetingInterruption] = useState(false);
+  const [interruptThreshold, setInterruptThreshold] = useState<number | null>(null);
+  const [dynamicVarsWebhook, setDynamicVarsWebhook] = useState('');
+  const [smsEnabled, setSmsEnabled] = useState(false);
+  const [dataRetention, setDataRetention] = useState(true);
+
   // Tools / Workflows
   const [tools, setTools] = useState<AssistantTool[]>([]);
+  const [editingTool, setEditingTool] = useState<AssistantTool | null>(null);
+  const [toolModalOpen, setToolModalOpen] = useState(false);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const [toolBusy, setToolBusy] = useState(false);
+
+  // Prompt helpers
+  const promptRef = React.useRef<HTMLTextAreaElement>(null);
 
   // On mount, pull the live agent config so the UI reflects reality.
   const loadAgent = () => {
@@ -134,6 +166,17 @@ export const AISettingsView: React.FC = () => {
         setEotTimeoutMs(a.eot_timeout_ms);
         setUserIdleSecs(a.user_idle_timeout_secs);
         setPostCall(a.post_call_processing);
+        setUserIdleReplySecs(a.user_idle_reply_secs);
+        setNoiseSuppression(a.noise_suppression);
+        setFallbackDestination(a.fallback_destination);
+        setVoicemailDetection(a.voicemail_detection);
+        setVoicemailAction(a.voicemail_action);
+        setDisableDtmf(a.disable_dtmf);
+        setDisableGreetingInterruption(a.disable_greeting_interruption);
+        setInterruptThreshold(a.interrupt_prediction_threshold);
+        setDynamicVarsWebhook(a.dynamic_variables_webhook_url);
+        setSmsEnabled((a.enabled_features || []).includes('messaging'));
+        setDataRetention(a.data_retention);
         setTools(a.tools || []);
       })
       .catch((e) => setAgentError(e.message))
@@ -154,11 +197,9 @@ export const AISettingsView: React.FC = () => {
       aiAgentName: aiName,
       aiTone: tone,
       aiSystemPrompt: systemPrompt,
-      businessHours: {
-        ...orgSettings.businessHours,
-        start: startHour,
-        end: endHour,
-      }
+      // businessHours is no longer written from here. Contact hours live in
+      // strategy.guardrails, which is what both schedulers read, and
+      // ContactWindowCard saves them on its own.
     });
 
     // 2) Deploy prompt + tone + voice + call behavior to the live AI voice agent.
@@ -190,11 +231,23 @@ export const AISettingsView: React.FC = () => {
         record_calls: recordCalls,
         max_call_secs: Math.max(60, maxCallMins * 60),
         user_idle_timeout_secs: userIdleSecs,
+        user_idle_reply_secs: userIdleReplySecs,
         post_call_processing: postCall,
+        noise_suppression: noiseSuppression,
+        fallback_destination: fallbackDestination,
+        voicemail_detection: voicemailDetection,
+        voicemail_action: voicemailAction,
+        disable_dtmf: disableDtmf,
+        disable_greeting_interruption: disableGreetingInterruption,
+        interrupt_prediction_threshold: interruptThreshold,
         dynamic_variables,
-        // NOTE: `tools` is intentionally NOT sent — the agent uses provider-managed shared tools
-        // (attached by reference), which can't be safely replaced via a full inline array.
-        // Manage tools in the provider console; this card is view-only.
+        dynamic_variables_webhook_url: dynamicVarsWebhook,
+        enabled_features: smsEnabled ? ['telephony', 'messaging'] : ['telephony'],
+        data_retention: dataRetention,
+        // `tools` is deliberately absent. Tools are saved the moment they are
+        // edited, through their own endpoint, so that saving this form can
+        // never silently rewrite them — and so a shared tool is never forked
+        // into a private copy. See the Tools card below.
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
@@ -205,15 +258,74 @@ export const AISettingsView: React.FC = () => {
     }
   };
 
-  const qualificationChecklist = [
-    { label: 'Buying Intent (Move-in vs Investment vs Relocation)', required: true },
-    { label: 'Timeline to Purchase (<30 days, 1-3 mos, 3-6 mos)', required: true },
-    { label: 'Target Location & Submarkets (North Austin, Round Rock)', required: true },
-    { label: 'Budget Range (Min & Max)', required: true },
-    { label: 'Property Type & Minimum Bedrooms (e.g. 4 beds, Single Family)', required: false },
-    { label: 'Financing Status & Lender Pre-approval Letter', required: false },
-    { label: 'Primary Motivation (Schools, backyard, lease expiration)', required: false },
-  ];
+  /**
+   * Tools are written on their own, not with the rest of the form.
+   *
+   * Each of these sends the assistant's complete list of OWNED tools — shared
+   * ones are filtered out, because they are attached by reference and the
+   * server re-attaches them afterwards. Writing one back inline would fork it
+   * into a private copy that stops tracking the library.
+   */
+  const ownedTools = () => tools.filter((t) => !t.shared);
+
+  const persistTools = async (next: AssistantTool[]) => {
+    setToolError(null);
+    setToolBusy(true);
+    try {
+      const a = await saveTools(next);
+      setTools(a.tools || []);
+    } catch (e: any) {
+      setToolError(e?.message || 'Could not save tools.');
+      throw e;
+    } finally {
+      setToolBusy(false);
+    }
+  };
+
+  const saveTool = async (tool: AssistantTool) => {
+    const owned = ownedTools();
+    // Identity by position: `editingTool` is the very object out of `tools`, so
+    // indexOf finds the one being edited even when two tools look alike.
+    const i = editingTool ? owned.indexOf(editingTool) : -1;
+    await persistTools(i >= 0 ? owned.map((t, j) => (j === i ? tool : t)) : [...owned, tool]);
+  };
+
+  const removeTool = async (tool: AssistantTool) => {
+    if (!confirm(`Remove "${toolLabel(tool)}" from this agent?`)) return;
+    setToolError(null);
+    setToolBusy(true);
+    try {
+      // A shared tool is detached by id and survives in the library; an owned
+      // one only exists here, so removing it from the list is the deletion.
+      const a = tool.shared && tool.id
+        ? await detachTool(tool.id)
+        : await saveTools(ownedTools().filter((t) => t !== tool));
+      setTools(a.tools || []);
+    } catch (e: any) {
+      setToolError(e?.message || 'Could not remove the tool.');
+    } finally {
+      setToolBusy(false);
+    }
+  };
+
+  /** Inserts a variable at the cursor, rather than at the end of the prompt. */
+  const insertVariable = (name: string) => {
+    const el = promptRef.current;
+    const token = `{{${name}}}`;
+    if (!el) {
+      setSystemPrompt((p) => `${p}${token}`);
+      return;
+    }
+    const start = el.selectionStart ?? systemPrompt.length;
+    const end = el.selectionEnd ?? start;
+    setSystemPrompt(systemPrompt.slice(0, start) + token + systemPrompt.slice(end));
+    // After React repaints, put the caret after what was just inserted so the
+    // user can keep typing mid-sentence.
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto text-slate-100">
@@ -326,48 +438,61 @@ export const AISettingsView: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-[11px]">
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
-              <div className="text-slate-500">API key</div>
-              <div className="text-slate-200 font-mono truncate">{status.apiKeyMasked || '—'}</div>
-            </div>
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
-              <div className="text-slate-500">From number</div>
-              <div className="text-slate-200 font-mono truncate">{status.fromNumber || 'none assigned'}</div>
-            </div>
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
-              <div className="text-slate-500">Assistant ID</div>
-              <div className="text-slate-200 font-mono truncate" title={status.assistantId}>
-                {status.assistantId || '—'}
+          {/* Capability, not credentials.
+              The four tiles here used to print the masked API key, the from
+              number, the assistant id and the connect date. The key is a secret
+              even masked and belongs nowhere near a settings page; the id is an
+              internal handle nobody acts on; and the number is already shown, in
+              full and with its controls, by PhoneNumberCard directly below —
+              so it was duplication as well as noise. What is left is the only
+              question this card exists to answer: can this agent call and text
+              right now? */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center gap-2.5 bg-slate-950 border border-emerald-800/40 rounded-xl px-3.5 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-slate-100">Voice calls</div>
+                <div className="text-[11px] text-emerald-400">Ready</div>
               </div>
             </div>
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 min-w-0">
-              <div className="text-slate-500">Connected</div>
-              <div className="text-slate-200 truncate">
-                {status.connectedAt ? new Date(status.connectedAt).toLocaleDateString() : '—'}
+
+            <div
+              className={`flex items-center gap-2.5 bg-slate-950 rounded-xl px-3.5 py-2.5 border ${
+                status.hasMessaging ? 'border-emerald-800/40' : 'border-amber-800/50'
+              }`}
+            >
+              {status.hasMessaging ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-slate-100">SMS messaging</div>
+                <div
+                  className={`text-[11px] ${status.hasMessaging ? 'text-emerald-400' : 'text-amber-400'}`}
+                >
+                  {status.hasMessaging
+                    ? 'Ready'
+                    : 'Assign your number to a Messaging Profile'}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex flex-wrap items-center gap-3 text-[11px]">
-              <span className="flex items-center gap-1 text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Voice calling ready
-              </span>
-              {status.hasMessaging ? (
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> SMS messaging ready
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-amber-400">
-                  <AlertTriangle className="w-3.5 h-3.5" /> SMS unavailable — assign your number to a
-                  Telnyx Messaging Profile
-                </span>
-              )}
-            </div>
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-slate-800">
+            <p className="text-[11px] text-slate-500 min-w-0">
+              {status.connectedAt
+                ? `Connected ${new Date(status.connectedAt).toLocaleDateString(undefined, {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                  })}`
+                : 'Connected'}
+              {status.accountCount > 1 && ` · ${status.accountCount} accounts on file`}
+            </p>
 
             {assistants.length > 0 && (
-              <div className="flex items-center gap-2 text-[11px] ml-auto">
+              <div className="flex items-center gap-2 text-[11px] ml-auto shrink-0">
                 <span className="text-slate-400">Editing agent:</span>
                 <select
                   value={status.assistantId}
@@ -472,6 +597,7 @@ export const AISettingsView: React.FC = () => {
               <span className="text-[11px] text-slate-500 font-normal">— deployed live to your AI voice agent on save</span>
             </label>
             <textarea
+              ref={promptRef}
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={9}
@@ -482,6 +608,32 @@ export const AISettingsView: React.FC = () => {
             <span className="text-[11px] text-slate-500 mt-1 block">
               The selected <span className="text-slate-300">Conversational Tone</span> is appended to this prompt automatically when deployed.
             </span>
+
+            {/* Variable picker. Every name here is one the backend really sends
+                when a call is answered, so nothing offered renders as braces. */}
+            <div className="mt-3">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Insert lead details
+              </span>
+              <p className="text-[11px] text-slate-500 mt-0.5 mb-1.5">
+                Click to drop one in at the cursor. Each is filled with this lead's own details when the call
+                connects.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {LEAD_VARIABLES.map((v) => (
+                  <button
+                    key={v.name}
+                    type="button"
+                    onClick={() => insertVariable(v.name)}
+                    title={`e.g. ${v.example}`}
+                    className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-emerald-600 hover:text-emerald-300 text-slate-400 rounded-md text-[11px] font-mono cursor-pointer transition"
+                  >
+                    {`{{${v.name}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
           </div>
 
         </div>
@@ -571,6 +723,199 @@ export const AISettingsView: React.FC = () => {
           </div>
         </div>
 
+        {/* Call Quality & Reliability — the settings that decide whether a call
+            is worth having at all, rather than how it sounds. */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <PhoneCall className="w-4 h-4 text-sky-400" />
+            Call Quality &amp; Reliability
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">Background Noise Removal</label>
+              <select
+                value={noiseSuppression}
+                onChange={(e) => setNoiseSuppression(e.target.value as NoiseSuppression)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
+              >
+                {NOISE_SUPPRESSION_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                Strips road and office noise from the caller's side before the agent hears it.
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                If the agent fails, send the call to
+              </label>
+              <input
+                type="tel"
+                value={fallbackDestination}
+                onChange={(e) => setFallbackDestination(e.target.value)}
+                placeholder="+15125550147"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                Leave blank to hang up instead. A caller hearing silence is worse than a caller hearing a person.
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Check in after silence (seconds)
+              </label>
+              <input
+                type="number" min={0} max={120}
+                value={userIdleReplySecs}
+                onChange={(e) => setUserIdleReplySecs(Number(e.target.value))}
+                className="w-32 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
+              />
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                How long the agent waits before asking "are you still there?".
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Interruption sensitivity
+                <span className="text-slate-500 font-normal ml-1">
+                  {interruptThreshold == null ? '— automatic' : interruptThreshold.toFixed(2)}
+                </span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range" min={0} max={1} step={0.05}
+                  value={interruptThreshold ?? 0.5}
+                  onChange={(e) => setInterruptThreshold(Number(e.target.value))}
+                  disabled={interruptThreshold == null}
+                  className="flex-1 accent-emerald-500 disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}
+                  className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 whitespace-nowrap cursor-pointer"
+                >
+                  {interruptThreshold == null ? 'Set manually' : 'Automatic'}
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                Higher means the agent is more certain before it stops talking. Raise it if it keeps cutting
+                itself off on "mm-hmm".
+              </span>
+            </div>
+
+            <div className="md:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-3 pt-1">
+              {[
+                {
+                  label: 'Detect voicemail',
+                  icon: <Voicemail className="w-3.5 h-3.5" />,
+                  on: voicemailDetection,
+                  set: setVoicemailDetection,
+                  hint: 'Stops the agent pitching an answering machine.',
+                },
+                {
+                  label: 'Let callers interrupt the greeting',
+                  on: !disableGreetingInterruption,
+                  set: (v: boolean) => setDisableGreetingInterruption(!v),
+                  hint: '',
+                },
+                {
+                  label: 'Ignore keypad presses',
+                  on: disableDtmf,
+                  set: setDisableDtmf,
+                  hint: '',
+                },
+              ].map(({ label, icon, on, set, hint }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => set(!on)}
+                  title={hint}
+                  className="flex items-center gap-2 text-slate-300 cursor-pointer"
+                >
+                  <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                  </span>
+                  <span className="font-semibold flex items-center gap-1.5">{icon}{label}</span>
+                </button>
+              ))}
+            </div>
+
+            {voicemailDetection && (
+              <div className="md:col-span-2">
+                <label className="block text-slate-300 font-semibold mb-1">When it reaches voicemail</label>
+                <select
+                  value={voicemailAction}
+                  onChange={(e) => setVoicemailAction(e.target.value as VoicemailAction)}
+                  className="w-full md:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="hangup">Hang up without leaving a message</option>
+                  <option value="leave_message">Leave a message</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Channels & Data */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-emerald-400" />
+            Channels &amp; Data
+          </h3>
+
+          <div className="space-y-4 text-xs">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              {[
+                {
+                  label: 'Let this agent handle SMS too',
+                  on: smsEnabled,
+                  set: setSmsEnabled,
+                },
+                {
+                  label: 'Keep conversation history at the provider',
+                  on: dataRetention,
+                  set: setDataRetention,
+                },
+              ].map(({ label, on, set }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => set(!on)}
+                  className="flex items-center gap-2 text-slate-300 cursor-pointer"
+                >
+                  <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                  </span>
+                  <span className="font-semibold">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Fetch lead details from your own URL
+                <span className="text-slate-500 font-normal ml-1">— optional</span>
+              </label>
+              <input
+                type="url"
+                value={dynamicVarsWebhook}
+                onChange={(e) => setDynamicVarsWebhook(e.target.value)}
+                placeholder="https://your-portal.com/api/assistant/context"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                Called as each conversation starts, to pull the newest details rather than whatever was true when
+                the call was scheduled. The lead's own fields are already sent without this.
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Advanced Voice */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -656,34 +1001,91 @@ export const AISettingsView: React.FC = () => {
           </button>
         </div>
 
-        {/* Tools / Workflows (view-only — shared tools managed in provider console) */}
+        {/* Tools / Workflows — created, edited and tested here. */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-amber-400" />
-            Tools / Workflows <span className="text-[11px] text-slate-500 font-normal">— what the agent can do during a call</span>
-          </h3>
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-amber-400" />
+              Tools / Workflows <span className="text-[11px] text-slate-500 font-normal">— what the agent can do during a call</span>
+            </h3>
+            <button
+              onClick={() => { setEditingTool(null); setToolModalOpen(true); }}
+              disabled={toolBusy}
+              className="shrink-0 px-3 py-1.5 bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 rounded-lg text-[11px] font-bold hover:bg-emerald-600/30 disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3 h-3" /> Add tool
+            </button>
+          </div>
+
+          {toolError && (
+            <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
+              {toolError}
+            </div>
+          )}
 
           <div className="space-y-2 text-xs">
-            {tools.length === 0 && <p className="text-slate-500">No tools attached.</p>}
+            {tools.length === 0 && (
+              <p className="text-slate-500">
+                No tools yet. Without one the agent can only talk — it cannot transfer a call, hang up or tell
+                your portal what it learned.
+              </p>
+            )}
             {tools.map((t, i) => (
-              <div key={i} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
-                <div>
-                  <span className="font-semibold text-slate-200">{toolLabel(t)}</span>
+              <div key={t.id ?? i} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    {toolLabel(t)}
+                    {t.shared && (
+                      <span
+                        className="text-[9px] uppercase font-mono tracking-wide text-sky-400 bg-sky-950/50 border border-sky-800/50 rounded px-1 py-0.5 flex items-center gap-1"
+                        title="Shared across your agents. Edit it in the provider console; removing it here only detaches it."
+                      >
+                        <Lock className="w-2.5 h-2.5" /> shared
+                      </span>
+                    )}
+                  </span>
                   {t.type === 'transfer' && (
                     <span className="text-slate-500 block mt-0.5">
                       Targets: {(t.transfer?.targets || []).map((x: any) => x.name || x.to).join(', ')}
                     </span>
                   )}
-                  {t.type === 'webhook' && <span className="text-slate-500 block mt-0.5 font-mono break-all">{t.webhook?.url}</span>}
+                  {t.type === 'webhook' && (
+                    <span className="text-slate-500 block mt-0.5 font-mono break-all">
+                      {t.webhook?.method ?? 'POST'} {t.webhook?.url}
+                    </span>
+                  )}
                 </div>
-                <span className="text-[9px] uppercase font-mono tracking-wide text-slate-600 shrink-0">{t.type}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* A shared tool is edited where it lives, not here: this
+                      agent is one of several using it. */}
+                  {!t.shared && (
+                    <button
+                      onClick={() => { setEditingTool(t); setToolModalOpen(true); }}
+                      disabled={toolBusy}
+                      className="p-1.5 text-slate-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
+                      aria-label={`Edit ${toolLabel(t)}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => removeTool(t)}
+                    disabled={toolBusy}
+                    className="p-1.5 text-slate-400 hover:text-rose-400 disabled:opacity-50 cursor-pointer"
+                    aria-label={`Remove ${toolLabel(t)}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
+
           <p className="text-[11px] text-slate-500">
-            These tools are managed in your AI agent console.
-            The high-value one to add there: a <span className="text-slate-300 font-mono">report_qualification</span> webhook to
-            <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;lead_id&#125;&#125;/qualified</span> so the agent reports hot/warm/cold and auto-hands off the lead.
+            Tools save as soon as you add or edit one — they are not part of the Deploy button above.
+            The one worth adding first: a <span className="text-slate-300 font-mono">report_qualification</span> webhook to
+            <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;leadId&#125;&#125;/qualified</span>, so the agent reports
+            hot/warm/cold and hands the lead off by itself.
           </p>
         </div>
 
@@ -719,73 +1121,27 @@ export const AISettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Qualification Rubric (PRD Section 22) */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+        {/* The real org-wide guardrails, read by BOTH schedulers. The card
+            that used to be here bound to the browser's demo store, so editing
+            the contact hours changed nothing the engine ever saw. */}
+        <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+
+        {/* Statements of behaviour, not settings — nothing here is editable. */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-            Active Qualification Rubric (Extracted by AI)
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            Compliance
           </h3>
-          <p className="text-xs text-slate-400">
-            The voice agent conversationally gathers these fields without reading off a rigid checklist:
-          </p>
-
-          <div className="space-y-2 text-xs">
-            {qualificationChecklist.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
-                <span className="text-slate-200 flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{item.label}</span>
-                </span>
-                <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded ${
-                  item.required ? 'bg-rose-950 text-rose-300' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {item.required ? 'Required for Score' : 'Recommended'}
-                </span>
-              </div>
-            ))}
+          <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-[11px] text-slate-300 space-y-1">
+            <div className="text-emerald-400 font-semibold">Strict TCPA STOP enforcement: active</div>
+            <p className="text-slate-400">
+              A reply of "STOP", "UNSUBSCRIBE" or similar sets do-not-contact and cancels every
+              scheduled step, in the strategy and in every sequence.
+            </p>
           </div>
-        </div>
-
-        {/* Business Hours & Compliance Guardrails (PRD Section 23 & 54) */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Clock className="w-4 h-4 text-amber-400" />
-            Contact Window & Safety Guardrails
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Permitted Contact Hours (CST)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={startHour}
-                  onChange={(e) => setStartHour(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-28 text-center"
-                />
-                <span className="text-slate-400">to</span>
-                <input
-                  type="text"
-                  value={endHour}
-                  onChange={(e) => setEndHour(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-28 text-center"
-                />
-              </div>
-              <span className="text-[10px] text-slate-500 mt-1 block">Voice calls outside these hours queue until next window</span>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">DNC & Opt-Out Handling</label>
-              <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-[11px] text-slate-300 space-y-1">
-                <div className="text-emerald-400 font-semibold">Strict TCPA STOP Enforcement: Active</div>
-                <p className="text-slate-400">Any text containing "STOP", "UNSUBSCRIBE", or verbal DNC request immediately cancels all follow-ups.</p>
-              </div>
-            </div>
-          </div>
-
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
-            <span className="font-semibold text-slate-200">Strict Non-Goals Enforced in System Prompt (PRD Section 4 & 23):</span>
-            <p>AI agent never gives legal advice, never guarantees mortgage approval, never makes unverified pricing promises, and escalates to a human agent whenever uncertain.</p>
+            <span className="font-semibold text-slate-200">Strict non-goals enforced in the system prompt:</span>
+            <p>The AI agent never gives legal advice, never guarantees mortgage approval, never makes unverified pricing promises, and escalates to a human whenever uncertain.</p>
           </div>
         </div>
 
@@ -802,6 +1158,16 @@ export const AISettingsView: React.FC = () => {
         </div>
 
       </form>
+      )}
+
+      {/* Outside the form on purpose: the modal saves through its own endpoint,
+          and nesting it here would make Enter inside it submit the whole page. */}
+      {toolModalOpen && (
+        <ToolEditorModal
+          tool={editingTool}
+          onClose={() => { setToolModalOpen(false); setEditingTool(null); }}
+          onSave={saveTool}
+        />
       )}
 
     </div>

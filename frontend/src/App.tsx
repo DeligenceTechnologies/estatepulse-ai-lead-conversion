@@ -16,6 +16,9 @@ import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
 import { LeadSourcesView } from './components/views/LeadSourcesView';
+import { CallsView } from './components/views/CallsView';
+import { ConversationsView } from './components/views/ConversationsView';
+import { FollowUpsView } from './components/views/FollowUpsView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -48,10 +51,10 @@ const AppContent: React.FC = () => {
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
           {activeView === 'dashboard' && <ComingSoonView title="Dashboard" />}
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
-          {activeView === 'conversations' && <ComingSoonView title="Conversations & SMS" />}
-          {activeView === 'calls' && <ComingSoonView title="AI Voice Calls" />}
+          {activeView === 'conversations' && <ConversationsView />}
+          {activeView === 'calls' && <CallsView />}
           {activeView === 'appointments' && <ComingSoonView title="Appointments" />}
-          {activeView === 'followups' && <ComingSoonView title="Follow-Up Sequences" />}
+          {activeView === 'followups' && <FollowUpsView />}
           {activeView === 'agents' && <AgentsView />}
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />

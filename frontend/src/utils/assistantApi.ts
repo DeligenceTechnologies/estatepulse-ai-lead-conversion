@@ -4,18 +4,77 @@ import { apiFetch } from '../lib/api';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** One key/value pair, the shape Telnyx uses for headers everywhere. */
+export interface ToolHeader {
+  name: string;
+  value: string;
+}
+
+/**
+ * A JSON-Schema object describing the arguments the model must supply. Telnyx
+ * takes the real thing, so this is a schema and not a bespoke parameter list.
+ */
+export interface ToolParamSchema {
+  type: 'object';
+  properties: Record<string, { type: string; description?: string }>;
+  required?: string[];
+}
+
+export interface WebhookToolParams {
+  name: string;
+  description: string;
+  url: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  headers?: ToolHeader[];
+  path_parameters?: ToolParamSchema;
+  query_parameters?: ToolParamSchema;
+  body_parameters?: ToolParamSchema;
+  timeout_ms?: number;
+}
+
+export interface TransferToolParams {
+  from?: string;
+  targets: Array<{ name: string; to: string }>;
+  custom_headers?: ToolHeader[];
+}
+
+export type ToolType = 'webhook' | 'transfer' | 'hangup' | 'send_dtmf' | 'handoff' | 'refer';
+
 export interface AssistantTool {
-  type: 'webhook' | 'transfer' | 'hangup' | string;
-  webhook?: any;
-  transfer?: any;
-  hangup?: any;
+  type: ToolType | string;
+  /**
+   * Server-assigned. Present on shared tools (which is how they are detached and
+   * tested) and absent on a tool the user has only just built in the form.
+   */
+  id?: string;
+  /**
+   * True when this tool lives in the account's shared library and is merely
+   * attached here. Read-only: the editor shows those but will not write them
+   * back inline, which is what stops a save forking a shared tool into a copy.
+   */
+  shared?: boolean;
+  webhook?: WebhookToolParams;
+  transfer?: TransferToolParams;
+  hangup?: { description?: string };
+  handoff?: { ai_assistants?: string[]; voice_mode?: 'distinct' | 'same' };
+  refer?: Record<string, any>;
   [k: string]: any;
+}
+
+/** What POST /assistant/tools/:id/test hands back. */
+export interface ToolTestResult {
+  success: boolean;
+  status_code?: number;
+  content_type?: string;
+  response?: string;
+  request?: Record<string, any>;
 }
 
 export interface AssistantConfig {
   id: string;
   name: string;
   model: string;
+  description: string;
   instructions: string;
   greeting: string;
   voice: string;
@@ -31,13 +90,39 @@ export interface AssistantConfig {
   eot_threshold: number;
   eot_timeout_ms: number;
   allow_interruptions: boolean;
+  disable_greeting_interruption: boolean;
+  /** null means "let the model decide" — distinct from 0. */
+  interrupt_prediction_threshold: number | null;
   record_calls: boolean;
   max_call_secs: number;
   user_idle_timeout_secs: number;
+  user_idle_reply_secs: number;
+  disable_dtmf: boolean;
+  noise_suppression: NoiseSuppression;
+  fallback_destination: string;
+  /** Answering-machine detection: skip the pitch when a machine picks up. */
+  voicemail_detection: boolean;
+  voicemail_action: VoicemailAction;
   post_call_processing: boolean;
+  enabled_features: string[];
+  messaging_profile_id: string;
+  /** 0 means no timeout. */
+  messaging_inactivity_minutes: number;
+  data_retention: boolean;
   dynamic_variables: Record<string, string>;
+  dynamic_variables_webhook_url: string;
   tools: AssistantTool[];
 }
+
+export type NoiseSuppression = 'disabled' | 'krisp' | 'aicoustics' | 'deepfilternet';
+export type VoicemailAction = 'hangup' | 'leave_message';
+
+export const NOISE_SUPPRESSION_OPTIONS: Array<{ value: NoiseSuppression; label: string }> = [
+  { value: 'disabled', label: 'Off' },
+  { value: 'krisp', label: 'Krisp' },
+  { value: 'aicoustics', label: 'ai-coustics' },
+  { value: 'deepfilternet', label: 'DeepFilterNet' },
+];
 
 export type AssistantPatch = Partial<Omit<AssistantConfig, 'id' | 'name'>>;
 
@@ -160,6 +245,38 @@ export const updateAssistant = (patch: AssistantPatch) =>
 export const listModels = () =>
   apiFetch<{ models: string[] }>('/assistant/models', { auth: true }).then((d) => d.models).catch(() => [] as string[]);
 
+// ---- Tools ----
+/**
+ * Replaces the assistant's own tools. Pass only the non-shared ones: shared
+ * tools are attached by reference and the server re-attaches them afterwards,
+ * so including them here would be asking for a private copy.
+ */
+export const setTools = (tools: AssistantTool[]) =>
+  apiFetch<{ assistant: AssistantConfig }>('/assistant/tools', {
+    method: 'PUT',
+    body: { tools },
+    auth: true,
+  }).then((d) => d.assistant);
+
+/** Detaches a shared tool. The tool stays in the account library. */
+export const detachTool = (toolId: string) =>
+  apiFetch<{ assistant: AssistantConfig }>(`/assistant/tools/${toolId}`, {
+    method: 'DELETE',
+    auth: true,
+  }).then((d) => d.assistant);
+
+/** Calls a webhook tool for real with the arguments given. */
+export const testTool = (
+  toolId: string,
+  args: Record<string, unknown>,
+  dynamicVariables: Record<string, unknown> = {},
+) =>
+  apiFetch<{ result: ToolTestResult }>(`/assistant/tools/${toolId}/test`, {
+    method: 'POST',
+    body: { arguments: args, dynamic_variables: dynamicVariables },
+    auth: true,
+  }).then((d) => d.result);
+
 // ---- Numbers ----
 export function searchNumbers(params: { country?: string; area?: string; features?: string; type?: string; limit?: number }) {
   const q = new URLSearchParams();
@@ -181,13 +298,92 @@ export const LANGUAGE_BOOST_OPTIONS = ['English', 'Spanish', 'French', 'German',
 // ---- Tools / Workflows helpers ----
 export function toolLabel(t: AssistantTool): string {
   if (t.type === 'transfer') {
-    const to = t.transfer?.targets?.[0]?.to || t.transfer?.to || '';
+    const to = t.transfer?.targets?.[0]?.to || (t.transfer as any)?.to || '';
     return `Transfer${to ? ` → ${to}` : ''}`;
   }
   if (t.type === 'webhook') return `Webhook: ${t.webhook?.name || t.webhook?.url || 'unnamed'}`;
   if (t.type === 'hangup') return 'Hang up';
+  if (t.type === 'send_dtmf') return 'Send keypad tones';
+  if (t.type === 'handoff') return 'Hand off to another agent';
+  if (t.type === 'refer') return 'SIP refer';
   return t.type;
 }
+
+/** What each tool type is for, in the words of someone running an office. */
+export const TOOL_TYPE_INFO: Record<string, { label: string; blurb: string }> = {
+  webhook: {
+    label: 'Webhook',
+    blurb: 'Call your own API mid-conversation — look something up, or report what the agent learned.',
+  },
+  transfer: {
+    label: 'Transfer',
+    blurb: 'Hand the live call to a real person on another number.',
+  },
+  hangup: {
+    label: 'Hang up',
+    blurb: 'Let the agent end the call itself once the conversation is finished.',
+  },
+  send_dtmf: {
+    label: 'Keypad tones',
+    blurb: 'Let the agent press phone keys, for navigating an IVR menu.',
+  },
+  handoff: {
+    label: 'Handoff',
+    blurb: 'Pass the conversation to a different AI agent that handles another specialism.',
+  },
+};
+
+/** A blank, valid tool of the given type — what the editor starts from. */
+export function blankTool(type: ToolType): AssistantTool {
+  switch (type) {
+    case 'webhook':
+      return {
+        type: 'webhook',
+        webhook: {
+          name: '',
+          description: '',
+          url: '',
+          method: 'POST',
+          headers: [],
+          body_parameters: { type: 'object', properties: {}, required: [] },
+          timeout_ms: 5000,
+        },
+      };
+    case 'transfer':
+      return { type: 'transfer', transfer: { targets: [{ name: '', to: '' }], custom_headers: [] } };
+    case 'hangup':
+      return { type: 'hangup', hangup: { description: '' } };
+    case 'handoff':
+      return { type: 'handoff', handoff: { ai_assistants: [], voice_mode: 'same' } };
+    default:
+      return { type };
+  }
+}
+
+/**
+ * The variables the backend actually sends when a call is answered, in the same
+ * order the prompt tends to want them.
+ *
+ * Kept deliberately in step with ActivityService.callVariables — a picker that
+ * offers a variable nothing populates is worse than no picker, because the
+ * prompt then renders the braces out loud.
+ */
+export const LEAD_VARIABLES: Array<{ name: string; example: string }> = [
+  { name: 'firstName', example: 'Dana' },
+  { name: 'lastName', example: 'Whitfield' },
+  { name: 'fullName', example: 'Dana Whitfield' },
+  { name: 'email', example: 'dana@example.com' },
+  { name: 'phone', example: '+15125550147' },
+  { name: 'location', example: 'North Austin' },
+  { name: 'budget', example: '450,000 to 600,000' },
+  { name: 'bedrooms', example: '3' },
+  { name: 'timeline', example: '3-6 months' },
+  { name: 'financingStatus', example: 'pre-approved' },
+  { name: 'temperature', example: 'warm' },
+  { name: 'motivation', example: 'relocating for work' },
+  { name: 'brokerage', example: 'Austin Home Advisors' },
+  { name: 'leadId', example: 'a3f1…' },
+];
 
 // ---- Tone: stored as a managed directive line on the prompt ----
 export const TONE_DIRECTIVE: Record<string, string> = {

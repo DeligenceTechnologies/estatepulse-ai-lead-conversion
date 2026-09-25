@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -82,6 +83,40 @@ export class AssistantController {
   async models(@OrgId() orgId: string) {
     return { models: await this.assistant.listModels(orgId) };
   }
+
+  /**
+   * The assistant's own tools, replaced wholesale. Shared tools are not in this
+   * array and are not touched by it — see AssistantService.setTools.
+   */
+  @Put('tools')
+  async setTools(@OrgId() orgId: string, @Body() body: any) {
+    return { assistant: await this.assistant.setTools(orgId, body?.tools ?? []) };
+  }
+
+  /** Detaches a shared tool from this assistant. The library keeps the tool. */
+  @Delete('tools/:toolId')
+  async detachTool(@OrgId() orgId: string, @Param('toolId') toolId: string) {
+    return { assistant: await this.assistant.detachTool(orgId, toolId) };
+  }
+
+  /** Invokes a webhook tool for real and returns the request and response. */
+  @Post('tools/:toolId/test')
+  @HttpCode(HttpStatus.OK)
+  async testTool(
+    @OrgId() orgId: string,
+    @Param('toolId') toolId: string,
+    @Body() body: any,
+  ) {
+    return {
+      result: await this.assistant.testTool(
+        orgId,
+        toolId,
+        body?.arguments,
+        body?.dynamic_variables,
+      ),
+    };
+  }
+
 }
 
 /** The org's single editable outbound strategy. */
