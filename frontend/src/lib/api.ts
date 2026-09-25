@@ -249,4 +249,10 @@ export const api = {
     apiFetch<AuthSession>('/auth/login', { method: 'POST', body }),
 
   me: () => apiFetch<MeResponse>('/auth/me', { auth: true }),
+
+  /** Real user input happened. The only thing that keeps a session alive. */
+  heartbeat: () => apiFetch<null>('/auth/heartbeat', { method: 'POST', auth: true }),
+
+  /** Revokes the session server-side; the token stops working everywhere. */
+  logout: () => apiFetch<null>('/auth/logout', { method: 'POST', auth: true }),
 };

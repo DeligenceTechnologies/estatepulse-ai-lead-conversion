@@ -590,6 +590,23 @@ model users {
   leads                leads[]
   messages             messages[]
   organization_members organization_members[]
+  user_sessions        user_sessions[]
+}
+
+/// One row per sign-in; the JWT's `jti` is this id. See migration
+/// 20260925000001_user_sessions for why the server holds session state.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_sessions {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String    @db.Uuid
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  /// Moved only by POST /api/auth/heartbeat (real user input), never by ordinary requests.
+  last_seen_at DateTime  @default(now()) @db.Timestamptz(6)
+  expires_at   DateTime  @db.Timestamptz(6)
+  revoked_at   DateTime? @db.Timestamptz(6)
+  users        users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_user_sessions_user")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
