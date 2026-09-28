@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { AppError } from '../../common/errors';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import type { GuardedPrisma } from '../../prisma/prisma.service';
+import type { MailService } from '../../mail/mail.service';
 import { AgentsService } from './agents.service';
 import { createAgentSchema, updateAgentSchema } from './schemas';
 
@@ -47,10 +48,12 @@ interface ProfileRow {
   organization_id: string;
   user_id: string;
   display_name: string;
+  title: string | null;
   email: string | null;
   phone: string | null;
   status: string;
   timezone: string;
+  max_active_leads: number;
 }
 
 interface Tables {
@@ -70,7 +73,9 @@ const nextId = (): string => `gen-${(seq += 1)}`;
  * ORG_A (an owner and an agent) and ORG_B (an owner). Two tenants is the
  * minimum that can prove isolation — with one, every query trivially passes.
  */
-function build(options: { failProfileCreate?: boolean } = {}) {
+function build(
+  options: { failProfileCreate?: boolean; mailDisabled?: boolean; mailThrows?: boolean } = {},
+) {
   const db: Tables = {
     users: [
       { id: OWNER_A, email: 'owner-a@example.test', password_hash: 'x', first_name: 'Ada', last_name: 'Owner', phone: null },
@@ -106,14 +111,22 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     phone: u.phone,
     agent_profiles: db.agent_profiles
       .filter((p) => p.user_id === u.id && p.organization_id === organizationId)
-      .map((p) => ({ timezone: p.timezone, _count: { calendar_connections: 0, lead_assignments: 0 } })),
+      .map((p) => ({
+        id: p.id,
+        title: p.title,
+        timezone: p.timezone,
+        max_active_leads: p.max_active_leads,
+        _count: { calendar_connections: 0, lead_assignments: 0 },
+      })),
   });
 
   const client = {
     organizations: {
       findUnique: async ({ where }: { where: Record<string, unknown> }) => {
         wheres.push({ op: 'organizations.findUnique', where });
-        return where['id'] === ORG_A || where['id'] === ORG_B ? { timezone: 'America/New_York' } : null;
+        if (where['id'] === ORG_A) return { timezone: 'America/New_York', name: 'Org A Realty' };
+        if (where['id'] === ORG_B) return { timezone: 'America/New_York', name: 'Org B Realty' };
+        return null;
       },
     },
     organization_members: {
@@ -167,16 +180,43 @@ function build(options: { failProfileCreate?: boolean } = {}) {
         const { agent_profiles: _ignored, ...scalars } = publicUser(row, '');
         return scalars;
       },
+      update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        wheres.push({ op: 'users.update', where });
+        const u = db.users.find((r) => r.id === where['id'])!;
+        Object.assign(u, data);
+        return { ...u };
+      },
     },
     agent_profiles: {
-      create: async ({ data }: { data: Omit<ProfileRow, 'id' | 'status'> & { timezone?: string } }) => {
+      create: async ({
+        data,
+      }: {
+        data: Omit<ProfileRow, 'id' | 'status' | 'title' | 'max_active_leads'> & {
+          timezone?: string;
+          title?: string | null;
+          max_active_leads?: number;
+        };
+      }) => {
         if (options.failProfileCreate) throw new Error('boom: agent_profiles insert failed');
-        // Honours a supplied timezone and falls back to the column default the
-        // way Postgres would - a fake that always answered the default could
-        // not tell a service that passes one from a service that does not.
-        const row = { ...data, id: nextId(), status: 'available', timezone: data.timezone ?? 'America/Chicago' };
+        // Honours supplied values and falls back to the column defaults the way
+        // Postgres would - a fake that always answered the default could not
+        // tell a service that passes one from a service that does not.
+        const row: ProfileRow = {
+          ...data,
+          id: nextId(),
+          status: 'available',
+          timezone: data.timezone ?? 'America/Chicago',
+          title: data.title ?? null,
+          max_active_leads: data.max_active_leads ?? 25,
+        };
         db.agent_profiles.push(row);
-        return { id: row.id, timezone: row.timezone };
+        return { id: row.id, title: row.title, timezone: row.timezone, max_active_leads: row.max_active_leads };
+      },
+      update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        wheres.push({ op: 'agent_profiles.update', where });
+        const row = db.agent_profiles.find((r) => r.id === where['id'])!;
+        Object.assign(row, data);
+        return { ...row };
       },
     },
     audit_logs: {
@@ -211,7 +251,28 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     },
   };
 
-  return { service: new AgentsService(client as unknown as GuardedPrisma), db, wheres };
+  /**
+   * A stand-in mailer. Records what it was asked to send so the tests can assert
+   * on the content, and can be told to fail so "the agent is still created when
+   * the email does not go out" is a real assertion rather than a hope.
+   */
+  const sent: Array<Record<string, unknown>> = [];
+  const mail = {
+    enabled: !options.mailDisabled,
+    sendAgentWelcome: async (input: Record<string, unknown>) => {
+      if (options.mailThrows) throw new Error('boom: smtp exploded');
+      if (options.mailDisabled) return { sent: false, reason: 'Email is not configured on this server' };
+      sent.push(input);
+      return { sent: true };
+    },
+  };
+
+  return {
+    service: new AgentsService(client as unknown as GuardedPrisma, mail as unknown as MailService),
+    db,
+    wheres,
+    sent,
+  };
 }
 
 const VALID = {
@@ -305,9 +366,11 @@ describe('AgentsService.list', () => {
         'hasProfile',
         'id',
         'lastName',
+        'maxActiveLeads',
         'memberSince',
         'phone',
         'role',
+        'title',
         'status',
         'timezone',
       ].sort(),
@@ -610,6 +673,455 @@ describe('updateAgentSchema', () => {
 });
 
 // --- authorization -----------------------------------------------------------
+
+// --- editing an agent profile ------------------------------------------------
+
+/**
+ * AGENT_A is seeded WITHOUT an agent_profiles row and a freshly created agent
+ * always has one, so the two fixtures below exercise both halves of
+ * updateProfile: the ordinary update, and the backfill for a member whose
+ * profile predates create() writing them.
+ */
+async function withProfile() {
+  const built = build();
+  const created = await built.service.create(ORG_A, OWNER_A, VALID);
+  return { ...built, agentId: created.id };
+}
+
+describe('AgentsService.updateProfile', () => {
+  it('persists every Phase 1 field to the column that owns it', async () => {
+    const { service, db, agentId } = await withProfile();
+
+    const updated = await service.updateProfile(ORG_A, OWNER_A, agentId, {
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      email: 'grace.hopper@example.test',
+      phone: '512-555-0123',
+      title: 'Senior Listing Agent',
+      timezone: 'America/New_York',
+      maxActiveLeads: 40,
+    });
+
+    // The response says so...
+    expect(updated.firstName).toBe('Grace');
+    expect(updated.lastName).toBe('Hopper');
+    expect(updated.email).toBe('grace.hopper@example.test');
+    expect(updated.phone).toBe('512-555-0123');
+    expect(updated.title).toBe('Senior Listing Agent');
+    expect(updated.timezone).toBe('America/New_York');
+    expect(updated.maxActiveLeads).toBe(40);
+
+    // ...and so do the rows, split across the two tables that really hold them.
+    const user = db.users.find((u) => u.id === agentId)!;
+    expect(user.first_name).toBe('Grace');
+    expect(user.last_name).toBe('Hopper');
+    expect(user.email).toBe('grace.hopper@example.test');
+    expect(user.phone).toBe('512-555-0123');
+
+    const profile = db.agent_profiles.find((p) => p.user_id === agentId)!;
+    expect(profile.title).toBe('Senior Listing Agent');
+    expect(profile.timezone).toBe('America/New_York');
+    expect(profile.max_active_leads).toBe(40);
+  });
+
+  it('leaves every field the request did not mention alone', async () => {
+    const { service, db, agentId } = await withProfile();
+    const before = { ...db.users.find((u) => u.id === agentId)! };
+
+    // A title-only edit, which is the common case from the form.
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { title: 'Buyer Agent' });
+
+    const after = db.users.find((u) => u.id === agentId)!;
+    expect(after.first_name).toBe(before.first_name);
+    expect(after.last_name).toBe(before.last_name);
+    expect(after.email).toBe(before.email);
+    expect(after.phone).toBe(before.phone);
+    // The cap keeps its column default rather than being reset by an edit that
+    // never mentioned it.
+    expect(db.agent_profiles.find((p) => p.user_id === agentId)!.max_active_leads).toBe(25);
+  });
+
+  it('clears an optional field with null, which absent cannot express', async () => {
+    const { service, db, agentId } = await withProfile();
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { title: 'Buyer Agent' });
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { phone: null, title: null });
+
+    expect(db.users.find((u) => u.id === agentId)!.phone).toBeNull();
+    expect(db.agent_profiles.find((p) => p.user_id === agentId)!.title).toBeNull();
+  });
+
+  it('treats an empty string as a clear, the way create() treats a blank phone', async () => {
+    const { service, db, agentId } = await withProfile();
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { phone: '' });
+
+    // '' would otherwise be stored and then render as a blank phone number that
+    // looks like a value.
+    expect(db.users.find((u) => u.id === agentId)!.phone).toBeNull();
+  });
+
+  it("keeps the agent profile's mirrored name, email and phone in step", async () => {
+    const { service, db, agentId } = await withProfile();
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, {
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      email: 'grace@example.test',
+      phone: '512-555-0177',
+    });
+
+    // create() writes these copies; an edit that skipped them would leave the
+    // profile disagreeing with the user row it was copied from.
+    const profile = db.agent_profiles.find((p) => p.user_id === agentId)!;
+    expect(profile.display_name).toBe('Grace Hopper');
+    expect(profile.email).toBe('grace@example.test');
+    expect(profile.phone).toBe('512-555-0177');
+  });
+
+  it('backfills a missing agent profile rather than dropping half the edit', async () => {
+    // AGENT_A is seeded with a membership but no profile row.
+    const { service, db } = build();
+    expect(db.agent_profiles).toHaveLength(0);
+
+    const updated = await service.updateProfile(ORG_A, OWNER_A, AGENT_A, {
+      title: 'Listing Agent',
+      timezone: 'Asia/Kolkata',
+      maxActiveLeads: 10,
+    });
+
+    const profile = db.agent_profiles.find((p) => p.user_id === AGENT_A)!;
+    expect(profile.organization_id).toBe(ORG_A);
+    expect(profile.title).toBe('Listing Agent');
+    expect(profile.timezone).toBe('Asia/Kolkata');
+    expect(profile.max_active_leads).toBe(10);
+    // The phone is carried over from the user row rather than blanked.
+    expect(profile.phone).toBe('512-555-0101');
+    expect(updated.hasProfile).toBe(true);
+  });
+
+  it('never changes role, membership status or organization', async () => {
+    const { service, db, agentId } = await withProfile();
+    const before = { ...db.organization_members.find((m) => m.user_id === agentId)! };
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { firstName: 'Grace', maxActiveLeads: 99 });
+
+    const after = db.organization_members.find((m) => m.user_id === agentId)!;
+    expect(after.role).toBe(before.role);
+    expect(after.status).toBe(before.status);
+    expect(after.organization_id).toBe(before.organization_id);
+  });
+
+  it('never rewrites the password hash', async () => {
+    const { service, db, agentId } = await withProfile();
+    const before = db.users.find((u) => u.id === agentId)!.password_hash;
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { firstName: 'Grace' });
+
+    expect(db.users.find((u) => u.id === agentId)!.password_hash).toBe(before);
+  });
+
+  it('cannot reach a member of another organization', async () => {
+    const { service, db } = build();
+
+    // ORG_B's owner, addressed by an ORG_A caller. A 404 rather than a 403: the
+    // existence of an account in another tenant is not ours to confirm.
+    await expect(service.updateProfile(ORG_A, OWNER_A, OWNER_B, { firstName: 'Mallory' })).rejects.toThrow(
+      AppError,
+    );
+    expect(db.users.find((u) => u.id === OWNER_B)!.first_name).toBe('Bob');
+  });
+
+  it('scopes the lookup by the authenticated organization, not the target id', async () => {
+    const { service, wheres, agentId } = await withProfile();
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { title: 'Buyer Agent' });
+
+    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
+      expect(read.where['organization_id']).toBe(ORG_A);
+    }
+  });
+
+  it('refuses to edit an owner, who has no agent profile by design', async () => {
+    const { service, db } = build();
+
+    // Minting a profile for an owner as a side effect of a name change would
+    // quietly turn the account into a routing target.
+    await expect(service.updateProfile(ORG_A, OWNER_A, OWNER_A, { title: 'Broker' })).rejects.toThrow(
+      AppError,
+    );
+    expect(db.agent_profiles).toHaveLength(0);
+  });
+
+  it('rejects an email another account already holds, case-insensitively', async () => {
+    const { service, db, agentId } = await withProfile();
+
+    await expect(
+      service.updateProfile(ORG_A, OWNER_A, agentId, { email: 'OWNER-A@example.test' }),
+    ).rejects.toThrow(AppError);
+    expect(db.users.find((u) => u.id === agentId)!.email).toBe(VALID.email);
+  });
+
+  it("accepts a save that leaves the agent's own email unchanged", async () => {
+    const { service, agentId } = await withProfile();
+
+    // The pre-check has to exclude the target's own row, or re-saving the form
+    // without touching the email would 409 against itself.
+    const updated = await service.updateProfile(ORG_A, OWNER_A, agentId, {
+      email: VALID.email,
+      title: 'Buyer Agent',
+    });
+
+    expect(updated.email).toBe(VALID.email);
+    expect(updated.title).toBe('Buyer Agent');
+  });
+
+  it('rolls the whole edit back when a later step fails', async () => {
+    // AGENT_A has no profile, so the edit takes the backfill branch — and this
+    // fake fails exactly that insert, after the users row has been written.
+    const { service, db } = build({ failProfileCreate: true });
+
+    await expect(
+      service.updateProfile(ORG_A, OWNER_A, AGENT_A, { firstName: 'Grace', title: 'Broker' }),
+    ).rejects.toThrow('boom');
+
+    // A renamed user whose profile never arrived would be a half-applied edit.
+    expect(db.users.find((u) => u.id === AGENT_A)!.first_name).toBe('Ann');
+    expect(db.agent_profiles).toHaveLength(0);
+    expect(db.audit_logs.some((a) => a['action'] === 'member.updated')).toBe(false);
+  });
+
+  it('records the edit, naming the fields changed but not their values', async () => {
+    const { service, db, agentId } = await withProfile();
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, {
+      title: 'Broker',
+      phone: '512-555-0144',
+      maxActiveLeads: 12,
+    });
+
+    const entry = db.audit_logs.find((a) => a['action'] === 'member.updated')!;
+    expect(entry['actor_id']).toBe(OWNER_A);
+    expect(entry['actor_type']).toBe('user');
+    expect(entry['entity_id']).toBe(agentId);
+    expect(entry['organization_id']).toBe(ORG_A);
+    expect((entry['payload'] as { changed: string[] }).changed.sort()).toEqual(
+      ['maxActiveLeads', 'phone', 'title'].sort(),
+    );
+    // The phone number itself is not copied into the audit table.
+    expect(JSON.stringify(entry['payload'])).not.toContain('512-555-0144');
+  });
+
+  it('records an email change from and to, because that is who can sign in', async () => {
+    const { service, db, agentId } = await withProfile();
+
+    await service.updateProfile(ORG_A, OWNER_A, agentId, { email: 'grace@example.test' });
+
+    const entry = db.audit_logs.find((a) => a['action'] === 'member.updated')!;
+    expect(entry['payload']).toMatchObject({
+      email: { from: VALID.email, to: 'grace@example.test' },
+    });
+  });
+});
+
+// --- the update schema -------------------------------------------------------
+
+describe('updateAgentSchema — profile fields', () => {
+  it('accepts a profile-only edit and normalises the email', () => {
+    const parsed = updateAgentSchema.parse({
+      firstName: '  Grace ',
+      email: 'Grace.Hopper@Example.Test',
+      maxActiveLeads: 12,
+    });
+
+    expect(parsed).toEqual({ firstName: 'Grace', email: 'grace.hopper@example.test', maxActiveLeads: 12 });
+  });
+
+  it('still accepts the membership switch in both directions', () => {
+    expect(updateAgentSchema.parse({ status: 'suspended' })).toEqual({ status: 'suspended' });
+    expect(updateAgentSchema.parse({ status: 'active' })).toEqual({ status: 'active' });
+  });
+
+  it('rejects an empty body rather than answering 200 to a no-op', () => {
+    expect(updateAgentSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('refuses to mix the membership switch with a profile edit', () => {
+    // They have different authorization rules, so a body doing both would have
+    // to half-apply when one of them is refused.
+    expect(updateAgentSchema.safeParse({ status: 'suspended', title: 'Broker' }).success).toBe(false);
+  });
+
+  it('rejects every field the client must not control', () => {
+    for (const body of [
+      { role: 'owner' },
+      { organizationId: ORG_B },
+      { organization_id: ORG_B },
+      { password: 'correct-horse-battery-staple' },
+      { routingEnabled: false },
+      { routing_enabled: false },
+      { agentStatus: 'available' },
+      { firstName: 'Grace', role: 'owner' },
+    ]) {
+      expect(updateAgentSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  it('rejects an invalid email', () => {
+    expect(updateAgentSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+  });
+
+  it('rejects a timezone the runtime cannot name, rather than ignoring it', () => {
+    // Unlike signup's browser-detected zone, this one was chosen on a form:
+    // swallowing it would report a save that did not happen.
+    expect(updateAgentSchema.safeParse({ timezone: 'Mars/Olympus_Mons' }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ timezone: 'America/Chicago' }).success).toBe(true);
+    expect(updateAgentSchema.safeParse({ timezone: 'Asia/Kolkata' }).success).toBe(true);
+  });
+
+  it('enforces the max_active_leads > 0 check constraint at the edge', () => {
+    // The database rejects 0; catching it here is the difference between a 400
+    // and a 500.
+    expect(updateAgentSchema.safeParse({ maxActiveLeads: 0 }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ maxActiveLeads: -1 }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ maxActiveLeads: 2.5 }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ maxActiveLeads: '10' }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ maxActiveLeads: 1 }).success).toBe(true);
+  });
+
+  it('requires a non-empty name when one is supplied', () => {
+    expect(updateAgentSchema.safeParse({ firstName: '   ' }).success).toBe(false);
+    expect(updateAgentSchema.safeParse({ lastName: '' }).success).toBe(false);
+  });
+
+  it('allows null for the two optional text fields, so they can be cleared', () => {
+    expect(updateAgentSchema.safeParse({ phone: null }).success).toBe(true);
+    expect(updateAgentSchema.safeParse({ title: null }).success).toBe(true);
+  });
+});
+
+// --- lead cap at onboarding --------------------------------------------------
+
+describe('AgentsService.create — max active leads', () => {
+  it('stores the cap the owner entered', async () => {
+    const { service, db } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, { ...VALID, maxActiveLeads: 12 });
+
+    expect(created.maxActiveLeads).toBe(12);
+    expect(db.agent_profiles.find((p) => p.user_id === created.id)!.max_active_leads).toBe(12);
+  });
+
+  it('leaves the column default standing when the client sends none', async () => {
+    const { service, db } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(created.maxActiveLeads).toBe(25);
+    expect(db.agent_profiles.find((p) => p.user_id === created.id)!.max_active_leads).toBe(25);
+  });
+});
+
+describe('createAgentSchema — max active leads', () => {
+  it('accepts a positive integer and stays optional', () => {
+    expect(createAgentSchema.safeParse({ ...VALID, maxActiveLeads: 25 }).success).toBe(true);
+    expect(createAgentSchema.safeParse(VALID).success).toBe(true);
+  });
+
+  it('applies the same rule as the edit form', () => {
+    // agent_profiles has CHECK (max_active_leads > 0), so 0 is a 400 not a 500.
+    for (const bad of [0, -1, 2.5, '10', null]) {
+      expect(
+        createAgentSchema.safeParse({ ...VALID, maxActiveLeads: bad }).success,
+        String(bad),
+      ).toBe(false);
+    }
+  });
+});
+
+// --- emailing the new agent their credentials --------------------------------
+
+describe('AgentsService.create — credentials email', () => {
+  it('emails the new agent the password the owner set', async () => {
+    const { service, sent } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      to: VALID.email,
+      firstName: VALID.firstName,
+      password: VALID.password,
+    });
+    expect(created.credentialsEmail).toEqual({ sent: true, to: VALID.email });
+  });
+
+  it('names the organization the agent was added to', async () => {
+    const { service, sent } = build();
+
+    await service.create(ORG_A, OWNER_A, VALID);
+
+    // Read back after the commit, so it is the office the rows actually landed
+    // in rather than anything the request supplied.
+    expect(sent[0]['organizationName']).toBe('Org A Realty');
+  });
+
+  it('creates the agent anyway when the mailer is switched off', async () => {
+    const { service, db } = build({ mailDisabled: true });
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    // The account is the point; the email is how the password travels. Losing
+    // the second must not lose the first.
+    expect(db.users.some((u) => u.email === VALID.email)).toBe(true);
+    expect(created.credentialsEmail.sent).toBe(false);
+    expect(created.credentialsEmail.reason).toBeTruthy();
+  });
+
+  it('still answers 201 when the mailer throws unexpectedly', async () => {
+    const { service, db } = build({ mailThrows: true });
+
+    // The account is already committed by this point, so an exploding mailer
+    // must not turn a created agent into a 500 — it turns into "not sent".
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    expect(db.users.some((u) => u.email === VALID.email)).toBe(true);
+    expect(created.credentialsEmail.sent).toBe(false);
+    expect(created.credentialsEmail.reason).toBeTruthy();
+  });
+
+  it('sends only after the write commits, so a rolled-back agent gets no email', async () => {
+    const { service, sent } = build({ failProfileCreate: true });
+
+    await expect(service.create(ORG_A, OWNER_A, VALID)).rejects.toThrow('boom');
+
+    // An email naming an account that does not exist is worse than none.
+    expect(sent).toHaveLength(0);
+  });
+
+  it('never returns the password or its hash to the caller', async () => {
+    const { service } = build();
+
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+
+    const body = JSON.stringify(created);
+    expect(body).not.toContain(VALID.password);
+    expect(body).not.toContain('password_hash');
+    expect(body).not.toContain('$2b$');
+  });
+
+  it('reports delivery on the create response only, not on the roster', async () => {
+    const { service } = build();
+    await service.create(ORG_A, OWNER_A, VALID);
+
+    const roster = await service.list(ORG_A);
+
+    // Delivery is a fact about one request, not a property of a member.
+    for (const member of roster) {
+      expect(member).not.toHaveProperty('credentialsEmail');
+    }
+  });
+});
 
 describe('OwnerGuard', () => {
   const contextFor = (auth: unknown) =>

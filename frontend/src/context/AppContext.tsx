@@ -114,7 +114,6 @@ interface AppContextType {
   toggleAutomation: (leadId: string) => void;
   takeOverConversation: (leadId: string) => void;
   triggerWebhookTest: (payload: any) => Lead;
-  resetDemoData: () => void;
   simulateHotQualification: (leadId: string) => void;
   addAuditLog: (action: string, entityType: AuditLog['entityType'], entityId: string, description: string, actor?: AuditLog['actor']) => void;
 }
@@ -634,32 +633,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSimulatedLead(null);
   };
 
-  const resetDemoData = () => {
-    setOrgSettings(INITIAL_ORG_SETTINGS);
-    setAgents(INITIAL_AGENTS);
-    setLeads(INITIAL_LEADS);
-    setConversations(INITIAL_CONVERSATIONS);
-    setCalls(INITIAL_CALLS);
-    setAppointments(INITIAL_APPOINTMENTS);
-    setFollowupSequences(INITIAL_FOLLOWUP_SEQUENCES);
-    setIntegrations(INITIAL_INTEGRATIONS);
-    setAuditLogs(INITIAL_AUDIT_LOGS);
-    // Only the demo keys. localStorage.clear() would also wipe the auth token
-    // and sign the user out mid-session.
-    [
-      'ep_org_settings',
-      'ep_agents',
-      'ep_leads',
-      'ep_conversations',
-      'ep_calls',
-      'ep_appointments',
-      'ep_sequences',
-      'ep_integrations',
-      'ep_audit_logs',
-    ].forEach(key => localStorage.removeItem(key));
-    addAuditLog('System Reset', 'system', 'demo_org', 'Reset application state to initial Austin Home Advisors demo scenario.', 'System (n8n)');
-  };
-
   return (
     <AppContext.Provider
       value={{
@@ -695,7 +668,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleAutomation,
         takeOverConversation,
         triggerWebhookTest,
-        resetDemoData,
         simulateHotQualification,
         addAuditLog,
       }}

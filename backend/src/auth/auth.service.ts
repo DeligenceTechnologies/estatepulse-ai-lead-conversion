@@ -13,7 +13,11 @@ import { hashPassword, verifyPassword } from './password';
 import type { LoginInput, SignupInput } from './schemas';
 import { ROLES, type AuthContext, type AuthSessionDTO, type Role } from './types';
 
-const TOKEN_EXPIRES_IN = '7d';
+/**
+ * Absolute session lifetime. There is no refresh and no idle timeout: 24 hours
+ * after issue the token stops verifying and the holder signs in again.
+ */
+const TOKEN_EXPIRES_IN = '24h';
 
 /**
  * The only users.status and organization_members.status value that
