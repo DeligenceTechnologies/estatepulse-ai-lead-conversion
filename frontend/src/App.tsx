@@ -16,6 +16,7 @@ import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
 import { LeadSourcesView } from './components/views/LeadSourcesView';
+import { AppointmentsView } from './components/views/AppointmentsView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -50,7 +51,7 @@ const AppContent: React.FC = () => {
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
           {activeView === 'conversations' && <ComingSoonView title="Conversations & SMS" />}
           {activeView === 'calls' && <ComingSoonView title="AI Voice Calls" />}
-          {activeView === 'appointments' && <ComingSoonView title="Appointments" />}
+          {activeView === 'appointments' && <AppointmentsView />}
           {activeView === 'followups' && <ComingSoonView title="Follow-Up Sequences" />}
           {activeView === 'agents' && <AgentsView />}
           {activeView === 'integrations' && (

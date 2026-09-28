@@ -58,9 +58,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
       title: 'Retell AI Voice Call Studio', 
       subtitle: 'Outbound & inbound call logs, audio playback, transcripts, and structured extraction' 
     },
-    appointments: { 
-      title: 'Scheduled Appointments', 
-      subtitle: 'Calendly & Google Calendar synchronized buyer consultations and property showings' 
+    appointments: {
+      title: 'Scheduled Appointments',
+      subtitle: 'Consultations synced from the office calendar, linked to the lead who booked'
     },
     followups: { 
       title: 'Automated Follow-up Sequences', 

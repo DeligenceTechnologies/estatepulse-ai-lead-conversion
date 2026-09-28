@@ -40,7 +40,21 @@ model agent_profiles {
   max_active_leads     Int                    @default(25)
   routing_enabled      Boolean                @default(true)
   round_robin_position Int?
+  /// The agent's public Calendly booking page, copied from their membership of
+  /// the office's Calendly organization.
   calendly_url         String?
+  /// Which Calendly member this agent IS -- the user URI that a synced event's
+  /// `event_memberships[].user` is matched against to decide whose booking it
+  /// is. Set by the roster sync, which matches on email exactly once. NULL
+  /// means this agent has not been linked to a Calendly member yet.
+  calendly_user_uri    String?
+  /// The same thing for Cal.com: the numeric user id that a booking's
+  /// `hosts[].id` is matched against. INTEGER because that is what Cal.com
+  /// issues, where Calendly issues a URI.
+  ///
+  /// At most one of these two is ever set, because at most one calendar
+  /// provider is connected at a time -- see calendar_connections_org_one_active.
+  cal_user_id          Int?
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   agent_availability   agent_availability[]
@@ -92,6 +106,11 @@ model appointments {
   end_at                 DateTime              @db.Timestamptz(6)
   meeting_url            String?
   notes                  String?
+  /// Provider-shaped detail we display but never join on: the provider's own
+  /// updated_at (which lets a sync tick skip the per-event invitee request for
+  /// an unchanged event), cancel/reschedule URLs, cancellation reason, the
+  /// event-type name, and the reschedule chain.
+  metadata               Json                  @default("{}")
   created_at             DateTime              @default(now()) @db.Timestamptz(6)
   updated_at             DateTime              @default(now()) @db.Timestamptz(6)
   agent_profiles         agent_profiles        @relation(fields: [agent_id], references: [id], onUpdate: NoAction)
@@ -99,6 +118,11 @@ model appointments {
   leads                  leads                 @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organizations          organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  /// Sync idempotency, and what lets the reconciler be a single upsert instead
+  /// of a find-then-write race between two poll ticks. Not partial: Postgres
+  /// treats NULLs as distinct, so hand-created rows (no external_event_id)
+  /// never collide -- and a partial index is one Prisma could not model here.
+  @@unique([organization_id, provider, external_event_id], map: "appointments_external_event_unique")
   @@index([agent_id], map: "idx_appointments_agent")
   @@index([external_event_id], map: "idx_appointments_external_event")
   @@index([lead_id], map: "idx_appointments_lead")
@@ -135,7 +159,7 @@ model audit_logs {
 model calendar_connections {
   id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id        String         @db.Uuid
-  agent_id               String         @db.Uuid
+  agent_id               String?        @db.Uuid
   provider               String         @db.VarChar(30)
   external_account_id    String?        @db.VarChar(255)
   credentials_secret_ref String?
@@ -145,9 +169,31 @@ model calendar_connections {
   created_at             DateTime       @default(now()) @db.Timestamptz(6)
   updated_at             DateTime       @default(now()) @db.Timestamptz(6)
   appointments           appointments[]
-  agent_profiles         agent_profiles @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  agent_profiles         agent_profiles? @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organizations          organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  /// NOTE: the database also holds `calendar_connections_active_unique`, a
+  /// PARTIAL unique index on (agent_id, provider) WHERE status = 'active'.
+  /// Prisma cannot express a partial index, so it is invisible here and lives
+  /// only in 20260922000001_calendar_sync. It is what guarantees one live
+  /// calendar per agent per provider while still allowing the several
+  /// 'inactive' rows a reconnect leaves behind. Do not "restore" it as a plain
+  /// @@unique -- that would reject every reconnect.
+  ///
+  /// Since 20260922000002 a calendar connection belongs to the ORGANIZATION,
+  /// not an agent: `agent_id` is NULL on those rows, and a second partial
+  /// unique index, `calendar_connections_org_one_active`, on
+  /// (organization_id) WHERE agent_id IS NULL AND status = 'active' is what
+  /// holds "one live office calendar" -- the index above cannot, because
+  /// Postgres treats NULL agent_ids as distinct from one another.
+  ///
+  /// Note that index has NO `provider` in its key, which is deliberate:
+  /// Calendly and Cal.com are alternatives, and an office that connects one
+  /// switches away from the other. Two live providers would sweep the same
+  /// office twice.
+  ///
+  /// Rows WITH an agent_id are the retired per-agent connections, kept because
+  /// appointments.calendar_connection_id still references them.
   @@index([agent_id], map: "idx_calendar_connections_agent")
   @@index([organization_id], map: "idx_calendar_connections_organization")
   @@index([organization_id, status], map: "idx_calendar_connections_status")

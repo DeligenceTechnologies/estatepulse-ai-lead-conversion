@@ -259,4 +259,43 @@ export class EngineService implements OnModuleDestroy {
     if (e) this.stop(e);
     this.logger.log(`lead ${leadId} qualified as ${temperature} — strategy stopped, handed off`);
   }
+
+  /**
+   * Called when an appointment lands for this lead — today from the Calendly
+   * sync, later from anything else that books one.
+   *
+   * The same shape as qualified(): set the status, then clear the pending
+   * timers. That second half is the point. Without it the cadence keeps its
+   * setTimeouts and goes on texting and calling somebody who has already put a
+   * meeting in the calendar, which is exactly the experience that gets a
+   * brokerage's number flagged.
+   *
+   * 'booked' is verbatim from leads_status_check. Note that
+   * common/domain.ts calls this status APPOINTMENT_BOOKED — that constant is
+   * wrong, the database has never accepted it, and using it here would throw.
+   */
+  async appointmentBooked(orgId: string, leadId: string): Promise<void> {
+    const lead = await this.prisma.leads.findUnique({ where: { id: leadId } });
+    if (!lead) return;
+
+    // Never drag a finished lead backwards, and never overwrite a do-not-call
+    // flag: a booking is good news, but it is not a reason to reopen a lead
+    // somebody deliberately closed.
+    const TERMINAL = ['closed', 'lost'];
+    if (TERMINAL.includes(lead.status) || lead.dnc_status) {
+      this.logger.log(`lead ${leadId} booked but left at '${lead.status}' (terminal)`);
+      return;
+    }
+
+    if (lead.status !== 'booked') {
+      await this.prisma.leads.update({ where: { id: leadId }, data: { status: 'booked' } });
+    }
+
+    const e = this.active.get(leadId);
+    if (e) {
+      this.stop(e);
+      await this.activity.exitStrategy(leadId, 'Appointment booked — strategy stopped');
+    }
+    this.logger.log(`lead ${leadId} booked — strategy stopped`);
+  }
 }

@@ -51,6 +51,8 @@ interface ProfileRow {
   phone: string | null;
   status: string;
   timezone: string;
+  /** Which Calendly member this agent is; null until the roster links them. */
+  calendly_user_uri?: string | null;
 }
 
 interface Tables {
@@ -106,7 +108,11 @@ function build(options: { failProfileCreate?: boolean } = {}) {
     phone: u.phone,
     agent_profiles: db.agent_profiles
       .filter((p) => p.user_id === u.id && p.organization_id === organizationId)
-      .map((p) => ({ timezone: p.timezone, _count: { calendar_connections: 0, lead_assignments: 0 } })),
+      .map((p) => ({
+        timezone: p.timezone,
+        calendly_user_uri: p.calendly_user_uri ?? null,
+        _count: { lead_assignments: 0 },
+      })),
   });
 
   const client = {
@@ -279,7 +285,7 @@ describe('AgentsService.list', () => {
 
     for (const member of roster) {
       expect(member.activeLeads).toBe(0);
-      expect(member.calendarConnected).toBe(false);
+      expect(member.calendarLinked).toBe(false);
     }
   });
 
@@ -299,7 +305,7 @@ describe('AgentsService.list', () => {
     expect(Object.keys(roster[0]).sort()).toEqual(
       [
         'activeLeads',
-        'calendarConnected',
+        'calendarLinked',
         'email',
         'firstName',
         'hasProfile',

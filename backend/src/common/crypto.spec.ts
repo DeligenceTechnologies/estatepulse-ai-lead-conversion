@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CryptoError,
   SecretBox,
+  calendarConnectionAad,
+  providerCredentialAad,
   signingSecretAad,
   verifyTallySignature,
 } from './crypto';
@@ -98,5 +100,40 @@ describe('verifyTallySignature', () => {
     // timingSafeEqual throws on length mismatch; that must not become a 500.
     expect(verifyTallySignature(rawBody, secret, '')).toBe(false);
     expect(verifyTallySignature(rawBody, secret, 'nonsense')).toBe(false);
+  });
+});
+
+describe('calendarConnectionAad', () => {
+  it('binds an OAuth token to one connection row', () => {
+    const box = new SecretBox(keys, 'k1');
+    const tokens = JSON.stringify({ access_token: 'at_live', refresh_token: 'rt_live' });
+    const aad = calendarConnectionAad('org-1', 'conn-1');
+
+    const env = box.encrypt(tokens, aad);
+    expect(env).not.toContain('rt_live');
+    expect(box.decrypt(env, aad)).toBe(tokens);
+  });
+
+  it("refuses a token lifted into another agent's connection row", () => {
+    const box = new SecretBox(keys, 'k1');
+    const stolen = box.encrypt('rt_agentA', calendarConnectionAad('org-1', 'conn-A'));
+
+    // Same organization, different connection: agent B must not be able to
+    // drive agent A's Calendly account by copying the ciphertext across rows.
+    expect(() => box.decrypt(stolen, calendarConnectionAad('org-1', 'conn-B'))).toThrow(CryptoError);
+    // And the cross-tenant case.
+    expect(() => box.decrypt(stolen, calendarConnectionAad('org-2', 'conn-A'))).toThrow(CryptoError);
+  });
+
+  it('does not collide with the other AAD purposes', () => {
+    // Same ids, different purpose strings: a provider credential envelope must
+    // never decrypt as a calendar token, or rotating one would silently
+    // authenticate the other.
+    const box = new SecretBox(keys, 'k1');
+    const asProvider = box.encrypt('secret', providerCredentialAad('org-1', 'row-1'));
+
+    expect(() => box.decrypt(asProvider, calendarConnectionAad('org-1', 'row-1'))).toThrow(
+      CryptoError,
+    );
   });
 });
