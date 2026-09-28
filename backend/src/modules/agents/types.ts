@@ -10,6 +10,25 @@ import type { Role } from '../../auth/types';
  * placeholder the API invents — where a feature is not built, the underlying
  * table is simply empty and the number is honestly zero.
  */
+/**
+ * What POST /api/agents answers: the new member, plus whether their credentials
+ * actually reached them.
+ *
+ * A separate shape from OrganizationMemberDTO on purpose. Delivery is a fact
+ * about this one request, not a property of a member, and putting it on the
+ * roster DTO would mean every listed agent carried a field that could only ever
+ * be meaningful for the few seconds after they were created.
+ */
+export interface CreateAgentResultDTO extends OrganizationMemberDTO {
+  credentialsEmail: {
+    sent: boolean;
+    /** The address it was sent to, or would have been. */
+    to: string;
+    /** Why it did not go. Present only when `sent` is false. */
+    reason?: string;
+  };
+}
+
 export interface OrganizationMemberDTO {
   /** users.id — the id PATCH /api/agents/:userId addresses. */
   id: string;
@@ -27,6 +46,14 @@ export interface OrganizationMemberDTO {
    * no agent profile, so the organization's value is the only true answer.
    */
   timezone: string;
+  /** agent_profiles.title. Null when unset, and for a member with no profile. */
+  title: string | null;
+  /**
+   * agent_profiles.max_active_leads — how many open leads this agent may hold.
+   * Null for a member with no profile: an owner is not a routing target, so
+   * there is no cap to report rather than a default to pretend about.
+   */
+  maxActiveLeads: number | null;
   /**
    * Whether an agent_profiles row exists for this member in this organization.
    * False for an owner created by signup, which deliberately creates no profile.

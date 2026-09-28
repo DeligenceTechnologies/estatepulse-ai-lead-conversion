@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AuthService } from '../../auth/auth.service';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { EventsBus } from './events.bus';
 import { EventsController } from './events.controller';
@@ -55,12 +56,13 @@ describe('EventsController — the live stream', () => {
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [EventsController],
-      providers: [EventsBus],
+      // The session re-check fires once a minute, far outside any test here.
+      providers: [EventsBus, { provide: AuthService, useValue: { assertSessionLive: async () => {} } }],
     })
       .overrideGuard(TenantGuard)
       .useValue({
         canActivate: (ctx: { switchToHttp: () => { getRequest: () => { tenant: unknown } } }) => {
-          ctx.switchToHttp().getRequest().tenant = { organizationId, apiKeyId: null, scopes: [], userId: 'u1' };
+          ctx.switchToHttp().getRequest().tenant = { organizationId, apiKeyId: null, scopes: [], userId: 'u1', sessionId: 's1' };
           return true;
         },
       })

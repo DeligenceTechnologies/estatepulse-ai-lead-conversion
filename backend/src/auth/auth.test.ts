@@ -93,13 +93,49 @@ before(async () => {
 });
 
 after(async () => {
-  if (createdOrgIds.length > 0) {
-    await prisma.organizations.deleteMany({ where: { id: { in: createdOrgIds } } });
+  try {
+    // Users first, and the order is load-bearing. organization_members and
+    // agent_profiles both cascade from users, and audit_logs.actor_id carries no
+    // foreign key, so this removes everything the run owns without ever touching
+    // an audit row. Deleting organizations first — as this hook used to — throws
+    // before reaching here and leaves the users behind.
+    if (createdUserIds.length > 0) {
+      await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
+    }
+
+    // An organization is only deletable while it has no audit rows: dropping one
+    // sets audit_logs.organization_id to NULL (ON DELETE SET NULL), and
+    // trg_audit_logs_immutable rejects every UPDATE on that table. So an
+    // organization this run wrote an audit row for cannot be removed, by design,
+    // and is deliberately left behind rather than worked around.
+    //
+    // Asked rather than caught: swallowing the exception would also swallow a
+    // genuine teardown failure.
+    const audited =
+      createdOrgIds.length === 0
+        ? []
+        : await prisma.audit_logs.findMany({
+            where: { organization_id: { in: createdOrgIds } },
+            select: { organization_id: true },
+            distinct: ['organization_id'],
+          });
+    const auditedOrgIds = new Set(audited.map((row) => row.organization_id));
+    const deletableOrgIds = createdOrgIds.filter((id) => !auditedOrgIds.has(id));
+
+    if (deletableOrgIds.length > 0) {
+      await prisma.organizations.deleteMany({ where: { id: { in: deletableOrgIds } } });
+    }
+
+    // Proves the cleanup ran, instead of leaving a silent leak for the next run
+    // to inherit — which is how the old hook failed unnoticed.
+    const leaked = await prisma.users.count({ where: { id: { in: createdUserIds } } });
+    assert.equal(leaked, 0, `${leaked} user(s) from run ${RUN} survived teardown`);
+  } finally {
+    // In a finally so a teardown failure can never again leave the Nest server
+    // and the Prisma pool open, which is what made the runner hang rather than
+    // report.
+    await app.close();
   }
-  if (createdUserIds.length > 0) {
-    await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
-  }
-  await app.close();
 });
 
 // --- happy path -------------------------------------------------------------
@@ -223,6 +259,90 @@ test('me returns user, organization, role and a null agentProfileId', async () =
   assert.equal(res.body['role'], 'owner');
   assert.equal(res.body['agentProfileId'], null);
   assert.equal(res.body['token'], undefined, 'me must not reissue a token');
+});
+
+// --- server-side sessions ---------------------------------------------------
+
+/** A fresh sign-in for primary, so each session test owns its own row. */
+async function freshLogin(): Promise<{ token: string; sessionId: string }> {
+  const res = await call('POST', '/api/auth/login', { body: { email: emailFor('primary'), password: PASSWORD } });
+  assert.equal(res.status, 200, res.text);
+  const token = res.body['token'] as string;
+  const sessionId = (JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()) as { jti: string }).jti;
+  return { token, sessionId };
+}
+
+test('login records a user_sessions row that the token points at', async () => {
+  const { sessionId } = await freshLogin();
+  const row = await prisma.user_sessions.findUnique({ where: { id: sessionId } });
+
+  assert.ok(row, 'no session row for the token jti');
+  assert.equal(row.user_id, primaryUserId);
+  assert.equal(row.revoked_at, null);
+  const lifetimeH = (row.expires_at.getTime() - row.created_at.getTime()) / 3_600_000;
+  assert.ok(Math.abs(lifetimeH - 24) < 0.1, `expected a 24h session, got ${lifetimeH}h`);
+});
+
+test('logout revokes the session server-side, not just in the browser', async () => {
+  const { token } = await freshLogin();
+
+  const out = await call('POST', '/api/auth/logout', { token });
+  assert.equal(out.status, 204, out.text);
+
+  // The same token, still inside its 24-hour JWT window, is now dead.
+  const me = await call('GET', '/api/auth/me', { token });
+  assert.equal(me.status, 401);
+  assert.equal(errCode(me), 'UNAUTHENTICATED');
+});
+
+test('a session idle for 30 minutes is rejected as TOKEN_EXPIRED', async () => {
+  // The reported bug: browser closed, reopened later, token still valid.
+  const { token, sessionId } = await freshLogin();
+  await prisma.user_sessions.update({
+    where: { id: sessionId },
+    data: { last_seen_at: new Date(Date.now() - 31 * 60 * 1000) },
+  });
+
+  const me = await call('GET', '/api/auth/me', { token });
+  assert.equal(me.status, 401);
+  assert.equal(errCode(me), 'TOKEN_EXPIRED');
+
+  // And it cannot be revived: the heartbeat sits behind the same guard.
+  const beat = await call('POST', '/api/auth/heartbeat', { token });
+  assert.equal(beat.status, 401);
+});
+
+test('heartbeat keeps a session alive; ordinary requests do not', async () => {
+  const { token, sessionId } = await freshLogin();
+  const stale = new Date(Date.now() - 20 * 60 * 1000);
+  await prisma.user_sessions.update({ where: { id: sessionId }, data: { last_seen_at: stale } });
+
+  // /me is the kind of call the dashboard makes with nobody at the keyboard.
+  assert.equal((await call('GET', '/api/auth/me', { token })).status, 200);
+  const afterMe = await prisma.user_sessions.findUniqueOrThrow({ where: { id: sessionId } });
+  assert.equal(afterMe.last_seen_at.getTime(), stale.getTime(), 'an ordinary request moved last_seen_at');
+
+  const beat = await call('POST', '/api/auth/heartbeat', { token });
+  assert.equal(beat.status, 204, beat.text);
+  const afterBeat = await prisma.user_sessions.findUniqueOrThrow({ where: { id: sessionId } });
+  assert.ok(Date.now() - afterBeat.last_seen_at.getTime() < 60_000, 'heartbeat did not move last_seen_at');
+});
+
+test('a session past its absolute expiry is rejected even if active', async () => {
+  const { token, sessionId } = await freshLogin();
+  await prisma.user_sessions.update({ where: { id: sessionId }, data: { expires_at: new Date(Date.now() - 1000) } });
+
+  const me = await call('GET', '/api/auth/me', { token });
+  assert.equal(me.status, 401);
+  assert.equal(errCode(me), 'TOKEN_EXPIRED');
+});
+
+test("logging out one session leaves the user's other sessions alone", async () => {
+  const a = await freshLogin();
+  const b = await freshLogin();
+
+  assert.equal((await call('POST', '/api/auth/logout', { token: a.token })).status, 204);
+  assert.equal((await call('GET', '/api/auth/me', { token: b.token })).status, 200);
 });
 
 // --- failure paths ----------------------------------------------------------

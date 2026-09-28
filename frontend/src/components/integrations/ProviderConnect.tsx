@@ -158,8 +158,9 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             {status.connected && !replacingKey ? (
               <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="font-mono text-white truncate">{status.apiKeyMasked}</span>
-                <span className="text-slate-500 shrink-0">on file</span>
+                {/* That a key is stored and works is the whole message. Its
+                    characters are not, even masked. */}
+                <span className="text-white truncate">API key saved and working</span>
                 <button
                   type="button"
                   onClick={() => setReplacingKey(true)}

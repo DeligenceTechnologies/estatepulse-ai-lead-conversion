@@ -1,41 +1,16 @@
 import React from 'react';
 import { 
   Search, 
-  PhoneForwarded, 
   Bell, 
   Sparkles, 
-  Flame, 
   CheckCircle2, 
-  Clock, 
-  ShieldCheck,
   Zap,
-  Globe,
-  LogOut
+  Globe
 } from 'lucide-react';
-import { isLockedView, useApp } from '../../context/AppContext';
-import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
 
-interface HeaderProps {
-  onOpenNewLead: () => void;
-  onOpenWebhookTester: () => void;
-}
-
-export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTester }) => {
-  const { 
-    activeView, 
-    setActiveView, 
-    leads, 
-    orgSettings, 
-    startLiveCallSimulation,
-    setPreCallLeadId 
-  } = useApp();
-  const { user, role, logout } = useAuth();
-
-  const hotLead = leads.find(l => l.temperature === 'hot');
-  const demoLead = leads[0];
-  // Locked sections show ComingSoonView, so the demo KPIs would be the only
-  // numbers on screen and would read as real.
-  const locked = isLockedView(activeView);
+export const Header: React.FC = () => {
+  const { activeView, setActiveView, orgSettings } = useApp();
 
   const viewTitles: Record<string, { title: string; subtitle: string }> = {
     lead_sources: {
@@ -107,51 +82,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
         </div>
       </div>
 
-      {/* Center Live Ticker (Speed & Qualification KPIs) */}
-      {!locked && (
-      <div className="hidden lg:flex items-center gap-3 text-xs bg-slate-950/70 px-3 py-1.5 rounded-full border border-slate-800/80">
-        <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Avg First Response: <strong className="text-white font-mono">38s</strong></span>
-        </div>
-        <span className="text-slate-700">•</span>
-        <div className="flex items-center gap-1.5 text-slate-300">
-          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Qualification Rate: <strong className="text-white font-mono">71%</strong></span>
-        </div>
-        <span className="text-slate-700">•</span>
-        <div className="flex items-center gap-1.5 text-amber-400">
-          <Flame className="w-3.5 h-3.5 text-rose-400" />
-          <span>Hot Leads: <strong className="text-white font-mono">{leads.filter(l => l.temperature === 'hot').length}</strong></span>
-        </div>
-      </div>
-      )}
-
       {/* Right Controls */}
       <div className="flex items-center gap-2.5">
-        {/* Agent Pre-Call Screen Trigger */}
-        {!locked && hotLead && (
-          <button
-            onClick={() => setPreCallLeadId(hotLead.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold hover:border-amber-400 transition-all cursor-pointer shadow-sm shadow-amber-950/50"
-          >
-            <Flame className="w-3.5 h-3.5 text-rose-400 animate-bounce" />
-            <span>Agent Pre-Call Briefing</span>
-          </button>
-        )}
-
-        {/* Live Interactive Voice Call Simulator */}
-        {!locked && demoLead && (
-          <button
-            onClick={() => startLiveCallSimulation(demoLead)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium transition-all cursor-pointer"
-            title="Launch live interactive voice agent simulation"
-          >
-            <PhoneForwarded className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">Simulate AI Call</span>
-          </button>
-        )}
-
         {/* View Landing Page Switcher */}
         {activeView !== 'landing_page' ? (
           <button
@@ -170,24 +102,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenNewLead, onOpenWebhookTest
           </button>
         )}
 
-        {/* Authenticated user */}
-        <div className="pl-2 border-l border-slate-800 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-200">
-            {initialsFor(user)}
-          </div>
-          <div className="hidden xl:block text-left">
-            <div className="text-xs font-medium text-slate-200 leading-tight">{displayName(user)}</div>
-            <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
-          </div>
-          <button
-            onClick={logout}
-            title="Sign out"
-            aria-label="Sign out"
-            className="ml-1 p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
       </div>
     </header>
   );

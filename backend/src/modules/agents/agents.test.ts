@@ -131,15 +131,49 @@ before(async () => {
 });
 
 after(async () => {
-  // Organizations cascade to memberships and agent profiles; users are deleted
-  // separately because they are not owned by an organization.
-  if (createdOrgIds.length > 0) {
-    await prisma.organizations.deleteMany({ where: { id: { in: createdOrgIds } } });
+  try {
+    // Users first, and the order is load-bearing. organization_members and
+    // agent_profiles both cascade from users, and audit_logs.actor_id carries no
+    // foreign key, so this removes everything the run owns without ever touching
+    // an audit row. Deleting organizations first — as this hook used to — throws
+    // before reaching here and leaves the users behind.
+    if (createdUserIds.length > 0) {
+      await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
+    }
+
+    // An organization is only deletable while it has no audit rows: dropping one
+    // sets audit_logs.organization_id to NULL (ON DELETE SET NULL), and
+    // trg_audit_logs_immutable rejects every UPDATE on that table. So an
+    // organization this run wrote an audit row for cannot be removed, by design,
+    // and is deliberately left behind rather than worked around.
+    //
+    // Asked rather than caught: swallowing the exception would also swallow a
+    // genuine teardown failure.
+    const audited =
+      createdOrgIds.length === 0
+        ? []
+        : await prisma.audit_logs.findMany({
+            where: { organization_id: { in: createdOrgIds } },
+            select: { organization_id: true },
+            distinct: ['organization_id'],
+          });
+    const auditedOrgIds = new Set(audited.map((row) => row.organization_id));
+    const deletableOrgIds = createdOrgIds.filter((id) => !auditedOrgIds.has(id));
+
+    if (deletableOrgIds.length > 0) {
+      await prisma.organizations.deleteMany({ where: { id: { in: deletableOrgIds } } });
+    }
+
+    // Proves the cleanup ran, instead of leaving a silent leak for the next run
+    // to inherit — which is how the old hook failed unnoticed.
+    const leaked = await prisma.users.count({ where: { id: { in: createdUserIds } } });
+    assert.equal(leaked, 0, `${leaked} user(s) from run ${RUN} survived teardown`);
+  } finally {
+    // In a finally so a teardown failure can never again leave the Nest server
+    // and the Prisma pool open, which is what made the runner hang rather than
+    // report.
+    await app.close();
   }
-  if (createdUserIds.length > 0) {
-    await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
-  }
-  await app.close();
 });
 
 // --- authentication and authorization ---------------------------------------
@@ -379,8 +413,11 @@ test('an unknown user id is a 404, and a malformed one a 400', async () => {
   assert.equal(malformed.status, 400, malformed.text);
 });
 
-test('only status: suspended is accepted', async () => {
-  for (const body of [{ status: 'active' }, { role: 'owner' }, {}]) {
+test('the membership switch takes suspended and active, and nothing else', async () => {
+  // 'active' is the reinstatement path and is deliberately NOT in this list:
+  // updateAgentSchema has always accepted it, and asserting a 400 for it here
+  // contradicted both the schema and the reactivation the UI offers.
+  for (const body of [{ status: 'banned' }, { status: true }, { role: 'owner' }, {}]) {
     const res = await call('PATCH', `/api/agents/${agentAId}`, { token: ownerA.token, body });
     assert.equal(res.status, 400, `${JSON.stringify(body)} -> ${res.text}`);
   }
@@ -416,6 +453,343 @@ test("a suspended agent's existing token stops working immediately", async () =>
 
   const login = await call('POST', '/api/auth/login', { body: { email: AGENT_A_EMAIL(), password: PASSWORD } });
   assert.equal(login.status, 403, login.text);
+});
+
+// --- editing an agent profile ------------------------------------------------
+
+/**
+ * A dedicated agent for the edit tests, created here rather than reusing
+ * agentA: that one has been suspended by the tests above, and an edit suite
+ * that depended on the suspension order would break the moment a test moved.
+ */
+let editAgentId = '';
+const EDIT_EMAIL = (): string => emailFor('agent-edit');
+const EDIT_EMAIL_NEW = (): string => emailFor('agent-edit-renamed');
+
+test('owner creates the agent the edit tests operate on', async () => {
+  const res = await call('POST', '/api/agents', {
+    token: ownerA.token,
+    body: { email: EDIT_EMAIL(), password: PASSWORD, firstName: 'Edna', lastName: 'Editable' },
+  });
+  assert.equal(res.status, 201, res.text);
+
+  editAgentId = (res.body as unknown as Member).id;
+  createdUserIds.push(editAgentId);
+});
+
+test('owner edits every Phase 1 field, and Postgres holds the new values', async () => {
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: {
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      email: EDIT_EMAIL_NEW(),
+      phone: '512-555-0123',
+      title: 'Senior Listing Agent',
+      timezone: 'America/New_York',
+      maxActiveLeads: 40,
+    },
+  });
+  assert.equal(res.status, 200, res.text);
+
+  const body = res.body as unknown as Member & { title: string | null; maxActiveLeads: number | null };
+  assert.equal(body.firstName, 'Grace');
+  assert.equal(body.lastName, 'Hopper');
+  assert.equal(body.email, EDIT_EMAIL_NEW());
+  assert.equal(body.phone, '512-555-0123');
+  assert.equal(body.title, 'Senior Listing Agent');
+  assert.equal(body.timezone, 'America/New_York');
+  assert.equal(body.maxActiveLeads, 40);
+
+  // The response is not the assertion — the rows are. Name, email and phone on
+  // users; title, timezone and the cap on agent_profiles.
+  const user = await prisma.users.findUnique({ where: { id: editAgentId } });
+  assert.equal(user?.first_name, 'Grace');
+  assert.equal(user?.last_name, 'Hopper');
+  assert.equal(user?.email, EDIT_EMAIL_NEW());
+  assert.equal(user?.phone, '512-555-0123');
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(profile?.title, 'Senior Listing Agent');
+  assert.equal(profile?.timezone, 'America/New_York');
+  assert.equal(profile?.max_active_leads, 40);
+  // The profile's own copies of the name, email and phone move with them.
+  assert.equal(profile?.display_name, 'Grace Hopper');
+  assert.equal(profile?.email, EDIT_EMAIL_NEW());
+  assert.equal(profile?.phone, '512-555-0123');
+});
+
+test('the edited email is the credential: the agent signs in with the new one', async () => {
+  const withNew = await call('POST', '/api/auth/login', {
+    body: { email: EDIT_EMAIL_NEW(), password: PASSWORD },
+  });
+  assert.equal(withNew.status, 200, withNew.text);
+
+  // And the old address is nobody's login any more.
+  const withOld = await call('POST', '/api/auth/login', { body: { email: EDIT_EMAIL(), password: PASSWORD } });
+  assert.equal(withOld.status, 401, withOld.text);
+});
+
+test('a partial edit changes only what it named', async () => {
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: { title: 'Buyer Agent' },
+  });
+  assert.equal(res.status, 200, res.text);
+
+  const user = await prisma.users.findUnique({ where: { id: editAgentId } });
+  assert.equal(user?.first_name, 'Grace');
+  assert.equal(user?.email, EDIT_EMAIL_NEW());
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(profile?.title, 'Buyer Agent');
+  // Untouched by a title-only edit.
+  assert.equal(profile?.max_active_leads, 40);
+  assert.equal(profile?.timezone, 'America/New_York');
+});
+
+test('null clears an optional column', async () => {
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: { phone: null, title: null },
+  });
+  assert.equal(res.status, 200, res.text);
+
+  const user = await prisma.users.findUnique({ where: { id: editAgentId } });
+  assert.equal(user?.phone, null);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(profile?.title, null);
+});
+
+test('an edit never moves role, membership status or organization', async () => {
+  const before = await prisma.organization_members.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: { firstName: 'Grace', maxActiveLeads: 7 },
+  });
+  assert.equal(res.status, 200, res.text);
+
+  const after = await prisma.organization_members.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(after?.role, before?.role);
+  assert.equal(after?.status, before?.status);
+  assert.equal(after?.organization_id, before?.organization_id);
+});
+
+test('invalid profile values are a 400, and nothing is written', async () => {
+  for (const body of [
+    { email: 'not-an-email' },
+    { timezone: 'Mars/Olympus_Mons' },
+    // agent_profiles has CHECK (max_active_leads > 0) — a 400, never a 500.
+    { maxActiveLeads: 0 },
+    { maxActiveLeads: -1 },
+    { maxActiveLeads: 2.5 },
+    { maxActiveLeads: '10' },
+    { firstName: '' },
+    { lastName: '   ' },
+  ]) {
+    const res = await call('PATCH', `/api/agents/${editAgentId}`, { token: ownerA.token, body });
+    assert.equal(res.status, 400, `${JSON.stringify(body)} -> ${res.text}`);
+  }
+
+  // The cap the last successful edit set is still there.
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(profile?.max_active_leads, 7);
+});
+
+test('fields the client must not control are rejected outright', async () => {
+  for (const body of [
+    { role: 'owner' },
+    { organizationId: ownerB.orgId },
+    { organization_id: ownerB.orgId },
+    { password: PASSWORD },
+    { routingEnabled: false },
+    { routing_enabled: false },
+    { agentStatus: 'available' },
+    { firstName: 'Grace', role: 'owner' },
+    // The membership switch and a profile edit have different authorization
+    // rules, so a body doing both is refused rather than half-applied.
+    { status: 'suspended', title: 'Broker' },
+  ]) {
+    const res = await call('PATCH', `/api/agents/${editAgentId}`, { token: ownerA.token, body });
+    assert.equal(res.status, 400, `${JSON.stringify(body)} -> ${res.text}`);
+  }
+
+  const member = await prisma.organization_members.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.equal(member?.role, 'agent');
+  assert.equal(member?.status, 'active');
+});
+
+test('an email another account holds is a 409, case-insensitively', async () => {
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: { email: AGENT_A_EMAIL().toUpperCase() },
+  });
+  assert.equal(res.status, 409, res.text);
+  assert.equal(errCode(res), 'EMAIL_TAKEN');
+
+  const user = await prisma.users.findUnique({ where: { id: editAgentId } });
+  assert.equal(user?.email, EDIT_EMAIL_NEW());
+});
+
+test("re-saving the agent's own email is not a conflict with itself", async () => {
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerA.token,
+    body: { email: EDIT_EMAIL_NEW(), title: 'Listing Agent' },
+  });
+  assert.equal(res.status, 200, res.text);
+});
+
+test("an owner cannot edit another organization's agent", async () => {
+  // Owner B, addressing an agent that exists — but not in their tenant. A 404
+  // rather than a 403: confirming the account exists would leak across tenants.
+  const res = await call('PATCH', `/api/agents/${editAgentId}`, {
+    token: ownerB.token,
+    body: { firstName: 'Mallory', maxActiveLeads: 999 },
+  });
+  assert.equal(res.status, 404, res.text);
+
+  const user = await prisma.users.findUnique({ where: { id: editAgentId } });
+  assert.equal(user?.first_name, 'Grace');
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: editAgentId },
+  });
+  assert.notEqual(profile?.max_active_leads, 999);
+});
+
+test('an agent cannot edit anyone, including themselves', async () => {
+  const login = await call('POST', '/api/auth/login', {
+    body: { email: EDIT_EMAIL_NEW(), password: PASSWORD },
+  });
+  assert.equal(login.status, 200, login.text);
+  const token = login.body['token'] as string;
+
+  const other = await call('PATCH', `/api/agents/${agentAId}`, { token, body: { title: 'Broker' } });
+  assert.equal(other.status, 403, other.text);
+
+  const self = await call('PATCH', `/api/agents/${editAgentId}`, { token, body: { title: 'Broker' } });
+  assert.equal(self.status, 403, self.text);
+});
+
+test('the owner is not editable here, and gains no agent profile from trying', async () => {
+  // An owner has no agent_profiles row by design. Minting one as a side effect
+  // of a name change would quietly turn the account into a routing target.
+  const res = await call('PATCH', `/api/agents/${ownerA.userId}`, {
+    token: ownerA.token,
+    body: { title: 'Broker' },
+  });
+  assert.equal(res.status, 403, res.text);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: ownerA.userId },
+  });
+  assert.equal(profile, null);
+});
+
+test('the roster reports the edited title and lead cap', async () => {
+  const res = await call('GET', '/api/agents', { token: ownerA.token });
+  assert.equal(res.status, 200, res.text);
+
+  const rows = res.body as unknown as Array<Member & { title: string | null; maxActiveLeads: number | null }>;
+  const edited = rows.find((m) => m.id === editAgentId)!;
+  assert.equal(edited.title, 'Listing Agent');
+  assert.equal(edited.maxActiveLeads, 7);
+
+  // The owner has no profile, so there is no cap to report rather than a
+  // default to invent.
+  const owner = rows.find((m) => m.id === ownerA.userId)!;
+  assert.equal(owner.maxActiveLeads, null);
+  assert.equal(owner.title, null);
+});
+
+test('the edit is recorded in the audit log, naming fields but not values', async () => {
+  const entries = await prisma.audit_logs.findMany({
+    where: { organization_id: ownerA.orgId, action: 'member.updated', entity_id: editAgentId },
+    orderBy: { created_at: 'desc' },
+  });
+  assert.ok(entries.length > 0, 'no member.updated audit row was written');
+
+  const first = entries.at(-1)!;
+  assert.equal(first.actor_type, 'user');
+  assert.equal(first.actor_id, ownerA.userId);
+  assert.equal(first.entity_type, 'member');
+  assert.ok(Array.isArray((first.payload as { changed?: unknown })?.changed));
+  // The phone number itself never reaches the audit table.
+  assert.ok(!JSON.stringify(first.payload).includes('512-555-0123'));
+});
+
+// --- max active leads at onboarding -----------------------------------------
+
+test('Add Agent stores the lead cap the owner entered', async () => {
+  const res = await call('POST', '/api/agents', {
+    token: ownerA.token,
+    body: {
+      email: emailFor('cap'),
+      password: PASSWORD,
+      firstName: 'Cap',
+      lastName: 'Ped',
+      maxActiveLeads: 12,
+    },
+  });
+  assert.equal(res.status, 201, res.text);
+
+  const created = res.body as unknown as Member & { maxActiveLeads: number | null };
+  createdUserIds.push(created.id);
+  assert.equal(created.maxActiveLeads, 12);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: created.id },
+  });
+  assert.equal(profile?.max_active_leads, 12);
+});
+
+test('Add Agent without a lead cap leaves the column default standing', async () => {
+  const res = await call('POST', '/api/agents', {
+    token: ownerA.token,
+    body: { email: emailFor('nocap'), password: PASSWORD, firstName: 'No', lastName: 'Cap' },
+  });
+  assert.equal(res.status, 201, res.text);
+
+  const created = res.body as unknown as Member & { maxActiveLeads: number | null };
+  createdUserIds.push(created.id);
+  assert.equal(created.maxActiveLeads, 25);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: created.id },
+  });
+  assert.equal(profile?.max_active_leads, 25);
+});
+
+test('Add Agent rejects a lead cap the database could not store', async () => {
+  // agent_profiles has CHECK (max_active_leads > 0).
+  for (const maxActiveLeads of [0, -1, 2.5, '10', null]) {
+    const res = await call('POST', '/api/agents', {
+      token: ownerA.token,
+      body: {
+        email: emailFor(`bad-cap-${String(maxActiveLeads)}`),
+        password: PASSWORD,
+        firstName: 'Bad',
+        lastName: 'Cap',
+        maxActiveLeads,
+      },
+    });
+    assert.equal(res.status, 400, `${String(maxActiveLeads)} -> ${res.text}`);
+  }
 });
 
 test('no response in this suite contained a password or a hash', () => {

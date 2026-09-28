@@ -1,10 +1,12 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PortalIngestModule } from '../ingest/portal-ingest.module';
+import { FollowupModule } from '../modules/followup/followup.module';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
 import { CredStoreService } from './cred-store.service';
 import { EngineService } from './engine.service';
+import { InboundSmsService } from './inbound-sms.service';
 import { LeadWatcherService } from './lead-watcher.service';
 import { NumbersService } from './numbers.service';
 import {
@@ -30,7 +32,7 @@ import { VoiceService } from './voice.service';
  * declared on both ends.
  */
 @Module({
-  imports: [AuthModule, forwardRef(() => PortalIngestModule)],
+  imports: [AuthModule, forwardRef(() => PortalIngestModule), forwardRef(() => FollowupModule)],
   controllers: [
     TelnyxController,
     OrgIntegrationsController,
@@ -44,6 +46,7 @@ import { VoiceService } from './voice.service';
     SecretCipherService,
     CredStoreService,
     ActivityService,
+    InboundSmsService,
     AssistantService,
     NumbersService,
     SmsService,
@@ -52,6 +55,8 @@ import { VoiceService } from './voice.service';
     EngineService,
     LeadWatcherService,
   ],
-  exports: [EngineService, CredStoreService],
+  // The follow-up runner sends through these; StrategyStoreService is where
+  // the quiet-hours guardrails live, so nurture obeys the same window.
+  exports: [EngineService, CredStoreService, SmsService, VoiceService, ActivityService, StrategyStoreService],
 })
 export class TelnyxModule {}

@@ -17,6 +17,9 @@ import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
 import { LeadSourcesView } from './components/views/LeadSourcesView';
 import { AppointmentsView } from './components/views/AppointmentsView';
+import { CallsView } from './components/views/CallsView';
+import { ConversationsView } from './components/views/ConversationsView';
+import { FollowUpsView } from './components/views/FollowUpsView';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -34,25 +37,19 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
       {/* Structural Sidebar */}
-      <Sidebar
-        onOpenNewLead={() => setIsNewLeadOpen(true)}
-        onOpenWebhookTester={() => setIsWebhookTesterOpen(true)}
-      />
+      <Sidebar />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header 
-          onOpenNewLead={() => setIsNewLeadOpen(true)}
-          onOpenWebhookTester={() => setIsWebhookTesterOpen(true)}
-        />
+        <Header />
 
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
           {activeView === 'dashboard' && <ComingSoonView title="Dashboard" />}
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
-          {activeView === 'conversations' && <ComingSoonView title="Conversations & SMS" />}
-          {activeView === 'calls' && <ComingSoonView title="AI Voice Calls" />}
+          {activeView === 'conversations' && <ConversationsView />}
+          {activeView === 'calls' && <CallsView />}
           {activeView === 'appointments' && <AppointmentsView />}
-          {activeView === 'followups' && <ComingSoonView title="Follow-Up Sequences" />}
+          {activeView === 'followups' && <FollowUpsView />}
           {activeView === 'agents' && <AgentsView />}
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />

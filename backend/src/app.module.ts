@@ -7,6 +7,8 @@ import { EventsModule } from './modules/events/events.module';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { FollowupModule } from './modules/followup/followup.module';
+import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
@@ -76,8 +78,28 @@ export const envSchema = z.object({
   STRATEGY_ENGINE: z.string().optional(),
   ENGINE_POLL_MS: z.coerce.number().default(15_000),
 
+  // --- nurture (follow-up sequences) ---
+  // Shares STRATEGY_ENGINE's opt-in: one switch decides whether this deployment
+  // may contact real people. A minute is plenty — the cadence is days, and the
+  // claim query is a partial-index lookup on an empty-most-of-the-time queue.
+  FOLLOWUP_POLL_MS: z.coerce.number().default(60_000),
+  FOLLOWUP_BATCH_SIZE: z.coerce.number().default(20),
+  FOLLOWUP_STUCK_AFTER_MS: z.coerce.number().default(600_000),
+
   // Overridable so scripts/fake-tally.mjs can stand in for the real API —
   // including the 401/429/5xx paths a real account will not produce on demand.
+  // Outbound email. All optional: with no SMTP_HOST the mailer is disabled and
+  // every send reports itself as not sent, which is the normal state in
+  // development and in the integration suites.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  SMTP_SECURE: z.string().optional(),
+  // Where the SPA is served, used only to put a sign-in link in outbound email.
+  // Absent simply omits the link.
+  APP_BASE_URL: z.string().optional(),
   TALLY_API_BASE_URL: z.string().url().default('https://api.tally.so'),
   PROVIDER_HTTP_TIMEOUT_MS: z.coerce.number().default(10_000),
 
@@ -154,6 +176,10 @@ export const envSchema = z.object({
     AuthModule,
     AgentsModule,
     TelnyxModule,
+
+    // Post-qualification: call/message history, and the nurture runner.
+    HistoryModule,
+    FollowupModule,
     PortalIngestModule,
 
     // Calendar: agent-owned Calendly connections, working hours, and the

@@ -13,7 +13,20 @@ import { hashPassword, verifyPassword } from './password';
 import type { LoginInput, SignupInput } from './schemas';
 import { ROLES, type AuthContext, type AuthSessionDTO, type Role } from './types';
 
-const TOKEN_EXPIRES_IN = '7d';
+/**
+ * Absolute session lifetime, enforced twice: by the JWT's own `exp` and by
+ * user_sessions.expires_at. There is no refresh: 24 hours after sign-in the
+ * holder signs in again, however active they were.
+ */
+const TOKEN_EXPIRES_IN = '24h';
+const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Idle timeout, enforced here rather than trusted to the browser: a session
+ * whose last heartbeat is this old is rejected on every route. Matches the
+ * frontend's IDLE_TIMEOUT_MS, which only exists to show the login page on time.
+ */
+export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * The only users.status and organization_members.status value that
@@ -55,22 +68,27 @@ export class AuthService {
   }
 
   /**
-   * Payload is {sub, iss, iat, exp} and nothing else. No email, no role, no org:
-   * role and organization are resolved from organization_members on every
+   * Payload is {sub, jti, iss, iat, exp} and nothing else. No email, no role, no
+   * org: role and organization are resolved from organization_members on every
    * request, so a demotion or removal takes effect immediately instead of
-   * whenever the token happens to expire.
+   * whenever the token happens to expire. `jti` is the user_sessions row.
    */
-  signToken(userId: string): string {
+  signToken(userId: string, sessionId: string): string {
     return jwt.sign({}, this.jwtSecret, {
       subject: userId,
+      jwtid: sessionId,
       issuer: this.jwtIssuer,
       expiresIn: TOKEN_EXPIRES_IN,
       algorithm: 'HS256',
     });
   }
 
-  /** Returns the subject (user id). Throws AppError on any verification failure. */
-  verifyToken(token: string): string {
+  /**
+   * Signature, issuer and `exp` only; says nothing about whether the session is
+   * still live. Use authenticate() to admit a request. Throws AppError on any
+   * verification failure.
+   */
+  verifyToken(token: string): { userId: string; sessionId: string } {
     try {
       // The algorithm allowlist is what prevents 'alg: none' and RS/HS confusion.
       const payload = jwt.verify(token, this.jwtSecret, {
@@ -81,7 +99,12 @@ export class AuthService {
       if (typeof payload === 'string' || typeof payload.sub !== 'string' || payload.sub.length === 0) {
         throw new AppError('UNAUTHENTICATED', 'Invalid token');
       }
-      return payload.sub;
+      // A token issued before server-side sessions existed has no jti, and
+      // therefore nothing that could ever revoke or idle it out.
+      if (typeof payload.jti !== 'string' || payload.jti.length === 0) {
+        throw new AppError('UNAUTHENTICATED', 'Invalid token');
+      }
+      return { userId: payload.sub, sessionId: payload.jti };
     } catch (err) {
       if (err instanceof AppError) throw err;
       if (err instanceof jwt.TokenExpiredError) {
@@ -89,6 +112,60 @@ export class AuthService {
       }
       throw new AppError('UNAUTHENTICATED', 'Invalid token');
     }
+  }
+
+  /**
+   * The one way a request is admitted, for SessionGuard and TenantGuard alike:
+   * a valid signature, a live user_sessions row, and an active membership.
+   *
+   * The two lookups are independent reads, so they run concurrently. A dead
+   * session is reported ahead of a membership problem either way, so a revoked
+   * token learns nothing about the account behind it.
+   */
+  async authenticate(token: string): Promise<{ sessionId: string; auth: AuthContext }> {
+    const { userId, sessionId } = this.verifyToken(token);
+    const [session, context] = await Promise.allSettled([
+      this.assertSessionLive(sessionId, userId),
+      this.loadAuthContext(userId),
+    ]);
+    if (session.status === 'rejected') throw session.reason;
+    if (context.status === 'rejected') throw context.reason;
+    return { sessionId, auth: context.value };
+  }
+
+  /**
+   * Revoked and unknown sessions are UNAUTHENTICATED; idle and absolute expiry
+   * are TOKEN_EXPIRED, which the client words as "your session has expired".
+   */
+  async assertSessionLive(sessionId: string, userId: string): Promise<void> {
+    const session = await this.prisma.user_sessions.findUnique({
+      where: { id: sessionId },
+      select: { user_id: true, last_seen_at: true, expires_at: true, revoked_at: true },
+    });
+
+    if (!session || session.user_id !== userId || session.revoked_at) {
+      throw new AppError('UNAUTHENTICATED', 'Invalid token');
+    }
+
+    const now = Date.now();
+    if (session.expires_at.getTime() <= now || now - session.last_seen_at.getTime() >= IDLE_TIMEOUT_MS) {
+      throw new AppError('TOKEN_EXPIRED', 'Session expired');
+    }
+  }
+
+  /** The caller is behind SessionGuard, so the session was live a moment ago. */
+  async heartbeat(sessionId: string): Promise<void> {
+    await this.prisma.user_sessions.updateMany({
+      where: { id: sessionId, revoked_at: null },
+      data: { last_seen_at: new Date() },
+    });
+  }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.prisma.user_sessions.updateMany({
+      where: { id: sessionId, revoked_at: null },
+      data: { revoked_at: new Date() },
+    });
   }
 
   /**
@@ -139,8 +216,15 @@ export class AuthService {
             select: { id: true },
           });
 
+          // Inside the transaction: a session for a user whose signup rolled
+          // back would be a row pointing at nothing.
+          const session = await tx.user_sessions.create({
+            data: { user_id: user.id, expires_at: new Date(Date.now() + SESSION_LIFETIME_MS) },
+            select: { id: true },
+          });
+
           return {
-            token: this.signToken(user.id),
+            token: this.signToken(user.id, session.id),
             user: {
               id: user.id,
               email: user.email,
@@ -201,8 +285,15 @@ export class AuthService {
 
     const context = await this.loadAuthContext(user.id);
 
+    // After loadAuthContext, so a user with no active organization gets no
+    // session row either.
+    const session = await this.prisma.user_sessions.create({
+      data: { user_id: context.userId, expires_at: new Date(Date.now() + SESSION_LIFETIME_MS) },
+      select: { id: true },
+    });
+
     return {
-      token: this.signToken(context.userId),
+      token: this.signToken(context.userId, session.id),
       user: context.user,
       organization: context.organization,
       role: context.role,

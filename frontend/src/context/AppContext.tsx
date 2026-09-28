@@ -41,6 +41,12 @@ export type AppView =
   // context — see src/api/client.ts. Only the view id lives here.
   | 'lead_sources';
 
+// Unlocked alongside the call/message history and nurture work: 'calls',
+// 'conversations' and 'followups' now read the real API through
+// utils/historyApi.ts and utils/sequencesApi.ts. The `calls`, `conversations`
+// and `followupSequences` values still on this context are the demo store and
+// are no longer what those three screens render.
+
 /**
  * Sections that are navigable but not built yet. Lives beside AppView so the
  * locked list cannot drift from the view union: App.tsx renders ComingSoonView
@@ -48,11 +54,8 @@ export type AppView =
  */
 const LOCKED_VIEWS: readonly AppView[] = [
   'dashboard',
-  'conversations',
-  'calls',
   // 'appointments' is live: it reads the real appointments table, populated by
   // the calendar sync from agents' connected Calendly accounts.
-  'followups',
   'analytics',
   'landing_page',
 ];
@@ -112,7 +115,6 @@ interface AppContextType {
   toggleAutomation: (leadId: string) => void;
   takeOverConversation: (leadId: string) => void;
   triggerWebhookTest: (payload: any) => Lead;
-  resetDemoData: () => void;
   simulateHotQualification: (leadId: string) => void;
   addAuditLog: (action: string, entityType: AuditLog['entityType'], entityId: string, description: string, actor?: AuditLog['actor']) => void;
 }
@@ -653,32 +655,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSimulatedLead(null);
   };
 
-  const resetDemoData = () => {
-    setOrgSettings(INITIAL_ORG_SETTINGS);
-    setAgents(INITIAL_AGENTS);
-    setLeads(INITIAL_LEADS);
-    setConversations(INITIAL_CONVERSATIONS);
-    setCalls(INITIAL_CALLS);
-    setAppointments(INITIAL_APPOINTMENTS);
-    setFollowupSequences(INITIAL_FOLLOWUP_SEQUENCES);
-    setIntegrations(INITIAL_INTEGRATIONS);
-    setAuditLogs(INITIAL_AUDIT_LOGS);
-    // Only the demo keys. localStorage.clear() would also wipe the auth token
-    // and sign the user out mid-session.
-    [
-      'ep_org_settings',
-      'ep_agents',
-      'ep_leads',
-      'ep_conversations',
-      'ep_calls',
-      'ep_appointments',
-      'ep_sequences',
-      'ep_integrations',
-      'ep_audit_logs',
-    ].forEach(key => localStorage.removeItem(key));
-    addAuditLog('System Reset', 'system', 'demo_org', 'Reset application state to initial Austin Home Advisors demo scenario.', 'System (n8n)');
-  };
-
   return (
     <AppContext.Provider
       value={{
@@ -714,7 +690,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleAutomation,
         takeOverConversation,
         triggerWebhookTest,
-        resetDemoData,
         simulateHotQualification,
         addAuditLog,
       }}
