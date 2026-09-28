@@ -13,6 +13,8 @@ export interface TenantContext {
   scopes: string[];
   /** Null for API-key callers — there is no user behind a machine credential. */
   userId: string | null;
+  /** Null for API-key callers. Long-lived routes (the live stream) re-check it. */
+  sessionId: string | null;
 }
 
 export interface TenantRequest extends Request {
@@ -88,6 +90,7 @@ export class TenantGuard implements CanActivate {
       apiKeyId: key.id,
       scopes: key.scopes,
       userId: null,
+      sessionId: null,
     };
   }
 
@@ -96,14 +99,14 @@ export class TenantGuard implements CanActivate {
       throw new AppError('UNAUTHENTICATED', 'Missing or malformed Authorization header');
     }
 
-    const userId = this.auth.verifyToken(token);
-    const auth = await this.auth.loadAuthContext(userId);
+    const { sessionId, auth } = await this.auth.authenticate(token);
 
     return {
       organizationId: auth.organizationId,
       apiKeyId: null,
       scopes: [],
       userId: auth.userId,
+      sessionId,
     };
   }
 }

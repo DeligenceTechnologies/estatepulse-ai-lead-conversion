@@ -4,6 +4,7 @@ import {
   SESSION_ENDED_EVENT,
   api,
   clearToken,
+  getToken,
   restorableToken,
   setToken,
   type AuthOrganization,
@@ -140,7 +141,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = (): void => {
-    // Stateless JWT: logout is disposing of the token client-side.
+    // Revoke server-side first: apiFetch reads the token synchronously, before
+    // the clearToken below removes it. Best-effort - if the call fails the
+    // session still dies on its own idle timeout.
+    if (getToken()) api.logout().catch(() => {});
     clearToken();
     setRestoreError(null);
     reset();
@@ -149,10 +153,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Idle timeout. Signing in flips status to 'authed' and starts a fresh
    * 30-minute watch; logging out (or an idle logout itself) flips it back and
-   * the cleanup clears the timer and the listeners. Nothing here touches the
-   * JWT - the token's own 24-hour expiry is still the session ceiling.
+   * the cleanup clears the timer and the listeners. Activity is reported to the
+   * backend as a heartbeat, which is what keeps the server-side session alive.
+   * A 401 on it ends the session through apiFetch like any other call.
    */
-  useEffect(() => startIdleWatch(status, logout), [status]);
+  useEffect(
+    () => startIdleWatch(status, logout, () => void api.heartbeat().catch(() => {})),
+    [status],
+  );
 
   const retryRestore = (): void => setRestoreNonce((n) => n + 1);
 

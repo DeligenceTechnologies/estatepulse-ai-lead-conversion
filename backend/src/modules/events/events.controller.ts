@@ -1,8 +1,16 @@
 import { Controller, Header, Req, Sse, UseGuards } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
-import { Observable, concat, interval, map, merge, of } from 'rxjs';
+import { NEVER, Observable, concat, exhaustMap, filter, interval, map, merge, of, takeUntil } from 'rxjs';
+import { AuthService } from '../../auth/auth.service';
 import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guard';
 import { EventsBus } from './events.bus';
+
+/**
+ * How often an open stream re-checks the session it was opened on. The guard
+ * only runs once, at connect; without this a stream outlives the logout or
+ * idle timeout that ended its session, for as long as the tab stays open.
+ */
+export const SESSION_RECHECK_MS = 60_000;
 
 /**
  * The live event stream the dashboard listens on instead of polling.
@@ -22,7 +30,10 @@ import { EventsBus } from './events.bus';
 @Controller('api/v1/events')
 @UseGuards(TenantGuard)
 export class EventsController {
-  constructor(private readonly bus: EventsBus) {}
+  constructor(
+    private readonly bus: EventsBus,
+    private readonly auth: AuthService,
+  ) {}
 
   @Sse()
   // nginx and several managed proxies buffer proxied responses by default, which
@@ -58,6 +69,19 @@ export class EventsController {
       map((): MessageEvent => ({ data: { type: 'ping', at: new Date().toISOString() } })),
     );
 
-    return concat(ready, merge(changes, heartbeat));
+    // Ends the stream cleanly once the session is gone. The client reconnects,
+    // the guard answers 401, and the browser lands on the login page. A failed
+    // check (the database unreachable) also ends it: fail closed, and the
+    // reconnect sorts out which it was. API-key callers have no session.
+    const { sessionId, userId } = req.tenant;
+    const sessionEnded =
+      sessionId === null || userId === null
+        ? NEVER
+        : interval(SESSION_RECHECK_MS).pipe(
+            exhaustMap(() => this.auth.assertSessionLive(sessionId, userId).then(() => true, () => false)),
+            filter((live) => !live),
+          );
+
+    return concat(ready, merge(changes, heartbeat)).pipe(takeUntil(sessionEnded));
   }
 }

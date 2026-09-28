@@ -6,6 +6,8 @@ import type { AuthContext } from '../../auth/types';
 
 export interface SessionRequest extends Request {
   auth: AuthContext;
+  /** The user_sessions row this request was admitted on. */
+  sessionId: string;
 }
 
 const BEARER = 'Bearer ';
@@ -13,9 +15,10 @@ const BEARER = 'Bearer ';
 /**
  * Requires a signed-in user and attaches the full AuthContext.
  *
- * The token is trusted for identity and nothing else: `sub` is the only claim
- * read from it. Organization and role come from organization_members on every
- * request, so a demotion, a removal or a suspension takes effect on the next
+ * The token is trusted for identity and nothing else: `sub` and `jti` are the
+ * only claims read from it. The session row is checked (revoked, idle, expired)
+ * and organization and role come from organization_members on every request,
+ * so a logout, a demotion, a removal or a suspension takes effect on the next
  * call rather than whenever the token happens to expire.
  *
  * Use this for portal routes, which are about a *user*. Routes that only need
@@ -39,10 +42,11 @@ export class SessionGuard implements CanActivate {
       throw new AppError('UNAUTHENTICATED', 'Missing or malformed Authorization header');
     }
 
-    // verifyToken distinguishes expired from invalid, and the client shows a
+    // authenticate distinguishes expired from invalid, and the client shows a
     // different message for each, so the AppError is allowed through as thrown.
-    const userId = this.auth.verifyToken(token);
-    req.auth = await this.auth.loadAuthContext(userId);
+    const { sessionId, auth } = await this.auth.authenticate(token);
+    req.auth = auth;
+    req.sessionId = sessionId;
     return true;
   }
 }

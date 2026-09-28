@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearToken, getToken, setToken } from './api';
-import { IDLE_TIMEOUT_MS, markActivity, readActivity, startIdleWatch } from './idle';
+import { HEARTBEAT_MS, IDLE_TIMEOUT_MS, markActivity, readActivity, startIdleWatch } from './idle';
 
 /**
  * Same plain-node setup as session.spec.ts: the code under test needs a
@@ -178,6 +178,30 @@ describe('idle session timeout', () => {
     expect(onIdle).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1000);
     expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it('reports the first input at once, then at most once a minute', () => {
+    // The heartbeat is what keeps the server-side session alive. First input
+    // goes immediately: after a reload the server may be close to its own
+    // 30-minute limit, and a minute's delay could let it lapse under a user
+    // who is plainly active.
+    const onActive = vi.fn();
+    startIdleWatch('authed', () => {}, onActive);
+
+    expect(onActive).not.toHaveBeenCalled(); // no input, no heartbeat
+    activity('keydown');
+    expect(onActive).toHaveBeenCalledOnce();
+
+    // A minute of steady input, one event per second: still just the one.
+    for (let i = 0; i < HEARTBEAT_MS / 1000 - 1; i += 1) {
+      vi.advanceTimersByTime(1000);
+      activity('mousemove');
+    }
+    expect(onActive).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(1000);
+    activity('mousemove');
+    expect(onActive).toHaveBeenCalledTimes(2);
   });
 
   it('drops the token without reissuing or extending one', () => {

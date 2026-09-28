@@ -1,18 +1,25 @@
 /**
- * Idle session timeout. Separate from the JWT: the token still expires on the
- * backend's own 24-hour schedule, which stays the absolute session ceiling.
- * This only drops the client's copy of it early when nobody is at the keyboard.
+ * Idle session timeout, in two layers.
  *
- * The deadline is persisted next to the token, so it survives a reload, a
- * browser restart and a second tab. It is a client-side convenience and not a
- * security boundary: the whole record lives in the browser, and anyone willing
- * to edit localStorage can push the deadline back out. What the server enforces
- * is, and stays, the JWT's own 24 hours.
+ * The backend enforces 30 minutes on its own session row
+ * (user_sessions.last_seen_at), and that is the rule that counts for security.
+ *
+ * This client-side deadline is persisted next to the token, so a reload, a
+ * browser restart or a second tab continue it instead of starting over, and the
+ * login page appears on time without waiting for a 401. It is a convenience,
+ * not a security boundary: anyone can edit localStorage.
  */
 export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Sits beside ep_auth_token, and is cleared with it. */
 const ACTIVITY_KEY = 'ep_last_activity';
+
+/**
+ * How often real input is reported to the backend. The server moves
+ * last_seen_at only on these, never on background requests, so a session with
+ * someone at the keyboard stays alive and an unattended one does not.
+ */
+export const HEARTBEAT_MS = 60 * 1000;
 
 /**
  * mousemove and scroll fire hundreds of times a second. One timestamp per second
@@ -61,18 +68,26 @@ export function clearActivity(): void {
 }
 
 /**
- * Calls onIdle once after timeoutMs with no user activity. Returns a stop
- * function that clears the timer and drops every listener.
+ * Calls onIdle once after timeoutMs with no user activity, and onActive on
+ * activity at most once per HEARTBEAT_MS. Returns a stop function that clears
+ * the timer and drops every listener.
  *
  * The deadline is a timestamp, not a countdown, so a tab that was backgrounded
  * (where browsers throttle setTimeout to about once a minute) still logs out on
  * real elapsed time rather than on how often the timer got to run.
  */
-export function watchIdle(onIdle: () => void, timeoutMs: number = IDLE_TIMEOUT_MS): () => void {
+export function watchIdle(
+  onIdle: () => void,
+  timeoutMs: number = IDLE_TIMEOUT_MS,
+  onActive: () => void = () => {},
+): () => void {
   // Seeded from storage so a reload continues the deadline it left behind
   // instead of starting a new one. The in-memory copy is what makes the
   // throttle check free, and what keeps this working with storage unavailable.
   let last = readActivity() ?? Date.now();
+  // 0, not now: after a reload the server's last_seen_at may be nearly 30
+  // minutes old, so the first input must be reported at once, not a minute late.
+  let lastBeat = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
@@ -97,6 +112,12 @@ export function watchIdle(onIdle: () => void, timeoutMs: number = IDLE_TIMEOUT_M
 
   const onActivity = (): void => {
     const now = Date.now();
+    // Ahead of the idle throttle, which starts closed: input in the first
+    // second after a reload would otherwise go unreported for a minute.
+    if (now - lastBeat >= HEARTBEAT_MS) {
+      lastBeat = now;
+      onActive();
+    }
     if (now - last < ACTIVITY_THROTTLE_MS) return;
     last = now;
     markActivity(now);
@@ -137,8 +158,9 @@ export function watchIdle(onIdle: () => void, timeoutMs: number = IDLE_TIMEOUT_M
 export function startIdleWatch(
   status: string,
   onIdle: () => void,
+  onActive: () => void = () => {},
   timeoutMs: number = IDLE_TIMEOUT_MS,
 ): (() => void) | undefined {
   if (status !== 'authed') return undefined;
-  return watchIdle(onIdle, timeoutMs);
+  return watchIdle(onIdle, timeoutMs, onActive);
 }

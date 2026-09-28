@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -27,7 +27,9 @@ export const Sidebar: React.FC = () => {
     orgSettings, 
     setPreCallLeadId 
   } = useApp();
-  const { user, role, logout } = useAuth();
+  const { user, role, organization, logout } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const isOwner = role === 'owner';
 
   const locked = isLockedView(activeView);
   const hotLeadsCount = leads.filter(l => l.temperature === 'hot').length;
@@ -182,14 +184,49 @@ export const Sidebar: React.FC = () => {
       </nav>
 
       {/* Who is signed in, and the way out. */}
-      <div className="p-3 border-t border-slate-800/80 bg-slate-950/40 flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 font-mono shrink-0">
-          {initialsFor(user)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold text-slate-200 truncate">{displayName(user)}</div>
-          <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
-        </div>
+      <div className="relative p-3 border-t border-slate-800/80 bg-slate-950/40 flex items-center gap-2.5">
+        {/* Read-only profile card, owner only for now. */}
+        {isOwner && profileOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
+            <div className="absolute bottom-full left-3 right-3 mb-2 z-50 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-sm font-bold text-slate-300 font-mono shrink-0">
+                  {initialsFor(user)}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-100 truncate">{displayName(user)}</div>
+                  <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
+                </div>
+              </div>
+              <dl className="text-[11px] space-y-2">
+                <div>
+                  <dt className="text-slate-500 uppercase tracking-wider text-[10px]">Email</dt>
+                  <dd className="text-slate-200 truncate">{user?.email}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500 uppercase tracking-wider text-[10px]">Organization</dt>
+                  <dd className="text-slate-200 truncate">{organization?.name}</dd>
+                </div>
+              </dl>
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          disabled={!isOwner}
+          onClick={() => setProfileOpen(o => !o)}
+          aria-expanded={isOwner ? profileOpen : undefined}
+          className={`min-w-0 flex-1 flex items-center gap-2.5 text-left rounded-lg ${isOwner ? 'cursor-pointer hover:bg-slate-800/60 -m-1 p-1' : 'cursor-default'}`}
+        >
+          <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 font-mono shrink-0">
+            {initialsFor(user)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-slate-200 truncate">{displayName(user)}</div>
+            <div className="text-[10px] text-emerald-400">{roleLabel(role)}</div>
+          </div>
+        </button>
         <button
           onClick={logout}
           title="Sign out"
