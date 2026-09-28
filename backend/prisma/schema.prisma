@@ -618,6 +618,8 @@ model users {
   messages             messages[]
   organization_members organization_members[]
   user_sessions        user_sessions[]
+  sequence_enrollments sequence_enrollments[]
+
 }
 
 /// One row per sign-in; the JWT's `jti` is this id. See migration
@@ -634,7 +636,6 @@ model user_sessions {
   users        users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([user_id], map: "idx_user_sessions_user")
-  sequence_enrollments sequence_enrollments[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
