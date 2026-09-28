@@ -41,6 +41,12 @@ export type AppView =
   // context — see src/api/client.ts. Only the view id lives here.
   | 'lead_sources';
 
+// Unlocked alongside the call/message history and nurture work: 'calls',
+// 'conversations' and 'followups' now read the real API through
+// utils/historyApi.ts and utils/sequencesApi.ts. The `calls`, `conversations`
+// and `followupSequences` values still on this context are the demo store and
+// are no longer what those three screens render.
+
 /**
  * Sections that are navigable but not built yet. Lives beside AppView so the
  * locked list cannot drift from the view union: App.tsx renders ComingSoonView
@@ -48,10 +54,7 @@ export type AppView =
  */
 const LOCKED_VIEWS: readonly AppView[] = [
   'dashboard',
-  'conversations',
-  'calls',
   'appointments',
-  'followups',
   'analytics',
   'landing_page',
 ];

@@ -54,6 +54,44 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Leads the engine claimed but never finished, because the process that owned
+   * their timers went away.
+   *
+   * A restart drops every pending `setTimeout`, and the claim on
+   * `first_contact_at` means the enrolment query above will never look at them
+   * again. Without this sweep they sit at 'contacted' forever — no more steps,
+   * no exit into nurture, and no way to add them to a sequence by hand, since
+   * the enrolment guard reads the same "still in the strategy" signature.
+   *
+   * The age threshold is what makes this safe. A strategy runs in seconds to
+   * hours, but a quiet-hours deferral can legitimately push its last step
+   * overnight, so the default is a full day: long enough that nothing live is
+   * ever cut short, short enough that a stranded lead is not forgotten.
+   * EngineService.finalizeAbandoned additionally refuses any lead this process
+   * is actively running.
+   */
+  private async recoverStranded(organizationId: string): Promise<void> {
+    const staleMs = Number(this.config.get<string>('STRATEGY_STALE_MS') ?? 86_400_000);
+    const before = new Date(Date.now() - staleMs);
+
+    const stranded = await this.prisma.leads.findMany({
+      where: {
+        organization_id: organizationId,
+        status: { in: ['new', 'contacted'] },
+        first_contact_at: { not: null, lt: before },
+        automation_paused: false,
+        dnc_status: false,
+      },
+      select: { id: true },
+      take: 10,
+    });
+
+    for (const lead of stranded) {
+      await this.engine.finalizeAbandoned(organizationId, lead.id);
+    }
+  }
+
+  /**
    * Never throws: a poll that fails must not take the process down, and the
    * next tick retries anyway. The overlap guard keeps a slow poll from stacking.
    */
@@ -82,6 +120,8 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
         for (const lead of leads) {
           await this.engine.enroll(organization_id, lead.id);
         }
+
+        await this.recoverStranded(organization_id);
       }
     } catch (err) {
       this.logger.error(`poll error: ${(err as Error).message}`);

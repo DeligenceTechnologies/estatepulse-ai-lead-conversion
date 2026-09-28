@@ -124,7 +124,10 @@ export const TelnyxCard: React.FC = () => {
           </div>
         ) : connected ? (
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1.5">
-            <Fact label="API key" value={status!.apiKeyMasked || '—'} mono />
+            {/* The key is never printed, masked or otherwise. It proves
+                nothing a reader can act on — "connected" already says the
+                credential works — and a secret on screen is a secret in every
+                screenshot and screen share of this page. */}
             <Fact label="From number" value={status!.fromNumber || 'none assigned'} mono />
             {status!.accountCount > 1 && (
               <Fact

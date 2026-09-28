@@ -6,6 +6,8 @@ import { HealthController } from './health.controller';
 import { EventsModule } from './modules/events/events.module';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
+import { FollowupModule } from './modules/followup/followup.module';
+import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
@@ -66,6 +68,14 @@ const envSchema = z.object({
   STRATEGY_ENGINE: z.string().optional(),
   ENGINE_POLL_MS: z.coerce.number().default(15_000),
 
+  // --- nurture (follow-up sequences) ---
+  // Shares STRATEGY_ENGINE's opt-in: one switch decides whether this deployment
+  // may contact real people. A minute is plenty — the cadence is days, and the
+  // claim query is a partial-index lookup on an empty-most-of-the-time queue.
+  FOLLOWUP_POLL_MS: z.coerce.number().default(60_000),
+  FOLLOWUP_BATCH_SIZE: z.coerce.number().default(20),
+  FOLLOWUP_STUCK_AFTER_MS: z.coerce.number().default(600_000),
+
   // Overridable so scripts/fake-tally.mjs can stand in for the real API —
   // including the 401/429/5xx paths a real account will not produce on demand.
   // Outbound email. All optional: with no SMTP_HOST the mailer is disabled and
@@ -109,6 +119,10 @@ const envSchema = z.object({
     AuthModule,
     AgentsModule,
     TelnyxModule,
+
+    // Post-qualification: call/message history, and the nurture runner.
+    HistoryModule,
+    FollowupModule,
     PortalIngestModule,
 
     // Ingestion: form-provider webhooks, mapping, the processing worker.

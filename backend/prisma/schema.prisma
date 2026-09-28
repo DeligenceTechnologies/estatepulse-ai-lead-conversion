@@ -43,6 +43,7 @@ model agent_profiles {
   calendly_url         String?
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  calendly_user_uri    String?
   agent_availability   agent_availability[]
   organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                users                  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -94,11 +95,13 @@ model appointments {
   notes                  String?
   created_at             DateTime              @default(now()) @db.Timestamptz(6)
   updated_at             DateTime              @default(now()) @db.Timestamptz(6)
+  metadata               Json                  @default("{}")
   agent_profiles         agent_profiles        @relation(fields: [agent_id], references: [id], onUpdate: NoAction)
   calendar_connections   calendar_connections? @relation(fields: [calendar_connection_id], references: [id], onUpdate: NoAction)
   leads                  leads                 @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organizations          organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@unique([organization_id, provider, external_event_id], map: "appointments_external_event_unique")
   @@index([agent_id], map: "idx_appointments_agent")
   @@index([external_event_id], map: "idx_appointments_external_event")
   @@index([lead_id], map: "idx_appointments_lead")
@@ -133,20 +136,20 @@ model audit_logs {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model calendar_connections {
-  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id        String         @db.Uuid
-  agent_id               String         @db.Uuid
-  provider               String         @db.VarChar(30)
-  external_account_id    String?        @db.VarChar(255)
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String          @db.Uuid
+  agent_id               String          @db.Uuid
+  provider               String          @db.VarChar(30)
+  external_account_id    String?         @db.VarChar(255)
   credentials_secret_ref String?
-  status                 String         @default("active") @db.VarChar(20)
-  last_synced_at         DateTime?      @db.Timestamptz(6)
+  status                 String          @default("active") @db.VarChar(20)
+  last_synced_at         DateTime?       @db.Timestamptz(6)
   metadata               Json?
-  created_at             DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime       @default(now()) @db.Timestamptz(6)
+  created_at             DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime        @default(now()) @db.Timestamptz(6)
   appointments           appointments[]
-  agent_profiles         agent_profiles @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  organizations          organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  agent_profiles         agent_profiles  @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations          organizations   @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([agent_id], map: "idx_calendar_connections_agent")
   @@index([organization_id], map: "idx_calendar_connections_organization")
@@ -176,17 +179,27 @@ model conversations {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model followup_sequences {
-  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id      String                 @db.Uuid
-  name                 String                 @db.VarChar(100)
-  code                 String                 @db.VarChar(50)
-  description          String?
-  status               String                 @default("active") @db.VarChar(20)
-  created_at           DateTime               @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
-  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  sequence_enrollments sequence_enrollments[]
-  sequence_steps       sequence_steps[]
+  id                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String                     @db.Uuid
+  name                     String                     @db.VarChar(100)
+  code                     String                     @db.VarChar(50)
+  description              String?
+  /// 'active' | 'inactive' | 'archived' — enforced by followup_sequences_status_check.
+  status                   String                     @default("active") @db.VarChar(20)
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  /// Superseded by sequence_enroll_triggers and no longer read or written.
+  /// Kept until the next migration so a rollback has something to fall back on
+  /// — see 20260923000001_sequence_enroll_triggers, which also dropped the
+  /// partial unique index that used to give this column its teeth.
+  auto_enroll_temperature  String?                    @db.VarChar(10)
+  organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// Which conditions enrol a lead into this sequence automatically. Empty =
+  /// manual only. At most one ACTIVE sequence per organization may claim each
+  /// condition, enforced by sequence_enroll_triggers_one_per_trigger.
+  sequence_enroll_triggers sequence_enroll_triggers[]
+  sequence_enrollments     sequence_enrollments[]
+  sequence_steps           sequence_steps[]
 
   @@unique([organization_id, code], map: "followup_sequences_code_unique")
   @@index([organization_id], map: "idx_followup_sequences_organization")
@@ -197,29 +210,29 @@ model followup_sequences {
 /// webhook on a customer's form. Deliberately NOT `integrations`, whose
 /// `credentials_secret_ref` is modelled as a pointer to an external vault.
 model provider_credentials {
-  id                  String        @id @db.Uuid
-  organization_id     String        @db.Uuid
-  provider            String        @db.VarChar(50)
-  label               String?       @db.VarChar(255)
+  id                  String         @id @db.Uuid
+  organization_id     String         @db.Uuid
+  provider            String         @db.VarChar(50)
+  label               String?        @db.VarChar(255)
   /// AES-256-GCM envelope; AAD binds it to (organization_id, id).
   credential_enc      String
   /// sha256(key) — dedupe only, never a lookup path.
-  credential_hash     String        @db.VarChar(64)
-  credential_prefix   String        @db.VarChar(32)
-  credential_last4    String        @db.VarChar(8)
-  external_account_id String?       @db.VarChar(255)
-  account_email       String?       @db.VarChar(255)
-  account_name        String?       @db.VarChar(255)
+  credential_hash     String         @db.VarChar(64)
+  credential_prefix   String         @db.VarChar(32)
+  credential_last4    String         @db.VarChar(8)
+  external_account_id String?        @db.VarChar(255)
+  account_email       String?        @db.VarChar(255)
+  account_name        String?        @db.VarChar(255)
   /// ACTIVE | INVALID | REVOKED
-  status              String        @default("ACTIVE") @db.VarChar(20)
-  last_verified_at    DateTime?     @db.Timestamptz(6)
-  last_error_at       DateTime?     @db.Timestamptz(6)
-  last_error_code     String?       @db.VarChar(50)
-  revoked_at          DateTime?     @db.Timestamptz(6)
-  created_at          DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
-  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  status              String         @default("ACTIVE") @db.VarChar(20)
+  last_verified_at    DateTime?      @db.Timestamptz(6)
+  last_error_at       DateTime?      @db.Timestamptz(6)
+  last_error_code     String?        @db.VarChar(50)
+  revoked_at          DateTime?      @db.Timestamptz(6)
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime       @default(now()) @db.Timestamptz(6)
   lead_sources        lead_sources[]
+  organizations       organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([organization_id, provider, status], map: "idx_provider_credentials_org")
 }
@@ -277,24 +290,6 @@ model lead_sources {
   /// Stays 'webhook' for API-connected sources too — they are byte-identical on
   /// the ingest path. The distinction lives in `connection_method`.
   source_type                 String                       @db.VarChar(50)
-  /// Which form provider this source belongs to, e.g. 'TALLY'.
-  provider                    String                       @default("TALLY") @db.VarChar(50)
-  /// MANUAL (customer pasted our URL) | API (we installed the webhook).
-  /// Only an API source can be repaired, paused or removed remotely.
-  connection_method           String                       @default("MANUAL") @db.VarChar(20)
-  provider_credential_id      String?                      @db.Uuid
-  /// The provider's own id for the webhook we installed.
-  external_webhook_id         String?                      @db.VarChar(255)
-  external_workspace_id       String?                      @db.VarChar(255)
-  /// PENDING | INSTALLED | DRIFTED | UNINSTALLED | ORPHANED | ERROR
-  remote_state                String?                      @db.VarChar(20)
-  remote_synced_at            DateTime?                    @db.Timestamptz(6)
-  remote_error_code           String?                      @db.VarChar(50)
-  remote_error_message        String?
-  /// Non-null => mappings built from the form schema that no real delivery has
-  /// confirmed yet.
-  prebuilt_at                 DateTime?                    @db.Timestamptz(6)
-  provider_credentials        provider_credentials?        @relation(fields: [provider_credential_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   is_active                   Boolean                      @default(true)
   created_at                  DateTime                     @default(now()) @db.Timestamptz(6)
   updated_at                  DateTime                     @default(now()) @db.Timestamptz(6)
@@ -354,9 +349,27 @@ model lead_sources {
   signing_secret_last4        String?                      @db.VarChar(8)
   signing_secret_set_at       DateTime?                    @db.Timestamptz(6)
   token_rotated_at            DateTime?                    @db.Timestamptz(6)
+  /// Which form provider this source belongs to, e.g. 'TALLY'.
+  provider                    String                       @default("TALLY") @db.VarChar(50)
+  /// MANUAL (customer pasted our URL) | API (we installed the webhook).
+  /// Only an API source can be repaired, paused or removed remotely.
+  connection_method           String                       @default("MANUAL") @db.VarChar(20)
+  provider_credential_id      String?                      @db.Uuid
+  /// The provider's own id for the webhook we installed.
+  external_webhook_id         String?                      @db.VarChar(255)
+  external_workspace_id       String?                      @db.VarChar(255)
+  /// PENDING | INSTALLED | DRIFTED | UNINSTALLED | ORPHANED | ERROR
+  remote_state                String?                      @db.VarChar(20)
+  remote_synced_at            DateTime?                    @db.Timestamptz(6)
+  remote_error_code           String?                      @db.VarChar(50)
+  remote_error_message        String?
+  /// Non-null => mappings built from the form schema that no real delivery has
+  /// confirmed yet.
+  prebuilt_at                 DateTime?                    @db.Timestamptz(6)
   lead_source_field_mappings  lead_source_field_mappings[]
   lead_source_fields          lead_source_fields[]
   organizations               organizations                @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  provider_credentials        provider_credentials?        @relation(fields: [provider_credential_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   lead_submissions            lead_submissions[]
   leads                       leads[]
   webhook_events              webhook_events[]
@@ -413,14 +426,14 @@ model leads {
   consent_text             String?
   consent_at               DateTime?              @db.Timestamptz(6)
   phone_valid              Boolean                @default(false)
-  /// False when the submitted address did not look like an email. Such a lead
-  /// is still a lead — its address just never becomes a merge identity, or
-  /// everyone who types "n/a" collapses into one person.
-  email_valid              Boolean                @default(false)
   submission_count         Int                    @default(1)
   last_submission_at       DateTime?              @db.Timestamptz(6)
   needs_review             Boolean                @default(false)
   review_reasons           String[]               @default([])
+  /// False when the submitted address did not look like an email. Such a lead
+  /// is still a lead — its address just never becomes a merge identity, or
+  /// everyone who types "n/a" collapses into one person.
+  email_valid              Boolean                @default(false)
   appointments             appointments[]
   conversations            conversations[]
   lead_assignments         lead_assignments[]
@@ -491,62 +504,76 @@ model organization_members {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model organizations {
-  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                  String                  @db.VarChar(255)
-  slug                  String                  @unique @db.VarChar(100)
-  email                 String?                 @db.VarChar(255)
-  phone                 String?                 @db.VarChar(50)
-  timezone              String                  @default("Asia/Kolkata") @db.VarChar(100)
-  status                String                  @default("active") @db.VarChar(30)
-  created_at            DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
-  routing_policy        String                  @default("geographic_round_robin") @db.VarChar(30)
-  default_region        String                  @default("US") @db.VarChar(2)
-  agent_availability    agent_availability[]
-  agent_profiles        agent_profiles[]
-  agent_territories     agent_territories[]
-  apiKeys               api_keys[]
-  appointments          appointments[]
-  audit_logs            audit_logs[]
-  calendar_connections  calendar_connections[]
-  conversations         conversations[]
-  domainEvents          domain_events[]
-  followup_sequences    followup_sequences[]
-  integrations          integrations[]
-  lead_assignments      lead_assignments[]
-  lead_sources          lead_sources[]
-  provider_credentials  provider_credentials[]
-  leads                 leads[]
-  messages              messages[]
-  organization_members  organization_members[]
-  sequence_steps        sequence_steps[]
-  voice_calls           voice_calls[]
-  webhook_events        webhook_events[]
-  webhook_subscriptions webhook_subscriptions[]
+  id                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                     String                     @db.VarChar(255)
+  slug                     String                     @unique @db.VarChar(100)
+  email                    String?                    @db.VarChar(255)
+  phone                    String?                    @db.VarChar(50)
+  timezone                 String                     @default("Asia/Kolkata") @db.VarChar(100)
+  status                   String                     @default("active") @db.VarChar(30)
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  routing_policy           String                     @default("geographic_round_robin") @db.VarChar(30)
+  default_region           String                     @default("US") @db.VarChar(2)
+  call_recording_enabled   Boolean                    @default(true)
+  call_recording_announce  Boolean                    @default(true)
+  agent_availability       agent_availability[]
+  agent_profiles           agent_profiles[]
+  agent_territories        agent_territories[]
+  apiKeys                  api_keys[]
+  appointments             appointments[]
+  audit_logs               audit_logs[]
+  calendar_connections     calendar_connections[]
+  conversations            conversations[]
+  domainEvents             domain_events[]
+  followup_sequences       followup_sequences[]
+  integrations             integrations[]
+  lead_assignments         lead_assignments[]
+  lead_sources             lead_sources[]
+  leads                    leads[]
+  messages                 messages[]
+  organization_members     organization_members[]
+  provider_credentials     provider_credentials[]
+  sequence_enroll_triggers sequence_enroll_triggers[]
+  sequence_enrollments     sequence_enrollments[]
+  sequence_steps           sequence_steps[]
+  voice_calls              voice_calls[]
+  webhook_events           webhook_events[]
+  webhook_subscriptions    webhook_subscriptions[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model sequence_enrollments {
-  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  lead_id            String             @db.Uuid
-  sequence_id        String             @db.Uuid
-  current_step       Int                @default(1)
-  status             String             @default("active") @db.VarChar(20)
-  next_action_at     DateTime?          @db.Timestamptz(6)
-  enrolled_at        DateTime           @default(now()) @db.Timestamptz(6)
-  completed_at       DateTime?          @db.Timestamptz(6)
-  stopped_at         DateTime?          @db.Timestamptz(6)
-  stopped_reason     String?            @db.VarChar(100)
-  created_at         DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
-  leads              leads              @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  followup_sequences followup_sequences @relation(fields: [sequence_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lead_id             String             @db.Uuid
+  sequence_id         String             @db.Uuid
+  current_step        Int                @default(1)
+  status              String             @default("active") @db.VarChar(20)
+  next_action_at      DateTime?          @db.Timestamptz(6)
+  enrolled_at         DateTime           @default(now()) @db.Timestamptz(6)
+  completed_at        DateTime?          @db.Timestamptz(6)
+  stopped_at          DateTime?          @db.Timestamptz(6)
+  stopped_reason      String?            @db.VarChar(100)
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime           @default(now()) @db.Timestamptz(6)
+  organization_id     String             @db.Uuid
+  locked_by           String?            @db.Uuid
+  locked_at           DateTime?          @db.Timestamptz(6)
+  attempts            Int                @default(0)
+  last_error          String?
+  enrolled_by         String             @default("auto") @db.VarChar(20)
+  enrolled_by_user_id String?            @db.Uuid
+  users               users?             @relation(fields: [enrolled_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "sequence_enrollments_enrolled_by_fkey")
+  leads               leads              @relation(fields: [lead_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations       organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  followup_sequences  followup_sequences @relation(fields: [sequence_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([lead_id, status], map: "idx_sequence_enrollments_active_leads")
   @@index([lead_id], map: "idx_sequence_enrollments_lead")
   @@index([status, next_action_at], map: "idx_sequence_enrollments_next_action")
   @@index([sequence_id], map: "idx_sequence_enrollments_sequence")
+  @@index([organization_id], map: "idx_sequence_enrollments_org")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -607,6 +634,7 @@ model user_sessions {
   users        users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([user_id], map: "idx_user_sessions_user")
+  sequence_enrollments sequence_enrollments[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -639,6 +667,7 @@ model voice_calls {
   @@index([lead_id], map: "idx_voice_calls_lead")
   @@index([organization_id], map: "idx_voice_calls_organization")
   @@index([provider_call_id], map: "idx_voice_calls_provider_id")
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_voice_calls_org_created_at")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -908,4 +937,38 @@ model domain_events {
   organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([aggregate_type, aggregate_id, occurred_at(sort: Desc)], map: "idx_domain_events_aggregate")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// One condition a sequence enrols on, e.g. "nobody ever answered".
+///
+/// Two jobs in one table: the row records that the office ticked the box, and
+/// `active` records whether that tick is currently in force. Splitting them is
+/// what lets a sequence be switched off — releasing its conditions for another
+/// sequence to claim — and switched back on with its configuration intact.
+model sequence_enroll_triggers {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String   @db.Uuid
+  sequence_id     String   @db.Uuid
+  /// Verbatim from sequence_enroll_triggers_trigger_check; the same list is
+  /// mirrored in enrollTriggerSchema. See TRIGGER_LABELS for the wording shown
+  /// to a person.
+  trigger         String   @db.VarChar(30)
+  /// Mirrors followup_sequences.status = 'active', written in the same
+  /// transaction. Denormalised on purpose: a partial unique index cannot reach
+  /// into another table, and "one sequence per condition among ACTIVE
+  /// sequences" is the rule that has to hold.
+  active          Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  organizations      organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  followup_sequences followup_sequences @relation(fields: [sequence_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  /// A sequence lists each condition at most once, in force or not.
+  @@unique([sequence_id, trigger], map: "sequence_enroll_triggers_one_per_sequence")
+  @@index([sequence_id], map: "idx_sequence_enroll_triggers_sequence")
+  /// NOTE: sequence_enroll_triggers_one_per_active_trigger — unique on
+  /// (organization_id, trigger) WHERE active — is a PARTIAL unique index and
+  /// cannot be expressed here. It lives in the migration and is the real
+  /// guarantee that two active sequences never claim the same condition.
 }
