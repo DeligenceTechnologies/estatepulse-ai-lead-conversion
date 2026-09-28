@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService } from './cred-store.service';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /**
  * Records contact attempts and their outcomes on the real tables:
  *  - SMS   -> messages.delivery_status  (sent | failed)
@@ -180,21 +182,171 @@ export class ActivityService {
     });
   }
 
-  /** Call answered — mark in progress, move the lead to contacted, attach the AI. */
+  /** Call answered — mark in progress, move the lead to contacted, record, attach the AI. */
   async onCallAnswered(ccid: string): Promise<void> {
     const call = await this.callByProvider(ccid);
     if (!call || !call.lead_id) return;
     await this.prisma.voice_calls.update({ where: { id: call.id }, data: { status: 'in_progress' } });
     await this.markContacted(call.lead_id, true);
 
-    // Attach the org's AI assistant so the answered call actually talks.
     const c = await this.creds.getCreds(call.organization_id);
-    if (c?.assistantId) {
+    if (!c?.apiKey) return;
+
+    // Recording starts BEFORE the assistant does, deliberately: the assistant's
+    // opening line is the recording announcement, and an announcement that is
+    // not itself on the recording proves nothing if consent is ever disputed.
+    await this.startRecording(call.organization_id, ccid, c.apiKey);
+
+    // Attach the org's AI assistant so the answered call actually talks.
+    if (c.assistantId) {
       await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assistant: { id: c.assistantId } }),
+        body: JSON.stringify({
+          assistant: { id: c.assistantId },
+          // What the assistant is allowed to know about who it just reached.
+          // Without these the prompt can only ever speak in generalities, and
+          // every {{firstName}} in it renders as the literal braces.
+          dynamic_variables: await this.callVariables(call.organization_id, call.lead_id),
+        }),
       }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * The lead, flattened into the variables a prompt or a webhook tool can
+   * reference as `{{name}}`.
+   *
+   * Every value is a string: Telnyx substitutes these into text, and a null
+   * would render as the word "null" mid-sentence. An unknown field is therefore
+   * the empty string, which reads as nothing at all.
+   *
+   * These names are the contract the portal's variable picker offers, so adding
+   * one here is what makes it offerable there — the two lists are meant to be
+   * read together.
+   */
+  private async callVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
+    const lead = await this.prisma.leads
+      .findFirst({ where: { id: leadId, organization_id: orgId } })
+      .catch(() => null);
+    if (!lead) return {};
+
+    const org = await this.unscoped.organizations
+      .findUnique({ where: { id: orgId }, select: { name: true } })
+      .catch(() => null);
+
+    const str = (v: unknown): string => (v == null ? '' : String(v));
+    const budget =
+      lead.min_budget != null && lead.max_budget != null
+        ? `${Number(lead.min_budget).toLocaleString()} to ${Number(lead.max_budget).toLocaleString()}`
+        : str(lead.max_budget ?? lead.min_budget);
+
+    return {
+      // 'there' so a greeting reads "Hi there" rather than "Hi ," when a form
+      // arrived without a name.
+      firstName: (lead.first_name ?? '').trim() || 'there',
+      lastName: str(lead.last_name),
+      fullName: `${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim(),
+      email: str(lead.email),
+      phone: str(lead.phone),
+      location: str(lead.location),
+      budget,
+      bedrooms: str(lead.bedrooms),
+      timeline: str(lead.timeline),
+      financingStatus: str(lead.financing_status),
+      temperature: str(lead.temperature),
+      motivation: str(lead.motivation),
+      brokerage: str(org?.name),
+      leadId,
+    };
+  }
+
+  /**
+   * Ask Telnyx to record the answered call, and to transcribe it when it ends.
+   *
+   * Gated on the office's own setting because recording consent is
+   * state-specific. Failure is logged and swallowed: a call that cannot be
+   * recorded is still a call worth having, so this must never abort the
+   * assistant attach that follows it.
+   */
+  private async startRecording(orgId: string, ccid: string, apiKey: string): Promise<void> {
+    const org = await this.unscoped.organizations.findUnique({
+      where: { id: orgId },
+      select: { call_recording_enabled: true },
+    });
+    if (!org?.call_recording_enabled) return;
+
+    try {
+      const res = await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/record_start`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        // Dual channel puts the lead and the assistant on separate tracks, which
+        // is what lets the transcript attribute a line to a speaker instead of
+        // returning one undifferentiated block of text.
+        body: JSON.stringify({ format: 'mp3', channels: 'dual', transcription: true }),
+      });
+      if (!res.ok) this.logger.warn(`record_start ${ccid}: ${res.status} ${await res.text()}`);
+    } catch (e) {
+      this.logger.warn(`record_start ${ccid}: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * `call.recording.saved` — store where the audio lives.
+   *
+   * Telnyx offers the file under several keys depending on how the recording
+   * was requested, so read them in preference order rather than assuming one.
+   * The non-public URLs are the ones that require the account's own credentials
+   * to fetch, which is what we want for a recording of a private conversation.
+   */
+  async onRecordingSaved(ccid: string, payload: any): Promise<void> {
+    const url: string | null =
+      payload?.recording_urls?.mp3 ??
+      payload?.recording_urls?.wav ??
+      payload?.public_recording_urls?.mp3 ??
+      payload?.public_recording_urls?.wav ??
+      null;
+    if (!url) return;
+
+    const call = await this.callByProvider(ccid);
+    if (!call) return;
+    try {
+      await this.prisma.voice_calls.update({
+        where: { id: call.id },
+        data: { recording_url: url },
+      });
+    } catch (e) {
+      this.logger.error(`onRecordingSaved: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * `call.recording.transcription.saved` — store what was said.
+   *
+   * Appends rather than overwrites: a call can produce more than one recording
+   * (a transfer, or a recording stopped and restarted), and each one arrives as
+   * its own event. Overwriting would silently keep only the last fragment.
+   */
+  async onTranscriptionSaved(ccid: string, payload: any): Promise<void> {
+    const text: string | null =
+      payload?.transcription_text ??
+      payload?.transcription_data?.transcription_text ??
+      payload?.transcription?.text ??
+      null;
+    if (!text) return;
+
+    const call = await this.callByProvider(ccid);
+    if (!call) return;
+    const merged = call.transcript ? `${call.transcript}
+
+${text}` : text;
+    try {
+      await this.prisma.voice_calls.update({
+        where: { id: call.id },
+        data: { transcript: merged },
+      });
+    } catch (e) {
+      this.logger.error(`onTranscriptionSaved: ${(e as Error).message}`);
     }
   }
 

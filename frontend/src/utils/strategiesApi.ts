@@ -8,9 +8,24 @@ export interface StrategyStep {
   template?: string;
   message?: string;
 }
+/**
+ * When contacting a lead is allowed, and the limits on how hard we try.
+ *
+ * Deliberately org-wide rather than per-sequence: the strategy engine and the
+ * nurture runner both read this one object, so an office that sets its contact
+ * hours once cannot discover that one of the two schedulers ignored them.
+ */
+export interface Guardrails {
+  respectQuietHours?: boolean;
+  /** 'HH:MM', 24-hour, in the organization's timezone. Quiet = do NOT contact. */
+  quietHours?: { start: string; end: string };
+  maxVoiceAttempts?: number;
+  stopOn?: string[];
+}
+
 export interface Strategy {
   name: string;
-  guardrails?: Record<string, unknown>;
+  guardrails?: Guardrails;
   steps: StrategyStep[];
 }
 

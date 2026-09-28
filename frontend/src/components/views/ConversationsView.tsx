@@ -1,254 +1,280 @@
-import React, { useState } from 'react';
-import { 
-  Search, 
-  Send, 
-  UserCheck, 
-  Pause, 
-  Play, 
-  Phone, 
-  Sparkles, 
-  Clock, 
-  CheckCircle2, 
-  Calendar,
-  Flame
-} from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Ban, CheckCircle2, Clock, RotateCw, Search, XCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useLiveQuery } from '../../lib/useLiveQuery';
+import {
+  listConversations,
+  listMessages,
+  type ConversationRow,
+  type MessageRow,
+} from '../../utils/historyApi';
+
+/**
+ * SMS history for the office.
+ *
+ * Read-only, and deliberately so. The previous version of this screen had a
+ * compose box, a "take over" button and an automation toggle, all of which
+ * wrote to localStorage and none of which sent anything — the backend has no
+ * agent-send endpoint, and inventing one is a different piece of work from
+ * showing the history. A composer that silently does nothing is worse than no
+ * composer.
+ *
+ * What IS real: every outbound message the engine and the nurture runner sent,
+ * every inbound reply, delivery state, and whether the lead has opted out.
+ */
+
+const TEMP_STYLES: Record<string, string> = {
+  hot: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+  warm: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+  cold: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+};
+
+const DeliveryMark: React.FC<{ m: MessageRow }> = ({ m }) => {
+  if (m.direction === 'inbound') return null;
+  if (m.failedAt || m.deliveryStatus === 'failed') {
+    return (
+      <span className="flex items-center gap-1 text-rose-400">
+        <XCircle className="w-3 h-3" />
+        failed
+      </span>
+    );
+  }
+  if (m.deliveredAt) {
+    return (
+      <span className="flex items-center gap-1 text-emerald-400">
+        <CheckCircle2 className="w-3 h-3" />
+        delivered
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-slate-500">
+      <Clock className="w-3 h-3" />
+      {m.deliveryStatus}
+    </span>
+  );
+};
 
 export const ConversationsView: React.FC = () => {
-  const { 
-    leads, 
-    conversations, 
-    sendSmsMessage, 
-    takeOverConversation, 
-    toggleAutomation, 
-    startLiveCallSimulation,
-    setSelectedLeadId,
-    orgSettings 
-  } = useApp();
+  const { setSelectedLeadId } = useApp();
+  const [q, setQ] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [selectedLeadIdLocal, setSelectedLeadIdLocal] = useState<string>(leads[0]?.id || '');
-  const [inputText, setInputText] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  const fetchThreads = useCallback(() => listConversations(), []);
+  const threadsQuery = useLiveQuery<ConversationRow[]>(fetchThreads);
+  const all = threadsQuery.data ?? [];
 
-  const currentLead = leads.find(l => l.id === selectedLeadIdLocal) || leads[0];
-  const currentConversation = currentLead ? conversations[currentLead.id] : undefined;
+  // Filtered in the browser: the thread list is capped at 200 and the filter is
+  // a substring match, so a round trip per keystroke would buy nothing.
+  const needle = q.trim().toLowerCase();
+  const threads = needle
+    ? all.filter(
+        (t) =>
+          t.leadName.toLowerCase().includes(needle) || (t.leadPhone ?? '').includes(needle),
+      )
+    : all;
 
-  const filteredLeads = leads.filter(l => {
-    const q = searchQuery.toLowerCase();
-    return `${l.firstName} ${l.lastName}`.toLowerCase().includes(q) || l.phone.includes(q);
-  });
+  const fetchMessages = useCallback(
+    () => (selectedId ? listMessages(selectedId) : Promise.resolve([])),
+    [selectedId],
+  );
+  const messagesQuery = useLiveQuery<MessageRow[]>(fetchMessages, { refreshKey: selectedId });
+  const messages = messagesQuery.data ?? [];
 
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || !currentLead) return;
-    sendSmsMessage(currentLead.id, inputText.trim(), 'agent');
-    setInputText('');
-  };
+  useEffect(() => {
+    if (threads.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !threads.some((t) => t.id === selectedId)) setSelectedId(threads[0].id);
+  }, [threads, selectedId]);
 
-  const cannedReplies = [
-    "Would tomorrow at 10:00 AM work for a quick introductory video call?",
-    "We have 3 off-market listings in North Austin matching your $500k-$650k budget.",
-    "Would it be helpful if we introduced you to our trusted local lender for pre-approval?",
-    "Can you confirm if you prefer single family homes or are open to townhomes?"
-  ];
+  const current = threads.find((t) => t.id === selectedId) ?? null;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto h-[calc(100vh-5rem)] flex flex-col text-slate-100">
-      
-      {/* Top Header */}
-      <div className="mb-4 flex items-center justify-between">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Omnichannel Conversations</h2>
-          <p className="text-xs text-slate-400">Unified Twilio SMS, voice transcripts, and live human agent takeover</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Conversations</h2>
+          <p className="text-xs text-slate-400">
+            Every SMS thread — what we sent, what came back, and who asked us to stop.
+          </p>
         </div>
-        <div className="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Active Assistant: <strong className="text-white">{orgSettings.aiAgentName}</strong></span>
-        </div>
+        <button
+          onClick={threadsQuery.refresh}
+          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <RotateCw className={`w-3.5 h-3.5 ${threadsQuery.refreshing ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
 
-      {/* Main Split Pane Layout */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-        
-        {/* Left Pane: Conversation Threads List */}
-        <div className="md:col-span-4 border-r border-slate-800 flex flex-col bg-slate-950/60">
-          <div className="p-3 border-b border-slate-800">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search conversations..."
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
+      {threadsQuery.stale && (
+        <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Showing the last good result — the most recent refresh failed.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Threads */}
+        <div className="lg:col-span-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-xl">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name or number"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600"
+            />
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60 custom-scrollbar">
-            {filteredLeads.map(lead => {
-              const conv = conversations[lead.id];
-              const lastMsg = conv?.messages[conv.messages.length - 1];
-              const isSelected = lead.id === currentLead?.id;
+          <div className="space-y-2 max-h-[580px] overflow-y-auto custom-scrollbar pr-1">
+            {threads.length === 0 && (
+              <div className="text-xs text-slate-500 py-8 text-center">
+                {threadsQuery.data === null
+                  ? 'Loading…'
+                  : needle
+                    ? 'No threads match.'
+                    : 'No SMS threads yet.'}
+              </div>
+            )}
 
-              return (
-                <div
-                  key={lead.id}
-                  onClick={() => setSelectedLeadIdLocal(lead.id)}
-                  className={`p-3 transition-colors cursor-pointer flex items-start justify-between gap-2 ${
-                    isSelected ? 'bg-slate-800/80 border-l-2 border-emerald-500' : 'hover:bg-slate-800/30'
-                  }`}
-                >
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-xs text-slate-100 truncate">
-                        {lead.firstName} {lead.lastName}
+            {threads.map((t) => (
+              <div
+                key={t.id}
+                onClick={() => setSelectedId(t.id)}
+                className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                  t.id === selectedId
+                    ? 'bg-slate-800/90 border-emerald-500/60'
+                    : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-xs text-white truncate">{t.leadName}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {t.dncStatus && (
+                      <span
+                        title="Opted out"
+                        className="text-[9px] uppercase font-bold px-1.5 rounded border bg-rose-500/20 text-rose-300 border-rose-500/40 flex items-center gap-0.5"
+                      >
+                        <Ban className="w-2.5 h-2.5" />
+                        stop
                       </span>
-                      {lead.temperature === 'hot' && (
-                        <span className="text-[10px] font-bold text-rose-400">🔥</span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-400 truncate">
-                      {lastMsg ? lastMsg.content : 'No messages logged yet'}
-                    </p>
+                    )}
+                    {t.temperature && (
+                      <span
+                        className={`text-[9px] uppercase font-bold px-1.5 rounded border ${
+                          TEMP_STYLES[t.temperature] ?? 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {t.temperature}
+                      </span>
+                    )}
                   </div>
+                </div>
 
-                  <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                    {lastMsg ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                <p className="text-[11px] text-slate-400 truncate">
+                  {t.lastMessageDirection === 'inbound' && (
+                    <span className="text-emerald-400 font-semibold">↩ </span>
+                  )}
+                  {t.lastMessageBody ?? 'No messages yet'}
+                </p>
+
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span className="font-mono">{t.leadPhone ?? '—'}</span>
+                  <span>
+                    {t.lastMessageAt
+                      ? new Date(t.lastMessageAt).toLocaleString([], {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : ''}
                   </span>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Right Pane: Active Message Thread */}
-        {currentLead ? (
-          <div className="md:col-span-8 flex flex-col h-full bg-slate-900">
-            
-            {/* Thread Header */}
-            <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-slate-800 text-white font-bold text-sm flex items-center justify-center">
-                  {currentLead.firstName[0]}{currentLead.lastName[0]}
+        {/* Thread */}
+        {current ? (
+          <div className="lg:col-span-8 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-b border-slate-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">{current.leadName}</h3>
+                  <span className="text-xs font-mono text-cyan-400">{current.leadPhone}</span>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-bold text-white">
-                      {currentLead.firstName} {currentLead.lastName}
-                    </h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                      {currentLead.phone}
-                    </span>
-                    <span className={`text-[10px] font-bold uppercase px-2 py-0.2 rounded-full ${
-                      currentLead.temperature === 'hot' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {currentLead.temperature} ({currentLead.score})
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Budget: ${(currentLead.budgetMin/1000).toFixed(0)}k–${(currentLead.budgetMax/1000).toFixed(0)}k • {currentLead.preferredLocation}
-                  </p>
-                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {current.messageCount} message{current.messageCount === 1 ? '' : 's'}
+                  {current.hasInboundReply && <> • the lead has replied</>}
+                </p>
               </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => startLiveCallSimulation(currentLead)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>AI Voice Call</span>
-                </button>
-
-                <button
-                  onClick={() => takeOverConversation(currentLead.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                    currentLead.status === 'human_handoff' 
-                      ? 'bg-amber-950 text-amber-300 border-amber-700/60' 
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                  }`}
-                >
-                  <UserCheck className="w-3.5 h-3.5 inline mr-1" />
-                  <span>{currentLead.status === 'human_handoff' ? 'Human Active' : 'Take Over'}</span>
-                </button>
-              </div>
+              <button
+                onClick={() => setSelectedLeadId(current.leadId)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
+              >
+                View Lead Dossier
+              </button>
             </div>
 
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-              {currentConversation && currentConversation.messages.length > 0 ? (
-                currentConversation.messages.map(msg => {
-                  const isLead = msg.sender === 'lead';
-                  const isAi = msg.sender === 'ai';
-                  return (
-                    <div key={msg.id} className={`flex flex-col ${isLead ? 'items-start' : 'items-end'}`}>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-0.5 px-1">
-                        <span className="font-semibold text-slate-300">
-                          {isAi ? `${orgSettings.aiAgentName} (AI Assistant)` : isLead ? `${currentLead.firstName} ${currentLead.lastName}` : 'Agent (You)'}
+            {current.dncStatus && (
+              <div className="mx-5 mt-4 flex items-start gap-2 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
+                <Ban className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  This lead has opted out. Every scheduled step was cancelled and nothing further
+                  will be sent without explicit re-consent.
+                </span>
+              </div>
+            )}
+
+            <div className="p-5 space-y-3 max-h-[520px] overflow-y-auto custom-scrollbar">
+              {messages.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-8">
+                  {messagesQuery.data === null ? 'Loading…' : 'No messages in this thread.'}
+                </p>
+              )}
+
+              {messages.map((m) => {
+                const inbound = m.direction === 'inbound';
+                return (
+                  <div key={m.id} className={`flex ${inbound ? 'justify-start' : 'justify-end'}`}>
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 space-y-1 border ${
+                        inbound
+                          ? 'bg-slate-950 border-slate-800'
+                          : 'bg-emerald-950/50 border-emerald-800/40'
+                      }`}
+                    >
+                      <p className="text-xs text-slate-100 leading-relaxed whitespace-pre-wrap">
+                        {m.body}
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                        <span className="uppercase font-semibold">{m.senderType}</span>
+                        <span>
+                          {new Date(m.sentAt ?? m.createdAt).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
-                        <span>•</span>
-                        <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      <div className={`p-3 rounded-2xl max-w-[75%] text-xs leading-relaxed ${
-                        isLead 
-                          ? 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700' 
-                          : isAi 
-                          ? 'bg-emerald-950/80 text-emerald-200 border border-emerald-800/60 rounded-tr-sm' 
-                          : 'bg-emerald-600 text-white rounded-tr-sm shadow-md'
-                      }`}>
-                        {msg.content}
+                        <DeliveryMark m={m} />
                       </div>
                     </div>
-                  );
-                })
-              ) : (
-                <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                  No message history for this lead.
-                </div>
-              )}
+                  </div>
+                );
+              })}
             </div>
-
-            {/* Canned Quick Actions */}
-            <div className="px-4 py-2 border-t border-slate-800/80 bg-slate-950/40 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold shrink-0">Quick Replies:</span>
-              {cannedReplies.map((reply, i) => (
-                <button
-                  key={i}
-                  onClick={() => setInputText(reply)}
-                  className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 transition-colors whitespace-nowrap cursor-pointer"
-                >
-                  {reply.substring(0, 38)}...
-                </button>
-              ))}
-            </div>
-
-            {/* Input Form */}
-            <form onSubmit={handleSendMessage} className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
-              <input
-                type="text"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder={`Type SMS message to ${currentLead.firstName}...`}
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-              <button
-                type="submit"
-                disabled={!inputText.trim()}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send SMS</span>
-              </button>
-            </form>
-
           </div>
         ) : (
-          <div className="md:col-span-8 flex items-center justify-center text-xs text-slate-500">
-            Select a conversation on the left.
+          <div className="lg:col-span-8 flex items-center justify-center p-12 text-xs text-slate-500">
+            Select a conversation.
           </div>
         )}
-
       </div>
     </div>
   );
