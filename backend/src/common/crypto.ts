@@ -126,6 +126,20 @@ export function ingestTokenAad(organizationId: string, leadSourceId: string): st
   return `${organizationId}:${leadSourceId}:ingest_token`;
 }
 
+/**
+ * AAD for a calendar connection's OAuth tokens (Calendly today).
+ *
+ * Binds the ciphertext to one `calendar_connections` row, so a token lifted
+ * from another agent's row — or another tenant's — fails authentication rather
+ * than decrypting into a working credential. `calendar_connections.id` defaults
+ * to gen_random_uuid() in the database, so the caller MUST generate the id with
+ * newId() and pass it to the INSERT; reading the id back afterwards is too late
+ * to encrypt against.
+ */
+export function calendarConnectionAad(organizationId: string, connectionId: string): string {
+  return `${organizationId}:${connectionId}:calendar_connection`;
+}
+
 // ---------------------------------------------------------------------------
 // Hashing and signature verification
 // ---------------------------------------------------------------------------

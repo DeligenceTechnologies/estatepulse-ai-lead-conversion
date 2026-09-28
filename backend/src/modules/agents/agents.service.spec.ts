@@ -54,6 +54,8 @@ interface ProfileRow {
   status: string;
   timezone: string;
   max_active_leads: number;
+  /** Which Calendly member this agent is; null until the roster links them. */
+  calendly_user_uri?: string | null;
 }
 
 interface Tables {
@@ -116,7 +118,8 @@ function build(
         title: p.title,
         timezone: p.timezone,
         max_active_leads: p.max_active_leads,
-        _count: { calendar_connections: 0, lead_assignments: 0 },
+        calendly_user_uri: p.calendly_user_uri ?? null,
+        _count: { lead_assignments: 0 },
       })),
   });
 
@@ -340,7 +343,7 @@ describe('AgentsService.list', () => {
 
     for (const member of roster) {
       expect(member.activeLeads).toBe(0);
-      expect(member.calendarConnected).toBe(false);
+      expect(member.calendarLinked).toBe(false);
     }
   });
 
@@ -360,7 +363,7 @@ describe('AgentsService.list', () => {
     expect(Object.keys(roster[0]).sort()).toEqual(
       [
         'activeLeads',
-        'calendarConnected',
+        'calendarLinked',
         'email',
         'firstName',
         'hasProfile',
