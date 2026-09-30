@@ -57,7 +57,6 @@ const AppContent: React.FC = () => {
           {activeView === 'lead_sources' && <LeadSourcesView />}
           {activeView === 'ai_settings' && <AISettingsView />}
           {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
-          {activeView === 'landing_page' && <ComingSoonView title="Public Landing Page" />}
         </main>
       </div>
 
