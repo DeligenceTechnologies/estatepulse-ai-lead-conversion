@@ -65,8 +65,12 @@ export interface OrganizationMemberDTO {
    */
   activeLeads: number;
   /**
-   * Whether a calendar_connections row exists. False for everyone until calendar
-   * integration exists — same story as activeLeads.
+   * Whether this agent is on the office's Calendly — `agent_profiles.calendly_user_uri`.
+   *
+   * Not "has a connection of their own": there is no such thing since Calendly
+   * moved to the organization. This is the fact that decides whether a booking
+   * hosted by them can be attributed to them at all, so a false here is the
+   * reason an agent's appointments are empty.
    */
-  calendarConnected: boolean;
+  calendarLinked: boolean;
 }

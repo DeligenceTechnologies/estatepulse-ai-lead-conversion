@@ -53,9 +53,15 @@ const memberSelect = (organizationId: string) =>
             title: true,
             timezone: true,
             max_active_leads: true,
+            // NOT a count of calendar_connections. Calendly belongs to the
+            // organization now, so the rows that still carry an agent_id are
+            // the RETIRED per-agent connections — counting them would report
+            // "calendar connected" for anyone who ever connected one, forever.
+            // What is true per agent is whether they are on the office's
+            // Calendly, and that is this column.
+            calendly_user_uri: true,
             _count: {
               select: {
-                calendar_connections: true,
                 lead_assignments: { where: { is_current: true } },
               },
             },
@@ -81,7 +87,8 @@ type MemberRow = {
       title: string | null;
       timezone: string;
       max_active_leads: number;
-      _count: { calendar_connections: number; lead_assignments: number };
+      calendly_user_uri: string | null;
+      _count: { lead_assignments: number };
     }>;
   };
 };
@@ -107,7 +114,7 @@ function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMe
     maxActiveLeads: profile?.max_active_leads ?? null,
     hasProfile: profile !== undefined,
     activeLeads: profile?._count.lead_assignments ?? 0,
-    calendarConnected: (profile?._count.calendar_connections ?? 0) > 0,
+    calendarLinked: profile?.calendly_user_uri != null,
   };
 }
 
@@ -289,7 +296,7 @@ export class AgentsService {
           // connected yet. Both are facts about the rows just written, not
           // placeholders.
           activeLeads: 0,
-          calendarConnected: false,
+          calendarLinked: false,
         };
       });
     } catch (err) {

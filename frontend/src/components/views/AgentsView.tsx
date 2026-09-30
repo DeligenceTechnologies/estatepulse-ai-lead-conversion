@@ -27,6 +27,7 @@ import {
   type OrganizationMember,
 } from '../../utils/agentsApi';
 import { AddAgentModal } from '../modals/AddAgentModal';
+import { AgentCalendarPanel } from '../agents/AgentCalendarPanel';
 import { EditAgentModal } from '../modals/EditAgentModal';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -56,6 +57,8 @@ export const AgentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** The member whose calendar panel is open, if any. */
+  const [calendarFor, setCalendarFor] = useState<OrganizationMember | null>(null);
   /**
    * The id of the agent being edited, or null. An id rather than a copy of the
    * row: the member is re-resolved from the roster below on every render, so a
@@ -331,12 +334,30 @@ export const AgentsView: React.FC = () => {
 
                 {/* Calendar + suspend */}
                 <div className="pt-3 border-t border-slate-800 flex items-center gap-2">
-                  <div className="flex-1 py-2 bg-slate-800/60 text-slate-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                  {/* Opens the read-only calendar panel for members who have a
+                      profile. An owner has none, so there is nothing to show.
+                      Connecting is deliberately absent: the scheduling
+                      account is connected once for the whole office, on
+                      Integrations. */}
+                  <button
+                    onClick={() => member.hasProfile && setCalendarFor(member)}
+                    disabled={!member.hasProfile}
+                    title={
+                      member.hasProfile
+                        ? 'View working hours and upcoming appointments'
+                        : 'Owners have no agent profile'
+                    }
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                      member.hasProfile
+                        ? 'bg-slate-800/60 hover:bg-slate-800 text-slate-300 cursor-pointer'
+                        : 'bg-slate-800/60 text-slate-400 cursor-default'
+                    }`}
+                  >
                     <Calendar className="w-3.5 h-3.5" />
-                    {/* calendar_connections is a real table that nothing writes
-                        yet, so this is a fact rather than a placeholder. */}
-                    <span>{member.calendarConnected ? 'Calendar connected' : 'No calendar connected'}</span>
-                  </div>
+                    <span>
+                      {member.calendarLinked ? 'On office calendar' : 'Not on calendar'}
+                    </span>
+                  </button>
 
                   {isOwner && (
                     <button
@@ -395,6 +416,14 @@ export const AgentsView: React.FC = () => {
       )}
 
       <AddAgentModal isOpen={addOpen} onClose={() => setAddOpen(false)} onCreated={() => void load()} />
+
+      {calendarFor && (
+        <AgentCalendarPanel
+          userId={calendarFor.id}
+          memberName={memberName(calendarFor)}
+          onClose={() => setCalendarFor(null)}
+        />
+      )}
 
       {/* Mounted only while editing, so the form always opens on fresh values. */}
       {editing && (

@@ -35,8 +35,11 @@ export interface OrganizationMember {
   hasProfile: boolean;
   /** Real count from lead_assignments. 0 until lead assignment is built. */
   activeLeads: number;
-  /** Real check against calendar_connections. False until calendars are built. */
-  calendarConnected: boolean;
+  /**
+   * Whether this agent is on the office's Calendly. False means their bookings
+   * cannot be attributed to them — not that the office has no calendar.
+   */
+  calendarLinked: boolean;
 }
 
 export interface NewAgentInput {

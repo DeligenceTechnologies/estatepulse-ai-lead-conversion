@@ -20,6 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
 import { TelnyxCard } from './TelnyxCard';
 
@@ -307,6 +308,12 @@ export const ConnectionCards: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Telnyx — the outbound side: the account the AI agent calls from. */}
         <TelnyxCard />
+
+        {/* Scheduling — Calendly and Cal.com, of which exactly one can be live.
+            Renders both cards from ONE status request: two self-loading cards
+            would disagree with each other for as long as the slower one took,
+            on a screen whose whole job is saying what is connected. */}
+        <SchedulingCards />
 
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard

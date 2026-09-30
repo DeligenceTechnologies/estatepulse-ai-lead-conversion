@@ -54,7 +54,8 @@ export type AppView =
  */
 const LOCKED_VIEWS: readonly AppView[] = [
   'dashboard',
-  'appointments',
+  // 'appointments' is live: it reads the real appointments table, populated by
+  // the calendar sync from agents' connected Calendly accounts.
   'analytics',
   'landing_page',
 ];
@@ -173,6 +174,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);
   const [activeSimulatedLead, setActiveSimulatedLead] = useState<Lead | null>(null);
   const [externalLeads, setExternalLeads] = useState<Record<string, Lead>>({});
+
+  /**
+   * One-shot boot signal from the Calendly OAuth callback.
+   *
+   * The popup normally posts its result back and closes itself. When it was
+   * blocked, the callback page redirects here with `?calendly=` instead. This
+   * reads that once, sends the user somewhere the outcome is visible, and
+   * strips the parameter again — so the URL is a boot signal and never becomes
+   * a route. In-app navigation stays `activeView` and nothing else.
+   *
+   * An agent never reaches this provider (AgentApp is a separate shell), and
+   * since Calendly became the OFFICE's one connection the only person who can
+   * start that flow is an owner — so they land back on Integrations, the screen
+   * that holds the card they pressed.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('calendly')) return;
+    setActiveView('integrations');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
   useEffect(() => {

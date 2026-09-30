@@ -88,7 +88,7 @@ interface Member {
   timezone: string;
   hasProfile: boolean;
   activeLeads: number;
-  calendarConnected: boolean;
+  calendarLinked: boolean;
 }
 
 async function signupOwner(tag: string, org: string): Promise<{ token: string; userId: string; orgId: string }> {
@@ -239,7 +239,7 @@ test('owner creates an agent: user + membership + profile, and nothing else', as
   // about empty tables, not placeholders.
   assert.equal(created.hasProfile, true);
   assert.equal(created.activeLeads, 0);
-  assert.equal(created.calendarConnected, false);
+  assert.equal(created.calendarLinked, false);
   assert.ok(created.timezone.length > 0);
   assert.ok(created.memberSince);
 

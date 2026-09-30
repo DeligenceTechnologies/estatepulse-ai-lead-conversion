@@ -1,43 +1,19 @@
 import React, { useState } from 'react';
-import { Building2, CalendarClock, LayoutDashboard, LogOut, Users } from 'lucide-react';
+import { Building2, CalendarClock, CalendarCheck, LayoutDashboard, LogOut, Users } from 'lucide-react';
 import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
+import { AgentAppointments } from './AgentAppointments';
+import { AgentAvailability } from './AgentAvailability';
 import { AgentDashboard } from './AgentDashboard';
 import { AgentLeads } from './AgentLeads';
 
-type AgentView = 'dashboard' | 'leads' | 'appointments';
+type AgentView = 'dashboard' | 'leads' | 'appointments' | 'availability';
 
 const NAV_ITEMS: Array<{ id: AgentView; label: string; icon: React.ReactNode }> = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
   { id: 'leads', label: 'My Leads', icon: <Users className="w-4 h-4" /> },
   { id: 'appointments', label: 'Appointments', icon: <CalendarClock className="w-4 h-4" /> },
+  { id: 'availability', label: 'Availability', icon: <CalendarCheck className="w-4 h-4" /> },
 ];
-
-/**
- * Appointments, deliberately inert.
- *
- * The `appointments` table is real and read-only for agents, but nothing in the
- * product books one yet — calendar integration is a later phase. A list that
- * could only ever be empty, or worse a demo one, would claim a feature that is
- * not there, so the section says where it stands instead.
- */
-const AgentAppointments: React.FC = () => (
-  <div className="p-6 space-y-4 max-w-7xl mx-auto text-slate-100">
-    <div>
-      <h2 className="text-xl font-bold text-white tracking-tight">My Appointments</h2>
-      <p className="text-xs text-slate-400">Consultations booked with you.</p>
-    </div>
-
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-3">
-      <CalendarClock className="w-6 h-6 text-slate-600 mx-auto" />
-      <div className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-        No upcoming appointments.
-        <span className="block text-slate-500 mt-1">
-          Booking is not switched on yet, so nothing can appear here for now.
-        </span>
-      </div>
-    </div>
-  </div>
-);
 
 /**
  * The whole application for someone whose role is `agent`.
@@ -137,6 +113,7 @@ export const AgentApp: React.FC = () => {
         {view === 'dashboard' && <AgentDashboard />}
         {view === 'leads' && <AgentLeads />}
         {view === 'appointments' && <AgentAppointments />}
+        {view === 'availability' && <AgentAvailability />}
       </main>
     </div>
   );
