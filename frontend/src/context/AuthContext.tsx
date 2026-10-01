@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ApiError,
   SESSION_ENDED_EVENT,
@@ -53,6 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreNonce, setRestoreNonce] = useState(0);
+  const navigate = useNavigate();
 
   const applySession = (data: MeResponse): void => {
     setUser(data.user);
@@ -140,7 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applySession({ ...session, agentProfileId: null });
   };
 
-  const logout = (): void => {
+  const endSession = (): void => {
     // Revoke server-side first: apiFetch reads the token synchronously, before
     // the clearToken below removes it. Best-effort - if the call fails the
     // session still dies on its own idle timeout.
@@ -151,6 +153,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
+   * The Sign out button. Goes to /login directly so RequireAuth never records
+   * the current page as `from`: a deliberate sign-out starts the next session
+   * on the dashboard. An idle timeout or an expired session still goes through
+   * RequireAuth, so signing back in returns to the page that was interrupted.
+   */
+  const logout = (): void => {
+    endSession();
+    navigate('/login', { replace: true });
+  };
+
+  /**
    * Idle timeout. Signing in flips status to 'authed' and starts a fresh
    * 30-minute watch; logging out (or an idle logout itself) flips it back and
    * the cleanup clears the timer and the listeners. Activity is reported to the
@@ -158,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * A 401 on it ends the session through apiFetch like any other call.
    */
   useEffect(
-    () => startIdleWatch(status, logout, () => void api.heartbeat().catch(() => {})),
+    () => startIdleWatch(status, endSession, () => void api.heartbeat().catch(() => {})),
     [status],
   );
 
