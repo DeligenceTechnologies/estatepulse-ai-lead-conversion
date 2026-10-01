@@ -25,6 +25,13 @@ interface AuthContextType {
   agentProfileId: string | null;
   /** Set when a session restore fails for a reason worth retrying (network). */
   restoreError: string | null;
+  /**
+   * True only between an explicit logout and the next login/signup. Lets
+   * RequireAuth skip recording `from` so a deliberate sign-out starts the
+   * next session on the dashboard. Idle timeouts and expired sessions never
+   * set this, so signing back in still returns to the interrupted page.
+   */
+  explicitLogout: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (input: {
     email: string;
@@ -54,6 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreNonce, setRestoreNonce] = useState(0);
+  const [explicitLogout, setExplicitLogout] = useState(false);
   const navigate = useNavigate();
 
   const applySession = (data: MeResponse): void => {
@@ -133,12 +141,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login: AuthContextType['login'] = async (email, password) => {
     const session = await api.login({ email, password });
     setToken(session.token);
+    setExplicitLogout(false);
     applySession({ ...session, agentProfileId: null });
   };
 
   const signup: AuthContextType['signup'] = async (input) => {
     const session = await api.signup(input);
     setToken(session.token);
+    setExplicitLogout(false);
     applySession({ ...session, agentProfileId: null });
   };
 
@@ -160,6 +170,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const logout = (): void => {
     endSession();
+    setExplicitLogout(true);
     navigate('/login', { replace: true });
   };
 
@@ -186,6 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         agentProfileId,
         restoreError,
+        explicitLogout,
         login,
         signup,
         logout,
