@@ -39,27 +39,3 @@ Other scripts:
 npm run build    # production build to dist/
 npm run preview  # preview the production build
 npm run lint      # TypeScript type-check (tsc --noEmit)
-```
-
-## Project structure
-
-```
-src/
-  App.tsx                 # Top-level routing between views + global modals
-  context/AppContext.tsx  # All demo "backend" logic: leads, scoring, conversations, etc.
-  types.ts                 # Data models matching the PRD's Supabase schema
-  data/mockData.ts         # Seed data for the Austin Home Advisors demo org
-  components/layout/       # Sidebar, Header
-  components/views/        # One component per sidebar section
-  components/modals/       # Lead detail, pre-call briefing, live call simulator, etc.
-  utils/pdfExport.ts       # Client-side PDF report generation (jsPDF)
-```
-
-## Next steps toward production (per the PRD)
-
-This prototype covers the UI/UX and interaction model end-to-end. To become the
-real product it would need: Supabase (auth, Postgres, RLS, multi-tenancy), n8n
-workflow orchestration, a real voice provider (Retell/Vapi), Twilio SMS, an LLM
-provider abstraction (Claude/OpenAI) for qualification and scoring, and CRM sync
-(Follow Up Boss / GoHighLevel / generic webhooks) — all currently simulated
-client-side in `AppContext.tsx`.
