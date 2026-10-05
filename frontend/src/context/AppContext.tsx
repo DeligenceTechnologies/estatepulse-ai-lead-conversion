@@ -64,7 +64,7 @@ export const viewForPath = (pathname: string): AppView | null => {
  * for these, and Header/Sidebar hide their demo chrome while one is open.
  */
 const LOCKED_VIEWS: readonly AppView[] = [
-  'dashboard',
+  // 'dashboard' is live: it reads GET /api/dashboard and GET /api/agents.
   // 'appointments' is live: it reads the real appointments table, populated by
   // the calendar sync from agents' connected Calendly accounts.
   'analytics',
