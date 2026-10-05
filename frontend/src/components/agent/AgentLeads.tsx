@@ -25,7 +25,7 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 const NEUTRAL = 'bg-slate-800 text-slate-400 border-slate-700';
-const PILL = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border font-mono';
+const PILL = 'text-2xs font-bold uppercase px-2 py-0.5 rounded-full border font-mono';
 const DASH = '—';
 
 const formatDate = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString() : DASH);
@@ -35,7 +35,7 @@ const money = (n: number | null): string => (n === null ? DASH : `$${n.toLocaleS
 /** One labelled value in the detail modal. Renders a dash rather than nothing. */
 const Field: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-    <span className="text-slate-400 block text-[10px]">{label}</span>
+    <span className="text-slate-400 block text-2xs">{label}</span>
     <span className="text-slate-100 break-words">{value === null || value === '' ? DASH : value}</span>
   </div>
 );
@@ -140,12 +140,12 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
               </div>
 
               <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1">
-                <span className="text-slate-400 block text-[10px]">Motivation</span>
+                <span className="text-slate-400 block text-2xs">Motivation</span>
                 <p className="text-slate-100 leading-relaxed">{lead.motivation ?? DASH}</p>
               </div>
 
               <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1">
-                <span className="text-slate-400 block text-[10px]">Latest AI note</span>
+                <span className="text-slate-400 block text-2xs">Latest AI note</span>
                 <p className="text-slate-100 leading-relaxed">{lead.aiSummary ?? DASH}</p>
               </div>
             </>

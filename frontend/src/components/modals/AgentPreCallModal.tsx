@@ -156,7 +156,7 @@ export const AgentPreCallModal: React.FC = () => {
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 AI Voice Qualification Summary (Alex)
               </span>
-              <span className="text-[11px] text-emerald-400 font-mono">94% Confidence</span>
+              <span className="text-xs text-emerald-400 font-mono">94% Confidence</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
               {lead.scoreBreakdown?.reasoningSummary || 
@@ -177,7 +177,7 @@ export const AgentPreCallModal: React.FC = () => {
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={handleAcceptAndConnect}
-                className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold shadow-lg shadow-emerald-950 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-on-accent text-xs font-bold shadow-lg shadow-emerald-950 flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 <Phone className="w-4 h-4" />
                 <span>Accept Call & Connect Now</span>

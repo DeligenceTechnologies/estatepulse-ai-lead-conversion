@@ -109,7 +109,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Lead Ingestion Webhook Tester</h3>
-              <p className="text-[11px] text-slate-400">Endpoint: <code className="text-cyan-400 font-mono">POST /api/webhooks/leads</code> (PRD Section 66)</p>
+              <p className="text-xs text-slate-400">Endpoint: <code className="text-cyan-400 font-mono">POST /api/webhooks/leads</code> (PRD Section 66)</p>
             </div>
           </div>
 
@@ -148,7 +148,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
               <span>Request JSON Body:</span>
               <button
                 onClick={handleCopyCurl}
-                className="flex items-center gap-1 text-[11px] text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="flex items-center gap-1 text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copied ? 'Copied cURL' : 'Copy as cURL'}</span>
@@ -175,7 +175,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
             </div>
           )}
 
-          <div className="bg-slate-950/60 border border-slate-800/80 p-3 rounded-xl text-[11px] text-slate-400 leading-relaxed">
+          <div className="bg-slate-950/60 border border-slate-800/80 p-3 rounded-xl text-xs text-slate-400 leading-relaxed">
             <span className="font-semibold text-slate-300">Backend Pipeline Behavior:</span> When executed, the ingestion engine normalizes the payload, assigns a round-robin agent, evaluates duplicate phone/email, and triggers automated voice & SMS outreach according to organization strategy rules.
           </div>
         </div>

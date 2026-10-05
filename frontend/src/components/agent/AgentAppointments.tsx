@@ -113,19 +113,19 @@ const Section: React.FC<{
             >
               <div className="flex items-center justify-between gap-2">
                 <span
-                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${statusTone(a.status)}`}
+                  className={`text-2xs uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${statusTone(a.status)}`}
                 >
                   {a.status}
                 </span>
                 {a.appointmentType && (
-                  <span className="text-[11px] text-slate-400 truncate">{a.appointmentType}</span>
+                  <span className="text-xs text-slate-400 truncate">{a.appointmentType}</span>
                 )}
               </div>
 
               <div>
                 <h4 className="text-base font-bold text-white truncate">{a.leadName}</h4>
                 {a.leadEmail && (
-                  <p className="text-[11px] text-slate-500 truncate">{a.leadEmail}</p>
+                  <p className="text-xs text-slate-500 truncate">{a.leadEmail}</p>
                 )}
               </div>
 
@@ -159,7 +159,7 @@ const Section: React.FC<{
               </div>
 
               {cancelled && a.canceledReason && (
-                <p className="text-[11px] text-slate-400 italic">"{a.canceledReason}"</p>
+                <p className="text-xs text-slate-400 italic">"{a.canceledReason}"</p>
               )}
 
               {!cancelled && a.meetingUrl && (
@@ -167,7 +167,7 @@ const Section: React.FC<{
                   href={a.meetingUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Video className="w-3.5 h-3.5" />
                   Join

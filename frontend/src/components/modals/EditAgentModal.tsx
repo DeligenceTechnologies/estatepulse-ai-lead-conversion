@@ -136,7 +136,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white truncate">Edit {memberName(member)}</h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-xs text-slate-400">
                 Their profile and contact details. Suspension and password are changed elsewhere.
               </p>
             </div>
@@ -207,7 +207,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
               onChange={(e) => setEmail(e.target.value)}
               className={field}
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-2xs text-slate-500 mt-1">
               This is the address they sign in with — changing it changes their login.
             </p>
           </div>
@@ -277,7 +277,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
               onChange={(e) => setLeadCap(e.target.value)}
               className={`${field} font-mono`}
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-2xs text-slate-500 mt-1">
               The most open leads this agent may hold. Nothing assigns leads yet, so this is stored
               and not yet enforced.
             </p>
@@ -296,7 +296,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
               type="submit"
               disabled={saving || nothingToSave}
               title={nothingToSave ? 'Nothing has changed yet' : undefined}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               {saving ? 'Saving…' : 'Save Changes'}

@@ -86,7 +86,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           <Clock className="w-4 h-4 text-amber-400" />
           Contact Window &amp; Safety Guardrails
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1">{blurb}</p>
+        <p className="text-xs text-slate-400 mt-1">{blurb}</p>
       </div>
 
       {error && (
@@ -124,7 +124,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                   className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-32 text-center disabled:opacity-40 focus:outline-none focus:border-emerald-600"
                 />
               </div>
-              <p className="text-[10px] text-slate-500 mt-1">
+              <p className="text-2xs text-slate-500 mt-1">
                 In your organization's timezone. A step falling inside this window is sent when it
                 reopens, never dropped — and the rest of the cadence shifts with it.
               </p>
@@ -142,7 +142,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                 onChange={(e) => setMaxVoice(Number(e.target.value))}
                 className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600"
               />
-              <p className="text-[10px] text-slate-500 mt-1">
+              <p className="text-2xs text-slate-500 mt-1">
                 Applies to the strategy's calls. Do-not-contact is absolute and is not a setting.
               </p>
             </div>
@@ -159,7 +159,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
               }`}
             >
               <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${
                   respect ? 'left-[18px]' : 'left-0.5'
                 }`}
               />
@@ -170,19 +170,19 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           </button>
 
           <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-            <p className="text-[11px] text-slate-500 flex items-center gap-1.5 min-w-0">
+            <p className="text-xs text-slate-500 flex items-center gap-1.5 min-w-0">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span className="truncate">
                 One window for both the strategy and every follow-up sequence.
               </span>
             </p>
             <div className="flex items-center gap-2 shrink-0">
-              {saved && <span className="text-[11px] text-emerald-400 font-semibold">Saved</span>}
+              {saved && <span className="text-xs text-emerald-400 font-semibold">Saved</span>}
               <button
                 type="button"
                 onClick={() => void save()}
                 disabled={saving || !valid}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer"
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
               >
                 {saving ? 'Saving…' : 'Save window'}
               </button>

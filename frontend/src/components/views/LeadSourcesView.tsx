@@ -30,7 +30,7 @@ const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> =
   if (state === 'VALID') {
     return (
       <span
-        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+        className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 border ${
           usedPrevious
             ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
             : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
@@ -43,14 +43,14 @@ const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> =
   }
   if (state === 'INVALID') {
     return (
-      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 bg-rose-500/20 text-rose-300 border border-rose-500/40">
+      <span className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 bg-rose-500/20 text-rose-300 border border-rose-500/40">
         <ShieldAlert className="w-3 h-3" />
         bad signature
       </span>
     );
   }
   return (
-    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+    <span className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
       {state === 'NOT_CONFIGURED' ? 'no secret' : 'unsigned'}
     </span>
   );
@@ -71,17 +71,17 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
           </span>
           <SignaturePill state={d.signatureState} usedPrevious={d.usedPreviousSecret} />
           {d.formName && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+            <span className="text-2xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
               {d.formName}
             </span>
           )}
         </div>
-        <span className="text-[10px] font-mono text-slate-500">{d.bodyBytes ?? 0}B</span>
+        <span className="text-2xs font-mono text-slate-500">{d.bodyBytes ?? 0}B</span>
       </div>
 
       {/* The one-line answer to "did normalization work on this submission?" */}
       {d.mapping && (
-        <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+        <div className="flex items-center gap-1.5 flex-wrap text-2xs">
           <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
             {d.mapping.mapped} mapped
           </span>
@@ -107,7 +107,7 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
       )}
 
       {quarantined && (
-        <div className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-2 leading-relaxed">
+        <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-2 leading-relaxed">
           <strong>Signature didn't match.</strong> The secret in Tally doesn't match ours, so this
           submission was quarantined rather than processed. The raw payload is retained — fix the
           secret and it can be re-verified and replayed, so nothing is lost.
@@ -115,7 +115,7 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
       )}
 
       {d.parseError && (
-        <div className="text-[11px] text-amber-300">Could not parse payload: {d.parseError}</div>
+        <div className="text-xs text-amber-300">Could not parse payload: {d.parseError}</div>
       )}
 
       {d.answers.length > 0 ? (
@@ -137,7 +137,7 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
                     a.targetFields.map(t => (
                       <span
                         key={t}
-                        className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                        className="text-2xs font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
                       >
                         → {t}
                       </span>
@@ -145,17 +145,17 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
                   ) : a.mappingOutcome === 'unmapped' ? (
                     <span
                       title="Stored on the lead as an extra answer, not as one of our fields"
-                      className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700"
+                      className="text-2xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700"
                     >
                       extra
                     </span>
                   ) : null}
-                  <span className="text-[9px] text-slate-600 font-mono">{a.type}</span>
+                  <span className="text-2xs text-slate-600 font-mono">{a.type}</span>
                 </span>
               </div>
 
               {a.warnings.map((w, j) => (
-                <div key={j} className="text-[10px] text-amber-300/90 pl-1 flex items-start gap-1">
+                <div key={j} className="text-2xs text-amber-300/90 pl-1 flex items-start gap-1">
                   <AlertTriangle className="w-2.5 h-2.5 mt-0.5 shrink-0" />
                   {w}
                 </div>
@@ -164,7 +164,7 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
           ))}
         </div>
       ) : (
-        !d.parseError && <div className="text-[11px] text-slate-500 italic">No fields in payload.</div>
+        !d.parseError && <div className="text-xs text-slate-500 italic">No fields in payload.</div>
       )}
     </div>
   );
@@ -180,7 +180,7 @@ const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
   <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 flex items-start justify-between gap-3">
     <div className="min-w-0">
       <div className="text-xs font-bold text-slate-100 truncate">{fullName(lead)}</div>
-      <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+      <div className="text-xs text-slate-400 font-mono flex items-center gap-1 mt-0.5">
         {lead.phone ?? DASH}
         {lead.phone && !lead.phoneValid && (
           <span title="Phone could not be parsed — excluded from dialing">
@@ -188,22 +188,22 @@ const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
           </span>
         )}
       </div>
-      <div className="text-[11px] text-slate-500 truncate">{lead.email ?? DASH}</div>
+      <div className="text-xs text-slate-500 truncate">{lead.email ?? DASH}</div>
     </div>
     <div className="text-right shrink-0 space-y-1">
-      <div className="text-[10px] text-slate-500">
+      <div className="text-2xs text-slate-500">
         {new Date(lead.createdAt).toLocaleString()}
       </div>
       <div className="flex items-center gap-1 justify-end">
         {lead.contactLeadCount > 1 && (
           <span
             title={`${lead.contactLeadCount} leads share this phone number or email. Each submission is kept as its own lead.`}
-            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30"
+            className="text-2xs px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30"
           >
             repeat
           </span>
         )}
-        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+        <span className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
           {lead.status}
         </span>
       </div>
@@ -317,19 +317,18 @@ export const LeadSourcesView: React.FC = () => {
                   ? 'Connected to the live event stream — deliveries appear as they arrive.'
                   : 'Event stream not connected; falling back to periodic refresh.'
               }
-              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+              className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
                 connected
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                   : 'bg-slate-800 text-slate-400 border-slate-700'
               }`}
             >
               <Radio className={`w-3 h-3 ${connected ? '' : 'opacity-60'}`} />
-              {connected ? 'Live API' : 'Polling'}
+              {connected ? 'Live' : 'Polling'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
-            What each connected form has brought in. Real data from Postgres — every other screen in
-            this app uses in-browser demo data.
+            What each connected form has brought in.
           </p>
         </div>
 
@@ -348,7 +347,7 @@ export const LeadSourcesView: React.FC = () => {
         case that actually needs the troubleshooting steps.
       */}
       {stale ? (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300/90 px-1">
+        <div className="flex items-center gap-2 text-xs text-amber-300/90 px-1">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>Showing the last data we loaded — reconnecting. ({error})</span>
         </div>
@@ -382,7 +381,7 @@ export const LeadSourcesView: React.FC = () => {
               </div>
               <button
                 onClick={() => setActiveView('integrations')}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
               >
                 Connect a form
               </button>
@@ -405,7 +404,7 @@ export const LeadSourcesView: React.FC = () => {
                       this is the number the question is actually about. */}
                   <span
                     title={`${s.leadCount ?? 0} leads from ${s.deliveryCount ?? 0} deliveries`}
-                    className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0 flex items-center gap-1"
+                    className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0 flex items-center gap-1"
                   >
                     <Users className="w-2.5 h-2.5" />
                     {s.leadCount ?? 0}
@@ -415,12 +414,12 @@ export const LeadSourcesView: React.FC = () => {
                   <SourceStatusPill source={s} />
                   <ConnectionPill source={s} />
                   {s.externalFormName && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[60%]">
+                    <span className="text-2xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[60%]">
                       {s.externalFormName}
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-slate-400">
+                <div className="text-xs text-slate-400">
                   {s.lastEventAt
                     ? `Last delivery ${new Date(s.lastEventAt).toLocaleString()}`
                     : (s.mappingStatus ?? '').toUpperCase() !== 'UNCONFIGURED'
@@ -439,7 +438,7 @@ export const LeadSourcesView: React.FC = () => {
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-white truncate">{selected.name}</h3>
-                  <div className="text-[11px] text-slate-400 truncate">
+                  <div className="text-xs text-slate-400 truncate">
                     {selected.externalFormName
                       ? `${(selected.provider ?? 'form').toLowerCase()} · ${selected.externalFormName}`
                       : `${selected.leadCount ?? 0} leads · ${selected.deliveryCount ?? 0} deliveries`}
@@ -458,14 +457,14 @@ export const LeadSourcesView: React.FC = () => {
                     <Users className="w-4 h-4 text-emerald-400" />
                     <h3 className="text-sm font-bold text-white">Leads from this source</h3>
                     {leads !== null && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                      <span className="text-2xs font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
                         {leads.length}
                       </span>
                     )}
                   </div>
                   <button
                     onClick={() => setActiveView('leads')}
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
                   >
                     Open pipeline →
                   </button>
@@ -482,7 +481,7 @@ export const LeadSourcesView: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-[11px] text-slate-500 text-center py-6 leading-relaxed max-w-md mx-auto">
+                  <div className="text-xs text-slate-500 text-center py-6 leading-relaxed max-w-md mx-auto">
                     No leads from this source yet. Every submission carrying a usable phone or email
                     becomes its own lead — a delivery with neither is stored below and stays
                     replayable once the mapping is fixed.
@@ -495,7 +494,7 @@ export const LeadSourcesView: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-white">Deliveries</h3>
                   <div className="flex items-center gap-3">
-                    <label className="text-[11px] text-slate-400 flex items-center gap-1.5 cursor-pointer">
+                    <label className="text-xs text-slate-400 flex items-center gap-1.5 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={autoRefresh}
@@ -519,7 +518,7 @@ export const LeadSourcesView: React.FC = () => {
                   <div className="text-center py-8 space-y-2">
                     <Radio className="w-6 h-6 text-slate-600 mx-auto animate-pulse" />
                     <div className="text-xs text-slate-400">Listening for your first submission…</div>
-                    <div className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                       {(selected.connectionMethod ?? '').toUpperCase() === 'API' ? (
                         <>
                           The webhook is already installed on your form — just submit it once.

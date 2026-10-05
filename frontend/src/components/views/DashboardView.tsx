@@ -51,11 +51,11 @@ const Card: React.FC<{ label: string; value: React.ReactNode; hint: string; icon
 }) => (
   <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-2">
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[11px] text-slate-400 font-semibold">{label}</span>
+      <span className="text-xs text-slate-400 font-semibold">{label}</span>
       <span className="text-slate-500">{icon}</span>
     </div>
     <div className="text-2xl font-bold text-white font-mono">{value}</div>
-    <p className="text-[10px] text-slate-500 leading-relaxed">{hint}</p>
+    <p className="text-2xs text-slate-500 leading-relaxed">{hint}</p>
   </div>
 );
 
@@ -71,7 +71,7 @@ const Panel: React.FC<{ title: string; icon: React.ReactNode; aside?: string; ch
         <span className="text-slate-500">{icon}</span>
         <h3 className="text-sm font-bold text-white">{title}</h3>
       </div>
-      {aside && <span className="text-[10px] text-slate-500">{aside}</span>}
+      {aside && <span className="text-2xs text-slate-500">{aside}</span>}
     </div>
     {children}
   </div>
@@ -241,7 +241,7 @@ export const DashboardView: React.FC = () => {
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-semibold text-slate-200">{a.label}</div>
-                        <div className="text-[10px] text-slate-500">{a.hint}</div>
+                        <div className="text-2xs text-slate-500">{a.hint}</div>
                       </div>
                       <span
                         className={`font-mono font-bold text-sm shrink-0 ${a.count > 0 ? 'text-amber-300' : 'text-slate-500'}`}
@@ -271,9 +271,9 @@ export const DashboardView: React.FC = () => {
                       ))}
                     </div>
                     <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] text-slate-500">Open leads by temperature:</span>
+                      <span className="text-2xs text-slate-500">Open leads by temperature:</span>
                       {TEMPERATURES.map((t) => (
-                        <span key={t.key} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${t.tone}`}>
+                        <span key={t.key} className={`text-2xs font-semibold px-2 py-0.5 rounded-full ${t.tone}`}>
                           {t.label} {data.leads.byTemperature[t.key]}
                         </span>
                       ))}

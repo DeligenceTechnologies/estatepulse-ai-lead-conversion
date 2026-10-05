@@ -49,7 +49,7 @@ export const Field: React.FC<{
       onChange={(e) => onChange(e.target.value)}
       className="w-full px-3 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/40 disabled:opacity-50 transition-colors"
     />
-    {hint && <span className="block text-[11px] text-slate-500 mt-1">{hint}</span>}
+    {hint && <span className="block text-xs text-slate-500 mt-1">{hint}</span>}
   </label>
 );
 
@@ -57,7 +57,7 @@ export const SubmitButton: React.FC<{ busy: boolean; children: React.ReactNode }
   <button
     type="submit"
     disabled={busy}
-    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:hover:bg-emerald-600 text-white text-sm font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed"
+    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:hover:bg-emerald-600 text-on-accent text-sm font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed"
   >
     {busy ? 'Please wait…' : children}
   </button>

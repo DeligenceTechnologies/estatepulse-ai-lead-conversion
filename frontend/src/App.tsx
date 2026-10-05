@@ -6,7 +6,6 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
-import { Header } from './components/layout/Header';
 
 // Views. Only the sections under active development are imported; the rest
 // render ComingSoonView, so their prototype dummy data never reaches the UI.
@@ -36,15 +35,14 @@ const AppContent: React.FC = () => {
   const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
+    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-on-accent">
       {/* Structural Sidebar */}
       <Sidebar />
 
       {/* Main Content Area */}
+      {/* No global title bar: every view renders its own heading and actions. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header />
-
-        <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
+        <main className="flex-1 overflow-y-auto custom-scrollbar">
           {activeView === 'dashboard' && <DashboardView />}
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
           {activeView === 'conversations' && <ConversationsView />}

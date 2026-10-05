@@ -110,7 +110,7 @@ export const ConversationsView: React.FC = () => {
       </div>
 
       {threadsQuery.stale && (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5" />
           Showing the last good result — the most recent refresh failed.
         </div>
@@ -156,7 +156,7 @@ export const ConversationsView: React.FC = () => {
                     {t.dncStatus && (
                       <span
                         title="Opted out"
-                        className="text-[9px] uppercase font-bold px-1.5 rounded border bg-rose-500/20 text-rose-300 border-rose-500/40 flex items-center gap-0.5"
+                        className="text-2xs uppercase font-bold px-1.5 rounded border bg-rose-500/20 text-rose-300 border-rose-500/40 flex items-center gap-0.5"
                       >
                         <Ban className="w-2.5 h-2.5" />
                         stop
@@ -164,7 +164,7 @@ export const ConversationsView: React.FC = () => {
                     )}
                     {t.temperature && (
                       <span
-                        className={`text-[9px] uppercase font-bold px-1.5 rounded border ${
+                        className={`text-2xs uppercase font-bold px-1.5 rounded border ${
                           TEMP_STYLES[t.temperature] ?? 'bg-slate-800 text-slate-400 border-slate-700'
                         }`}
                       >
@@ -174,14 +174,14 @@ export const ConversationsView: React.FC = () => {
                   </div>
                 </div>
 
-                <p className="text-[11px] text-slate-400 truncate">
+                <p className="text-xs text-slate-400 truncate">
                   {t.lastMessageDirection === 'inbound' && (
                     <span className="text-emerald-400 font-semibold">↩ </span>
                   )}
                   {t.lastMessageBody ?? 'No messages yet'}
                 </p>
 
-                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                <div className="flex items-center justify-between text-2xs text-slate-500">
                   <span className="font-mono">{t.leadPhone ?? '—'}</span>
                   <span>
                     {t.lastMessageAt
@@ -208,7 +208,7 @@ export const ConversationsView: React.FC = () => {
                   <h3 className="text-base font-bold text-white">{current.leadName}</h3>
                   <span className="text-xs font-mono text-cyan-400">{current.leadPhone}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   {current.messageCount} message{current.messageCount === 1 ? '' : 's'}
                   {current.hasInboundReply && <> • the lead has replied</>}
                 </p>
@@ -222,7 +222,7 @@ export const ConversationsView: React.FC = () => {
             </div>
 
             {current.dncStatus && (
-              <div className="mx-5 mt-4 flex items-start gap-2 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
+              <div className="mx-5 mt-4 flex items-start gap-2 text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
                 <Ban className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>
                   This lead has opted out. Every scheduled step was cancelled and nothing further
@@ -252,7 +252,7 @@ export const ConversationsView: React.FC = () => {
                       <p className="text-xs text-slate-100 leading-relaxed whitespace-pre-wrap">
                         {m.body}
                       </p>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                      <div className="flex items-center gap-2 text-2xs text-slate-500">
                         <span className="uppercase font-semibold">{m.senderType}</span>
                         <span>
                           {new Date(m.sentAt ?? m.createdAt).toLocaleString([], {

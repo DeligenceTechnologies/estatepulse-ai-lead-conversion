@@ -240,7 +240,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-white tracking-tight">Lead Pipeline Management</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">Leads</h2>
             {/*
               Says which mechanism is actually feeding the table. "Live" means the
               event stream is open and a new lead lands here the moment it is
@@ -254,7 +254,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                   ? 'Connected to the live event stream — new leads appear as they arrive.'
                   : 'Event stream not connected; falling back to periodic refresh.'
               }
-              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+              className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
                 connected
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                   : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -280,7 +280,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
           <button
             onClick={onOpenNewLead}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add New Lead</span>
@@ -297,7 +297,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
         reserved for having nothing to show at all.
       */}
       {stale ? (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300/90 px-1">
+        <div className="flex items-center gap-2 text-xs text-amber-300/90 px-1">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>
             Showing the last data we loaded — reconnecting. ({error})
@@ -389,7 +389,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-2xs tracking-wider border-b border-slate-800">
               <tr>
                 <th className="px-4 py-3.5">Lead / Contact</th>
                 <th className="px-4 py-3.5">Temperature</th>
@@ -417,11 +417,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     {/* Name & Contact */}
                     <td className="px-4 py-3.5">
                       <div className="space-y-0.5">
-                        <div className="font-bold text-slate-100 group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
+                        <div className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors flex items-center gap-2">
                           <span>{fullName(lead)}</span>
                           <span
                             title={lead.source?.name ?? undefined}
-                            className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400"
+                            className="text-2xs font-medium px-1.5 rounded bg-slate-800 text-slate-400"
                           >
                             {sourceLabel(lead)}
                           </span>
@@ -434,7 +434,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             // rows stay separate and a human decides.
                             <span
                               title={`${lead.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`}
-                              className="text-[10px] text-amber-300 font-normal"
+                              className="text-2xs text-amber-300 font-normal"
                             >
                               repeat contact ({lead.contactLeadCount})
                             </span>
@@ -442,30 +442,39 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                           {lead.needsReview && (
                             <span
                               title={lead.reviewReasons.join('\n')}
-                              className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                              className="text-2xs font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"
                             >
                               review
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                          {lead.phone ?? DASH}
-                          {lead.phone && !lead.phoneValid && (
-                            // Surfaced because such a lead must never be auto-dialed.
-                            <span title="Phone could not be parsed — excluded from dialing">
-                              <ShieldAlert className="w-3 h-3 text-amber-400" />
+                        {/* One contact line: only what the lead actually has. */}
+                        <div className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                          {lead.phone && (
+                            <span className="flex items-center gap-1 shrink-0">
+                              {lead.phone}
+                              {!lead.phoneValid && (
+                                // Surfaced because such a lead must never be auto-dialed.
+                                <span title="Phone could not be parsed — excluded from dialing">
+                                  <ShieldAlert className="w-3 h-3 text-amber-400" />
+                                </span>
+                              )}
                             </span>
                           )}
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate max-w-[180px] flex items-center gap-1">
-                          {lead.email ?? DASH}
-                          {lead.email && !lead.emailValid && (
-                            // Stored, but never used to match this lead to
-                            // another — see the email_valid guard in createLead.
-                            <span title="Not a usable address — excluded from matching and email outreach">
-                              <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
+                          {lead.phone && lead.email && <span className="text-slate-600">·</span>}
+                          {lead.email && (
+                            <span className="flex items-center gap-1 min-w-0">
+                              <span className="truncate max-w-[200px]">{lead.email}</span>
+                              {!lead.emailValid && (
+                                // Stored, but never used to match this lead to
+                                // another — see the email_valid guard in createLead.
+                                <span title="Not a usable address — excluded from matching and email outreach">
+                                  <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
+                                </span>
+                              )}
                             </span>
                           )}
+                          {!lead.phone && !lead.email && DASH}
                         </div>
                       </div>
                     </td>
@@ -474,7 +483,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     <td className="px-4 py-3.5">
                       <span
                         title={lead.temperature ? undefined : 'Not rated yet — the AI call rates the lead'}
-                        className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
+                        className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
                       >
                         {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
                         {lead.temperature ?? DASH}
@@ -487,7 +496,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                         <div className="font-bold text-emerald-400 font-mono">
                           {budgetRange(lead)}
                         </div>
-                        <div className="text-[11px] text-slate-300 truncate max-w-[150px]">
+                        <div className="text-xs text-slate-300 truncate max-w-[150px]">
                           {lead.location ?? DASH}
                         </div>
                       </div>
@@ -503,7 +512,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     {/* Agent — ingestion does not route to an agent yet. */}
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-[10px] font-bold text-slate-500 flex items-center justify-center">
+                        <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-500 flex items-center justify-center">
                           {DASH}
                         </div>
                         <span className="text-slate-500">Unassigned</span>
@@ -514,7 +523,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     <td className="px-4 py-3.5">
                       <span
                         title={lead.statusReason || undefined}
-                        className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                        className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
                       >
                         {humanize(lead.status)}
                       </span>
@@ -549,7 +558,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                   <td colSpan={7} className="px-4 py-12 text-center space-y-2">
                     <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
                     <div className="text-xs text-slate-400">No live leads yet.</div>
-                    <div className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                       Connect a form under <strong className="text-slate-400">Lead Sources</strong> and
                       submit it — a lead appears here within a couple of seconds, with status{' '}
                       <span className="text-cyan-300 font-semibold">new</span>.
@@ -565,12 +574,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="px-5 py-2.5 bg-slate-950/60 border-t border-slate-800 text-[10px] text-slate-500 flex items-center gap-1.5">
-          <Users className="w-3 h-3" />
-          Every ingested lead starts at <span className="text-cyan-300 font-semibold">new</span>.
-          Status advances as the SMS, voice-qualification and booking stages are built.
         </div>
       </div>
 

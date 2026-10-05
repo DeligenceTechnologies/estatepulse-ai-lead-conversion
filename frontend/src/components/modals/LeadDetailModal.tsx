@@ -124,11 +124,11 @@ export const LeadDetailModal: React.FC = () => {
         {/* Header (PRD Section 38: Name, HOT - 87, Actions) */}
         <div className="p-5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg text-white ${
-              lead.temperature === 'hot' 
-                ? 'bg-gradient-to-tr from-amber-600 to-rose-600 shadow-md shadow-rose-950' 
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg ${
+              lead.temperature === 'hot'
+                ? 'bg-gradient-to-tr from-amber-600 to-rose-600 shadow-md shadow-rose-950 text-on-accent'
                 : lead.temperature === 'warm'
-                ? 'bg-gradient-to-tr from-amber-600 to-yellow-500'
+                ? 'bg-gradient-to-tr from-amber-600 to-yellow-500 text-on-accent'
                 : 'bg-slate-800 text-slate-400'
             }`}>
               {lead.firstName[0]}{lead.lastName[0]}
@@ -148,21 +148,23 @@ export const LeadDetailModal: React.FC = () => {
                   {lead.temperature.toUpperCase()}
                 </span>
 
-                <span className="text-[11px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                <span className="text-xs uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                   {lead.status.replace('_', ' ')}
                 </span>
               </div>
 
               <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                <span>{lead.phone}</span>
-                <span>•</span>
-                <span>{lead.email}</span>
-                <span>•</span>
-                <span className="text-slate-300 font-medium">
-                  Agent: {lead.assignedAgentId ? assignedAgent.name : 'Unassigned'}
-                </span>
-                <span>•</span>
-                <span className="text-emerald-400 font-medium">Source: {lead.source}</span>
+                {/* Only the parts the lead has, so there is never a stray separator. */}
+                {[
+                  lead.phone && <span key="p">{lead.phone}</span>,
+                  lead.email && <span key="e">{lead.email}</span>,
+                  <span key="a" className="text-slate-300 font-medium">
+                    Agent: {lead.assignedAgentId ? assignedAgent.name : 'Unassigned'}
+                  </span>,
+                  <span key="s" className="text-emerald-400 font-medium">Source: {lead.source}</span>,
+                ]
+                  .filter(Boolean)
+                  .flatMap((part, i) => (i === 0 ? [part] : [<span key={`d${i}`} className="text-slate-600">•</span>, part]))}
               </div>
             </div>
           </div>
@@ -176,7 +178,7 @@ export const LeadDetailModal: React.FC = () => {
                 onClick={() => void startOutreach()}
                 disabled={enrolling}
                 title={enrollError ?? 'Start the outbound strategy (AI call / SMS) for this lead now'}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
                 <Phone className="w-3.5 h-3.5" />
                 <span>{enrolling ? 'Starting…' : enrollError ? 'Retry AI Outreach' : 'Start AI Outreach'}</span>
@@ -217,7 +219,7 @@ export const LeadDetailModal: React.FC = () => {
         {/* Flow status — where this lead is in its journey (strategy step vs follow-up) */}
         {flow && (
           <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-            <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">Flow</span>
+            <span className="text-2xs uppercase font-bold tracking-wide text-slate-500">Flow</span>
             {(() => {
               const map = {
                 strategy: { label: 'In Strategy', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
@@ -226,7 +228,7 @@ export const LeadDetailModal: React.FC = () => {
                 not_started: { label: 'Not started', cls: 'bg-slate-800 text-slate-400 border-slate-700' },
               } as const;
               const m = map[flow.phase];
-              return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-[10px] ${m.cls}`}>{m.label}</span>;
+              return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-2xs ${m.cls}`}>{m.label}</span>;
             })()}
 
             {/* The real-world outcome (SMS sent / Call answered / Exited …) */}
@@ -241,10 +243,10 @@ export const LeadDetailModal: React.FC = () => {
                     const cls =
                       s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
                       : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
-                      : s.state === 'current' ? 'bg-emerald-500 text-white border-emerald-400 shadow shadow-emerald-950'
+                      : s.state === 'current' ? 'bg-emerald-500 text-on-accent border-emerald-400 shadow shadow-emerald-950'
                       : 'bg-slate-800 text-slate-500 border-slate-700';
                     return (
-                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${cls}`}>
+                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}>
                         {s.index + 1}·{s.outcome ?? name}
                       </span>
                     );
@@ -302,95 +304,30 @@ export const LeadDetailModal: React.FC = () => {
           {activeTab === 'overview' && (
             <div className="space-y-6">
               
-              {/* Top Highlights Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <DollarSign className="w-4 h-4 text-emerald-400" />
-                    <span>Budget Range</span>
+              {/* What the lead told us. Each value is a real field or an honest dash. */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { icon: <DollarSign className="w-4 h-4 text-emerald-400" />, label: 'Budget', value: lead.budgetMin || lead.budgetMax ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K` : '—' },
+                  { icon: <MapPin className="w-4 h-4 text-cyan-400" />, label: 'Location', value: lead.preferredLocation || '—' },
+                  { icon: <Clock className="w-4 h-4 text-amber-400" />, label: 'Timeline', value: lead.timeline || '—' },
+                  { icon: <Home className="w-4 h-4 text-purple-400" />, label: 'Bedrooms', value: lead.bedrooms ? `${lead.bedrooms} beds${lead.propertyType ? ` · ${lead.propertyType}` : ''}` : '—' },
+                ].map((f) => (
+                  <div key={f.label} className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                      {f.icon}
+                      <span>{f.label}</span>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-100 truncate" title={f.value}>{f.value}</div>
                   </div>
-                  <div className="text-base font-bold text-emerald-300 font-mono">
-                    {lead.budgetMin || lead.budgetMax
-                      ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K`
-                      : '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Confirmed in AI conversation</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <MapPin className="w-4 h-4 text-cyan-400" />
-                    <span>Target Location</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200 truncate">
-                    {lead.preferredLocation || '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Target area verified</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <Clock className="w-4 h-4 text-amber-400" />
-                    <span>Buying Timeline</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200">
-                    {lead.timeline || '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">High priority urgency</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <Home className="w-4 h-4 text-purple-400" />
-                    <span>Bedrooms & Spec</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200">
-                    {lead.bedrooms ? `${lead.bedrooms} Beds` : '—'}
-                    {lead.propertyType ? ` (${lead.propertyType})` : ''}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Single family preference</span>
-                </div>
+                ))}
               </div>
 
-              {/* Financing, Motivation & CRM Status */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                    Financing & Pre-Approval
-                  </h4>
-                  <div className="text-xs text-slate-200 bg-slate-900 p-3 rounded-lg border border-slate-800">
-                    {lead.financingStatus || '—'}
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Pre-approval Status: <strong className={lead.preapprovalStatus ? 'text-emerald-400' : 'text-amber-400'}>
-                      {lead.preapprovalStatus ? 'Verified Pre-Approved' : 'Needs Lender Connection'}
-                    </strong>
-                  </div>
+              <div className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  <span>Financing</span>
                 </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Building2 className="w-4 h-4 text-emerald-400" />
-                    CRM & Pipeline Status
-                  </h4>
-                  <div className="space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Follow Up Boss ID:</span>
-                      <span className="font-mono text-emerald-400">FUB-{lead.id.substring(5, 12)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Next Scheduled Action:</span>
-                      <span className="text-amber-300">{lead.nextFollowupAt || 'None scheduled'}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Communication Opt-in:</span>
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> 10DLC SMS & Voice Consent
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <div className="text-sm text-slate-100">{lead.financingStatus || '—'}</div>
               </div>
 
               {/* Everything the prospect said that has no field of its own.
@@ -402,7 +339,7 @@ export const LeadDetailModal: React.FC = () => {
                     <FileText className="w-4 h-4 text-slate-400" />
                     Other answers from the form
                   </h4>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Captured verbatim. These did not match one of our lead fields, so they are kept
                     here rather than dropped.
                   </p>
@@ -419,20 +356,6 @@ export const LeadDetailModal: React.FC = () => {
                 </div>
               )}
 
-              {/* Quick Consultation Booking Bar */}
-              <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-emerald-300">Fast Buyer Consultation Booking</h4>
-                  <p className="text-[11px] text-slate-400">Synchronizes with Alex Vance's Calendly and pauses cold follow-up tasks.</p>
-                </div>
-                <button
-                  onClick={handleBookQuickConsult}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Book Consultation for Tomorrow 10 AM</span>
-                </button>
-              </div>
 
             </div>
           )}
@@ -448,7 +371,7 @@ export const LeadDetailModal: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => takeOverConversation(lead.id)}
-                    className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+                    className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-xs font-semibold transition-colors cursor-pointer"
                   >
                     Take Over (Human Handoff)
                   </button>
@@ -463,7 +386,7 @@ export const LeadDetailModal: React.FC = () => {
                     const isAi = msg.sender === 'ai';
                     return (
                       <div key={msg.id} className={`flex flex-col ${isLead ? 'items-start' : 'items-end'}`}>
-                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-0.5 px-1">
+                        <div className="flex items-center gap-1.5 text-2xs text-slate-400 mb-0.5 px-1">
                           <span className="font-semibold text-slate-300">
                             {isAi ? `${orgSettings.aiAgentName} (AI)` : isLead ? `${lead.firstName} ${lead.lastName}` : 'Agent (You)'}
                           </span>
@@ -475,7 +398,7 @@ export const LeadDetailModal: React.FC = () => {
                             ? 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700' 
                             : isAi 
                             ? 'bg-emerald-950/80 text-emerald-200 border border-emerald-800/60 rounded-tr-sm' 
-                            : 'bg-emerald-600 text-white rounded-tr-sm shadow'
+                            : 'bg-emerald-600 text-on-accent rounded-tr-sm shadow'
                         }`}>
                           {msg.content}
                         </div>
@@ -501,7 +424,7 @@ export const LeadDetailModal: React.FC = () => {
                 <button
                   type="submit"
                   disabled={!smsInput.trim()}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Send</span>
@@ -524,11 +447,11 @@ export const LeadDetailModal: React.FC = () => {
                         <div>
                           <div className="text-xs font-bold text-white flex items-center gap-2">
                             <span>Retell Voice Call ({call.direction.toUpperCase()})</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">
+                            <span className="text-2xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">
                               {call.outcome}
                             </span>
                           </div>
-                          <span className="text-[10px] text-slate-400">
+                          <span className="text-2xs text-slate-400">
                             Duration: {Math.floor(call.durationSeconds / 60)}m {call.durationSeconds % 60}s • {new Date(call.startedAt).toLocaleString()}
                           </span>
                         </div>
@@ -547,13 +470,13 @@ export const LeadDetailModal: React.FC = () => {
 
                     {/* Transcript Accordion */}
                     <div className="space-y-2 pt-1">
-                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                         Call Transcript ({call.transcript.length} turns)
                       </div>
                       <div className="max-h-48 overflow-y-auto space-y-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/60 custom-scrollbar">
                         {call.transcript.map((t, idx) => (
                           <div key={idx} className="text-xs flex gap-2">
-                            <span className="font-semibold text-emerald-400 w-20 shrink-0 font-mono text-[11px]">{t.speaker}:</span>
+                            <span className="font-semibold text-emerald-400 w-20 shrink-0 font-mono text-xs">{t.speaker}:</span>
                             <span className="text-slate-300">{t.text}</span>
                           </div>
                         ))}
@@ -567,7 +490,7 @@ export const LeadDetailModal: React.FC = () => {
                   <p className="text-xs text-slate-400">No voice calls recorded yet for this lead.</p>
                   <button
                     onClick={() => startLiveCallSimulation(lead)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                   >
                     Start Simulated AI Call
                   </button>
@@ -589,14 +512,14 @@ export const LeadDetailModal: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <h4 className="text-xs font-bold text-white">{appt.appointmentType}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 font-mono">
+                          <span className="text-2xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 font-mono">
                             {appt.status.toUpperCase()}
                           </span>
                         </div>
                         <div className="text-xs text-slate-300 mt-0.5">
                           {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                         </div>
-                        <div className="text-[11px] text-slate-400">Agent: {appt.agentName}</div>
+                        <div className="text-xs text-slate-400">Agent: {appt.agentName}</div>
                       </div>
                     </div>
 
@@ -616,7 +539,7 @@ export const LeadDetailModal: React.FC = () => {
                   <p className="text-xs text-slate-400">No appointments currently booked.</p>
                   <button
                     onClick={handleBookQuickConsult}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                   >
                     Schedule Buyer Consultation
                   </button>
@@ -637,10 +560,10 @@ export const LeadDetailModal: React.FC = () => {
                     <div className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-slate-900" />
                     <div className="flex items-center gap-2 text-xs">
                       <span className="font-bold text-slate-200">{log.action}</span>
-                      <span className="text-[10px] text-slate-500 font-mono">
+                      <span className="text-2xs text-slate-500 font-mono">
                         {new Date(log.timestamp).toLocaleTimeString()}
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                      <span className="text-2xs px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
                         {log.actor}
                       </span>
                     </div>

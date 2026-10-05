@@ -167,7 +167,7 @@ export const CallsView: React.FC = () => {
       </div>
 
       {callsQuery.stale && (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5" />
           Showing the last good result — the most recent refresh failed.
         </div>
@@ -249,7 +249,7 @@ export const CallsView: React.FC = () => {
               {calls.length} call{calls.length === 1 ? '' : 's'}
             </span>
             {calls.length === 200 && (
-              <span className="text-[10px] text-slate-500">showing the newest 200</span>
+              <span className="text-2xs text-slate-500">showing the newest 200</span>
             )}
           </div>
 
@@ -291,20 +291,20 @@ export const CallsView: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <div className="font-bold text-xs text-white truncate">{call.leadName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono truncate">
+                      <div className="text-2xs text-slate-400 font-mono truncate">
                         {call.leadPhone ?? 'no number'}
                       </div>
                     </div>
                   </div>
 
                   <span
-                    className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full border shrink-0 ${OUTCOME_STYLES[call.outcome]}`}
+                    className={`text-2xs font-bold font-mono px-2 py-0.5 rounded-full border shrink-0 ${OUTCOME_STYLES[call.outcome]}`}
                   >
                     {call.outcome.replace(/_/g, ' ')}
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/60">
                   <span className="flex items-center gap-2">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3 text-slate-500" />
@@ -314,7 +314,7 @@ export const CallsView: React.FC = () => {
                     {call.hasTranscript && <FileText className="w-3 h-3 text-cyan-500" />}
                     {call.temperature && (
                       <span
-                        className={`text-[9px] uppercase font-bold px-1.5 rounded border ${
+                        className={`text-2xs uppercase font-bold px-1.5 rounded border ${
                           TEMP_STYLES[call.temperature] ?? 'bg-slate-800 text-slate-400 border-slate-700'
                         }`}
                       >
@@ -345,7 +345,7 @@ export const CallsView: React.FC = () => {
                   <h3 className="text-base font-bold text-white">{detail.leadName}</h3>
                   <span className="text-xs font-mono text-cyan-400">{detail.leadPhone}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   {detail.provider} • {detail.direction} •{' '}
                   {detail.startedAt ? new Date(detail.startedAt).toLocaleString() : 'not started'}
                   {detail.agentName && <> • owned by {detail.agentName}</>}
@@ -373,7 +373,7 @@ export const CallsView: React.FC = () => {
                   Your browser cannot play this recording.
                 </audio>
               ) : (
-                <p className="text-[11px] text-slate-500">
+                <p className="text-xs text-slate-500">
                   No recording. Either the office has call recording switched off, or the file has
                   not finished uploading — Telnyx delivers it a little after the call ends.
                 </p>
@@ -404,7 +404,7 @@ export const CallsView: React.FC = () => {
                     {detail.transcript}
                   </pre>
                 ) : (
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     No transcript yet. Telnyx transcribes after the recording is closed, so it
                     arrives a minute or two behind the call.
                   </p>

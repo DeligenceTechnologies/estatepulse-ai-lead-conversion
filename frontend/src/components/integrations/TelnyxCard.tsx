@@ -18,8 +18,8 @@ import { ProviderConnect } from './ProviderConnect';
 /** One labelled fact about the live connection. */
 const Fact: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
   <div className="flex items-baseline justify-between gap-3">
-    <span className="text-[11px] text-slate-500 shrink-0">{label}</span>
-    <span className={`text-[11px] text-slate-200 truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
+    <span className="text-xs text-slate-500 shrink-0">{label}</span>
+    <span className={`text-xs text-slate-200 truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
   </div>
 );
 
@@ -108,18 +108,18 @@ export const TelnyxCard: React.FC = () => {
                 : 'Connect Telnyx',
           icon: connected ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
           onClick: () => setOpen(true),
-          className: 'bg-violet-600 hover:bg-violet-500 text-white shadow-md shadow-violet-950',
+          className: 'bg-violet-600 hover:bg-violet-500 text-on-accent shadow-md shadow-violet-950',
         }}
       >
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-            <div className="text-[11px] text-rose-200 leading-relaxed">{error}</div>
+            <div className="text-xs text-rose-200 leading-relaxed">{error}</div>
           </div>
         )}
 
         {loading ? (
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400 flex items-center gap-2">
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Checking your Telnyx connection…
           </div>
         ) : connected ? (
@@ -136,25 +136,25 @@ export const TelnyxCard: React.FC = () => {
               />
             )}
             <div className="pt-1.5 mt-1.5 border-t border-slate-800/80 space-y-1">
-              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Voice calling ready
               </div>
               {status!.hasMessaging ? (
-                <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> SMS messaging ready
                 </div>
               ) : (
-                <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
+                <div className="flex items-start gap-1.5 text-xs text-amber-400 leading-relaxed">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   SMS unavailable — assign your number to a Telnyx Messaging Profile to enable texting
                 </div>
               )}
               {status!.hasAssistant ? (
-                <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> AI assistant attached
                 </div>
               ) : (
-                <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
+                <div className="flex items-start gap-1.5 text-xs text-amber-400 leading-relaxed">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   No AI assistant yet — create or attach one before the agent can take a call
                 </div>
@@ -162,7 +162,7 @@ export const TelnyxCard: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400 leading-relaxed">
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
             {saved ? (
               <>
                 Credentials are saved but the connection is currently disconnected. Reconnect to let

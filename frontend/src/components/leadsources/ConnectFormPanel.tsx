@@ -122,7 +122,7 @@ const ErrorBlock: React.FC<{ e: PanelError }> = ({ e }) => (
     <AlertTriangle
       className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${e.tone === 'rose' ? 'text-rose-400' : 'text-amber-400'}`}
     />
-    <div className={`text-[11px] leading-relaxed ${e.tone === 'rose' ? 'text-rose-200' : 'text-amber-200'}`}>
+    <div className={`text-xs leading-relaxed ${e.tone === 'rose' ? 'text-rose-200' : 'text-amber-200'}`}>
       <div className={`font-semibold ${e.tone === 'rose' ? 'text-rose-100' : 'text-amber-100'}`}>{e.title}</div>
       {e.body}
       {e.hint && <div className="mt-1 opacity-80">{e.hint}</div>}
@@ -261,7 +261,7 @@ export const ConnectFormPanel: React.FC<{
           <h3 className="text-sm font-bold text-white">
             {step.k === 'done' ? 'Connected' : 'Connect a form'}
           </h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-400 mt-0.5">
             {step.k === 'done'
               ? 'Nothing to paste anywhere — the webhook is already on your form.'
               : `We install the webhook on your ${provider?.displayName ?? 'provider'} form for you.`}
@@ -287,9 +287,9 @@ export const ConnectFormPanel: React.FC<{
             onSubmit={submitKey}
             disabled={busy}
           />
-          <div className="text-[11px] text-slate-500">{provider?.capabilities.credentialHint}</div>
+          <div className="text-xs text-slate-500">{provider?.capabilities.credentialHint}</div>
 
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 leading-relaxed flex gap-2">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
             <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
               This key can read and change everything in that account — all forms and all
@@ -302,14 +302,14 @@ export const ConnectFormPanel: React.FC<{
           <div className="flex items-center justify-between gap-2">
             <button
               onClick={onSetUpManually}
-              className="text-[11px] text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
             >
               Rather not share a key? Set it up manually →
             </button>
             <button
               onClick={submitKey}
               disabled={busy || !apiKey}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Connect
@@ -327,7 +327,7 @@ export const ConnectFormPanel: React.FC<{
               <span className="text-xs text-slate-200 font-medium truncate">
                 {provider?.displayName ?? connection.provider} · {connection.accountEmail ?? connection.label ?? 'connected'}
               </span>
-              <span className="text-[10px] font-mono text-slate-500 shrink-0">
+              <span className="text-2xs font-mono text-slate-500 shrink-0">
                 {connection.credentialPreview}
               </span>
             </div>
@@ -336,7 +336,7 @@ export const ConnectFormPanel: React.FC<{
               disabled={busy}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 disabled:opacity-50 ${
                 confirmForget
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                  ? 'bg-rose-600 hover:bg-rose-500 text-on-accent'
                   : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
               }`}
             >
@@ -359,7 +359,7 @@ export const ConnectFormPanel: React.FC<{
 
           {selectedForm && (
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-400 font-medium">Name this lead source</div>
+              <div className="text-xs text-slate-400 font-medium">Name this lead source</div>
               <input
                 value={sourceName}
                 onChange={(e) => setSourceName(e.target.value)}
@@ -378,7 +378,7 @@ export const ConnectFormPanel: React.FC<{
             <button
               onClick={submitForm}
               disabled={!selectedForm || busy}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Connect this form
             </button>
@@ -415,13 +415,13 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
         <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
         <div className="text-xs text-slate-200">
           <div className="font-semibold text-white">"{result.name}" is connected</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
+          <div className="text-xs text-slate-400 mt-0.5">
             {result.externalFormName ?? result.connection.externalFormId}
           </div>
         </div>
       </div>
 
-      <div className="space-y-1.5 text-[11px]">
+      <div className="space-y-1.5 text-xs">
         <div className="text-emerald-300 flex items-center gap-1.5">
           <CheckCircle2 className="w-3 h-3" /> Webhook installed on your form — nothing to paste
         </div>
@@ -443,7 +443,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
       </div>
 
       {needsReview > 0 && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 leading-relaxed flex gap-2">
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
           <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           <span>
             We deliberately did not map <strong>{p!.needsReview.join(', ').replace(/_/g, ' ')}</strong>.
@@ -455,7 +455,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
 
       {result.webhookUrl && (
         <details className="group">
-          <summary className="text-[11px] text-slate-500 cursor-pointer hover:text-slate-300 transition-colors">
+          <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors">
             Webhook details (for troubleshooting)
           </summary>
           <div className="mt-2">
@@ -467,7 +467,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
       <div className="flex justify-end">
         <button
           onClick={onClose}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
         >
           Done
         </button>
