@@ -44,9 +44,9 @@ const Home: React.FC = () => {
 };
 
 /**
- * The router operates only at the auth boundary. Everything inside the owner
- * shell still navigates through AppContext's activeView, so no view is touched
- * and App.tsx is rendered as-is.
+ * These routes decide only the auth boundary. Section paths (/dashboard,
+ * /leads, ...) all fall through `*` to the role's shell, which maps the path to
+ * a view itself: AppContext's activeView for an owner, AgentApp for an agent.
  */
 export const Root: React.FC = () => (
   <Routes>
