@@ -19,6 +19,8 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('LeadWatcher');
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  /** The first completed sweep also resumes strategies a restart interrupted. */
+  private resumed = false;
 
   constructor(
     // Unguarded by necessity: the first query asks "which organizations have a
@@ -70,9 +72,35 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
    * EngineService.finalizeAbandoned additionally refuses any lead this process
    * is actively running.
    */
+  private staleBefore(): Date {
+    return new Date(Date.now() - Number(this.config.get<string>('STRATEGY_STALE_MS') ?? 86_400_000));
+  }
+
+  /**
+   * Leads a previous process was mid-way through: claimed within the stale
+   * window and still new|contacted. Their timers died with that process, so
+   * the engine rebuilds the rest of the cadence from what is on record. Older
+   * claims are left to recoverStranded, which ends them instead.
+   */
+  private async resumeInFlight(organizationId: string): Promise<void> {
+    const inFlight = await this.prisma.leads.findMany({
+      where: {
+        organization_id: organizationId,
+        status: { in: ['new', 'contacted'] },
+        first_contact_at: { gte: this.staleBefore() },
+        automation_paused: false,
+        dnc_status: false,
+      },
+      select: { id: true },
+      take: 200,
+    });
+    for (const lead of inFlight) {
+      await this.engine.resume(organizationId, lead.id);
+    }
+  }
+
   private async recoverStranded(organizationId: string): Promise<void> {
-    const staleMs = Number(this.config.get<string>('STRATEGY_STALE_MS') ?? 86_400_000);
-    const before = new Date(Date.now() - staleMs);
+    const before = this.staleBefore();
 
     const stranded = await this.prisma.leads.findMany({
       where: {
@@ -106,6 +134,10 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
       });
 
       for (const { organization_id } of orgs) {
+        // Before enrolling anything new, so a resumed lead is never mistaken
+        // for one this process has not seen.
+        if (!this.resumed) await this.resumeInFlight(organization_id);
+
         const leads = await this.prisma.leads.findMany({
           where: {
             organization_id,
@@ -123,6 +155,7 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
 
         await this.recoverStranded(organization_id);
       }
+      this.resumed = true;
     } catch (err) {
       this.logger.error(`poll error: ${(err as Error).message}`);
     } finally {
