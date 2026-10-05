@@ -10,6 +10,7 @@ import { Header } from './components/layout/Header';
 
 // Views. Only the sections under active development are imported; the rest
 // render ComingSoonView, so their prototype dummy data never reaches the UI.
+import { DashboardView } from './components/views/DashboardView';
 import { LeadsView } from './components/views/LeadsView';
 import { AgentsView } from './components/views/AgentsView';
 import { IntegrationsView } from './components/views/IntegrationsView';
@@ -44,7 +45,7 @@ const AppContent: React.FC = () => {
         <Header />
 
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
-          {activeView === 'dashboard' && <ComingSoonView title="Dashboard" />}
+          {activeView === 'dashboard' && <DashboardView />}
           {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
           {activeView === 'conversations' && <ConversationsView />}
           {activeView === 'calls' && <CallsView />}

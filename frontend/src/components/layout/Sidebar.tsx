@@ -14,21 +14,18 @@ import {
   LogOut,
   Webhook
 } from 'lucide-react';
-import { useApp, AppView, isLockedView } from '../../context/AppContext';
+import { useApp, AppView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
 
 export const Sidebar: React.FC = () => {
   const { 
     activeView, 
     setActiveView, 
-    leads, 
-    orgSettings 
+    leads
   } = useApp();
   const { user, role, organization, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
-
-  const locked = isLockedView(activeView);
 
   const navItems: { id: AppView; label: string; icon: React.ReactNode; badge?: string | number; badgeColor?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -47,9 +44,7 @@ export const Sidebar: React.FC = () => {
     { 
       id: 'calls', 
       label: 'AI Voice Calls', 
-      icon: <PhoneCall className="w-4 h-4" />,
-      badge: 'Retell',
-      badgeColor: 'bg-cyan-950/80 text-cyan-400 border border-cyan-800/40'
+      icon: <PhoneCall className="w-4 h-4" />
     },
     { 
       id: 'appointments', 
@@ -103,26 +98,10 @@ export const Sidebar: React.FC = () => {
               <span className="font-bold text-sm text-slate-100 tracking-tight">EstatePulse</span>
               <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">AI</span>
             </div>
-            <p className="text-[11px] text-slate-400 truncate max-w-[130px]">{orgSettings.name}</p>
+            <p className="text-[11px] text-slate-400 truncate max-w-[130px]">{organization?.name ?? '—'}</p>
           </div>
         </div>
       </div>
-
-      {/* System Status Pill */}
-      {!locked && (
-      <div className="px-4 pt-3 pb-1">
-        <div className="bg-slate-950/60 rounded-lg p-2.5 border border-slate-800/60 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-[11px] font-medium text-slate-300">Voice AI: <strong>{orgSettings.aiAgentName}</strong></span>
-          </div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">24/7 LIVE</span>
-        </div>
-      </div>
-      )}
 
       {/* Navigation List */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">

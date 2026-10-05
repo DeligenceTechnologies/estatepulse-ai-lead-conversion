@@ -14,10 +14,10 @@ import { VoiceService } from './voice.service';
  * cadence (SMS + AI call) with delays, compliance guardrails, and status updates
  * on the real `leads` table.
  *
- * The scheduler is in-process (setTimeout), which means a restart drops every
- * pending step. That is survivable because enrollment is idempotent and the
- * lead watcher re-enrolls anything still untouched — but it is the reason this
- * wants a durable queue before it carries real volume.
+ * The scheduler is in-process (setTimeout), so a restart drops every pending
+ * step. The schedule is rebuilt on boot from what is durable: the lead's
+ * `first_contact_at` (when the cadence started) and the calls and texts on
+ * record (which steps already ran) — see resume() and remainingSteps().
  */
 const UNIT_MS: Record<string, number> = {
   seconds: 1000,
@@ -27,6 +27,42 @@ const UNIT_MS: Record<string, number> = {
 };
 
 const offsetMs = (a: StrategyStep['after']): number => (a?.value ?? 0) * (UNIT_MS[a?.unit] ?? 1000);
+
+/**
+ * After a restart: which steps are still to run, and the cadence anchor to run
+ * them from.
+ *
+ * A step counts as run when there is an activity of its channel on record for
+ * it, consumed in order — the same walk the lead's Flow view does, so what the
+ * owner sees and what the engine resumes cannot disagree. A quiet-hours
+ * deferral writes nothing, so a deferred step is correctly still pending.
+ *
+ * Overdue steps are not fired as one burst: the anchor moves forward so the
+ * first remaining step is due now and the rest keep their original gaps.
+ */
+export function remainingSteps(
+  steps: StrategyStep[],
+  callsOnRecord: number,
+  textsOnRecord: number,
+  enrolledAt: number,
+  now: number,
+): { remaining: StrategyStep[]; anchor: number } {
+  let calls = callsOnRecord;
+  let texts = textsOnRecord;
+  const remaining = steps.filter((s) => {
+    if (s.channel === 'voice') {
+      if (calls === 0) return true;
+      calls -= 1;
+      return false;
+    }
+    if (texts === 0) return true;
+    texts -= 1;
+    return false;
+  });
+  const first = remaining.at(0);
+  const lag = first ? Math.max(0, now - (enrolledAt + offsetMs(first.after))) : 0;
+  return { remaining, anchor: enrolledAt + lag };
+}
 
 interface Enrollment {
   orgId: string;
@@ -117,17 +153,76 @@ export class EngineService implements OnModuleDestroy {
       `enrolled lead ${leadId} (${lead.first_name ?? ''}) into "${strategy.name}" — ${strategy.steps.length} steps`,
     );
 
-    const enrolledAt = enrollment.enrolledAt;
-    for (const step of strategy.steps) {
+    this.schedule(enrollment, strategy.steps, brokerage, tz, strategy.guardrails);
+  }
+
+  /** One timer per step, each measured from the enrolment's anchor. */
+  private schedule(e: Enrollment, steps: StrategyStep[], brokerage: string, tz: string, guardrails: any): void {
+    for (const step of steps) {
       const t = setTimeout(
         () => {
-          void this.fireStep(enrollment, step, brokerage, tz, strategy.guardrails);
+          void this.fireStep(e, step, brokerage, tz, guardrails);
         },
-        Math.max(0, enrolledAt + offsetMs(step.after) - Date.now()),
+        Math.max(0, e.enrolledAt + offsetMs(step.after) - Date.now()),
       );
       if (t.unref) t.unref();
-      enrollment.timers.push(t);
+      e.timers.push(t);
     }
+  }
+
+  /**
+   * Pick a lead's strategy back up after a restart dropped its timers.
+   *
+   * Only for a lead still IN the strategy (claimed, status new|contacted, not
+   * paused or DNC) and not already running here. Steps already on record are
+   * not repeated — re-running them would call or text the lead twice.
+   *
+   * ponytail: assumes one engine process. Two replicas booting together would
+   * both resume the same lead; add a lease column on leads if this ever runs
+   * more than one instance.
+   */
+  async resume(orgId: string, leadId: string): Promise<boolean> {
+    if (this.active.has(leadId)) return false;
+    const lead = await this.prisma.leads.findFirst({
+      where: { id: leadId, organization_id: orgId },
+      select: { first_contact_at: true, status: true, dnc_status: true, automation_paused: true },
+    });
+    if (!lead?.first_contact_at || lead.dnc_status || lead.automation_paused) return false;
+    if (!['new', 'contacted'].includes(lead.status)) return false;
+
+    const [calls, texts, strategy, org] = await Promise.all([
+      this.prisma.voice_calls.count({ where: { organization_id: orgId, lead_id: leadId } }),
+      this.prisma.messages.count({
+        where: { organization_id: orgId, direction: 'outbound', channel: 'sms', conversations: { lead_id: leadId } },
+      }),
+      this.strategies.getStrategy(orgId),
+      this.prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true, timezone: true } }),
+    ]);
+
+    const { remaining, anchor } = remainingSteps(
+      strategy.steps,
+      calls,
+      texts,
+      lead.first_contact_at.getTime(),
+      Date.now(),
+    );
+    const e: Enrollment = {
+      orgId,
+      leadId,
+      voiceAttempts: calls,
+      timers: [],
+      stopped: false,
+      ran: strategy.steps.length - remaining.length,
+      total: strategy.steps.length,
+      enrolledAt: anchor,
+      quietShift: 0,
+    };
+    this.active.set(leadId, e);
+    this.logger.log(`resumed lead ${leadId} — ${remaining.length} of ${e.total} step(s) left`);
+
+    if (remaining.length === 0) this.scheduleFinalize(e);
+    else this.schedule(e, remaining, org?.name ?? 'our team', org?.timezone ?? 'America/Chicago', strategy.guardrails);
+    return true;
   }
 
   private async fireStep(

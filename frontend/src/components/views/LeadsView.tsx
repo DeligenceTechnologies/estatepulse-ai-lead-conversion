@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ChevronRight,
   Flame,
-  Phone,
   Plus,
   Radio,
   RefreshCw,
@@ -154,7 +153,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     agents,
     setSelectedLeadId,
     setPreCallLeadId,
-    startLiveCallSimulation,
     registerExternalLeads,
   } = useApp();
 
@@ -394,7 +392,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
                 <th className="px-4 py-3.5">Lead / Contact</th>
-                <th className="px-4 py-3.5">Score & Temperature</th>
+                <th className="px-4 py-3.5">Temperature</th>
                 <th className="px-4 py-3.5">Target Budget & Location</th>
                 <th className="px-4 py-3.5">Timeline</th>
                 <th className="px-4 py-3.5">Assigned Agent</th>
@@ -472,20 +470,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       </div>
                     </td>
 
-                    {/* Score & Temperature */}
+                    {/* Temperature (Hot / Warm / Cold) — no numeric score in Milestone 2 */}
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <span
-                          title={lead.score ? undefined : 'Not scored yet — scoring runs after qualification'}
-                          className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 font-mono ${temperatureTone(lead.temperature)}`}
-                        >
-                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
-                          {lead.score}
-                        </span>
-                        <span className="text-[11px] text-slate-400 uppercase font-semibold">
-                          {lead.temperature ?? DASH}
-                        </span>
-                      </div>
+                      <span
+                        title={lead.temperature ? undefined : 'Not rated yet — the AI call rates the lead'}
+                        className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
+                      >
+                        {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
+                        {lead.temperature ?? DASH}
+                      </span>
                     </td>
 
                     {/* Target Budget & Location */}
@@ -530,15 +523,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     {/* Actions */}
                     <td className="px-4 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => startLiveCallSimulation(mapped[lead.id])}
-                          disabled={!lead.phoneValid}
-                          title={lead.phoneValid ? 'Trigger Voice AI Call' : 'No dialable phone number on this lead'}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
-                        >
-                          <Phone className="w-3.5 h-3.5" />
-                        </button>
-
                         {lead.temperature === 'hot' && (
                           <button
                             onClick={() => setPreCallLeadId(lead.id)}

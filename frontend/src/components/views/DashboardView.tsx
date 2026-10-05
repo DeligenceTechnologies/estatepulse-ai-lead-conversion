@@ -1,259 +1,338 @@
-import React from 'react';
-import { 
-  Users, 
-  PhoneCall, 
-  CheckCircle2, 
-  Calendar, 
-  Clock, 
-  Flame, 
-  DollarSign, 
-  TrendingUp, 
-  Sparkles, 
-  ArrowRight, 
-  PhoneForwarded, 
-  ShieldCheck, 
-  Zap, 
-  Activity,
-  AlertCircle,
-  ExternalLink
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  AlertTriangle,
+  Building2,
+  CalendarClock,
+  Flame,
+  Inbox,
+  Loader2,
+  PhoneCall,
+  RefreshCw,
+  Timer,
+  UserCheck,
+  Users,
+  Webhook,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { messageFor } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
+import { useApp, type AppView } from '../../context/AppContext';
+import { getOwnerDashboard, type OwnerDashboard } from '../../utils/dashboardApi';
+import { listMembers, memberName, type OrganizationMember } from '../../utils/agentsApi';
 
+/** leads_status_check order, i.e. the lifecycle left to right. */
+const STATUSES = ['new', 'contacted', 'qualified', 'nurture', 'booked', 'closed', 'lost'] as const;
+
+const CALL_LABELS: Record<string, string> = {
+  completed: 'Completed',
+  no_answer: 'No answer',
+  failed: 'Failed',
+  handoff_requested: 'Asked for a human',
+  dnc: 'Do not call',
+  in_progress: 'In progress',
+  ringing: 'Ringing',
+  queued: 'Queued',
+};
+
+const TEMPERATURES = [
+  { key: 'hot', label: 'Hot', tone: 'bg-rose-500/20 text-rose-300 border border-rose-500/40' },
+  { key: 'warm', label: 'Warm', tone: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' },
+  { key: 'cold', label: 'Cold', tone: 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' },
+  { key: 'unrated', label: 'Not rated', tone: 'bg-slate-800 text-slate-400 border border-slate-700' },
+] as const;
+
+const formatDuration = (s: number): string =>
+  s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${(s / 3600).toFixed(1)}h`;
+
+const Card: React.FC<{ label: string; value: React.ReactNode; hint: string; icon: React.ReactNode }> = ({
+  label,
+  value,
+  hint,
+  icon,
+}) => (
+  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-2">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[11px] text-slate-400 font-semibold">{label}</span>
+      <span className="text-slate-500">{icon}</span>
+    </div>
+    <div className="text-2xl font-bold text-white font-mono">{value}</div>
+    <p className="text-[10px] text-slate-500 leading-relaxed">{hint}</p>
+  </div>
+);
+
+const Panel: React.FC<{ title: string; icon: React.ReactNode; aside?: string; children: React.ReactNode }> = ({
+  title,
+  icon,
+  aside,
+  children,
+}) => (
+  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-slate-500">{icon}</span>
+        <h3 className="text-sm font-bold text-white">{title}</h3>
+      </div>
+      {aside && <span className="text-[10px] text-slate-500">{aside}</span>}
+    </div>
+    {children}
+  </div>
+);
+
+const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="text-xs text-slate-500 leading-relaxed">{children}</p>
+);
+
+/** One labelled horizontal bar; width is relative to the largest row in its panel. */
+const BarRow: React.FC<{ label: string; value: number; max: number; suffix?: string }> = ({
+  label,
+  value,
+  max,
+  suffix,
+}) => (
+  <div className="space-y-1" title={`${label}: ${value}${suffix ?? ''}`}>
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-slate-300 truncate">{label}</span>
+      <span className="font-mono font-bold text-white shrink-0">
+        {value}
+        {suffix && <span className="text-slate-500 font-normal">{suffix}</span>}
+      </span>
+    </div>
+    <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+      <div
+        className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+        style={{ width: max > 0 ? `${(value / max) * 100}%` : '0%' }}
+      />
+    </div>
+  </div>
+);
+
+/**
+ * The owner's office at a glance. Every number is read from the office's real
+ * records via GET /api/dashboard and GET /api/agents; zero is a real answer.
+ */
 export const DashboardView: React.FC = () => {
-  const { 
-    leads, 
-    calls, 
-    appointments, 
-    auditLogs, 
-    setSelectedLeadId, 
-    setPreCallLeadId,
-    startLiveCallSimulation,
-    setActiveView 
-  } = useApp();
+  const { user, organization } = useAuth();
+  const { setActiveView } = useApp();
+  const [data, setData] = useState<OwnerDashboard | null>(null);
+  const [members, setMembers] = useState<OrganizationMember[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const hotLeads = leads.filter(l => l.temperature === 'hot');
-  const contactedLeads = leads.filter(l => l.status !== 'new');
-  const qualifiedLeads = leads.filter(l => l.status === 'qualified' || l.status === 'appointment_booked');
-  const totalPipeline = leads.reduce((acc, l) => acc + (l.budgetMax || 0), 0);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [d, m] = await Promise.all([getOwnerDashboard(), listMembers()]);
+      setData(d);
+      setMembers(m);
+      setError(null);
+    } catch (e) {
+      setError(messageFor(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const contactRate = leads.length > 0 ? Math.round((contactedLeads.length / leads.length) * 100) : 0;
-  const qualRate = contactedLeads.length > 0 ? Math.round((qualifiedLeads.length / contactedLeads.length) * 100) : 0;
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  // Funnel steps (PRD Section 36)
-  const funnelSteps = [
-    { label: 'Leads Ingested', count: leads.length, pct: 100, color: 'bg-slate-600' },
-    { label: 'Contacted (<60s)', count: contactedLeads.length, pct: contactRate, color: 'bg-cyan-600' },
-    { label: 'AI Engaged', count: Math.max(1, contactedLeads.length), pct: 85, color: 'bg-emerald-600' },
-    { label: 'Qualified', count: qualifiedLeads.length, pct: qualRate, color: 'bg-amber-500' },
-    { label: 'Appointment', count: appointments.length, pct: Math.round((appointments.length / leads.length) * 100), color: 'bg-rose-500' },
-  ];
+  const spinner = <Loader2 className="w-5 h-5 animate-spin text-slate-600" />;
+  const agents = (members ?? []).filter((m) => m.hasProfile && m.status !== 'suspended');
+  const statusMax = data ? Math.max(0, ...STATUSES.map((s) => data.leads.byStatus[s] ?? 0)) : 0;
+  const callRows = data ? Object.entries(data.calls7Days.byStatus).sort((a, b) => b[1] - a[1]) : [];
+  const sourceMax = data ? Math.max(0, ...data.sources30Days.map((s) => s.count)) : 0;
+
+  const attention: { label: string; hint: string; count: number; view: AppView }[] = data
+    ? [
+        {
+          label: 'Hot leads with no agent',
+          hint: 'Open hot leads nobody currently holds.',
+          count: data.attention.hotUnassigned,
+          view: 'leads',
+        },
+        {
+          label: 'Not contacted yet',
+          hint: 'New leads with no outreach sent.',
+          count: data.attention.neverContacted,
+          view: 'leads',
+        },
+        {
+          label: 'Flagged for review',
+          hint: 'Ingested with a data problem (e.g. invalid phone).',
+          count: data.attention.needsReview,
+          view: 'leads',
+        },
+      ]
+    : [];
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
-      
-      {/* Hero Welcome & Speed Metric Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-emerald-950/40 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                Autonomous Lead Response
-              </span>
-              <span className="text-xs text-slate-400 font-mono">Austin Home Advisors</span>
-            </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">
-              Speed-to-Lead: <span className="text-emerald-400 font-mono">38 Seconds</span> Average Response
-            </h2>
-            <p className="text-xs text-slate-300 max-w-xl">
-              Industry benchmark is 4.8 hours. EstatePulse AI connects via voice & SMS within 60 seconds, qualifies timeline, budget, and financing, and routes hot appointments to agents.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {leads[0] && (
-              <button
-                onClick={() => startLiveCallSimulation(leads[0])}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold shadow-lg shadow-emerald-950 flex items-center gap-2 transition-all cursor-pointer"
-              >
-                <PhoneForwarded className="w-4 h-4" />
-                <span>Simulate Inbound Call</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setActiveView('leads')}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-            >
-              View Full Pipeline
-            </button>
-          </div>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-white tracking-tight">
+            {user?.firstName ? `Welcome back, ${user.firstName}` : 'Dashboard'}
+          </h2>
+          <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
+            <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span className="text-slate-500">Organization</span>
+            <span className="text-slate-300 font-semibold truncate">{organization?.name ?? '—'}</span>
+          </p>
         </div>
+        <button
+          onClick={() => void load()}
+          className="px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
 
-      {/* KPI Cards Grid (PRD Section 36) */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Total Inbound Leads</span>
-            <Users className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white font-mono">{leads.length}</div>
-          <div className="text-[11px] text-emerald-400 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> +14% this week
+      {error && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-rose-200 leading-relaxed">
+            <div className="font-semibold text-rose-100">Could not load the dashboard</div>
+            {error}
           </div>
         </div>
+      )}
 
-        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Lead Contact Rate</span>
-            <PhoneCall className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white font-mono">{contactRate}%</div>
-          <div className="text-[11px] text-slate-400">Target: &gt;90% under 60s</div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Appointments Booked</span>
-            <Calendar className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white font-mono">{appointments.length}</div>
-          <div className="text-[11px] text-purple-300">Calendly direct sync</div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Estimated Active Pipeline</span>
-            <DollarSign className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white font-mono">${(totalPipeline / 1000000).toFixed(2)}M</div>
-          <div className="text-[11px] text-amber-400">Buyer purchasing power</div>
-        </div>
-
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card
+          label="New Leads (7 days)"
+          value={data ? data.leads.last7Days : spinner}
+          hint={data ? `${data.leads.total} leads in total.` : 'Leads received this week.'}
+          icon={<Inbox className="w-4 h-4" />}
+        />
+        <Card
+          label="Median Speed-to-Lead"
+          value={data ? (data.speedToLead.medianSeconds === null ? '—' : formatDuration(data.speedToLead.medianSeconds)) : spinner}
+          hint={
+            data && data.speedToLead.sample > 0
+              ? `${data.speedToLead.within60sPct}% reached within 60s · ${data.speedToLead.sample} leads, last 30 days.`
+              : 'Lead received to first outreach. No outreach in the last 30 days.'
+          }
+          icon={<Timer className="w-4 h-4" />}
+        />
+        <Card
+          label="Open Hot Leads"
+          value={data ? data.leads.byTemperature.hot : spinner}
+          hint="Rated hot and not yet booked, closed or lost."
+          icon={<Flame className="w-4 h-4" />}
+        />
+        <Card
+          label="Upcoming Appointments"
+          value={data ? data.upcomingAppointments : spinner}
+          hint="Scheduled with your team, from now onwards."
+          icon={<CalendarClock className="w-4 h-4" />}
+        />
       </div>
 
-      {/* Two Column Section: Funnel on Left, Hot Leads Action List on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left: Visual Lead Conversion Funnel (PRD Section 36) */}
-        <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-bold text-white">Lead Conversion Funnel</h3>
-            </div>
-            <span className="text-xs text-slate-400">Real-time Progression</span>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            {funnelSteps.map((step, idx) => (
-              <div key={idx} className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-300 font-medium">{step.label}</span>
-                  <div className="flex items-center gap-2 font-mono">
-                    <span className="font-bold text-white">{step.count}</span>
-                    <span className="text-slate-500 text-[11px]">({step.pct}%)</span>
-                  </div>
+      {data && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-5">
+              <Panel title="Needs Attention" icon={<AlertTriangle className="w-4 h-4" />}>
+                <div className="space-y-2">
+                  {attention.map((a) => (
+                    <button
+                      key={a.label}
+                      onClick={() => setActiveView(a.view)}
+                      className="w-full p-3 bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-200">{a.label}</div>
+                        <div className="text-[10px] text-slate-500">{a.hint}</div>
+                      </div>
+                      <span
+                        className={`font-mono font-bold text-sm shrink-0 ${a.count > 0 ? 'text-amber-300' : 'text-slate-500'}`}
+                      >
+                        {a.count}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-800">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-500 ${step.color}`} 
-                    style={{ width: `${Math.max(8, step.pct)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Zero manual data entry needed</span>
-            <span className="text-emerald-400 font-medium">94% Automated Qualification</span>
-          </div>
-        </div>
-
-        {/* Right: Urgent Hot Leads Alert & Pre-Call Quick Access (PRD Section 41) */}
-        <div className="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4 flex flex-col justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Flame className="w-4 h-4 text-rose-400" />
-                <h3 className="text-sm font-bold text-white">Hot Leads Requiring Agent Touch</h3>
-              </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold font-mono">
-                {hotLeads.length} HOT
-              </span>
+              </Panel>
             </div>
 
-            <div className="space-y-2.5">
-              {hotLeads.slice(0, 3).map(lead => (
-                <div 
-                  key={lead.id}
-                  className="p-3 bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 rounded-xl transition-all flex items-center justify-between group"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs text-slate-100 group-hover:text-amber-300 transition-colors">
-                        {lead.firstName} {lead.lastName}
-                      </span>
-                      <span className="text-[10px] font-extrabold text-rose-400 font-mono">
-                        SCORE {lead.score}
-                      </span>
+            <div className="lg:col-span-7">
+              <Panel title="Pipeline by Status" icon={<Users className="w-4 h-4" />} aside={`${data.leads.total} leads`}>
+                {data.leads.total === 0 ? (
+                  <Empty>No leads yet. Connect a lead source and they will appear here as they arrive.</Empty>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      {STATUSES.map((s) => (
+                        <BarRow
+                          key={s}
+                          label={s.charAt(0).toUpperCase() + s.slice(1)}
+                          value={data.leads.byStatus[s] ?? 0}
+                          max={statusMax}
+                        />
+                      ))}
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      ${(lead.budgetMin / 1000).toFixed(0)}k–${(lead.budgetMax / 1000).toFixed(0)}k • {lead.preferredLocation}
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => setPreCallLeadId(lead.id)}
-                    className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-semibold transition-colors cursor-pointer shrink-0"
-                  >
-                    Pre-Call Screen
-                  </button>
-                </div>
-              ))}
+                    <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] text-slate-500">Open leads by temperature:</span>
+                      {TEMPERATURES.map((t) => (
+                        <span key={t.key} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${t.tone}`}>
+                          {t.label} {data.leads.byTemperature[t.key]}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </Panel>
             </div>
           </div>
 
-          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
-            <span>Strategy B Default Active:</span>
-            <span className="text-slate-200 font-medium">Voice call then SMS if no answer</span>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Recent Activity Audit Feed (PRD Section 36 & 55) */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-cyan-400" />
-            <h3 className="text-sm font-bold text-white">Live System Activity & Audit Trail</h3>
-          </div>
-          <span className="text-xs text-slate-400">Realtime Event Stream</span>
-        </div>
-
-        <div className="divide-y divide-slate-800/60">
-          {auditLogs.slice(0, 6).map(log => (
-            <div key={log.id} className="py-2.5 flex items-start justify-between gap-4 text-xs">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-200">{log.action}</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                    {log.actor}
-                  </span>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Panel title="Agent Load" icon={<UserCheck className="w-4 h-4" />} aside="Current leads / cap">
+              {agents.length === 0 ? (
+                <Empty>No active agents yet. Add one from Agent Team &amp; Routing.</Empty>
+              ) : (
+                <div className="space-y-3">
+                  {agents.map((m) => (
+                    <BarRow
+                      key={m.id}
+                      label={memberName(m)}
+                      value={m.activeLeads}
+                      max={m.maxActiveLeads ?? m.activeLeads}
+                      suffix={m.maxActiveLeads !== null ? ` / ${m.maxActiveLeads}` : undefined}
+                    />
+                  ))}
                 </div>
-                <p className="text-[11px] text-slate-400">{log.description}</p>
-              </div>
-              <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+              )}
+            </Panel>
 
+            <Panel
+              title="AI Calls"
+              icon={<PhoneCall className="w-4 h-4" />}
+              aside={`${data.calls7Days.total} in the last 7 days`}
+            >
+              {callRows.length === 0 ? (
+                <Empty>No calls placed in the last 7 days.</Empty>
+              ) : (
+                <div className="space-y-3">
+                  {callRows.map(([status, n]) => (
+                    <BarRow key={status} label={CALL_LABELS[status] ?? status} value={n} max={data.calls7Days.total} />
+                  ))}
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Lead Sources" icon={<Webhook className="w-4 h-4" />} aside="Last 30 days">
+              {data.sources30Days.length === 0 ? (
+                <Empty>No leads received in the last 30 days.</Empty>
+              ) : (
+                <div className="space-y-3">
+                  {data.sources30Days.map((s, i) => (
+                    <BarRow key={`${s.name}-${i}`} label={s.name} value={s.count} max={sourceMax} />
+                  ))}
+                </div>
+              )}
+            </Panel>
+          </div>
+        </>
+      )}
     </div>
   );
 };
