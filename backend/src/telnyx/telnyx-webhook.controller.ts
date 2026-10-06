@@ -1,6 +1,8 @@
-import { Body, Controller, HttpCode, HttpStatus, Logger, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Logger, Post, Req, type RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import { ActivityService } from './activity.service';
 import { InboundSmsService } from './inbound-sms.service';
+import { LeadScoringService } from './lead-scoring.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -12,6 +14,7 @@ import { InboundSmsService } from './inbound-sms.service';
  *                    real conversation, 'invalid' on a bad-number hangup cause
  *   call.recording.saved                 -> the audio URL
  *   call.recording.transcription.saved   -> what was said
+ *   call.conversation_insights.generated -> lead score + temperature
  *
  * The two recording events arrive well after hangup — Telnyx transcribes once
  * the file is closed — so they are matched back by call_control_id rather than
@@ -31,11 +34,12 @@ export class TelnyxWebhookController {
   constructor(
     private readonly activity: ActivityService,
     private readonly inbound: InboundSmsService,
+    private readonly scoring: LeadScoringService,
   ) {}
 
   @Post('voice')
   @HttpCode(HttpStatus.OK)
-  voice(@Body() body: any): { received: true } {
+  voice(@Body() body: any, @Req() req: RawBodyRequest<Request>): { received: true } {
     const data = body?.data;
     const type: string | undefined = data?.event_type;
     const payload = data?.payload;
@@ -49,6 +53,12 @@ export class TelnyxWebhookController {
           await this.activity.onRecordingSaved(ccid, payload);
         else if (type === 'call.recording.transcription.saved')
           await this.activity.onTranscriptionSaved(ccid, payload);
+        else if (type === 'call.conversation_insights.generated')
+          await this.scoring.onInsightsGenerated(ccid, payload, {
+            signature: req.header('telnyx-signature-ed25519'),
+            timestamp: req.header('telnyx-timestamp'),
+            rawBody: req.rawBody,
+          });
       })().catch((e) => this.logger.error(`voice: ${(e as Error).message}`));
     }
 

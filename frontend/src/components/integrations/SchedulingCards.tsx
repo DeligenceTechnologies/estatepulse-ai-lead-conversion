@@ -74,6 +74,14 @@ function relativeTime(iso: string | null): string {
 }
 
 /** Both providers' vocabularies, spelled the way each one's UI spells it. */
+/** The scheduling account's own role for a member, in the words Cal.com and Calendly use. */
+const MEMBER_ROLE_LABEL: Record<string, string> = {
+  owner: 'Owner',
+  admin: 'Admin',
+  user: 'Member',
+  member: 'Member',
+};
+
 const POOLING_LABEL: Record<string, string> = {
   round_robin: 'Round robin',
   collective: 'Collective',
@@ -420,7 +428,7 @@ const ManageModal: React.FC<{
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-slate-400" />
-                <h4 className="text-xs font-bold text-white">{label} members</h4>
+                <h4 className="text-xs font-bold text-white">Team members</h4>
               </div>
               <button
                 type="button"
@@ -431,21 +439,22 @@ const ManageModal: React.FC<{
                 {busy === 'members' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  'Match to agents'
+                  'Sync agents'
                 )}
               </button>
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Invite agents from your {label} account. Matching links each member to the agent with
-              the same email — bookings are only attributed to a matched agent.
+              People in your {label} account. <span className="text-slate-300">Sync agents</span>{' '}
+              links each one to the EstatePulse agent with the same email, so their bookings show up
+              under that agent.
             </p>
 
             {matched && (
               <div className={`${panel} p-2.5 text-[11px] text-slate-300`}>
-                {matched.members} member{matched.members === 1 ? '' : 's'} · {matched.linked} newly
-                linked · {matched.unmatched} matched no agent · {matched.agentsUnlinked} agent
-                {matched.agentsUnlinked === 1 ? '' : 's'} not on {label}
+                {matched.members} team member{matched.members === 1 ? '' : 's'} · {matched.linked} newly
+                linked · {matched.unmatched} with no matching agent · {matched.agentsUnlinked} agent
+                {matched.agentsUnlinked === 1 ? '' : 's'} not in {label}
               </div>
             )}
 
@@ -456,7 +465,7 @@ const ManageModal: React.FC<{
               </div>
             ) : members.length === 0 ? (
               <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed`}>
-                No members returned. Invite your agents in {label}, then match them here.
+                No team members found. Invite your agents in {label}, then press Sync agents.
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -470,31 +479,26 @@ const ManageModal: React.FC<{
                       <div className="text-[11px] text-slate-500 truncate">{m.email}</div>
                     </div>
 
-                    <span className="text-[10px] uppercase font-bold text-slate-500 shrink-0">
-                      {m.role}
+                    <span
+                      title={`Their role in ${label}`}
+                      className="text-[10px] uppercase font-bold text-slate-500 shrink-0"
+                    >
+                      {MEMBER_ROLE_LABEL[m.role?.toLowerCase()] ?? m.role}
                     </span>
 
                     {m.agentId ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shrink-0 truncate max-w-[9rem]">
-                        {m.agentName}
+                      <span
+                        title="Linked EstatePulse agent"
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shrink-0 truncate max-w-[11rem]"
+                      >
+                        Agent: {m.agentName}
                       </span>
                     ) : (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-800 text-slate-400 border-slate-700 shrink-0">
-                        No agent
+                        Not linked
                       </span>
                     )}
 
-                    {m.schedulingUrl && (
-                      <a
-                        href={m.schedulingUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open their booking page"
-                        className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors shrink-0"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
                   </div>
                 ))}
               </div>
@@ -503,8 +507,8 @@ const ManageModal: React.FC<{
             {unlinked > 0 && (
               <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                {unlinked} {label} member{unlinked === 1 ? '' : 's'} match no agent here. Their
-                bookings are skipped until the emails line up.
+                {unlinked} team member{unlinked === 1 ? '' : 's'} not linked to an agent. Their
+                bookings are skipped until their {label} email matches an agent's email.
               </div>
             )}
           </section>
@@ -513,9 +517,11 @@ const ManageModal: React.FC<{
           {/* Event types                                                       */}
           {/* ---------------------------------------------------------------- */}
           <section className="space-y-2">
-            <h4 className="text-xs font-bold text-white">Bookable pages</h4>
+            <h4 className="text-xs font-bold text-white">Event types</h4>
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Read from {label}. A round-robin page lets {label} pick which agent takes the meeting.
+              The meetings leads can book, managed in {label}. Open one to see the booking page a lead
+              uses. A <span className="text-slate-300">Round robin</span> event type lets {label}{' '}
+              choose which agent hosts.
             </p>
 
             {eventTypesError ? (
@@ -529,7 +535,8 @@ const ManageModal: React.FC<{
               </div>
             ) : eventTypes.length === 0 ? (
               <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed`}>
-                No active event types. Create one in {label} — a round-robin type needs a team plan.
+                No active event types. Create one in {label} — a round robin event type needs a team
+                plan.
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -538,7 +545,7 @@ const ManageModal: React.FC<{
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-semibold text-white truncate">{et.name}</div>
                       <div className="text-[11px] text-slate-500 truncate">
-                        {et.durationMinutes} min{et.ownerName ? ` · ${et.ownerName}` : ''}
+                        {et.durationMinutes} min{et.ownerName ? ` · Host: ${et.ownerName}` : ''}
                       </div>
                     </div>
 
@@ -553,7 +560,7 @@ const ManageModal: React.FC<{
                         href={et.schedulingUrl}
                         target="_blank"
                         rel="noreferrer"
-                        title="Open the booking page"
+                        title="Open the booking page leads use"
                         className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors shrink-0"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -571,9 +578,9 @@ const ManageModal: React.FC<{
           <section className="space-y-2 pt-1 border-t border-slate-800">
             {synced && (
               <div className={`${panel} p-2.5 text-[11px] text-slate-300`}>
-                {synced.scanned} booking{synced.scanned === 1 ? '' : 's'} scanned · {synced.created}{' '}
-                new · {synced.updated} updated · {synced.skippedNoLead} matched no lead ·{' '}
-                {synced.skippedNoAgent} hosted by nobody on this roster
+                {synced.scanned} booking{synced.scanned === 1 ? '' : 's'} checked · {synced.created}{' '}
+                new · {synced.updated} updated · {synced.skippedNoLead} not from a known lead ·{' '}
+                {synced.skippedNoAgent} hosted by an unlinked team member
               </div>
             )}
 
@@ -620,8 +627,9 @@ const ManageModal: React.FC<{
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Disconnecting keeps the appointments already synced — they are history — and keeps
-              each agent linked to their {label} member, so reconnecting picks up where it left off.
+              Bookings sync automatically every few minutes; Sync bookings now just does it
+              immediately. Disconnecting keeps appointments already synced and each agent's link, so
+              reconnecting picks up where it left off.
             </p>
           </section>
         </div>

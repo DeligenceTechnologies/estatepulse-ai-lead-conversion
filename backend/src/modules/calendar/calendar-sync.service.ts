@@ -11,6 +11,8 @@ import type { NormalizedAttendee, NormalizedBooking } from './providers/types';
 import type { SyncResultDTO } from './types';
 import { INACTIVE_STATUSES } from '../../common/domain';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Guard against a runaway window; 10 pages is 1000 bookings. */
 const MAX_PAGES = 10;
 
@@ -284,7 +286,8 @@ export class CalendarSyncService {
   /**
    * Find an EXISTING lead for this attendee. Never creates one.
    *
-   * Email first, then phone, both normalized the way the ingestion path
+   * The lead id our booking link carried first (see lead-booking-link.ts), then
+   * email, then phone, both normalized the way the ingestion path
    * normalizes them (transforms.isValidEmail, then lowercase/trim; a phone is a
    * match key only when it is already E.164) so a lead created by a form and a
    * lead looked up here agree on what counts as the same person.
@@ -298,6 +301,18 @@ export class CalendarSyncService {
     organizationId: string,
     attendee: NormalizedAttendee,
   ): Promise<string | null> {
+    // A booking made through a lead's own link names the lead outright. It is
+    // a claim anyone could type into a URL, so it only counts for a lead in
+    // THIS organization; otherwise fall through to the contact details.
+    const ref = attendee.leadRef?.trim();
+    if (ref && UUID.test(ref)) {
+      const hit = await this.prisma.leads.findFirst({
+        where: { id: ref, organization_id: organizationId },
+        select: { id: true },
+      });
+      if (hit) return hit.id;
+    }
+
     const email = attendee.email?.trim().toLowerCase();
     if (email && isValidEmail(email)) {
       const hit = await this.prisma.leads.findFirst({

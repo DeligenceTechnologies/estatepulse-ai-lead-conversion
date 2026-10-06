@@ -96,6 +96,7 @@ function makeDb(leads: LeadRow[], hosts: HostRow[]) {
             .filter(
               (l) =>
                 l.organization_id === where.organization_id &&
+                (where.id === undefined || l.id === where.id) &&
                 !notIn.includes(l.status) &&
                 (where.normalized_email === undefined ||
                   l.normalized_email === where.normalized_email) &&
@@ -370,6 +371,53 @@ describe('CalendarSyncService.reconcile', () => {
     expect(appointments).toHaveLength(0);
   });
 
+  it('attributes a booking made through the lead\'s own link, whatever email was typed', async () => {
+    const { service, conn, appointments } = makeService([lead()], [event()], {
+      [EVENT_URI]: [
+        invitee({ email: 'someone-else@work.example', tracking: { utm_source: 'estatepulse', utm_content: LEAD } }),
+      ],
+    });
+
+    const result = await service.syncConnection(conn);
+
+    expect(result).toMatchObject({ created: 1, skippedNoLead: 0 });
+    expect(appointments[0].lead_id).toBe(LEAD);
+  });
+
+  it('ignores a lead id from another organization in the link, and falls back to email', async () => {
+    const foreign = lead({ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', organization_id: OTHER_ORG, normalized_email: 'x@x.example' });
+    const { service, conn, appointments } = makeService([lead(), foreign], [event()], {
+      [EVENT_URI]: [invitee({ tracking: { utm_source: 'estatepulse', utm_content: foreign.id } })],
+    });
+
+    await service.syncConnection(conn);
+
+    expect(appointments[0].lead_id).toBe(LEAD);
+  });
+
+  it('skips a link-tagged booking whose lead id belongs to another organization and whose email matches nobody', async () => {
+    const foreign = lead({ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', organization_id: OTHER_ORG });
+    const { service, conn, appointments } = makeService([foreign], [event()], {
+      [EVENT_URI]: [invitee({ email: 'nobody@example.com', tracking: { utm_source: 'estatepulse', utm_content: foreign.id } })],
+    });
+
+    const result = await service.syncConnection(conn);
+
+    expect(result.skippedNoLead).toBe(1);
+    expect(appointments).toHaveLength(0);
+  });
+
+  it('only trusts utm_content when our own utm_source tagged it', async () => {
+    const { service, conn, appointments } = makeService([lead()], [event()], {
+      [EVENT_URI]: [invitee({ email: 'nobody@example.com', tracking: { utm_source: 'newsletter', utm_content: LEAD } })],
+    });
+
+    const result = await service.syncConnection(conn);
+
+    expect(result.skippedNoLead).toBe(1);
+    expect(appointments).toHaveLength(0);
+  });
+
   it('does not reopen a closed or lost lead', async () => {
     const { service, conn, appointments } = makeService(
       [lead({ status: 'closed' })],
@@ -595,6 +643,18 @@ describe('CalendarSyncService.reconcile — Cal.com', () => {
       meeting_url: 'https://meet.example/abc',
     });
     expect(appointmentBooked).toHaveBeenCalledWith(ORG, LEAD);
+  });
+
+  it('attributes a Cal.com booking by the metadata[leadId] our link passed', async () => {
+    const { service, conn, appointments } = makeCalService(
+      [lead()],
+      [calBooking({ attendees: [{ name: 'B', email: 'other@example.com', timeZone: 'UTC' }], metadata: { leadId: LEAD } })],
+    );
+
+    const result = await service.syncConnection(conn);
+
+    expect(result).toMatchObject({ created: 1, skippedNoLead: 0 });
+    expect(appointments[0].lead_id).toBe(LEAD);
   });
 
   it('never asks for the attendee — Cal.com returns it with the booking', async () => {

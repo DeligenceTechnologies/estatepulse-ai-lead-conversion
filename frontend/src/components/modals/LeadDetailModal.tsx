@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
+import { LeadAppointments, LeadBookMeeting } from '../leads/LeadBooking';
 import { Lead, Channel } from '../../types';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import { messageFor } from '../../lib/api';
@@ -42,7 +43,6 @@ export const LeadDetailModal: React.FC = () => {
     sendSmsMessage, 
     toggleAutomation, 
     takeOverConversation, 
-    bookAppointment, 
     startLiveCallSimulation, 
     setPreCallLeadId,
     orgSettings,
@@ -115,26 +115,6 @@ export const LeadDetailModal: React.FC = () => {
     setSmsInput('');
   };
 
-  const handleBookQuickConsult = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
-
-    bookAppointment({
-      organizationId: orgSettings.id,
-      leadId: lead.id,
-      leadName: `${lead.firstName} ${lead.lastName}`,
-      agentId: assignedAgent.id,
-      agentName: assignedAgent.name,
-      provider: 'calendly',
-      startTime: tomorrow.toISOString(),
-      endTime: new Date(tomorrow.getTime() + 30 * 60000).toISOString(),
-      status: 'scheduled',
-      appointmentType: 'Buyer Consultation',
-      locationOrLink: 'https://meet.google.com/aus-home-consult',
-      notes: 'Consultation scheduled directly from lead detail dossier.',
-    });
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -301,7 +281,7 @@ export const LeadDetailModal: React.FC = () => {
             { id: 'overview', label: 'Overview & Qualification' },
             { id: 'conversation', label: `SMS & Chat (${conversation?.messages.length || 0})` },
             { id: 'calls', label: `Voice Calls (${leadCalls.length})` },
-            { id: 'appointments', label: `Appointments (${leadAppointments.length})` },
+            { id: 'appointments', label: isLive ? 'Appointments' : `Appointments (${leadAppointments.length})` },
             { id: 'audit', label: `Audit Trail (${leadLogs.length})` },
           ].map(tab => (
             <button
@@ -442,20 +422,8 @@ export const LeadDetailModal: React.FC = () => {
                 </div>
               )}
 
-              {/* Quick Consultation Booking Bar */}
-              <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-emerald-300">Fast Buyer Consultation Booking</h4>
-                  <p className="text-[11px] text-slate-400">Synchronizes with Alex Vance's Calendly and pauses cold follow-up tasks.</p>
-                </div>
-                <button
-                  onClick={handleBookQuickConsult}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Book Consultation for Tomorrow 10 AM</span>
-                </button>
-              </div>
+              {/* Booking: the assigned agent's own event types, pre-filled for this lead. */}
+              {isLive && <LeadBookMeeting leadId={lead.id} agentKey={liveAgent?.id ?? null} />}
 
             </div>
           )}
@@ -601,51 +569,33 @@ export const LeadDetailModal: React.FC = () => {
 
           {/* TAB 4: APPOINTMENTS */}
           {activeTab === 'appointments' && (
-            <div className="space-y-4">
-              {leadAppointments.length > 0 ? (
-                leadAppointments.map(appt => (
-                  <div key={appt.id} className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+            isLive ? (
+              <LeadAppointments leadId={lead.id} agentKey={liveAgent?.id ?? null} />
+            ) : (
+              <div className="space-y-4">
+                {leadAppointments.length > 0 ? (
+                  leadAppointments.map(appt => (
+                    <div key={appt.id} className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
                         <Calendar className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-bold text-white">{appt.appointmentType}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 font-mono">
-                            {appt.status.toUpperCase()}
-                          </span>
-                        </div>
+                        <h4 className="text-xs font-bold text-white">{appt.appointmentType}</h4>
                         <div className="text-xs text-slate-300 mt-0.5">
                           {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                         </div>
                         <div className="text-[11px] text-slate-400">Agent: {appt.agentName}</div>
                       </div>
                     </div>
-
-                    <a
-                      href={appt.locationOrLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors"
-                    >
-                      Join Meeting Link
-                    </a>
+                  ))
+                ) : (
+                  <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl">
+                    <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-xs text-slate-400 mt-3">No appointments currently booked.</p>
                   </div>
-                ))
-              ) : (
-                <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                  <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="text-xs text-slate-400">No appointments currently booked.</p>
-                  <button
-                    onClick={handleBookQuickConsult}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Schedule Buyer Consultation
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )
           )}
 
           {/* TAB 5: AUDIT TRAIL (PRD Section 55) */}

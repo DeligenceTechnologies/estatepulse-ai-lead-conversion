@@ -132,6 +132,7 @@ export class CalComProvider implements CalendarProvider {
             // attendee the way it is on Calendly.
             rescheduled: false,
             externalId: b.uid,
+            leadRef: typeof b.metadata?.leadId === 'string' ? b.metadata.leadId.trim() || null : null,
           }
         : null,
     };
@@ -186,6 +187,7 @@ export class CalComProvider implements CalendarProvider {
       poolingType: et.schedulingType ? (POOLING[et.schedulingType] ?? et.schedulingType) : null,
       ownerName: null,
       ownerType: 'Team',
+      hostIds: (et.hosts ?? []).map((h) => String(h.userId)),
     };
   }
 

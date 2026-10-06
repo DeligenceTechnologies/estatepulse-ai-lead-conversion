@@ -113,6 +113,8 @@ export interface CalComBooking {
   rescheduledFromUid?: string | null;
   hosts: CalComBookingHost[];
   attendees: CalComBookingAttendee[];
+  /** Booking metadata, including what a booking link passed as `metadata[key]=`. */
+  metadata?: Record<string, unknown> | null;
 }
 
 /** `GET /teams/{teamId}/event-types` */
@@ -129,6 +131,7 @@ export interface CalComTeamEventType {
    */
   schedulingType?: string | null;
   assignAllTeamMembers?: boolean;
+  hosts?: Array<{ userId: number }> | null;
 }
 
 /**

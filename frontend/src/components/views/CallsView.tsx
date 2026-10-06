@@ -11,6 +11,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listMembers, type OrganizationMember } from '../../utils/agentsApi';
 import {
@@ -20,6 +21,7 @@ import {
   type CallOutcome,
   type CallRow,
 } from '../../utils/historyApi';
+import { CallQualificationCard } from './CallQualificationCard';
 
 /**
  * Call history for the office.
@@ -75,6 +77,7 @@ const selectClass =
 
 export const CallsView: React.FC = () => {
   const { setSelectedLeadId } = useApp();
+  const { role } = useAuth();
 
   const [q, setQ] = useState('');
   // Applied separately from `q` so the list is not refetched on every keystroke.
@@ -379,6 +382,17 @@ export const CallsView: React.FC = () => {
                 </p>
               )}
             </div>
+
+            <CallQualificationCard
+              callId={detail.id}
+              extractedIntel={detail.extractedIntel}
+              hasTranscript={!!detail.transcript?.trim()}
+              isOwner={role === 'owner'}
+              onClassified={() => {
+                detailQuery.refresh();
+                callsQuery.refresh();
+              }}
+            />
 
             {/* Summary */}
             {detail.aiSummary && (

@@ -8,6 +8,8 @@ import { CalendarConnectionsService } from './calendar-connections.service';
 import { CalendarPollerService } from './calendar-poller.service';
 import { CalendarSyncService } from './calendar-sync.service';
 import { CalendlyClientService } from './calendly.client';
+import { LeadBookingController } from './lead-booking.controller';
+import { LeadBookingService } from './lead-booking.service';
 import { CalComClientService } from './providers/calcom.client';
 import { CalComProvider } from './providers/calcom.provider';
 import { CalendlyProvider } from './providers/calendly.provider';
@@ -48,6 +50,7 @@ import { OwnerCalendarController } from './owner-calendar.controller';
     OwnerCalendarController,
     OrganizationCalendarController,
     CalendlyOAuthController,
+    LeadBookingController,
   ],
   providers: [
     // The provider layer. CalendarProviderRegistry is what every neutral
@@ -66,6 +69,7 @@ import { OwnerCalendarController } from './owner-calendar.controller';
     CalendarEventTypesService,
     AvailabilityService,
     AppointmentsService,
+    LeadBookingService,
   ],
   exports: [CalendarSyncService, CalendarConnectionsService],
 })

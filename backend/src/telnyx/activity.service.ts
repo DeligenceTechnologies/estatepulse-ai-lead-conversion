@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { AUTO_FROM, IN_STRATEGY_STATUSES, LeadStatus } from '../common/domain';
 import { CredStoreService } from './cred-store.service';
+import { LeadInsightsService } from './lead-insights.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,6 +26,7 @@ export class ActivityService {
     // belongs to IS the query, so there is no organization id to scope it by.
     private readonly unscoped: PrismaService,
     private readonly creds: CredStoreService,
+    private readonly insights: LeadInsightsService,
   ) {}
 
   private async findOrCreateConversation(orgId: string, leadId: string, channel: 'sms' | 'voice') {
@@ -227,6 +229,9 @@ export class ActivityService {
 
     // Attach the org's AI assistant so the answered call actually talks.
     if (c.assistantId) {
+      // Make sure Telnyx will score this conversation when it ends. Once per
+      // assistant per process, never blocks the call, and never throws.
+      void this.insights.ensureProvisioned(call.organization_id);
       await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
