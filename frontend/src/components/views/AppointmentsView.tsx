@@ -197,6 +197,9 @@ export const AppointmentsView: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((appt) => {
             const cancelled = appt.status === 'cancelled';
+            // Once a meeting is over there is nothing to join. Judged by the END time,
+            // so a meeting still running (already under Past) can still be joined.
+            const ended = new Date(appt.endTime).getTime() < Date.now();
             return (
               <div
                 key={appt.id}
@@ -273,7 +276,7 @@ export const AppointmentsView: React.FC = () => {
                     View Lead Profile →
                   </button>
 
-                  {!cancelled && appt.meetingUrl && (
+                  {!cancelled && !ended && appt.meetingUrl && (
                     <a
                       href={appt.meetingUrl}
                       target="_blank"
