@@ -52,6 +52,18 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private readonly instanceId = randomUUID();
   private timer?: NodeJS.Timeout;
   private running = false;
+  /**
+   * Idle back-off. An empty claim doubles the wait up to `maxDelay`; any claimed
+   * work snaps it back to `baseDelay`. An idle worker used to cost two queries a
+   * second — a pooled connection held almost permanently on a remote database.
+   * New deliveries do not wait on this: the ingest path calls nudge().
+   */
+  private baseDelay = 1000;
+  private maxDelay = 10_000;
+  private delay = 1000;
+  /** Stuck-row recovery is a safety net with a minutes-long threshold; once a minute is plenty. */
+  private requeueEveryMs = 60_000;
+  private lastRequeueAt = 0;
   private stopped = false;
   /** The tick currently in flight, so shutdown can wait for it. */
   private inFlight: Promise<void> | null = null;
@@ -72,9 +84,22 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Worker disabled (WORKER_ENABLED=false)');
       return;
     }
-    const interval = Number(this.config.get('WORKER_POLL_INTERVAL_MS') ?? 1000);
-    this.timer = setInterval(() => void this.tick(), interval);
-    this.logger.log(`Worker started (poll ${interval}ms, instance ${this.instanceId.slice(0, 8)})`);
+    this.baseDelay = Number(this.config.get('WORKER_POLL_INTERVAL_MS') ?? 1000);
+    this.maxDelay = Math.max(this.baseDelay, Number(this.config.get('WORKER_MAX_POLL_INTERVAL_MS') ?? 10_000));
+    this.requeueEveryMs = Number(this.config.get('WORKER_REQUEUE_EVERY_MS') ?? 60_000);
+    this.delay = this.baseDelay;
+    this.scheduleNext();
+    this.logger.log(
+      `Worker started (poll ${this.baseDelay}ms, idle back-off to ${this.maxDelay}ms, instance ${this.instanceId.slice(0, 8)})`,
+    );
+  }
+
+  /** A timeout chain rather than setInterval, so the gap can grow while idle. */
+  private scheduleNext(): void {
+    if (this.stopped) return;
+    this.timer = setTimeout(() => {
+      void this.tick().finally(() => this.scheduleNext());
+    }, this.delay);
   }
 
   /**
@@ -88,7 +113,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
    */
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     if (this.inFlight) {
       await Promise.race([
         this.inFlight,
@@ -111,8 +136,12 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
 
   private async runTick(): Promise<void> {
     try {
-      await this.requeueStuck();
+      if (Date.now() - this.lastRequeueAt >= this.requeueEveryMs) {
+        await this.requeueStuck();
+        this.lastRequeueAt = Date.now();
+      }
       const batch = await this.claim();
+      this.delay = batch.length > 0 ? this.baseDelay : Math.min(this.delay * 2, this.maxDelay);
       for (const event of batch) {
         await this.process(event);
       }

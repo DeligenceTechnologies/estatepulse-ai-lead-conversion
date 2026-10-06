@@ -7,14 +7,25 @@ import type { AuthContext } from '../../auth/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Leads still being worked. Vocabulary is leads_status_check. */
-const CLOSED_STATUSES = ['booked', 'closed', 'lost'];
+/** leads_status_check, in lifecycle order. byStatus lists only those with a count. */
+const STATUSES = ['new', 'contacted', 'qualified', 'nurture', 'booked', 'closed', 'lost'] as const;
 
-/** Median of a non-empty list. Does not mutate the input. */
-export function median(values: number[]): number {
-  const s = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+interface SummaryRow {
+  by_status: Record<string, number>;
+  temp_hot: number;
+  temp_warm: number;
+  temp_cold: number;
+  temp_unrated: number;
+  last7: number;
+  hot_unassigned: number;
+  never_contacted: number;
+  needs_review: number;
+  contacted_sample: number;
+  contacted_within_60: number;
+  median_delay_seconds: number | null;
+  calls_by_status: Record<string, number> | null;
+  upcoming_appointments: number;
+  sources: { name: string | null; source_id: string | null; count: number }[] | null;
 }
 
 /**
@@ -22,8 +33,13 @@ export function median(values: number[]): number {
  * real rows — there is nothing to show until leads arrive, and the screen says
  * so instead of inventing one.
  *
- * Owner-only on the class, so a route added later is protected by default. The
- * organization is the session's; nothing here takes an id from the caller.
+ * One SQL statement, one round trip. Each figure used to be its own Prisma
+ * query; on a remote database every query is a network round trip, and eleven
+ * of them through a small connection pool were most of this endpoint's latency.
+ * Every subquery is scoped to the caller's organization, which comes from the
+ * session — never from the request.
+ *
+ * Owner-only on the class, so a route added later is protected by default.
  * Per-agent load is NOT here: GET /api/agents already returns activeLeads and
  * maxActiveLeads per member, and the dashboard reads it from there.
  */
@@ -38,113 +54,89 @@ export class OwnerDashboardController {
     const now = Date.now();
     const since7 = new Date(now - 7 * DAY_MS);
     const since30 = new Date(now - 30 * DAY_MS);
+    const nowDate = new Date(now);
 
-    const [
-      byStatusRows,
-      byTempRows,
-      last7Days,
-      contactedRecent,
-      hotUnassigned,
-      neverContacted,
-      needsReview,
-      callRows,
-      upcomingAppointments,
-      sourceRows,
-    ] = await Promise.all([
-      this.prisma.leads.groupBy({ by: ['status'], where: { organization_id: org }, _count: { _all: true } }),
-      this.prisma.leads.groupBy({
-        by: ['temperature'],
-        where: { organization_id: org, status: { notIn: CLOSED_STATUSES } },
-        _count: { _all: true },
-      }),
-      this.prisma.leads.count({ where: { organization_id: org, created_at: { gte: since7 } } }),
-      // ponytail: median computed in memory over ≤5000 recent leads; move to
-      // percentile_cont in SQL if an office outgrows that in 30 days.
-      this.prisma.leads.findMany({
-        where: { organization_id: org, created_at: { gte: since30 }, first_contact_at: { not: null } },
-        select: { created_at: true, first_contact_at: true },
-        take: 5000,
-      }),
-      // Hot, still open, and nobody currently holds it.
-      this.prisma.leads.count({
-        where: {
-          organization_id: org,
-          temperature: 'hot',
-          status: { notIn: CLOSED_STATUSES },
-          lead_assignments: { none: { is_current: true } },
-        },
-      }),
-      this.prisma.leads.count({
-        where: { organization_id: org, status: 'new', first_contact_at: null, dnc_status: false },
-      }),
-      this.prisma.leads.count({ where: { organization_id: org, needs_review: true } }),
-      this.prisma.voice_calls.groupBy({
-        by: ['status'],
-        where: { organization_id: org, created_at: { gte: since7 } },
-        _count: { _all: true },
-      }),
-      this.prisma.appointments.count({
-        where: {
-          organization_id: org,
-          start_at: { gte: new Date(now) },
-          // Verbatim from appointments_status_check.
-          status: { in: ['scheduled', 'rescheduled'] },
-        },
-      }),
-      this.prisma.leads.groupBy({
-        by: ['lead_source_id'],
-        where: { organization_id: org, created_at: { gte: since30 } },
-        _count: { _all: true },
-      }),
-    ]);
+    // Closed statuses (booked, closed, lost) are leads_status_check values.
+    const [row] = await this.prisma.$queryRaw<SummaryRow[]>`
+      with l as (
+        select * from leads where organization_id = ${org}::uuid
+      ),
+      delays as (
+        -- Lead created -> first outreach, at the millisecond precision the
+        -- previous JS computation saw through Date objects.
+        select extract(epoch from date_trunc('milliseconds', first_contact_at)
+                                - date_trunc('milliseconds', created_at))::float8 as s
+          from l
+         where created_at >= ${since30} and first_contact_at is not null
+      )
+      select
+        (select coalesce(json_object_agg(status, n), '{}'::json)
+           from (select status, count(*)::int as n from l group by status) s) as by_status,
+        count(*) filter (where temperature = 'hot'   and status not in ('booked','closed','lost'))::int as temp_hot,
+        count(*) filter (where temperature = 'warm'  and status not in ('booked','closed','lost'))::int as temp_warm,
+        count(*) filter (where temperature = 'cold'  and status not in ('booked','closed','lost'))::int as temp_cold,
+        count(*) filter (where temperature is null   and status not in ('booked','closed','lost'))::int as temp_unrated,
+        count(*) filter (where created_at >= ${since7})::int as last7,
+        -- Hot, still open, and nobody currently holds it.
+        count(*) filter (
+          where temperature = 'hot' and status not in ('booked','closed','lost')
+            and not exists (select 1 from lead_assignments a
+                             where a.lead_id = l.id and a.is_current
+                               and a.organization_id = ${org}::uuid)
+        )::int as hot_unassigned,
+        count(*) filter (where status = 'new' and first_contact_at is null and dnc_status = false)::int as never_contacted,
+        count(*) filter (where needs_review)::int as needs_review,
+        (select count(*)::int from delays) as contacted_sample,
+        (select count(*)::int from delays where s <= 60) as contacted_within_60,
+        (select percentile_cont(0.5) within group (order by s) from delays) as median_delay_seconds,
+        (select json_object_agg(status, n)
+           from (select status, count(*)::int as n from voice_calls
+                  where organization_id = ${org}::uuid and created_at >= ${since7}
+                  group by status) c) as calls_by_status,
+        (select count(*)::int from appointments
+          where organization_id = ${org}::uuid and start_at >= ${nowDate}
+            and status in ('scheduled','rescheduled')) as upcoming_appointments,
+        (select json_agg(json_build_object('source_id', g.lead_source_id, 'name', src.name, 'count', g.n)
+                         order by g.n desc, src.name)
+           from (select lead_source_id, count(*)::int as n from l
+                  where created_at >= ${since30} group by lead_source_id) g
+           left join lead_sources src
+             on src.id = g.lead_source_id and src.organization_id = ${org}::uuid) as sources
+      from l
+    `;
 
     const byStatus: Record<string, number> = {};
-    for (const g of byStatusRows) byStatus[g.status] = g._count._all;
+    for (const s of STATUSES) if (row.by_status[s]) byStatus[s] = row.by_status[s];
+    // Any value outside the known list (there should be none) is still reported.
+    for (const [s, n] of Object.entries(row.by_status)) if (!(s in byStatus)) byStatus[s] = n;
 
-    const byTemperature = { hot: 0, warm: 0, cold: 0, unrated: 0 };
-    for (const g of byTempRows) {
-      const key = (g.temperature ?? 'unrated') as keyof typeof byTemperature;
-      if (key in byTemperature) byTemperature[key] += g._count._all;
-    }
-
-    const delays = contactedRecent.map((l) => (l.first_contact_at!.getTime() - l.created_at.getTime()) / 1000);
-
-    const calls: Record<string, number> = {};
-    for (const g of callRows) calls[g.status] = g._count._all;
-
-    const sourceIds = sourceRows.map((r) => r.lead_source_id).filter((id): id is string => id !== null);
-    const sourceNames = new Map(
-      (
-        await this.prisma.lead_sources.findMany({
-          where: { organization_id: org, id: { in: sourceIds } },
-          select: { id: true, name: true },
-        })
-      ).map((s) => [s.id, s.name]),
-    );
-    const sources = sourceRows
-      .map((r) => ({
-        name: r.lead_source_id ? (sourceNames.get(r.lead_source_id) ?? 'Removed source') : 'No source',
-        count: r._count._all,
-      }))
-      .sort((a, b) => b.count - a.count);
+    const calls = row.calls_by_status ?? {};
+    const sample = row.contacted_sample;
 
     return {
       leads: {
         total: Object.values(byStatus).reduce((a, b) => a + b, 0),
-        last7Days,
+        last7Days: row.last7,
         byStatus,
-        byTemperature,
+        byTemperature: { hot: row.temp_hot, warm: row.temp_warm, cold: row.temp_cold, unrated: row.temp_unrated },
       },
       // Lead created -> first outreach dispatched (leads.first_contact_at), last 30 days.
       speedToLead: {
-        sample: delays.length,
-        medianSeconds: delays.length ? Math.round(median(delays)) : null,
-        within60sPct: delays.length ? Math.round((delays.filter((d) => d <= 60).length / delays.length) * 100) : null,
+        sample,
+        medianSeconds: sample ? Math.round(row.median_delay_seconds ?? 0) : null,
+        within60sPct: sample ? Math.round((row.contacted_within_60 / sample) * 100) : null,
       },
-      attention: { hotUnassigned, neverContacted, needsReview },
+      attention: {
+        hotUnassigned: row.hot_unassigned,
+        neverContacted: row.never_contacted,
+        needsReview: row.needs_review,
+      },
       calls7Days: { total: Object.values(calls).reduce((a, b) => a + b, 0), byStatus: calls },
-      upcomingAppointments,
-      sources30Days: sources,
+      upcomingAppointments: row.upcoming_appointments,
+      sources30Days: (row.sources ?? []).map((s) => ({
+        name: s.source_id ? (s.name ?? 'Removed source') : 'No source',
+        count: s.count,
+      })),
     };
   }
 }
