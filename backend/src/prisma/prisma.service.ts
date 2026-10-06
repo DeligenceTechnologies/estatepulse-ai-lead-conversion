@@ -1,5 +1,6 @@
 import { INestApplication, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { perfEnabled, recordQuery } from '../common/perf/perf-timing';
 
 /**
  * Models that carry `organization_id` and must never be queried across tenants.
@@ -104,8 +105,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       log: [
         { emit: 'event', level: 'warn' },
         { emit: 'event', level: 'error' },
+        // Query events only when measuring (PERF_TIMING=1) — see perf-timing.ts.
+        ...(perfEnabled ? [{ emit: 'event' as const, level: 'query' as const }] : []),
       ],
     });
+    // Here, not in onModuleInit: Nest also calls that hook on the extended
+    // (tenancy-guarded) client, which has no $on.
+    if (perfEnabled) {
+      (this as PrismaClient<Prisma.PrismaClientOptions, 'query'>).$on('query', (e) => {
+        recordQuery(e.duration);
+        // eslint-disable-next-line no-console
+        console.log(`[perf:sql] ${e.duration}ms ${e.query.replace(/\s+/g, ' ').slice(0, 140)}`);
+      });
+    }
   }
 
   async onModuleInit(): Promise<void> {

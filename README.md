@@ -91,6 +91,30 @@ which esbuild-based loaders (tsx, and so vitest's default transform) cannot
 emit. A test that boots Nest must run compiled, or every injected dependency
 arrives as `undefined`.
 
+## Request timing (`PERF_TIMING`)
+
+Optional, dev-only instrumentation for finding slow endpoints. Off by default,
+and refused when `NODE_ENV=production` (the server logs a warning instead).
+
+```bash
+cd backend && PERF_TIMING=1 STRATEGY_ENGINE=0 WORKER_ENABLED=false npm run dev
+```
+
+Each request then prints one line, and each SQL statement one `[perf:sql]` line:
+
+```
+[perf] GET /api/dashboard 200 total=307ms queries=3 db=410ms guard=150ms
+```
+
+- `queries` / `db` — statements Prisma sent and their summed engine time
+  (parallel queries can make `db` exceed `total`).
+- `guard` — time spent in `SessionGuard` / `TenantGuard` authentication.
+
+Queries are attributed to whichever request is in flight, so the numbers are
+only accurate with one request at a time and the background pollers off
+(`STRATEGY_ENGINE=0`, `WORKER_ENABLED=false`), as above. The SQL lines include
+statement text — keep them out of shared logs.
+
 ## What each part does
 
 **`frontend/`** — the dashboard. Most sections are still the in-browser demo
