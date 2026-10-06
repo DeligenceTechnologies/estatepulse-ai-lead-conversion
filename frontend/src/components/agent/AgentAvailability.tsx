@@ -188,13 +188,13 @@ export const AgentAvailability: React.FC = () => {
         {!status.organizationConnected ? (
           <p className="text-[11px] text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 leading-relaxed">
             {isOwner
-              ? 'No scheduling account is connected yet. Connect Calendly or Cal.com on Integrations, then press Match to agents — your bookings appear here once you are matched.'
+              ? 'No scheduling account is connected yet. Connect Calendly or Cal.com on Integrations, then press Sync agents — your bookings appear here once you are matched.'
               : 'Your office has not connected a scheduling account yet. Once the owner connects Calendly or Cal.com on Integrations and invites you, your bookings appear here.'}
           </p>
         ) : !status.schedulingUserId ? (
           <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 leading-relaxed">
             {isOwner
-              ? `You are not matched to a ${providerLabel} member yet, so bookings cannot be attributed to you. Make sure your ${providerLabel} email matches your agent profile email, then press Match to agents on Integrations.`
+              ? `You are not matched to a ${providerLabel} member yet, so bookings cannot be attributed to you. Make sure your ${providerLabel} email matches your agent profile email, then press Sync agents on Integrations.`
               : `You are not on your office's ${providerLabel} yet, so bookings cannot be attributed to you. Ask your owner to invite you in ${providerLabel} using this account's email address.`}
           </p>
         ) : (

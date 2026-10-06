@@ -257,7 +257,7 @@ export const AgentsView: React.FC = () => {
             {me.takingLeads && !me.calendarLinked && (
               <p className="text-[11px] text-amber-300/90 leading-relaxed">
                 Your bookings are not attributed to you yet. Your Calendly or Cal.com email must
-                match {me.email}, then press <strong>Match to agents</strong> on Integrations.
+                match {me.email}, then press <strong>Sync agents</strong> on Integrations.
               </p>
             )}
           </div>
