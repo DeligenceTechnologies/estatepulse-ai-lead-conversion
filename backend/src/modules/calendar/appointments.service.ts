@@ -88,6 +88,21 @@ export class AppointmentsService {
     return rows.map((r) => this.toDto(r as AppointmentRow));
   }
 
+  /** Every appointment for one lead, newest first — the lead dossier's tab. */
+  async forLead(organizationId: string, leadId: string): Promise<AppointmentDTO[]> {
+    const rows = await this.prisma.appointments.findMany({
+      where: { organization_id: organizationId, lead_id: leadId },
+      orderBy: { start_at: 'desc' },
+      take: 50,
+      include: {
+        leads: { select: { first_name: true, last_name: true, email: true, phone: true, status: true } },
+        agent_profiles: { select: { display_name: true } },
+      },
+    });
+
+    return rows.map((r) => this.toDto(r as AppointmentRow));
+  }
+
   private toDto(r: AppointmentRow): AppointmentDTO {
     const meta = (r.metadata ?? {}) as Record<string, unknown>;
     const name = [r.leads?.first_name, r.leads?.last_name].filter(Boolean).join(' ').trim();

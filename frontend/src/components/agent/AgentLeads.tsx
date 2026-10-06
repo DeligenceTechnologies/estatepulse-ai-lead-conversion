@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Inbox, Loader2, Mail, Phone, RefreshCw, X } from 'lucide-react';
 import { messageFor } from '../../lib/api';
+import { LeadAppointments } from '../leads/LeadBooking';
 import {
   getMyLead,
   getMyLeads,
@@ -148,6 +149,8 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
                 <span className="text-slate-400 block text-[10px]">Latest AI note</span>
                 <p className="text-slate-100 leading-relaxed">{lead.aiSummary ?? DASH}</p>
               </div>
+
+              <LeadAppointments leadId={lead.id} agentKey={null} />
             </>
           )}
         </div>

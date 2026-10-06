@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../../../common/errors';
 import { CalendlyClientService, type ConnectionRef } from '../calendly.client';
+import { LEAD_BOOKING_UTM_SOURCE } from '../lead-booking-link';
 import type {
   CalendarConnectionMetadata,
   CalendlyEventType,
@@ -196,6 +197,7 @@ export class CalendlyProvider implements CalendarProvider {
       rescheduleUrl: i.reschedule_url,
       rescheduled: i.rescheduled,
       externalId: i.uri,
+      leadRef: leadRefFromTracking(i.tracking),
     };
   }
 
@@ -209,6 +211,9 @@ export class CalendlyProvider implements CalendarProvider {
       poolingType: et.pooling_type ?? null,
       ownerName: et.profile?.name ?? null,
       ownerType: et.profile?.type ?? null,
+      // A personal event type's profile owner is its host's user URI; a team
+      // page is owned by the team and names no single host.
+      hostIds: et.profile?.type === 'User' && et.profile.owner ? [et.profile.owner] : [],
     };
   }
 
@@ -234,4 +239,10 @@ export class CalendlyProvider implements CalendarProvider {
   private uuidOf(uri: string): string {
     return uri.split('/').filter(Boolean).pop() ?? uri;
   }
+}
+
+/** Our booking links tag Calendly's UTM fields; see lead-booking.service.ts. */
+function leadRefFromTracking(tracking: Record<string, string | null> | null | undefined): string | null {
+  if (tracking?.utm_source !== LEAD_BOOKING_UTM_SOURCE) return null;
+  return tracking.utm_content?.trim() || null;
 }
