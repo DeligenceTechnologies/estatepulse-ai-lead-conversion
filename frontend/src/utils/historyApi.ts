@@ -92,6 +92,8 @@ export interface CallFilters {
   from?: string;
   to?: string;
   q?: string;
+  /** One lead's calls; the server keeps it inside your org and visibility. */
+  leadId?: string;
 }
 
 const query = (params: Record<string, string | number | undefined>): string => {
@@ -114,8 +116,8 @@ export const listCalls = (filters: CallFilters = {}): Promise<CallRow[]> =>
 export const getCall = (id: string): Promise<CallDetail> =>
   apiFetch<CallDetail>(`/v1/calls/${id}`, { auth: true });
 
-export const listConversations = (limit?: number): Promise<ConversationRow[]> =>
-  apiFetch<ConversationRow[]>(`/v1/conversations${query({ limit })}`, { auth: true });
+export const listConversations = (limit?: number, leadId?: string): Promise<ConversationRow[]> =>
+  apiFetch<ConversationRow[]>(`/v1/conversations${query({ limit, leadId })}`, { auth: true });
 
 export const listMessages = (conversationId: string): Promise<MessageRow[]> =>
   apiFetch<MessageRow[]>(`/v1/conversations/${conversationId}/messages`, { auth: true });

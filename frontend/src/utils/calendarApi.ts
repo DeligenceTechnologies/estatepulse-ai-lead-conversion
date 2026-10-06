@@ -292,12 +292,14 @@ export const listAppointments = (params?: {
   to?: string;
   status?: string;
   agentId?: string;
+  leadId?: string;
 }): Promise<Appointment[]> => {
   const q = new URLSearchParams();
   if (params?.from) q.set('from', params.from);
   if (params?.to) q.set('to', params.to);
   if (params?.status) q.set('status', params.status);
   if (params?.agentId) q.set('agentId', params.agentId);
+  if (params?.leadId) q.set('leadId', params.leadId);
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return apiFetch<Appointment[]>(`/appointments${suffix}`, { auth: true });
 };

@@ -35,27 +35,23 @@ interface LeadActivity {
 }
 
 /**
- * Everything that actually happened with one lead.
- *
- * ponytail: these endpoints have no lead filter yet, so this reads the office's
- * most recent 200 calls / conversations and filters here. Add `?leadId=` to the
- * history and appointment endpoints when an office outgrows that window.
+ * Everything that actually happened with one lead, filtered server-side by
+ * `?leadId=` (the server keeps it inside the session's org and visibility).
+ * Limits are the endpoints' own maximums, so a busy lead is not truncated
+ * earlier than the API would truncate it anyway.
  */
 async function loadLeadActivity(leadId: string): Promise<LeadActivity> {
   const [calls, conversations, appointments] = await Promise.all([
-    listCalls({ limit: 200 }),
-    listConversations(200),
-    listAppointments(),
+    listCalls({ leadId, limit: 200 }),
+    listConversations(200, leadId),
+    listAppointments({ leadId }),
   ]);
-  const threads = conversations.filter((c) => c.leadId === leadId && c.channel === 'sms');
+  // The endpoint returns every channel; the SMS tab shows SMS threads only.
+  const threads = conversations.filter((c) => c.channel === 'sms');
   const messages = (await Promise.all(threads.map((c) => listMessages(c.id))))
     .flat()
     .sort((a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt));
-  return {
-    calls: calls.filter((c) => c.leadId === leadId),
-    messages,
-    appointments: appointments.filter((a) => a.leadId === leadId),
-  };
+  return { calls, messages, appointments };
 }
 
 const EmptyTab: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, text }) => (
