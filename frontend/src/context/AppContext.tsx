@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Lead,
   Agent,
@@ -25,24 +26,34 @@ import {
   INITIAL_AUDIT_LOGS,
 } from '../data/mockData';
 
-export type AppView = 
-  | 'dashboard'
-  | 'leads'
-  | 'conversations'
-  | 'calls'
-  | 'appointments'
-  | 'followups'
-  | 'agents'
-  | 'integrations'
-  | 'ai_settings'
-  | 'analytics'
-  | 'landing_page'
+// A runtime list, not just a union, because the URL is parsed back into a view.
+const APP_VIEWS = [
+  'dashboard',
+  'leads',
+  'conversations',
+  'calls',
+  'appointments',
+  'followups',
+  'agents',
+  'integrations',
+  'ai_settings',
+  'analytics',
   // Live-backend screen. Its data comes from the real API, NOT from this
   // context — see src/api/client.ts. Only the view id lives here.
-  | 'lead_sources'
+  'lead_sources',
   // An owner who also takes leads: their own working hours and calendar
   // status, the same screen an agent sees. Live API, like lead_sources.
-  | 'my_availability';
+  'my_availability',
+] as const;
+
+export type AppView = (typeof APP_VIEWS)[number];
+
+/** `lead_sources` <-> `/lead-sources`. The URL is the one source of truth for the active view. */
+export const pathForView = (view: AppView): string => '/' + view.replace(/_/g, '-');
+export const viewForPath = (pathname: string): AppView | null => {
+  const id = pathname.replace(/^\/+|\/+$/g, '').replace(/-/g, '_');
+  return (APP_VIEWS as readonly string[]).includes(id) ? (id as AppView) : null;
+};
 
 // Unlocked alongside the call/message history and nurture work: 'calls',
 // 'conversations' and 'followups' now read the real API through
@@ -56,11 +67,10 @@ export type AppView =
  * for these, and Header/Sidebar hide their demo chrome while one is open.
  */
 const LOCKED_VIEWS: readonly AppView[] = [
-  'dashboard',
+  // 'dashboard' is live: it reads GET /api/dashboard and GET /api/agents.
   // 'appointments' is live: it reads the real appointments table, populated by
   // the calendar sync from agents' connected Calendly accounts.
   'analytics',
-  'landing_page',
 ];
 
 export const isLockedView = (view: AppView): boolean => LOCKED_VIEWS.includes(view);
@@ -170,7 +180,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
   });
 
-  const [activeView, setActiveView] = useState<AppView>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Derived from the URL, so refresh, back/forward and shared links all land on
+  // the same section. An unknown path shows the dashboard until the effect
+  // below rewrites it.
+  const activeView: AppView = viewForPath(location.pathname) ?? 'dashboard';
+  const setActiveView = (view: AppView) => {
+    if (view !== activeView) navigate(pathForView(view));
+  };
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [focusLeadSourceId, setFocusLeadSourceId] = useState<string | null>(null);
   const [preCallLeadId, setPreCallLeadId] = useState<string | null>(null);
@@ -183,21 +201,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    *
    * The popup normally posts its result back and closes itself. When it was
    * blocked, the callback page redirects here with `?calendly=` instead. This
-   * reads that once, sends the user somewhere the outcome is visible, and
-   * strips the parameter again — so the URL is a boot signal and never becomes
-   * a route. In-app navigation stays `activeView` and nothing else.
+   * reads that, sends the user somewhere the outcome is visible, and strips
+   * the parameter again — so the query string is a boot signal and never
+   * becomes part of a route.
    *
    * An agent never reaches this provider (AgentApp is a separate shell), and
    * since Calendly became the OFFICE's one connection the only person who can
    * start that flow is an owner — so they land back on Integrations, the screen
    * that holds the card they pressed.
+   *
+   * Otherwise, any path that is not a view (`/` after login, a typo, an
+   * agent-only path) is rewritten to /dashboard in place, without adding a
+   * history entry.
    */
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('calendly')) return;
-    setActiveView('integrations');
-    window.history.replaceState({}, '', window.location.pathname);
-  }, []);
+    if (new URLSearchParams(location.search).has('calendly')) {
+      navigate(pathForView('integrations'), { replace: true });
+    } else if (!viewForPath(location.pathname)) {
+      navigate(pathForView('dashboard'), { replace: true });
+    }
+  }, [location.pathname, location.search]);
 
   // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
   useEffect(() => {

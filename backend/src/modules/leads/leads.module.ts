@@ -5,6 +5,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { LeadAssignmentController } from './lead-assignment.controller';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { LeadsController } from './leads.controller';
+import { OwnerDashboardController } from './owner-dashboard.controller';
 
 /**
  * EventsBus needs no import: EventsModule is @Global. OwnerGuard has no
@@ -12,7 +13,7 @@ import { LeadsController } from './leads.controller';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [LeadsController, LeadAssignmentController],
+  controllers: [LeadsController, LeadAssignmentController, OwnerDashboardController],
   providers: [LeadAssignmentService, OwnerGuard],
 })
 export class LeadsModule {}

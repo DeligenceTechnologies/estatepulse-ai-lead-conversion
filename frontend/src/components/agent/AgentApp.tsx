@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Building2, CalendarClock, CalendarCheck, LayoutDashboard, LogOut, Users } from 'lucide-react';
 import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
 import { AgentAppointments } from './AgentAppointments';
@@ -35,7 +36,13 @@ const NAV_ITEMS: Array<{ id: AgentView; label: string; icon: React.ReactNode }> 
  */
 export const AgentApp: React.FC = () => {
   const { user, organization, logout } = useAuth();
-  const [view, setView] = useState<AgentView>('dashboard');
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  // The URL is the active view, as in the owner shell (AppContext). Paths are
+  // shared with the owner's (/leads, /appointments); which shell answers them is
+  // decided by role in Root, not by the path.
+  const view = NAV_ITEMS.find((item) => pathname === `/${item.id}`)?.id;
+  if (!view) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
@@ -71,7 +78,7 @@ export const AgentApp: React.FC = () => {
             return (
               <button
                 key={item.id}
-                onClick={() => setView(item.id)}
+                onClick={() => item.id !== view && navigate(`/${item.id}`)}
                 className={`w-full flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30'

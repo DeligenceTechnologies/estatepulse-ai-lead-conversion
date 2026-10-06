@@ -57,7 +57,7 @@ export const AgentPreCallModal: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs uppercase tracking-widest font-extrabold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                  🔥 HOT LEAD — SCORE {lead.score}
+                  🔥 HOT LEAD
                 </span>
                 <span className="text-xs text-amber-300/80 font-mono">Transferred from Voice AI</span>
               </div>
@@ -162,19 +162,6 @@ export const AgentPreCallModal: React.FC = () => {
               {lead.scoreBreakdown?.reasoningSummary || 
                'Lead answered outbound voice inquiry within 38 seconds. Confirmed urgency to purchase within 60 days. Open to morning consultation call and interested in lender pre-approval guidance.'}
             </p>
-
-            {/* Rules Applied Pills */}
-            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-1.5">
-              {lead.scoreBreakdown?.rulesApplied.map((rule, idx) => (
-                <span 
-                  key={idx} 
-                  className="text-[10px] px-2 py-0.5 rounded-full bg-slate-900 text-slate-300 border border-slate-800 flex items-center gap-1"
-                >
-                  <span className="text-emerald-400 font-mono">+{rule.points}</span>
-                  <span>{rule.rule}</span>
-                </span>
-              ))}
-            </div>
           </div>
 
           {/* Action Row */}

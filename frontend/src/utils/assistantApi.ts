@@ -496,3 +496,6 @@ export interface LeadFlow {
   reason: string | null;
 }
 export const getLeadFlow = (id: string) => apiFetch<LeadFlow>(`/leads/${id}/flow`, { auth: true });
+/** Start the strategy now. A no-op server-side for a lead already contacted. */
+export const enrollLead = (id: string) =>
+  apiFetch<{ ok: boolean }>(`/leads/${id}/enroll`, { method: 'POST', auth: true });

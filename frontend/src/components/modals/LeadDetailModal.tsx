@@ -12,7 +12,6 @@ import {
   DollarSign, 
   Clock, 
   Home, 
-  Sparkles, 
   CheckCircle2, 
   RotateCw, 
   Send, 
@@ -26,7 +25,8 @@ import {
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { Lead, Channel } from '../../types';
-import { getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import { messageFor } from '../../lib/api';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -66,6 +66,23 @@ export const LeadDetailModal: React.FC = () => {
     getLeadFlow(selectedLeadId).then((f) => { if (alive) setFlow(f); }).catch(() => {});
     return () => { alive = false; };
   }, [selectedLeadId]);
+
+  // Real outreach: enrols the lead into the office's strategy (call/SMS via Telnyx).
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
+  const startOutreach = async () => {
+    if (!selectedLeadId) return;
+    setEnrolling(true);
+    setEnrollError(null);
+    try {
+      await enrollLead(selectedLeadId);
+      setFlow(await getLeadFlow(selectedLeadId));
+    } catch (e) {
+      setEnrollError(messageFor(e));
+    } finally {
+      setEnrolling(false);
+    }
+  };
 
   if (!selectedLeadId) return null;
 
@@ -147,7 +164,7 @@ export const LeadDetailModal: React.FC = () => {
                     : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30'
                 }`}>
                   {lead.temperature === 'hot' && <Flame className="w-3.5 h-3.5 text-rose-400" />}
-                  {lead.temperature.toUpperCase()} — SCORE {lead.score}
+                  {lead.temperature.toUpperCase()}
                 </span>
 
                 <span className="text-[11px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
@@ -175,13 +192,19 @@ export const LeadDetailModal: React.FC = () => {
               <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
             )}
 
-            <button
-              onClick={() => startLiveCallSimulation(lead)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
-            >
-              <Phone className="w-3.5 h-3.5" />
-              <span>Voice AI Call</span>
-            </button>
+            {/* Only offered while the strategy has not started: once it has, the
+                server ignores a second enrol, so the button would do nothing. */}
+            {flow?.phase === 'not_started' && (
+              <button
+                onClick={() => void startOutreach()}
+                disabled={enrolling}
+                title={enrollError ?? 'Start the outbound strategy (AI call / SMS) for this lead now'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>{enrolling ? 'Starting…' : enrollError ? 'Retry AI Outreach' : 'Start AI Outreach'}</span>
+              </button>
+            )}
 
             {lead.temperature === 'hot' && (
               <button
@@ -349,35 +372,6 @@ export const LeadDetailModal: React.FC = () => {
                     {lead.propertyType ? ` (${lead.propertyType})` : ''}
                   </div>
                   <span className="text-[10px] text-slate-500">Single family preference</span>
-                </div>
-              </div>
-
-              {/* AI Score Reasoning Breakdown (PRD Section 26) */}
-              <div className="bg-slate-950/80 border border-slate-800 p-5 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                      Deterministic Lead Score Breakdown ({lead.score}/100)
-                    </h4>
-                  </div>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Updated: {new Date(lead.updatedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  {lead.scoreBreakdown?.reasoningSummary || 'Lead scored based on confirmed budget, timeline, location alignment, and responsiveness.'}
-                </p>
-
-                {/* Score Rules Badges */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-2 border-t border-slate-800">
-                  {lead.scoreBreakdown?.rulesApplied.map((rule, idx) => (
-                    <div key={idx} className="bg-slate-900 border border-slate-800/80 p-2 rounded-lg flex items-center justify-between text-xs">
-                      <span className="text-slate-300 truncate pr-2">{rule.rule}</span>
-                      <span className="text-emerald-400 font-bold font-mono shrink-0">+{rule.points}</span>
-                    </div>
-                  ))}
                 </div>
               </div>
 

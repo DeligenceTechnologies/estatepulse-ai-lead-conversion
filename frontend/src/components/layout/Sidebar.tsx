@@ -9,32 +9,24 @@ import {
   UserCheck, 
   Cpu, 
   Sliders, 
-  BarChart3, 
-  Flame, 
-  Sparkles,
+  BarChart3,
   Building2,
   LogOut,
   Webhook,
   Clock
 } from 'lucide-react';
-import { useApp, AppView, isLockedView } from '../../context/AppContext';
+import { useApp, AppView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
 
 export const Sidebar: React.FC = () => {
   const { 
     activeView, 
     setActiveView, 
-    leads, 
-    orgSettings, 
-    setPreCallLeadId 
+    leads
   } = useApp();
   const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
-
-  const locked = isLockedView(activeView);
-  const hotLeadsCount = leads.filter(l => l.temperature === 'hot').length;
-  const newLeadsCount = leads.filter(l => l.status === 'new').length;
 
   const navItems: { id: AppView; label: string; icon: React.ReactNode; badge?: string | number; badgeColor?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -53,9 +45,7 @@ export const Sidebar: React.FC = () => {
     { 
       id: 'calls', 
       label: 'AI Voice Calls', 
-      icon: <PhoneCall className="w-4 h-4" />,
-      badge: 'Retell',
-      badgeColor: 'bg-cyan-950/80 text-cyan-400 border border-cyan-800/40'
+      icon: <PhoneCall className="w-4 h-4" />
     },
     { 
       id: 'appointments', 
@@ -114,48 +104,10 @@ export const Sidebar: React.FC = () => {
               <span className="font-bold text-sm text-slate-100 tracking-tight">EstatePulse</span>
               <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">AI</span>
             </div>
-            <p className="text-[11px] text-slate-400 truncate max-w-[130px]">{orgSettings.name}</p>
+            <p className="text-[11px] text-slate-400 truncate max-w-[130px]">{organization?.name ?? '—'}</p>
           </div>
         </div>
       </div>
-
-      {/* System Status Pill */}
-      {!locked && (
-      <div className="px-4 pt-3 pb-1">
-        <div className="bg-slate-950/60 rounded-lg p-2.5 border border-slate-800/60 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-[11px] font-medium text-slate-300">Voice AI: <strong>{orgSettings.aiAgentName}</strong></span>
-          </div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">24/7 LIVE</span>
-        </div>
-      </div>
-      )}
-
-      {/* Hot Lead Alert Banner if Hot Leads Exist */}
-      {!locked && hotLeadsCount > 0 && (
-        <div className="px-4 py-2">
-          <button
-            onClick={() => {
-              const hotLead = leads.find(l => l.temperature === 'hot');
-              if (hotLead) setPreCallLeadId(hotLead.id);
-            }}
-            className="w-full text-left bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/15 border border-amber-500/30 hover:border-amber-500/60 rounded-lg p-2.5 transition-all group cursor-pointer"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
-                <Flame className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
-                {hotLeadsCount} HOT Lead{hotLeadsCount > 1 ? 's' : ''} Ready
-              </span>
-              <span className="text-[10px] text-amber-200 group-hover:translate-x-0.5 transition-transform font-medium">Briefing →</span>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-0.5">Click for Agent Pre-Call Screen</p>
-          </button>
-        </div>
-      )}
 
       {/* Navigation List */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">

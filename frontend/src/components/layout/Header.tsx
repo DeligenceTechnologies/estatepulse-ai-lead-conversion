@@ -1,16 +1,8 @@
 import React from 'react';
-import { 
-  Search, 
-  Bell, 
-  Sparkles, 
-  CheckCircle2, 
-  Zap,
-  Globe
-} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 export const Header: React.FC = () => {
-  const { activeView, setActiveView, orgSettings } = useApp();
+  const { activeView, orgSettings } = useApp();
 
   const viewTitles: Record<string, { title: string; subtitle: string }> = {
     lead_sources: {
@@ -60,10 +52,6 @@ export const Header: React.FC = () => {
     analytics: { 
       title: 'Conversion Analytics & ROI Model', 
       subtitle: 'First-response speed audit, stage drop-offs, and estimated pipeline value' 
-    },
-    landing_page: { 
-      title: 'Public Landing Page & Live Demo', 
-      subtitle: 'Visitor experience with instant lead response simulation' 
     }
   };
 
@@ -76,36 +64,9 @@ export const Header: React.FC = () => {
         <div>
           <h1 className="text-sm font-bold text-slate-100 flex items-center gap-2">
             {currentInfo.title}
-            {activeView === 'landing_page' && (
-              <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40">
-                Visitor View
-              </span>
-            )}
           </h1>
           <p className="text-[11px] text-slate-400 hidden md:block truncate max-w-md">{currentInfo.subtitle}</p>
         </div>
-      </div>
-
-      {/* Right Controls */}
-      <div className="flex items-center gap-2.5">
-        {/* View Landing Page Switcher */}
-        {activeView !== 'landing_page' ? (
-          <button
-            onClick={() => setActiveView('landing_page')}
-            className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 text-xs transition-colors cursor-pointer"
-            title="View Public Landing Page & Live Demo Form"
-          >
-            <Globe className="w-4 h-4 text-emerald-400" />
-          </button>
-        ) : (
-          <button
-            onClick={() => setActiveView('dashboard')}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium transition-colors cursor-pointer"
-          >
-            Back to Dashboard
-          </button>
-        )}
-
       </div>
     </header>
   );
