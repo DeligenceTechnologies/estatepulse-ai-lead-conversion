@@ -9,6 +9,7 @@ import { CalendarReauthRequired, type ConnectionRef } from './calendly.client';
 import { CalendarProviderRegistry } from './providers/provider.registry';
 import type { NormalizedAttendee, NormalizedBooking } from './providers/types';
 import type { SyncResultDTO } from './types';
+import { INACTIVE_STATUSES } from '../../common/domain';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -318,7 +319,7 @@ export class CalendarSyncService {
         where: {
           organization_id: organizationId,
           normalized_email: email,
-          status: { notIn: ['closed', 'lost'] },
+          status: { notIn: INACTIVE_STATUSES },
         },
         orderBy: { updated_at: 'desc' },
         select: { id: true },
@@ -332,7 +333,7 @@ export class CalendarSyncService {
         where: {
           organization_id: organizationId,
           normalized_phone: phone,
-          status: { notIn: ['closed', 'lost'] },
+          status: { notIn: INACTIVE_STATUSES },
         },
         orderBy: { updated_at: 'desc' },
         select: { id: true },

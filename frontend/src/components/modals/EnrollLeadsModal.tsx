@@ -9,6 +9,7 @@ import {
   type LeadFilter,
   type Sequence,
 } from '../../utils/sequencesApi';
+import { LEAD_STATUSES, STATUS_LABELS } from '../../lib/leadStatus';
 
 /**
  * Add leads to a sequence: by condition, or by hand from the matches.
@@ -29,16 +30,6 @@ interface Props {
   onEnrolled: () => void;
 }
 
-const LEAD_STATUSES = [
-  'new',
-  'contacted',
-  'qualified',
-  'nurture',
-  'appointment_booked',
-  'closed',
-  'lost',
-  'dnc',
-];
 
 const label = 'block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1';
 const input =
@@ -219,7 +210,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
                     <option value="">Any</option>
                     {LEAD_STATUSES.map((s) => (
                       <option key={s} value={s}>
-                        {s.replace(/_/g, ' ')}
+                        {STATUS_LABELS[s]}
                       </option>
                     ))}
                   </select>

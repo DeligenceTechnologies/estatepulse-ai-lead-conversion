@@ -114,7 +114,8 @@ before(async () => {
   await prisma.lead_assignments.create({
     data: { organization_id: ownerA.orgId, lead_id: held, agent_id: agentProfileId, assignment_type: 'manual' },
   });
-  // Hot but lost: excluded from open temperature counts.
+  // Hot but lost (the legacy spelling, still legal in the database): excluded
+  // from open temperature counts, and reported as 'not_interested'.
   await makeLead({ temperature: 'hot', status: 'lost' });
 });
 
@@ -154,7 +155,7 @@ test('owner sees real counts for their own organization', async () => {
 
   assert.equal(d.leads.total, 5);
   assert.equal(d.leads.last7Days, 5);
-  assert.deepEqual(d.leads.byStatus, { new: 1, contacted: 1, nurture: 1, qualified: 1, lost: 1 });
+  assert.deepEqual(d.leads.byStatus, { new: 1, contacted: 1, nurture: 1, qualified: 1, not_interested: 1 });
   assert.deepEqual(d.leads.byTemperature, { hot: 2, warm: 0, cold: 1, unrated: 1 });
 
   assert.equal(d.attention.hotUnassigned, 1);

@@ -16,7 +16,9 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '..
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
+import { messageFor } from '../../lib/api';
 import { Lead, LeadStatus, LeadTemperature } from '../../types';
+import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
 
 /**
  * Lead pipeline — live rows only.
@@ -74,27 +76,6 @@ const sourceLabel = (l: LiveLead): string => {
   return s.type ?? 'webhook';
 };
 
-/** The demo store's status vocabulary; the backend calls a booked lead 'booked'. */
-const toDemoStatus = (status: string): LeadStatus =>
-  status === 'booked' ? 'appointment_booked' : (status as LeadStatus);
-
-const statusTone = (status: string) => {
-  switch (status) {
-    case 'booked':
-    case 'appointment_booked':
-      return 'bg-purple-950 text-purple-300 border border-purple-800/40';
-    case 'qualified':
-      return 'bg-emerald-950 text-emerald-300 border border-emerald-800/40';
-    case 'contacted':
-      return 'bg-cyan-950 text-cyan-300 border border-cyan-800/40';
-    case 'nurture':
-      return 'bg-amber-950 text-amber-300 border border-amber-800/40';
-    case 'lost':
-      return 'bg-rose-950 text-rose-300 border border-rose-800/40';
-    default:
-      return 'bg-slate-800 text-slate-300';
-  }
-};
 
 const temperatureTone = (t: string | null) => {
   switch (t) {
@@ -130,7 +111,7 @@ const toLead = (l: LiveLead): Lead => ({
   // nothing branches on this value; it is displayed and nothing more.
   source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
-  status: toDemoStatus(l.status),
+  status: normalizeStatus(l.status, l.dncStatus),
   leadType: 'buyer',
   preferredLocation: l.location ?? '',
   budgetMin: l.minBudget ?? 0,
@@ -158,7 +139,8 @@ interface LeadsViewProps {
 
 export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
-  const { agentProfileId } = useAuth();
+  const { agentProfileId, role } = useAuth();
+  const isOwner = role === 'owner';
   const {
     setSelectedLeadId,
     setPreCallLeadId,
@@ -200,6 +182,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
 
+  const [savingStatus, setSavingStatus] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null);
+
+  const changeStatus = async (id: string, status: LeadStatus): Promise<void> => {
+    setSavingStatus(id);
+    setStatusError(null);
+    try {
+      await leadsApi.setStatus(id, status);
+      invalidate();
+    } catch (e) {
+      setStatusError({ id, message: messageFor(e) });
+    } finally {
+      setSavingStatus(null);
+    }
+  };
+
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
     for (const l of rows) byId[l.id] = toLead(l);
@@ -239,7 +237,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     if (selectedTab === 'warm' && lead.temperature !== 'warm') return false;
     if (selectedTab === 'cold' && lead.temperature !== 'cold') return false;
     if (selectedTab === 'new' && lead.status !== 'new') return false;
-    if (selectedTab === 'booked' && lead.status !== 'booked') return false;
+    if (selectedTab === 'booked' && normalizeStatus(lead.status) !== 'appointment_booked') return false;
 
     // Source filter
     if (sourceFilter !== 'all' && lead.source?.id !== sourceFilter) return false;
@@ -354,7 +352,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             { id: 'warm', label: `☀️ Warm (${rows.filter(l => l.temperature === 'warm').length})` },
             { id: 'cold', label: `❄️ Cold (${rows.filter(l => l.temperature === 'cold').length})` },
             { id: 'new', label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
-            { id: 'booked', label: `Appointments (${rows.filter(l => l.status === 'booked').length})` },
+            { id: 'booked', label: `Appointments (${rows.filter(l => normalizeStatus(l.status) === 'appointment_booked').length})` },
           ].map(tab => (
             <button
               key={tab.id}
@@ -552,13 +550,34 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     </td>
 
                     {/* Status — hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5">
-                      <span
-                        title={lead.statusReason || undefined}
-                        className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                      >
-                        {humanize(lead.status)}
-                      </span>
+                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                      {isOwner ? (
+                        // Owner-only: the API refuses anyone else. The only way
+                        // into 'closed', and the correction path for automation.
+                        <select
+                          value={normalizeStatus(lead.status, lead.dncStatus)}
+                          disabled={savingStatus === lead.id}
+                          onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
+                          title={lead.statusReason || 'Change status'}
+                          className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase cursor-pointer focus:outline-none disabled:opacity-50 ${statusTone(lead.status)}`}
+                        >
+                          {LEAD_STATUSES.map((s) => (
+                            <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
+                              {STATUS_LABELS[s]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span
+                          title={lead.statusReason || undefined}
+                          className={`text-[11px] px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                        >
+                          {statusLabel(lead.status)}
+                        </span>
+                      )}
+                      {statusError?.id === lead.id && (
+                        <p className="text-[10px] text-rose-400 mt-1">{statusError.message}</p>
+                      )}
                     </td>
 
                     {/* Actions */}

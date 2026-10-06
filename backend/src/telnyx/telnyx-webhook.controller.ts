@@ -10,7 +10,8 @@ import { LeadScoringService } from './lead-scoring.service';
  * Telnyx Call Control webhook. Unauthenticated — Telnyx posts here — and drives
  * lead/call outcome updates:
  *   call.answered -> in_progress + lead 'contacted' + record + attach the AI
- *   call.hangup   -> completed (if answered) or no_answer
+ *   call.hangup   -> completed (if answered) or no_answer; lead 'engaged' after a
+ *                    real conversation, 'invalid' on a bad-number hangup cause
  *   call.recording.saved                 -> the audio URL
  *   call.recording.transcription.saved   -> what was said
  *   call.conversation_insights.generated -> lead score + temperature
@@ -47,7 +48,7 @@ export class TelnyxWebhookController {
     if (ccid && type) {
       void (async () => {
         if (type === 'call.answered') await this.activity.onCallAnswered(ccid);
-        else if (type === 'call.hangup') await this.activity.onCallHangup(ccid);
+        else if (type === 'call.hangup') await this.activity.onCallHangup(ccid, payload);
         else if (type === 'call.recording.saved')
           await this.activity.onRecordingSaved(ccid, payload);
         else if (type === 'call.recording.transcription.saved')

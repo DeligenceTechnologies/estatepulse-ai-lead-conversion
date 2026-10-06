@@ -7,6 +7,7 @@ import { ActivityService } from '../../telnyx/activity.service';
 import { SmsService } from '../../telnyx/sms.service';
 import { VoiceService } from '../../telnyx/voice.service';
 import { FollowupService } from './followup.service';
+import { LeadStatus, OUTCOME_STATUSES, normalizeLeadStatus } from '../../common/domain';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -188,11 +189,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       if (!lead) return void (await this.finish(row.id, 'stopped', 'lead_deleted'));
       if (lead.dnc_status) return void (await this.finish(row.id, 'stopped', 'opted_out'));
       if (lead.automation_paused) return void (await this.pause(row.id));
-      // 'appointment_booked' was in this list and is not a value the column
-      // can hold — leads_status_check permits 'booked'. Dead, but it read as
-      // evidence that such a status exists.
-      if (['qualified', 'booked', 'closed', 'lost'].includes(lead.status)) {
-        return void (await this.finish(row.id, 'stopped', `lead_${lead.status}`));
+      // Any outcome ends the drip (OUTCOME_STATUSES, legacy spellings included).
+      if (OUTCOME_STATUSES.includes(lead.status)) {
+        return void (await this.finish(row.id, 'stopped', `lead_${normalizeLeadStatus(lead.status, lead.dnc_status)}`));
       }
 
       const step = await this.prisma.sequence_steps.findFirst({
@@ -288,10 +287,10 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       // in limbo: the spec's rule is that a lead leaves nurture upwards or out,
       // and a sequence with no end is how you get a TCPA complaint.
       await this.prisma.leads.updateMany({
-        where: { id: row.lead_id, status: 'nurture' },
-        data: { status: 'lost', lost_reason: 'Nurture sequence exhausted with no response' },
+        where: { id: row.lead_id, status: { in: [LeadStatus.NURTURE, LeadStatus.FOLLOW_UP] } },
+        data: { status: LeadStatus.NOT_INTERESTED, lost_reason: 'Nurture sequence exhausted with no response' },
       });
-      this.logger.log(`lead ${row.lead_id} exhausted its sequence — marked lost`);
+      this.logger.log(`lead ${row.lead_id} exhausted its sequence — marked not_interested`);
       return;
     }
 

@@ -145,6 +145,13 @@ function makeDb(opts: { integrations?: { organization_id: string; status: string
         Object.assign(lead, data);
         return lead;
       },
+      updateMany: async ({ where, data }: any) => {
+        const hit = leads.filter(
+          (l) => l.id === where.id && (!where.status?.in || where.status.in.includes(l.status)),
+        );
+        for (const l of hit) Object.assign(l, data);
+        return { count: hit.length };
+      },
     },
     sequence_enrollments: {
       updateMany: async ({ where, data }: any) => {
@@ -187,15 +194,25 @@ const inbound = (text: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** Verbatim from leads_status_check. A value outside this list is a failed write. */
+/**
+ * Verbatim from leads_status_check (migration 20261006000001_lead_status_v2),
+ * without the two legacy values nothing should write any more. A value outside
+ * this list is a failed write.
+ */
 const LEAD_STATUSES = [
   'new',
+  'contacting',
   'contacted',
+  'engaged',
   'qualified',
+  'appointment_requested',
+  'appointment_booked',
+  'follow_up',
   'nurture',
-  'booked',
+  'not_interested',
+  'dnc',
+  'invalid',
   'closed',
-  'lost',
 ];
 
 describe('InboundSmsService', () => {
@@ -206,12 +223,12 @@ describe('InboundSmsService', () => {
     const lead = db.leads[0];
     expect(lead.dnc_status).toBe(true);
     expect(lead.automation_paused).toBe(true);
-    expect(lead.status).toBe('lost');
+    expect(lead.status).toBe('dnc');
     expect(lead.lost_reason).toBe('Opted out by SMS');
     expect(lead.consent_status).toBe('revoked');
 
-    // This assertion is the point of the two above it. The handler used to
-    // write status 'dnc', which leads_status_check rejects, and because that
+    // This assertion is the point of the two above it. The handler once wrote
+    // a status the constraint of the day rejected, and because that
     // travelled in the same UPDATE as dnc_status the ENTIRE opt-out was lost
     // and the catch swallowed it. The fake below has no CHECK constraint, so
     // the old test passed while the real thing silently kept texting people
@@ -239,7 +256,8 @@ describe('InboundSmsService', () => {
     await db.svc.onMessageReceived(inbound('Can I stop by the open house on Sunday?'));
 
     expect(db.leads[0].dnc_status).toBe(false);
-    expect(db.leads[0].status).toBe('contacted');
+    // A reply is engagement.
+    expect(db.leads[0].status).toBe('engaged');
     expect(db.enrollments[0].status).toBe('paused');
   });
 
