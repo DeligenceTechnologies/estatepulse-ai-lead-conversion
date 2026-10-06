@@ -4,6 +4,7 @@ import { AppError } from '../../common/errors';
 import { SessionGuard } from '../../common/guards/session.guard';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { AuthContext } from '../../auth/types';
+import { INACTIVE_STATUSES, normalizeLeadStatus } from '../../common/domain';
 
 /**
  * What an agent can see of their own work: their assigned leads, and the counts
@@ -71,10 +72,8 @@ export class AgentMeController {
 
     const [totalAssignedLeads, activeLeads, newLeads, upcomingAppointments] = await Promise.all([
       this.prisma.leads.count({ where: mine }),
-      // "Active" is every lead still in play. The closed states come from
-      // leads_status_check, which permits new | contacted | qualified | nurture
-      // | booked | closed | lost.
-      this.prisma.leads.count({ where: { ...mine, status: { notIn: ['closed', 'lost'] } } }),
+      // "Active" is every lead still in play (INACTIVE_STATUSES, common/domain).
+      this.prisma.leads.count({ where: { ...mine, status: { notIn: INACTIVE_STATUSES } } }),
       this.prisma.leads.count({ where: { ...mine, status: 'new' } }),
       this.prisma.appointments.count({
         where: {
@@ -179,7 +178,7 @@ function toAgentLead(l: {
     lastName: l.last_name,
     email: l.email,
     phone: l.phone,
-    status: l.status,
+    status: normalizeLeadStatus(l.status),
     temperature: l.temperature,
     source: l.lead_sources ? { name: l.lead_sources.name, provider: l.lead_sources.provider } : null,
     createdAt: l.created_at,

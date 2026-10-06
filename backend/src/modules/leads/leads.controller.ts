@@ -1,6 +1,7 @@
 import { Controller, Get, Inject, Query, Req, UseGuards } from '@nestjs/common';
 import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guard';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { normalizeLeadStatus, normalizeStatusCounts, statusFilterValues } from '../../common/domain';
 
 /**
  * Read-only. There is deliberately no POST or PATCH here. (Manual assignment,
@@ -32,7 +33,7 @@ export class LeadsController {
     const rows = await this.prisma.leads.findMany({
       where: {
         organization_id: req.tenant.organizationId,
-        ...(status ? { status } : {}),
+        ...(status ? { status: { in: statusFilterValues(status) } } : {}),
         ...(sourceId ? { lead_source_id: sourceId } : {}),
       },
       orderBy: { created_at: 'desc' },
@@ -82,7 +83,7 @@ export class LeadsController {
       emailValid: l.email_valid,
       needsReview: l.needs_review,
       reviewReasons: l.review_reasons,
-      status: l.status,
+      status: normalizeLeadStatus(l.status, l.dnc_status),
       statusReason: l.ai_summary, // why it's in this status (e.g. "Call attempt failed: …") — shown on hover
       temperature: l.temperature,
       score: l.score ? Number(l.score) : 0,
@@ -195,12 +196,11 @@ export class LeadsController {
   @Get('stats')
   async stats(@Req() req: TenantRequest) {
     const grouped = await this.prisma.leads.groupBy({
-      by: ['status'],
+      by: ['status', 'dnc_status'],
       where: { organization_id: req.tenant.organizationId },
       _count: { _all: true },
     });
-    const byStatus: Record<string, number> = {};
-    for (const g of grouped) byStatus[g.status] = g._count._all;
+    const byStatus = normalizeStatusCounts(grouped);
     return { byStatus, total: Object.values(byStatus).reduce((a, b) => a + b, 0) };
   }
 }

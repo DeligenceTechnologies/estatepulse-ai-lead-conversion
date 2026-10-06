@@ -1,4 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
+import {
+  IN_STRATEGY_STATUSES,
+  INACTIVE_STATUSES,
+  LeadStatus,
+  OUTCOME_STATUSES,
+  normalizeLeadStatus,
+} from '../common/domain';
 import { deferredResume, inQuietHours, type QuietHours } from '../common/quiet-hours';
 import { FollowupService } from '../modules/followup/followup.service';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
@@ -128,6 +135,11 @@ export class EngineService implements OnModuleDestroy {
       data: { first_contact_at: new Date() },
     });
     if (claim.count === 0) return;
+    // Enrolled: outreach is under way, nobody reached yet.
+    await this.prisma.leads.updateMany({
+      where: { id: leadId, status: LeadStatus.NEW },
+      data: { status: LeadStatus.CONTACTING },
+    });
 
     const strategy = await this.strategies.getStrategy(orgId);
     const org = await this.prisma.organizations.findUnique({
@@ -188,7 +200,7 @@ export class EngineService implements OnModuleDestroy {
       select: { first_contact_at: true, status: true, dnc_status: true, automation_paused: true },
     });
     if (!lead?.first_contact_at || lead.dnc_status || lead.automation_paused) return false;
-    if (!['new', 'contacted'].includes(lead.status)) return false;
+    if (!IN_STRATEGY_STATUSES.includes(lead.status)) return false;
 
     const [calls, texts, strategy, org] = await Promise.all([
       this.prisma.voice_calls.count({ where: { organization_id: orgId, lead_id: leadId } }),
@@ -239,7 +251,7 @@ export class EngineService implements OnModuleDestroy {
       this.logger.log(`stop lead ${e.leadId} (dnc/paused)`);
       return this.stop(e);
     }
-    if (lead.status === 'qualified' || lead.status === 'booked') {
+    if (OUTCOME_STATUSES.includes(lead.status)) {
       this.logger.log(`stop lead ${e.leadId} (${lead.status})`);
       return this.stop(e);
     }
@@ -356,8 +368,7 @@ export class EngineService implements OnModuleDestroy {
     const lead = await this.prisma.leads.findUnique({ where: { id: e.leadId } });
     if (!lead) return this.stop(e);
 
-    const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
-    if (!CONVERTED.includes(lead.status) && !lead.dnc_status) {
+    if (!OUTCOME_STATUSES.includes(lead.status) && !lead.dnc_status) {
       const why = `Strategy complete after ${e.total} step(s) — ${lead.ai_summary || 'lead not converted'}`;
       await this.activity.exitStrategy(e.leadId, why.slice(0, 2000));
       this.logger.log(`lead ${e.leadId} exited strategy (all ${e.total} steps done, not converted)`);
@@ -395,8 +406,7 @@ export class EngineService implements OnModuleDestroy {
     });
     if (!lead) return false;
 
-    const CONVERTED = ['qualified', 'booked', 'closed', 'lost'];
-    if (CONVERTED.includes(lead.status) || lead.dnc_status) return false;
+    if (OUTCOME_STATUSES.includes(lead.status) || lead.dnc_status) return false;
 
     const why = `Strategy interrupted — ${lead.ai_summary || 'recovered after a restart'}`;
     await this.activity.exitStrategy(leadId, why.slice(0, 2000));
@@ -509,7 +519,7 @@ export class EngineService implements OnModuleDestroy {
     await this.prisma.leads.update({
       where: { id: leadId },
       data: {
-        status: isHot ? 'qualified' : 'nurture',
+        status: isHot ? LeadStatus.QUALIFIED : LeadStatus.NURTURE,
         temperature,
         ...(summary ? { ai_summary: summary } : {}),
       },
@@ -545,9 +555,8 @@ export class EngineService implements OnModuleDestroy {
    * meeting in the calendar, which is exactly the experience that gets a
    * brokerage's number flagged.
    *
-   * 'booked' is verbatim from leads_status_check. Note that
-   * common/domain.ts calls this status APPOINTMENT_BOOKED — that constant is
-   * wrong, the database has never accepted it, and using it here would throw.
+   * Writes 'appointment_booked' (lead_status_v2); a legacy 'booked' row is
+   * treated as already booked.
    */
   async appointmentBooked(orgId: string, leadId: string): Promise<void> {
     const lead = await this.prisma.leads.findUnique({ where: { id: leadId } });
@@ -556,14 +565,13 @@ export class EngineService implements OnModuleDestroy {
     // Never drag a finished lead backwards, and never overwrite a do-not-call
     // flag: a booking is good news, but it is not a reason to reopen a lead
     // somebody deliberately closed.
-    const TERMINAL = ['closed', 'lost'];
-    if (TERMINAL.includes(lead.status) || lead.dnc_status) {
+    if (INACTIVE_STATUSES.includes(lead.status) || lead.dnc_status) {
       this.logger.log(`lead ${leadId} booked but left at '${lead.status}' (terminal)`);
       return;
     }
 
-    if (lead.status !== 'booked') {
-      await this.prisma.leads.update({ where: { id: leadId }, data: { status: 'booked' } });
+    if (normalizeLeadStatus(lead.status) !== LeadStatus.APPOINTMENT_BOOKED) {
+      await this.prisma.leads.update({ where: { id: leadId }, data: { status: LeadStatus.APPOINTMENT_BOOKED } });
     }
 
     const e = this.active.get(leadId);
@@ -572,5 +580,44 @@ export class EngineService implements OnModuleDestroy {
       await this.activity.exitStrategy(leadId, 'Appointment booked — strategy stopped');
     }
     this.logger.log(`lead ${leadId} booked — strategy stopped`);
+  }
+
+  /**
+   * Put a lead in a status directly: the AI call reporting an outcome other
+   * than a temperature, or a person moving the lead by hand.
+   *
+   * Any outcome or parked status ends the strategy, exactly as qualified() and
+   * appointmentBooked() do — a lead somebody has just marked not interested
+   * must not get the next scheduled text. 'dnc' also sets the do-not-contact
+   * flag, because that flag, not the status, is what every send path reads.
+   */
+  async setStatus(orgId: string, leadId: string, status: LeadStatus, reason?: string): Promise<void> {
+    const lead = await this.prisma.leads.findFirst({
+      where: { id: leadId, organization_id: orgId },
+      select: { id: true },
+    });
+    if (!lead) throw new Error('Lead not found');
+
+    await this.prisma.leads.update({
+      where: { id: leadId },
+      data: {
+        status,
+        ...(reason ? { ai_summary: reason.slice(0, 2000) } : {}),
+        ...(status === LeadStatus.DNC
+          ? { dnc_status: true, automation_paused: true, consent_status: 'revoked' }
+          : {}),
+        ...([LeadStatus.NOT_INTERESTED, LeadStatus.DNC, LeadStatus.INVALID, LeadStatus.CLOSED] as string[]).includes(
+          status,
+        ) && reason
+          ? { lost_reason: reason.slice(0, 255) }
+          : {},
+      },
+    });
+
+    if (!IN_STRATEGY_STATUSES.includes(status)) {
+      const e = this.active.get(leadId);
+      if (e) this.stop(e);
+    }
+    this.logger.log(`lead ${leadId} -> ${status}${reason ? ` (${reason})` : ''}`);
   }
 }

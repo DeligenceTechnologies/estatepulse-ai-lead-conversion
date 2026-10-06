@@ -9,6 +9,7 @@ import { CalendarReauthRequired, type ConnectionRef } from './calendly.client';
 import { CalendarProviderRegistry } from './providers/provider.registry';
 import type { NormalizedAttendee, NormalizedBooking } from './providers/types';
 import type { SyncResultDTO } from './types';
+import { INACTIVE_STATUSES } from '../../common/domain';
 
 /** Guard against a runaway window; 10 pages is 1000 bookings. */
 const MAX_PAGES = 10;
@@ -303,7 +304,7 @@ export class CalendarSyncService {
         where: {
           organization_id: organizationId,
           normalized_email: email,
-          status: { notIn: ['closed', 'lost'] },
+          status: { notIn: INACTIVE_STATUSES },
         },
         orderBy: { updated_at: 'desc' },
         select: { id: true },
@@ -317,7 +318,7 @@ export class CalendarSyncService {
         where: {
           organization_id: organizationId,
           normalized_phone: phone,
-          status: { notIn: ['closed', 'lost'] },
+          status: { notIn: INACTIVE_STATUSES },
         },
         orderBy: { updated_at: 'desc' },
         select: { id: true },

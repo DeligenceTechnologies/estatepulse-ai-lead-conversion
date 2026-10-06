@@ -563,7 +563,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const takeOverConversation = (leadId: string) => {
     toggleAutomation(leadId);
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'human_handoff' } : l));
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'engaged' } : l));
     addAuditLog(
       'Human Agent Takeover',
       'lead',

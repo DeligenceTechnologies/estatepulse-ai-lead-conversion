@@ -4,11 +4,12 @@ import { OwnerGuard } from '../../common/guards/owner.guard';
 import { SessionGuard } from '../../common/guards/session.guard';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { AuthContext } from '../../auth/types';
+import { INACTIVE_STATUSES, LEGACY_BOOKED, LeadStatus, normalizeStatusCounts } from '../../common/domain';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Leads still being worked. Vocabulary is leads_status_check. */
-const CLOSED_STATUSES = ['booked', 'closed', 'lost'];
+/** Leads no longer being worked: booked (an agent has it) or out of the pipeline. */
+const CLOSED_STATUSES = [LeadStatus.APPOINTMENT_BOOKED, LEGACY_BOOKED, ...INACTIVE_STATUSES];
 
 /** Median of a non-empty list. Does not mutate the input. */
 export function median(values: number[]): number {
@@ -51,7 +52,11 @@ export class OwnerDashboardController {
       upcomingAppointments,
       sourceRows,
     ] = await Promise.all([
-      this.prisma.leads.groupBy({ by: ['status'], where: { organization_id: org }, _count: { _all: true } }),
+      this.prisma.leads.groupBy({
+        by: ['status', 'dnc_status'],
+        where: { organization_id: org },
+        _count: { _all: true },
+      }),
       this.prisma.leads.groupBy({
         by: ['temperature'],
         where: { organization_id: org, status: { notIn: CLOSED_STATUSES } },
@@ -98,8 +103,7 @@ export class OwnerDashboardController {
       }),
     ]);
 
-    const byStatus: Record<string, number> = {};
-    for (const g of byStatusRows) byStatus[g.status] = g._count._all;
+    const byStatus = normalizeStatusCounts(byStatusRows);
 
     const byTemperature = { hot: 0, warm: 0, cold: 0, unrated: 0 };
     for (const g of byTempRows) {

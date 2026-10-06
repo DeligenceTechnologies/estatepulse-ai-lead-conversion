@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AUTO_FROM, LeadStatus } from '../common/domain';
 import { normalizePhone } from '../ingest/parse';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 
@@ -194,17 +195,12 @@ export class InboundSmsService {
         data: {
           dnc_status: true,
           automation_paused: true,
-          // 'lost', NOT 'dnc'. leads_status_check permits exactly
-          // new|contacted|qualified|nurture|booked|closed|lost, so 'dnc' was
-          // rejected by the database — and because it travelled in the SAME
-          // statement as dnc_status, the whole write was lost and the catch
-          // below swallowed it. Every opt-out silently did nothing: the flag
-          // the runner gates on stayed false and the sequence kept sending.
-          //
-          // Do-not-contact is carried by dnc_status, which is what every gate
-          // actually reads. The pipeline column says where the lead is, and
-          // somebody who has told us to stop is out of it.
-          status: 'lost',
+          // 'dnc' is a legal status since lead_status_v2. Before that the
+          // constraint rejected it, and because it travelled in the SAME
+          // statement as dnc_status the whole write was lost — so if this ever
+          // runs against a database without that migration, opt-outs fail
+          // silently. Every gate still reads dnc_status, not the status.
+          status: LeadStatus.DNC,
           lost_reason: 'Opted out by SMS',
           consent_status: 'revoked',
           first_response_at: new Date(),
@@ -229,6 +225,12 @@ export class InboundSmsService {
    */
   private async onOptIn(orgId: string, leadId: string): Promise<void> {
     try {
+      // Out of 'dnc' and into 'follow_up': they are reachable again, and a
+      // person — not the drip — decides what happens next.
+      await this.prisma.leads.updateMany({
+        where: { id: leadId, status: { in: [LeadStatus.DNC, 'lost'] } },
+        data: { status: LeadStatus.FOLLOW_UP },
+      });
       await this.prisma.leads.update({
         where: { id: leadId },
         data: {
@@ -264,6 +266,11 @@ export class InboundSmsService {
           last_contact_at: new Date(),
           ...(isFirst ? { first_response_at: new Date() } : {}),
         },
+      });
+      // They answered: engaged, from any status that has not reached an outcome.
+      await this.prisma.leads.updateMany({
+        where: { id: leadId, status: { in: AUTO_FROM[LeadStatus.ENGAGED] ?? [] } },
+        data: { status: LeadStatus.ENGAGED },
       });
       await this.pauseEnrollments(orgId, leadId);
     } catch (e) {

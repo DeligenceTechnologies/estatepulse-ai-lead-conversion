@@ -17,10 +17,9 @@ import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { useApp, type AppView } from '../../context/AppContext';
 import { getOwnerDashboard, type OwnerDashboard } from '../../utils/dashboardApi';
+import { LEAD_STATUSES, STATUS_LABELS } from '../../lib/leadStatus';
 import { listMembers, memberName, type OrganizationMember } from '../../utils/agentsApi';
 
-/** leads_status_check order, i.e. the lifecycle left to right. */
-const STATUSES = ['new', 'contacted', 'qualified', 'nurture', 'booked', 'closed', 'lost'] as const;
 
 const CALL_LABELS: Record<string, string> = {
   completed: 'Completed',
@@ -137,7 +136,7 @@ export const DashboardView: React.FC = () => {
 
   const spinner = <Loader2 className="w-5 h-5 animate-spin text-slate-600" />;
   const agents = (members ?? []).filter((m) => m.hasProfile && m.status !== 'suspended');
-  const statusMax = data ? Math.max(0, ...STATUSES.map((s) => data.leads.byStatus[s] ?? 0)) : 0;
+  const statusMax = data ? Math.max(0, ...LEAD_STATUSES.map((s) => data.leads.byStatus[s] ?? 0)) : 0;
   const callRows = data ? Object.entries(data.calls7Days.byStatus).sort((a, b) => b[1] - a[1]) : [];
   const sourceMax = data ? Math.max(0, ...data.sources30Days.map((s) => s.count)) : 0;
 
@@ -261,10 +260,10 @@ export const DashboardView: React.FC = () => {
                 ) : (
                   <>
                     <div className="space-y-3">
-                      {STATUSES.map((s) => (
+                      {LEAD_STATUSES.map((s) => (
                         <BarRow
                           key={s}
-                          label={s.charAt(0).toUpperCase() + s.slice(1)}
+                          label={STATUS_LABELS[s]}
                           value={data.leads.byStatus[s] ?? 0}
                           max={statusMax}
                         />

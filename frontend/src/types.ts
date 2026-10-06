@@ -12,17 +12,21 @@
 
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
 
-export type LeadStatus = 
+/** The 13 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
+export type LeadStatus =
   | 'new'
+  | 'contacting'
   | 'contacted'
   | 'engaged'
   | 'qualified'
+  | 'appointment_requested'
   | 'appointment_booked'
+  | 'follow_up'
   | 'nurture'
-  | 'human_handoff'
-  | 'closed'
+  | 'not_interested'
   | 'dnc'
-  | 'lost';
+  | 'invalid'
+  | 'closed';
 
 export type LeadSource = 
   | 'website'

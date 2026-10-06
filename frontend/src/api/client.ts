@@ -426,6 +426,12 @@ export const leadsApi = {
     return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
   },
   stats: () => request<LeadStats>('/v1/leads/stats'),
+  /** Owner-only. Any of the 13 statuses; ends the strategy for an outcome. */
+  setStatus: (leadId: string, status: string, reason?: string) =>
+    request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, ...(reason ? { reason } : {}) }),
+    }),
   /** Owner-only. Assigning to someone else is a reassignment; the same agent is a no-op. */
   assign: (leadId: string, agentId: string) =>
     request<LeadAssignment>(`/v1/leads/${leadId}/assignment`, {
