@@ -289,42 +289,54 @@ export class HistoryService {
    * the difference between a page that loads and one that does not.
    */
   async getCall(auth: AuthContext, id: string): Promise<CallDetail> {
-    const r = await this.prisma.voice_calls.findFirst({
-      where: {
-        id,
-        organization_id: auth.organizationId,
-        ...(auth.role === 'owner' ? {} : { leads: this.leadScope(auth) }),
-      },
-      include: {
-        leads: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            phone: true,
-            temperature: true,
-            status: true,
-            lead_assignments: {
-              where: { is_current: true },
-              take: 1,
-              select: {
-                agent_id: true,
-                agent_profiles: { select: { users: { select: { first_name: true, last_name: true, email: true } } } },
-              },
-            },
-          },
-        },
-      },
-    });
-    if (!r) throw new AppError('NOT_FOUND', 'No such call');
+    const org = auth.organizationId;
+    // "The lead that owns this call", reached through the call id so the three
+    // reads below can run together instead of waiting on each other. Every one
+    // is scoped to the caller's organization.
+    const ownsCall = { voice_calls: { some: { id, organization_id: org } } };
 
-    // A single call fetched by id is always treated as the lead's latest for
-    // outcome purposes: the caller asked about this call specifically.
-    const latest = await this.prisma.voice_calls.findFirst({
-      where: { lead_id: r.lead_id, organization_id: auth.organizationId },
-      orderBy: { created_at: 'desc' },
-      select: { id: true },
-    });
+    const [call, lead, agent, latest] = await Promise.all([
+      // Visibility is decided here, exactly as before: an agent only sees calls
+      // on leads currently assigned to them. The other two reads only enrich a
+      // call that passed this check, and are discarded otherwise.
+      this.prisma.voice_calls.findFirst({
+        where: {
+          id,
+          organization_id: org,
+          ...(auth.role === 'owner' ? {} : { leads: this.leadScope(auth) }),
+        },
+      }),
+      this.prisma.leads.findFirst({
+        where: { organization_id: org, ...ownsCall },
+        select: { id: true, first_name: true, last_name: true, phone: true, temperature: true, status: true },
+      }),
+      // The lead's current agent, as its own read so it does not wait on the
+      // lead: one profile row with its user, so the id and the name always come
+      // from the same assignment (what `lead_assignments: take 1` returned).
+      this.prisma.agent_profiles.findFirst({
+        where: {
+          organization_id: org,
+          lead_assignments: { some: { organization_id: org, is_current: true, leads: ownsCall } },
+        },
+        select: { id: true, users: { select: { first_name: true, last_name: true, email: true } } },
+      }),
+      // A single call fetched by id is always treated as the lead's latest for
+      // outcome purposes: the caller asked about this call specifically.
+      this.prisma.voice_calls.findFirst({
+        where: { organization_id: org, leads: ownsCall },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      }),
+    ]);
+    if (!call) throw new AppError('NOT_FOUND', 'No such call');
+    // Reassembled into the shape toListRow has always read.
+    const r = {
+      ...call,
+      leads: lead && {
+        ...lead,
+        lead_assignments: agent ? [{ agent_id: agent.id, agent_profiles: { users: agent.users } }] : [],
+      },
+    };
 
     return {
       ...this.toListRow(r, latest?.id === r.id),
@@ -341,47 +353,54 @@ export class HistoryService {
     const take = Math.min(Number(limitRaw ?? 100) || 100, 200);
     const leadWhere = this.leadScope(auth);
 
-    const rows = await this.prisma.conversations.findMany({
+    const org = auth.organizationId;
+    // Threads first (the message count rides along in the same query), then
+    // everything that hangs off them in one parallel round: Prisma loads each
+    // included relation as its own sequential query, and on a remote database
+    // every one of those is a full round trip.
+    const threads = await this.prisma.conversations.findMany({
       where: {
-        organization_id: auth.organizationId,
+        organization_id: org,
         ...(Object.keys(leadWhere).length ? { leads: leadWhere } : {}),
       },
       orderBy: { updated_at: 'desc' },
       take,
-      include: {
-        leads: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            phone: true,
-            temperature: true,
-            dnc_status: true,
-          },
-        },
-        messages: { orderBy: { created_at: 'desc' }, take: 1 },
-        _count: { select: { messages: true } },
-      },
+      include: { _count: { select: { messages: true } } },
     });
+    const ids = threads.map((r) => r.id);
+    const leadIds = [...new Set(threads.map((r) => r.lead_id))];
 
-    // "Has the lead ever replied" in one grouped query rather than one per
-    // thread: it is the flag the UI sorts its attention by, so it must not cost
-    // N round trips.
-    const withInbound = new Set(
-      (
-        await this.prisma.messages.groupBy({
-          by: ['conversation_id'],
-          where: {
-            organization_id: auth.organizationId,
-            direction: 'inbound',
-            conversation_id: { in: rows.map((r) => r.id) },
-          },
-        })
-      ).map((g) => g.conversation_id),
-    );
+    const [leadRows, lastMessages, inbound] = ids.length
+      ? await Promise.all([
+          this.prisma.leads.findMany({
+            where: { organization_id: org, id: { in: leadIds } },
+            select: { id: true, first_name: true, last_name: true, phone: true, temperature: true, dnc_status: true },
+          }),
+          // The newest message per thread — what `messages: { orderBy: created_at
+          // desc, take: 1 }` returned per conversation, as one statement.
+          this.prisma.$queryRaw<{ conversation_id: string; body: string; direction: string; created_at: Date }[]>`
+            select distinct on (conversation_id) conversation_id, body, direction, created_at
+              from messages
+             where organization_id = ${org}::uuid
+               and conversation_id = any(${ids}::uuid[])
+             order by conversation_id, created_at desc`,
+          // "Has the lead ever replied" in one grouped query rather than one per
+          // thread: it is the flag the UI sorts its attention by, so it must not
+          // cost N round trips.
+          this.prisma.messages.groupBy({
+            by: ['conversation_id'],
+            where: { organization_id: org, direction: 'inbound', conversation_id: { in: ids } },
+          }),
+        ])
+      : [[], [], []];
+
+    const leadsById = new Map(leadRows.map((l) => [l.id, l]));
+    const lastByThread = new Map(lastMessages.map((m) => [m.conversation_id, m]));
+    const withInbound = new Set(inbound.map((g) => g.conversation_id));
+    const rows = threads.map((t) => ({ ...t, leads: leadsById.get(t.lead_id) ?? null }));
 
     return rows.map((r) => {
-      const last = r.messages[0];
+      const last = lastByThread.get(r.id);
       return {
         id: r.id,
         leadId: r.lead_id,

@@ -181,38 +181,42 @@ export class PortalLeadsController {
    */
   @Get(':id/flow')
   async flow(@OrgId() orgId: string, @Param('id') leadId: string) {
-    const lead = await this.prisma.leads.findFirst({
+    // The reads are independent, so they run together instead of one round trip
+    // each. getStrategy can write a default strategy when the office has none,
+    // so it still waits until the lead is known to exist, as it always did.
+    const leadP = this.prisma.leads.findFirst({
       where: { id: leadId, organization_id: orgId },
     });
-    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-
-    const strategy = await this.strategies.getStrategy(orgId);
-    const steps = strategy.steps ?? [];
-
+    const strategyP = leadP.then((l) => (l ? this.strategies.getStrategy(orgId) : null));
     // Real outcomes, in order, so each step shows what actually happened.
-    const calls = await this.prisma.voice_calls.findMany({
+    const callsP = this.prisma.voice_calls.findMany({
       where: { organization_id: orgId, lead_id: leadId },
       orderBy: { created_at: 'asc' },
       select: { status: true },
     });
-    const convs = await this.prisma.conversations.findMany({
-      where: { organization_id: orgId, lead_id: leadId, channel: 'sms' },
-      select: { id: true },
+    // Outbound texts on this lead's SMS threads, in one query rather than
+    // threads-then-messages. Both sides carry organization_id: messages is
+    // tenant-scoped, and the relation alone must not stand in for that.
+    const msgsP = this.prisma.messages.findMany({
+      where: {
+        organization_id: orgId,
+        direction: 'outbound',
+        conversations: { organization_id: orgId, lead_id: leadId, channel: 'sms' },
+      },
+      orderBy: { created_at: 'asc' },
+      select: { delivery_status: true },
     });
-    const msgs = convs.length
-      ? await this.prisma.messages.findMany({
-          // organization_id as well as the conversation ids: messages is
-          // tenant-scoped, and a foreign key alone does not satisfy the
-          // tenancy guard (nor should it).
-          where: {
-            organization_id: orgId,
-            conversation_id: { in: convs.map((c) => c.id) },
-            direction: 'outbound',
-          },
-          orderBy: { created_at: 'asc' },
-          select: { delivery_status: true },
-        })
-      : [];
+
+    const [leadR, strategyR, callsR, msgsR] = await Promise.allSettled([leadP, strategyP, callsP, msgsP]);
+    // A missing lead is reported as before, whatever the other reads did.
+    if (leadR.status === 'rejected') throw leadR.reason;
+    const lead = leadR.value;
+    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
+    for (const r of [strategyR, callsR, msgsR]) if (r.status === 'rejected') throw r.reason;
+    const strategy = (strategyR as PromiseFulfilledResult<Awaited<typeof strategyP>>).value!;
+    const calls = (callsR as PromiseFulfilledResult<Awaited<typeof callsP>>).value;
+    const msgs = (msgsR as PromiseFulfilledResult<Awaited<typeof msgsP>>).value;
+    const steps = strategy.steps ?? [];
 
     const callOutcome = (s: string): { state: string; label: string } =>
       s === 'no_answer'
