@@ -14,6 +14,7 @@ import {
   RefreshCw,
   ShieldCheck,
   UserMinus,
+  UserCheck,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import {
   memberInitials,
   memberName,
   setAgentStatus,
+  setTakingLeads,
   type OrganizationMember,
 } from '../../utils/agentsApi';
 import { AddAgentModal } from '../modals/AddAgentModal';
@@ -50,7 +52,7 @@ const formatDate = (iso: string | null): string =>
  * answers an agent with a 403 whatever the UI renders.
  */
 export const AgentsView: React.FC = () => {
-  const { user, role } = useAuth();
+  const { user, role, refreshSession } = useAuth();
   const isOwner = role === 'owner';
 
   const [members, setMembers] = useState<OrganizationMember[] | null>(null);
@@ -67,6 +69,8 @@ export const AgentsView: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   /** The member whose status request is in flight, so only that card spins. */
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /** The owner's "I also take leads" request is in flight. */
+  const [switching, setSwitching] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -86,13 +90,21 @@ export const AgentsView: React.FC = () => {
     void load();
   }, [load]);
 
+  /** The signed-in member's own row — for an owner, where their switch lives. */
+  const me = members?.find((m) => m.id === user?.id) ?? null;
+
   /**
-   * Agents only. The owner is a member of the organization and GET /api/agents
-   * returns them, but they are not someone this screen manages: they cannot be
-   * suspended, and they are the person reading the page. Filtered here rather
-   * than in the query so the endpoint stays the organization's full member list.
+   * Agents, plus the reader themselves once they take leads. Other owners are
+   * not someone this screen manages: they cannot be suspended or edited here.
+   * An owner WITH a profile is on the team as an agent — lead cap, hours,
+   * calendar link — so their own card appears (first, as the list is
+   * owner-first). Filtered here rather than in the query so the endpoint stays
+   * the organization's full member list.
    */
-  const agents = members === null ? null : members.filter((m) => m.role === 'agent');
+  const agents =
+    members === null
+      ? null
+      : members.filter((m) => m.role === 'agent' || (m.id === user?.id && m.hasProfile));
 
   // Resolved from the current roster rather than stored as a snapshot: if the
   // list reloads underneath an open modal, the modal is looking at the same row
@@ -124,6 +136,21 @@ export const AgentsView: React.FC = () => {
       setError(messageFor(e));
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const handleTakingLeads = async (enabled: boolean): Promise<void> => {
+    setSwitching(true);
+    setError(null);
+    try {
+      await setTakingLeads(enabled);
+      // The session too: the first switch-on gives this owner an agent profile,
+      // which is what their own availability and "Mine" filters key on.
+      await Promise.all([load(), refreshSession()]);
+    } catch (e) {
+      setError(messageFor(e));
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -211,6 +238,51 @@ export const AgentsView: React.FC = () => {
         </div>
       )}
 
+      {/* The owner's own switch. A one-person office is just an owner with this
+          on; a team owner who also sells turns it on too. */}
+      {isOwner && me && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1 min-w-0">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-emerald-400" />
+              I also take leads
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {me.takingLeads
+                ? 'You are on the team as an agent, with your own lead cap, working hours and calendar link. Routing treats you like any other agent.'
+                : me.hasProfile
+                  ? 'Paused — you will not get new leads. Leads already assigned to you stay yours.'
+                  : 'Turn this on if you sell too. You join the team as an agent, and routing treats you like everyone else.'}
+            </p>
+            {me.takingLeads && !me.calendarLinked && (
+              <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                Your bookings are not attributed to you yet. Your Calendly or Cal.com email must
+                match {me.email}, then press <strong>Match to agents</strong> on Integrations.
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={me.takingLeads}
+            aria-label="I also take leads"
+            onClick={() => void handleTakingLeads(!me.takingLeads)}
+            disabled={switching}
+            className={`relative w-11 h-6 rounded-full border transition-colors shrink-0 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+              me.takingLeads ? 'bg-emerald-600 border-emerald-500' : 'bg-slate-800 border-slate-700'
+            }`}
+          >
+            <span
+              className={`absolute top-[1px] left-[1px] w-5 h-5 rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+                me.takingLeads ? 'translate-x-5' : ''
+              }`}
+            >
+              {switching && <Loader2 className="w-3 h-3 animate-spin text-slate-500" />}
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Roster */}
       {agents === null ? (
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-xs text-slate-400 flex items-center gap-2">
@@ -237,6 +309,10 @@ export const AgentsView: React.FC = () => {
             const pending = pendingId === member.id;
             const canSuspend =
               isOwner && member.role !== 'owner' && member.id !== user?.id && member.status !== 'suspended';
+            // The reader's own card, as an owner who takes leads. Its chip is
+            // the taking-leads switch rather than the membership status: an
+            // owner can never be suspended, so "active" would say nothing.
+            const isSelfOwner = member.role === 'owner';
 
             return (
               <div
@@ -264,18 +340,25 @@ export const AgentsView: React.FC = () => {
                         available, so a green "AVAILABLE" would be a claim the
                         system cannot back. This one is real, and it is what the
                         suspend action changes. */}
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
-                        member.hasProfile ? (STATUS_STYLES[member.status] ?? NEUTRAL_CHIP) : NEUTRAL_CHIP
-                      }`}
-                      title={
-                        member.hasProfile
-                          ? 'Membership status'
-                          : 'No agent profile — owners are not created with one'
-                      }
-                    >
-                      {member.hasProfile ? member.status : 'No profile'}
-                    </span>
+                    {isSelfOwner ? (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
+                          member.takingLeads ? STATUS_STYLES['active'] : NEUTRAL_CHIP
+                        }`}
+                        title="Whether routing may give you new leads"
+                      >
+                        {member.takingLeads ? 'Taking leads' : 'Paused'}
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
+                          member.hasProfile ? (STATUS_STYLES[member.status] ?? NEUTRAL_CHIP) : NEUTRAL_CHIP
+                        }`}
+                        title={member.hasProfile ? 'Membership status' : 'No agent profile'}
+                      >
+                        {member.hasProfile ? member.status : 'No profile'}
+                      </span>
+                    )}
                   </div>
 
                   {/* Contact */}
@@ -345,7 +428,7 @@ export const AgentsView: React.FC = () => {
                     title={
                       member.hasProfile
                         ? 'View working hours and upcoming appointments'
-                        : 'Owners have no agent profile'
+                        : 'No agent profile'
                     }
                     className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
                       member.hasProfile
@@ -363,7 +446,7 @@ export const AgentsView: React.FC = () => {
                     <button
                       onClick={() => setEditingId(member.id)}
                       disabled={pending}
-                      title="Edit this agent"
+                      title={isSelfOwner ? 'Edit your agent profile' : 'Edit this agent'}
                       aria-label={`Edit ${memberName(member)}`}
                       className="p-2 bg-slate-800 hover:bg-emerald-600/20 text-slate-400 hover:text-emerald-300 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
                     >

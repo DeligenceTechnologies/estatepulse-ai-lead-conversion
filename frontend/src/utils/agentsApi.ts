@@ -28,11 +28,18 @@ export interface OrganizationMember {
   title: string | null;
   /**
    * agent_profiles.max_active_leads. Null for a member with no profile — an
-   * owner is not a routing target, so there is no cap to show.
+   * owner who does not take leads is not a routing target, so there is no cap.
    */
   maxActiveLeads: number | null;
-  /** False for an owner: signup deliberately creates no agent_profiles row. */
+  /** False for an owner who has never taken leads; true for every agent. */
   hasProfile: boolean;
+  /** agent_profiles.id — what a lead is assigned to. Null when hasProfile is false. */
+  profileId: string | null;
+  /**
+   * Whether routing may hand this member NEW leads. For an owner, the
+   * "I also take leads" switch; off keeps the profile and current leads.
+   */
+  takingLeads: boolean;
   /** Real count from lead_assignments. 0 until lead assignment is built. */
   activeLeads: number;
   /**
@@ -125,6 +132,18 @@ export const setAgentStatus = (
   apiFetch<OrganizationMember>(`/agents/${userId}`, {
     method: 'PATCH',
     body: { status },
+    auth: true,
+  });
+
+/**
+ * The owner's own "I also take leads" switch. No user id: the server applies it
+ * to the caller only. On the first switch-on the owner gains an agent profile,
+ * so the caller should refresh their session afterwards.
+ */
+export const setTakingLeads = (enabled: boolean): Promise<OrganizationMember> =>
+  apiFetch<OrganizationMember>('/agents/me/taking-leads', {
+    method: 'PUT',
+    body: { enabled },
     auth: true,
   });
 

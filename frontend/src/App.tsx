@@ -20,6 +20,7 @@ import { AppointmentsView } from './components/views/AppointmentsView';
 import { CallsView } from './components/views/CallsView';
 import { ConversationsView } from './components/views/ConversationsView';
 import { FollowUpsView } from './components/views/FollowUpsView';
+import { AgentAvailability } from './components/agent/AgentAvailability';
 
 // Modals
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
@@ -51,6 +52,7 @@ const AppContent: React.FC = () => {
           {activeView === 'appointments' && <AppointmentsView />}
           {activeView === 'followups' && <FollowUpsView />}
           {activeView === 'agents' && <AgentsView />}
+          {activeView === 'my_availability' && <AgentAvailability />}
           {activeView === 'integrations' && (
             <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
           )}

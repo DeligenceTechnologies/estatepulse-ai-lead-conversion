@@ -792,6 +792,156 @@ test('Add Agent rejects a lead cap the database could not store', async () => {
   }
 });
 
+// --- owner who also takes leads ---------------------------------------------
+
+test('"I also take leads" requires a session and an owner', async () => {
+  const anon = await call('PUT', '/api/agents/me/taking-leads', { body: { enabled: true } });
+  assert.equal(anon.status, 401, anon.text);
+
+  const login = await call('POST', '/api/auth/login', { body: { email: EDIT_EMAIL_NEW(), password: PASSWORD } });
+  assert.equal(login.status, 200, login.text);
+  const asAgent = await call('PUT', '/api/agents/me/taking-leads', {
+    token: login.body['token'] as string,
+    body: { enabled: true },
+  });
+  assert.equal(asAgent.status, 403, asAgent.text);
+});
+
+test('"I also take leads" accepts only {enabled}, never a target', async () => {
+  for (const body of [{}, { enabled: 'yes' }, { enabled: true, userId: ownerA.userId }, { enabled: true, organizationId: ownerA.orgId }]) {
+    const res = await call('PUT', '/api/agents/me/taking-leads', { token: ownerB.token, body });
+    assert.equal(res.status, 400, `${JSON.stringify(body)} -> ${res.text}`);
+  }
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+  assert.equal(profile, null);
+});
+
+test('an owner turns on "I also take leads": a profile in their own org, and /me sees it', async () => {
+  const res = await call('PUT', '/api/agents/me/taking-leads', { token: ownerB.token, body: { enabled: true } });
+  assert.equal(res.status, 200, res.text);
+  const me = res.body as unknown as Member & { takingLeads: boolean };
+  assert.equal(me.id, ownerB.userId);
+  assert.equal(me.role, 'owner');
+  assert.equal(me.hasProfile, true);
+  assert.equal(me.takingLeads, true);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+  assert.ok(profile);
+  assert.equal(profile.routing_enabled, true);
+  assert.equal(profile.email, emailFor('owner-b'));
+
+  // Owner A's organization is untouched.
+  const leak = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: ownerB.userId },
+  });
+  assert.equal(leak, null);
+
+  const session = await call('GET', '/api/auth/me', { token: ownerB.token });
+  assert.equal(session.body['agentProfileId'], profile.id);
+  assert.equal(session.body['role'], 'owner');
+});
+
+test('the owner who takes leads can edit their own profile, but not before', async () => {
+  const res = await call('PATCH', `/api/agents/${ownerB.userId}`, {
+    token: ownerB.token,
+    body: { title: 'Broker', maxActiveLeads: 12, timezone: 'Asia/Kolkata' },
+  });
+  assert.equal(res.status, 200, res.text);
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+  assert.equal(profile?.title, 'Broker');
+  assert.equal(profile?.max_active_leads, 12);
+  assert.equal(profile?.timezone, 'Asia/Kolkata');
+
+  // Owner A still has no profile, so their self-edit is still refused.
+  const before = await call('PATCH', `/api/agents/${ownerA.userId}`, { token: ownerA.token, body: { title: 'Broker' } });
+  assert.equal(before.status, 403, before.text);
+});
+
+test('the owner who takes leads reaches the agent self-service routes, like any agent', async () => {
+  const res = await call('GET', '/api/agents/me/dashboard', { token: ownerB.token });
+  // The agent routes resolve the caller's profile, not their role.
+  assert.equal(res.status, 200, res.text);
+});
+
+test('turning "I also take leads" off keeps the profile and is idempotent', async () => {
+  const profileBefore = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+
+  for (let i = 0; i < 2; i += 1) {
+    const res = await call('PUT', '/api/agents/me/taking-leads', { token: ownerB.token, body: { enabled: false } });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.body['takingLeads'], false);
+    assert.equal(res.body['hasProfile'], true);
+  }
+
+  const profileAfter = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+  assert.equal(profileAfter?.id, profileBefore?.id);
+  assert.equal(profileAfter?.routing_enabled, false);
+
+  const audits = await prisma.audit_logs.findMany({
+    where: { organization_id: ownerB.orgId, entity_id: ownerB.userId, action: 'member.routing_disabled' },
+  });
+  assert.equal(audits.length, 1);
+});
+
+test('a "Just me" signup starts the owner with an agent profile', async () => {
+  const res = await call('POST', '/api/auth/signup', {
+    body: {
+      email: emailFor('solo'),
+      password: PASSWORD,
+      firstName: 'Solo',
+      lastName: 'Owner',
+      organizationName: `Agents Test Solo ${RUN}`,
+      teamSize: 'solo',
+    },
+  });
+  assert.equal(res.status, 201, res.text);
+  const user = res.body['user'] as { id: string };
+  const organization = res.body['organization'] as { id: string };
+  createdUserIds.push(user.id);
+  createdOrgIds.push(organization.id);
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: organization.id, user_id: user.id },
+  });
+  assert.ok(profile);
+  assert.equal(res.body['agentProfileId'], profile.id);
+  assert.equal(profile.routing_enabled, true);
+
+  const roster = await call('GET', '/api/agents', { token: res.body['token'] as string });
+  const [owner] = roster.body as unknown as Array<Member & { takingLeads: boolean }>;
+  assert.equal(owner.role, 'owner');
+  assert.equal(owner.takingLeads, true);
+});
+
+test('a team signup (or an older client sending nothing) creates no profile', async () => {
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: ownerA.userId },
+  });
+  assert.equal(profile, null);
+
+  const bad = await call('POST', '/api/auth/signup', {
+    body: {
+      email: emailFor('bad-size'),
+      password: PASSWORD,
+      firstName: 'Bad',
+      lastName: 'Size',
+      organizationName: `Agents Test Bad ${RUN}`,
+      teamSize: 'enterprise',
+    },
+  });
+  assert.equal(bad.status, 400, bad.text);
+});
+
 test('no response in this suite contained a password or a hash', () => {
   for (const body of allResponseBodies) {
     assert.ok(!body.includes(PASSWORD), `a response echoed the password: ${body}`);

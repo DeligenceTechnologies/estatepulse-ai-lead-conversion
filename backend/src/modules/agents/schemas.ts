@@ -125,5 +125,13 @@ export const isStatusUpdate = (
   input: UpdateAgentInput,
 ): input is UpdateAgentInput & { status: 'suspended' | 'active' } => input.status !== undefined;
 
+/**
+ * The owner's "I also take leads" switch. Strict for the same reason as the
+ * others: a body naming a user or an organization is refused, not ignored —
+ * the switch only ever applies to the caller.
+ */
+export const takingLeadsSchema = z.object({ enabled: z.boolean() }).strict();
+
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export type UpdateAgentInput = z.infer<typeof updateAgentSchema>;
+export type TakingLeadsInput = z.infer<typeof takingLeadsSchema>;

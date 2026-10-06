@@ -39,7 +39,10 @@ export type AppView =
   | 'landing_page'
   // Live-backend screen. Its data comes from the real API, NOT from this
   // context — see src/api/client.ts. Only the view id lives here.
-  | 'lead_sources';
+  | 'lead_sources'
+  // An owner who also takes leads: their own working hours and calendar
+  // status, the same screen an agent sees. Live API, like lead_sources.
+  | 'my_availability';
 
 // Unlocked alongside the call/message history and nurture work: 'calls',
 // 'conversations' and 'followups' now read the real API through
@@ -642,8 +645,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const findLead = (id: string | null) =>
-    id ? leads.find(l => l.id === id) ?? externalLeads[id] : undefined;
+  /**
+   * The same database lead can be here twice: in `leads`, loaded from
+   * /api/leads (PortalLeadsController), and in `externalLeads`, registered by
+   * the pipeline from /api/v1/leads. The first wins as before — it carries the
+   * demo store's local edits, such as a paused AI — but only the pipeline's copy
+   * knows who the lead is assigned to, so that is layered on top of it.
+   */
+  const findLead = (id: string | null) => {
+    if (!id) return undefined;
+    const stored = leads.find(l => l.id === id);
+    const piped = externalLeads[id];
+    if (stored && piped) {
+      return { ...stored, assignedAgentId: piped.assignedAgentId, assignedAgentName: piped.assignedAgentName };
+    }
+    return stored ?? piped;
+  };
 
   const startLiveCallSimulation = (lead: Lead) => {
     setActiveSimulatedLead(lead);

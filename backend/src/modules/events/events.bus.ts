@@ -32,7 +32,7 @@ import { Observable, Subject, filter } from 'rxjs';
  * change.
  */
 
-export type LiveEventType = 'delivery.received' | 'lead.created';
+export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned';
 
 export interface LiveEvent {
   organizationId: string;

@@ -20,7 +20,7 @@ import { endSessionIfUnauthenticated, getToken } from './api';
 
 const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
 
-export type LiveEventType = 'delivery.received' | 'lead.created';
+export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned';
 
 export interface LiveEvent {
   type: LiveEventType;

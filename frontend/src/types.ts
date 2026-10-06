@@ -85,6 +85,8 @@ export interface Lead {
   id: string;
   organizationId: string;
   assignedAgentId: string;
+  /** Live leads only: the assigned agent's name, which the demo store resolves by id instead. */
+  assignedAgentName?: string;
   firstName: string;
   lastName: string;
   email: string;
