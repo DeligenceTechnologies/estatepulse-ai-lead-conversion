@@ -1,53 +1,140 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  Flame, 
-  Phone, 
-  MessageSquare, 
-  Calendar, 
-  Pause, 
-  Play, 
-  UserCheck, 
-  MapPin, 
-  DollarSign, 
-  Clock, 
-  Home, 
-  CheckCircle2, 
-  RotateCw, 
-  Send, 
-  Share2, 
-  History, 
+import {
+  X,
+  Flame,
+  Phone,
+  MessageSquare,
+  Calendar,
+  MapPin,
+  DollarSign,
+  Clock,
+  Home,
   ShieldCheck,
-  Building2,
   FileText,
-  Volume2
+  ChevronDown,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Lead, Channel } from '../../types';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import {
+  getCall,
+  listCalls,
+  listConversations,
+  listMessages,
+  type CallDetail,
+  type CallRow,
+  type MessageRow,
+} from '../../utils/historyApi';
+import { listAppointments, type Appointment as CalendarAppointment } from '../../utils/calendarApi';
+import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
 
+interface LeadActivity {
+  calls: CallRow[];
+  messages: MessageRow[];
+  appointments: CalendarAppointment[];
+}
+
+/**
+ * Everything that actually happened with one lead.
+ *
+ * ponytail: these endpoints have no lead filter yet, so this reads the office's
+ * most recent 200 calls / conversations and filters here. Add `?leadId=` to the
+ * history and appointment endpoints when an office outgrows that window.
+ */
+async function loadLeadActivity(leadId: string): Promise<LeadActivity> {
+  const [calls, conversations, appointments] = await Promise.all([
+    listCalls({ limit: 200 }),
+    listConversations(200),
+    listAppointments(),
+  ]);
+  const threads = conversations.filter((c) => c.leadId === leadId && c.channel === 'sms');
+  const messages = (await Promise.all(threads.map((c) => listMessages(c.id))))
+    .flat()
+    .sort((a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt));
+  return {
+    calls: calls.filter((c) => c.leadId === leadId),
+    messages,
+    appointments: appointments.filter((a) => a.leadId === leadId),
+  };
+}
+
+const EmptyTab: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, text }) => (
+  <div className="py-12 text-center space-y-2">
+    <div className="w-12 h-12 mx-auto rounded-xl bg-slate-800/70 text-slate-500 flex items-center justify-center">{icon}</div>
+    <p className="text-sm text-slate-400">{text}</p>
+  </div>
+);
+
+/** One call; the transcript and summary are fetched only when it is opened. */
+const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<CallDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = () => {
+    setOpen((o) => !o);
+    if (!detail && !error) getCall(call.id).then(setDetail).catch((e) => setError(messageFor(e)));
+  };
+  return (
+    <div className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden">
+      <button onClick={toggle} className="w-full px-4 py-3.5 flex items-center gap-3 text-left hover:bg-slate-800/40 transition-colors cursor-pointer">
+        <div className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+          <Phone className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-slate-100 capitalize">{call.direction} call</span>
+            <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${OUTCOME_STYLES[call.outcome]}`}>
+              {call.outcome.replace(/_/g, ' ').toLowerCase()}
+            </span>
+          </div>
+          <div className="text-xs text-slate-400 mt-0.5">
+            {new Date(call.startedAt ?? call.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+            {' · '}
+            {duration(call.durationSeconds)}
+            {call.agentName && ` · ${call.agentName}`}
+          </div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-800">
+          {call.recordingUrl && <audio controls src={call.recordingUrl} className="w-full h-9 mt-2" />}
+          {error ? (
+            <p className="text-xs text-rose-300">Could not load this call: {error}</p>
+          ) : !detail ? (
+            <p className="text-xs text-slate-500">Loading…</p>
+          ) : (
+            <>
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1">Summary</div>
+                <p className="text-sm text-slate-200 leading-relaxed">{detail.aiSummary || 'No summary was recorded for this call.'}</p>
+              </div>
+              {detail.transcript && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-400 mb-1">Transcript</div>
+                  <pre className="max-h-56 overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs text-slate-300 leading-relaxed bg-slate-900 border border-slate-800 rounded-lg p-3">
+                    {detail.transcript}
+                  </pre>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const LeadDetailModal: React.FC = () => {
-  const { 
-    selectedLeadId, 
-    setSelectedLeadId, 
-    findLead, 
-    conversations, 
-    calls, 
-    appointments, 
-    auditLogs, 
-    sendSmsMessage, 
-    toggleAutomation, 
-    takeOverConversation, 
-    bookAppointment, 
-    startLiveCallSimulation, 
+  const {
+    selectedLeadId,
+    setSelectedLeadId,
+    findLead,
     setPreCallLeadId,
-    orgSettings,
-    agents 
+    agents
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments' | 'audit'>('overview');
-  const [smsInput, setSmsInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments'>('overview');
 
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
@@ -58,6 +145,28 @@ export const LeadDetailModal: React.FC = () => {
     getLeadFlow(selectedLeadId).then((f) => { if (alive) setFlow(f); }).catch(() => {});
     return () => { alive = false; };
   }, [selectedLeadId]);
+
+  // The lead's real activity: calls, SMS and appointments from the API.
+  const [activity, setActivity] = useState<LeadActivity | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  useEffect(() => {
+    setActivity(null);
+    setActivityError(null);
+    if (!selectedLeadId) return;
+    let alive = true;
+    loadLeadActivity(selectedLeadId)
+      .then((a) => { if (alive) setActivity(a); })
+      .catch((e) => { if (alive) setActivityError(messageFor(e)); });
+    return () => { alive = false; };
+  }, [selectedLeadId]);
+
+  // Esc closes the dossier, like every other dialog.
+  useEffect(() => {
+    if (!selectedLeadId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedLeadId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedLeadId, setSelectedLeadId]);
 
   // Real outreach: enrols the lead into the office's strategy (call/SMS via Telnyx).
   const [enrolling, setEnrolling] = useState(false);
@@ -83,39 +192,8 @@ export const LeadDetailModal: React.FC = () => {
   const lead = findLead(selectedLeadId);
   if (!lead) return null;
 
-  const conversation = conversations[lead.id];
-  const leadCalls = calls.filter(c => c.leadId === lead.id);
-  const leadAppointments = appointments.filter(a => a.leadId === lead.id);
-  const leadLogs = auditLogs.filter(log => log.entityId === lead.id);
   const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
-
-  const handleSendSms = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!smsInput.trim()) return;
-    sendSmsMessage(lead.id, smsInput.trim(), 'agent');
-    setSmsInput('');
-  };
-
-  const handleBookQuickConsult = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
-
-    bookAppointment({
-      organizationId: orgSettings.id,
-      leadId: lead.id,
-      leadName: `${lead.firstName} ${lead.lastName}`,
-      agentId: assignedAgent.id,
-      agentName: assignedAgent.name,
-      provider: 'calendly',
-      startTime: tomorrow.toISOString(),
-      endTime: new Date(tomorrow.getTime() + 30 * 60000).toISOString(),
-      status: 'scheduled',
-      appointmentType: 'Buyer Consultation',
-      locationOrLink: 'https://meet.google.com/aus-home-consult',
-      notes: 'Consultation scheduled directly from lead detail dossier.',
-    });
-  };
+  const count = (n: number | undefined) => (activity ? ` (${n})` : '');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -196,18 +274,6 @@ export const LeadDetailModal: React.FC = () => {
             )}
 
             <button
-              onClick={() => toggleAutomation(lead.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                lead.automationPaused 
-                  ? 'bg-amber-950 text-amber-300 border-amber-700/60' 
-                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-              }`}
-            >
-              {lead.automationPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-              <span>{lead.automationPaused ? 'Resume AI' : 'Pause AI'}</span>
-            </button>
-
-            <button
               onClick={() => setSelectedLeadId(null)}
               className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
             >
@@ -277,11 +343,10 @@ export const LeadDetailModal: React.FC = () => {
         {/* Tab Navigation */}
         <div className="flex border-b border-slate-800 px-5 bg-slate-950/40 gap-4 text-xs font-medium">
           {[
-            { id: 'overview', label: 'Overview & Qualification' },
-            { id: 'conversation', label: `SMS & Chat (${conversation?.messages.length || 0})` },
-            { id: 'calls', label: `Voice Calls (${leadCalls.length})` },
-            { id: 'appointments', label: `Appointments (${leadAppointments.length})` },
-            { id: 'audit', label: `Audit Trail (${leadLogs.length})` },
+            { id: 'overview', label: 'Overview' },
+            { id: 'conversation', label: `SMS${count(activity?.messages.length)}` },
+            { id: 'calls', label: `AI Calls${count(activity?.calls.length)}` },
+            { id: 'appointments', label: `Appointments${count(activity?.appointments.length)}` },
           ].map(tab => (
             <button
               key={tab.id}
@@ -360,218 +425,96 @@ export const LeadDetailModal: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: CONVERSATION (SMS / Chat) */}
-          {activeTab === 'conversation' && (
-            <div className="flex flex-col h-[460px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-              <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="font-semibold text-slate-200">Twilio SMS Thread with {lead.firstName} ({lead.phone})</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => takeOverConversation(lead.id)}
-                    className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    Take Over (Human Handoff)
-                  </button>
-                </div>
-              </div>
-
-              {/* Messages Container */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                {conversation && conversation.messages.length > 0 ? (
-                  conversation.messages.map(msg => {
-                    const isLead = msg.sender === 'lead';
-                    const isAi = msg.sender === 'ai';
-                    return (
-                      <div key={msg.id} className={`flex flex-col ${isLead ? 'items-start' : 'items-end'}`}>
-                        <div className="flex items-center gap-1.5 text-2xs text-slate-400 mb-0.5 px-1">
-                          <span className="font-semibold text-slate-300">
-                            {isAi ? `${orgSettings.aiAgentName} (AI)` : isLead ? `${lead.firstName} ${lead.lastName}` : 'Agent (You)'}
-                          </span>
-                          <span>•</span>
-                          <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                        <div className={`p-3 rounded-2xl max-w-[80%] text-xs leading-relaxed ${
-                          isLead 
-                            ? 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700' 
-                            : isAi 
-                            ? 'bg-emerald-950/80 text-emerald-200 border border-emerald-800/60 rounded-tr-sm' 
-                            : 'bg-emerald-600 text-on-accent rounded-tr-sm shadow'
-                        }`}>
-                          {msg.content}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                    No conversation messages logged yet. Send an SMS below.
-                  </div>
-                )}
-              </div>
-
-              {/* Send Box */}
-              <form onSubmit={handleSendSms} className="p-3 bg-slate-900 border-t border-slate-800 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={smsInput}
-                  onChange={(e) => setSmsInput(e.target.value)}
-                  placeholder={`Text ${lead.firstName} directly via Twilio...`}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!smsInput.trim()}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Send</span>
-                </button>
-              </form>
+          {/* Shared loading / error state for the three activity tabs. */}
+          {activeTab !== 'overview' && !activity && (
+            <div className="p-10 text-center text-xs text-slate-500">
+              {activityError ? `Could not load activity: ${activityError}` : 'Loading activity…'}
             </div>
           )}
 
-          {/* TAB 3: VOICE CALLS */}
-          {activeTab === 'calls' && (
-            <div className="space-y-4">
-              {leadCalls.length > 0 ? (
-                leadCalls.map(call => (
-                  <div key={call.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                          <Phone className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-white flex items-center gap-2">
-                            <span>Retell Voice Call ({call.direction.toUpperCase()})</span>
-                            <span className="text-2xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">
-                              {call.outcome}
-                            </span>
-                          </div>
-                          <span className="text-2xs text-slate-400">
-                            Duration: {Math.floor(call.durationSeconds / 60)}m {call.durationSeconds % 60}s • {new Date(call.startedAt).toLocaleString()}
-                          </span>
-                        </div>
+          {/* TAB 2: SMS — the real thread, newest at the bottom. Read-only: texts
+              are sent by the strategy and follow-up sequences. */}
+          {activeTab === 'conversation' && activity && (
+            activity.messages.length > 0 ? (
+              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar">
+                {activity.messages.map(msg => {
+                  const inbound = msg.direction === 'inbound';
+                  const failed = msg.deliveryStatus === 'failed';
+                  return (
+                    <div key={msg.id} className={`flex flex-col ${inbound ? 'items-start' : 'items-end'}`}>
+                      <div className="text-2xs text-slate-500 mb-1 px-1">
+                        {inbound ? lead.firstName : msg.senderType === 'ai' ? 'AI assistant' : 'Agent'}
+                        {' · '}
+                        {new Date(msg.sentAt ?? msg.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        {failed && <span className="text-rose-400 font-semibold"> · not delivered</span>}
                       </div>
-
-                      <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-mono">
-                        <Volume2 className="w-4 h-4" />
-                        <span>Audio Logged</span>
+                      <div className={`px-3.5 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed whitespace-pre-wrap ${
+                        inbound
+                          ? 'bg-slate-800 text-slate-100 rounded-tl-sm'
+                          : failed
+                          ? 'bg-rose-500/10 text-rose-200 border border-rose-500/30 rounded-tr-sm'
+                          : 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/25 rounded-tr-sm'
+                      }`}>
+                        {msg.body}
                       </div>
                     </div>
-
-                    <div className="bg-slate-900 border border-slate-800/80 p-3 rounded-lg text-xs text-slate-300 space-y-1">
-                      <div className="font-semibold text-slate-200">AI Call Summary:</div>
-                      <p className="leading-relaxed">{call.summary}</p>
-                    </div>
-
-                    {/* Transcript Accordion */}
-                    <div className="space-y-2 pt-1">
-                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                        Call Transcript ({call.transcript.length} turns)
-                      </div>
-                      <div className="max-h-48 overflow-y-auto space-y-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/60 custom-scrollbar">
-                        {call.transcript.map((t, idx) => (
-                          <div key={idx} className="text-xs flex gap-2">
-                            <span className="font-semibold text-emerald-400 w-20 shrink-0 font-mono text-xs">{t.speaker}:</span>
-                            <span className="text-slate-300">{t.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                  <Phone className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="text-xs text-slate-400">No voice calls recorded yet for this lead.</p>
-                  <button
-                    onClick={() => startLiveCallSimulation(lead)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Start Simulated AI Call
-                  </button>
-                </div>
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptyTab icon={<MessageSquare className="w-6 h-6" />} text="No texts with this lead yet." />
+            )
           )}
 
-          {/* TAB 4: APPOINTMENTS */}
-          {activeTab === 'appointments' && (
-            <div className="space-y-4">
-              {leadAppointments.length > 0 ? (
-                leadAppointments.map(appt => (
-                  <div key={appt.id} className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+          {/* TAB 3: AI CALLS — every call placed or received, transcript on demand. */}
+          {activeTab === 'calls' && activity && (
+            activity.calls.length > 0 ? (
+              <div className="space-y-2.5">
+                {activity.calls.map(call => <CallItem key={call.id} call={call} />)}
+              </div>
+            ) : (
+              <EmptyTab icon={<Phone className="w-6 h-6" />} text="No AI calls with this lead yet." />
+            )
+          )}
+
+          {/* TAB 4: APPOINTMENTS — synced from the office calendar. */}
+          {activeTab === 'appointments' && activity && (
+            activity.appointments.length > 0 ? (
+              <div className="space-y-2.5">
+                {activity.appointments.map(appt => (
+                  <div key={appt.id} className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/15 text-purple-400 flex items-center justify-center shrink-0">
                         <Calendar className="w-5 h-5" />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-bold text-white">{appt.appointmentType}</h4>
-                          <span className="text-2xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 font-mono">
-                            {appt.status.toUpperCase()}
+                          <span className="text-sm font-semibold text-slate-100 truncate">{appt.appointmentType || 'Appointment'}</span>
+                          <span className="text-2xs font-semibold capitalize px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                            {appt.status.replace('_', ' ')}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-300 mt-0.5">
-                          {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · {appt.agentName}
                         </div>
-                        <div className="text-xs text-slate-400">Agent: {appt.agentName}</div>
                       </div>
                     </div>
-
-                    <a
-                      href={appt.locationOrLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors"
-                    >
-                      Join Meeting Link
-                    </a>
-                  </div>
-                ))
-              ) : (
-                <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                  <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="text-xs text-slate-400">No appointments currently booked.</p>
-                  <button
-                    onClick={handleBookQuickConsult}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Schedule Buyer Consultation
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 5: AUDIT TRAIL (PRD Section 55) */}
-          {activeTab === 'audit' && (
-            <div className="space-y-3">
-              <div className="text-xs text-slate-400 mb-2">
-                Chronological event trail tracking lead capture, automated triggers, score adjustments, and CRM sync:
-              </div>
-              <div className="relative pl-6 border-l border-slate-800 space-y-4">
-                {leadLogs.map(log => (
-                  <div key={log.id} className="relative group">
-                    <div className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-slate-900" />
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-bold text-slate-200">{log.action}</span>
-                      <span className="text-2xs text-slate-500 font-mono">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className="text-2xs px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                        {log.actor}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{log.description}</p>
+                    {appt.meetingUrl && (
+                      <a
+                        href={appt.meetingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors shrink-0"
+                      >
+                        Join meeting
+                      </a>
+                    )}
                   </div>
                 ))}
               </div>
-            </div>
+            ) : (
+              <EmptyTab icon={<Calendar className="w-6 h-6" />} text="No appointments booked with this lead." />
+            )
           )}
 
         </div>

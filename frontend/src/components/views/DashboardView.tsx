@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
-import { useApp, type AppView } from '../../context/AppContext';
+import { useNavigate } from 'react-router-dom';
 import { getOwnerDashboard, type OwnerDashboard } from '../../utils/dashboardApi';
 import { listMembers, memberName, type OrganizationMember } from '../../utils/agentsApi';
 
@@ -111,7 +111,7 @@ const BarRow: React.FC<{ label: string; value: number; max: number; suffix?: str
  */
 export const DashboardView: React.FC = () => {
   const { user, organization } = useAuth();
-  const { setActiveView } = useApp();
+  const navigate = useNavigate();
   const [data, setData] = useState<OwnerDashboard | null>(null);
   const [members, setMembers] = useState<OrganizationMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -135,31 +135,32 @@ export const DashboardView: React.FC = () => {
     void load();
   }, [load]);
 
-  const spinner = <Loader2 className="w-5 h-5 animate-spin text-slate-600" />;
+  const spinner = <span aria-label="Loading" className="block h-7 w-14 rounded-md bg-slate-800 animate-pulse" />;
   const agents = (members ?? []).filter((m) => m.hasProfile && m.status !== 'suspended');
   const statusMax = data ? Math.max(0, ...STATUSES.map((s) => data.leads.byStatus[s] ?? 0)) : 0;
   const callRows = data ? Object.entries(data.calls7Days.byStatus).sort((a, b) => b[1] - a[1]) : [];
   const sourceMax = data ? Math.max(0, ...data.sources30Days.map((s) => s.count)) : 0;
 
-  const attention: { label: string; hint: string; count: number; view: AppView }[] = data
+  // Each item opens Leads already filtered to what it counts.
+  const attention: { label: string; hint: string; count: number; to: string }[] = data
     ? [
         {
           label: 'Hot leads with no agent',
           hint: 'Open hot leads nobody currently holds.',
           count: data.attention.hotUnassigned,
-          view: 'leads',
+          to: '/leads?tab=hot',
         },
         {
           label: 'Not contacted yet',
           hint: 'New leads with no outreach sent.',
           count: data.attention.neverContacted,
-          view: 'leads',
+          to: '/leads?tab=new',
         },
         {
           label: 'Flagged for review',
           hint: 'Ingested with a data problem (e.g. invalid phone).',
           count: data.attention.needsReview,
-          view: 'leads',
+          to: '/leads',
         },
       ]
     : [];
@@ -227,6 +228,21 @@ export const DashboardView: React.FC = () => {
         />
       </div>
 
+      {/* Panel-shaped placeholders while the first load runs. */}
+      {!data && !error && (
+        <div aria-hidden="true" className="space-y-6 animate-pulse">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-5 h-64 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="lg:col-span-7 h-64 rounded-2xl bg-slate-900 border border-slate-800" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+          </div>
+        </div>
+      )}
+
       {data && (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -236,7 +252,7 @@ export const DashboardView: React.FC = () => {
                   {attention.map((a) => (
                     <button
                       key={a.label}
-                      onClick={() => setActiveView(a.view)}
+                      onClick={() => navigate(a.to)}
                       className="w-full p-3 bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
                     >
                       <div className="min-w-0">

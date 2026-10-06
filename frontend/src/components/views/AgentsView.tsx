@@ -163,37 +163,12 @@ export const AgentsView: React.FC = () => {
       {/* Lead Routing (not built). Kept as a statement of intent, deliberately
           inert: nothing in the product assigns a lead to an agent yet, and a
           card that looks selectable would claim otherwise. */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-cyan-400" />
-            Lead Distribution Algorithm
-          </h3>
-          <span className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-            Not implemented
-          </span>
-        </div>
-        <p className="text-xs text-slate-400">
-          Inbound leads are <strong className="text-slate-300">not</strong> routed to agents yet —
-          every lead stays unassigned in the pipeline. These are the policies planned for a later
-          phase; none of them is running.
+      <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex items-center gap-3 text-xs">
+        <GitBranch className="w-4 h-4 text-cyan-400 shrink-0" />
+        <p className="text-slate-400">
+          <span className="font-semibold text-slate-200">Automatic lead routing is coming soon.</span>{' '}
+          Until then every lead stays unassigned — round-robin, area and availability rules are planned.
         </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
-          {[
-            { id: 'round_robin', title: 'Round-Robin', desc: 'Spread leads evenly across eligible agents.' },
-            { id: 'geographic', title: 'Geographic Routing', desc: 'Match a lead to the agent covering its area.' },
-            { id: 'availability', title: 'Availability First', desc: 'Only assign to agents with open calendar slots.' },
-          ].map((opt) => (
-            <div
-              key={opt.id}
-              className="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 space-y-1 opacity-60"
-            >
-              <span className="font-bold text-slate-300 block">{opt.title}</span>
-              <p className="text-xs text-slate-500">{opt.desc}</p>
-            </div>
-          ))}
-        </div>
       </div>
 
       {error && (

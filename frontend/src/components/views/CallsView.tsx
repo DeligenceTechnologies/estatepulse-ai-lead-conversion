@@ -35,7 +35,7 @@ import {
  * than the one every browser already ships.
  */
 
-const OUTCOME_STYLES: Record<CallOutcome, string> = {
+export const OUTCOME_STYLES: Record<CallOutcome, string> = {
   APPOINTMENT_BOOKED: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
   QUALIFIED: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
   HUMAN_HANDOFF: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
@@ -63,7 +63,7 @@ const TEMP_STYLES: Record<string, string> = {
   cold: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
 };
 
-const duration = (s: number | null): string => {
+export const duration = (s: number | null): string => {
   if (s == null) return '—';
   const m = Math.floor(s / 60);
   const r = s % 60;

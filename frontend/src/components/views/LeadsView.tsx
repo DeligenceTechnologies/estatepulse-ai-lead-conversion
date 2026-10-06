@@ -11,6 +11,7 @@ import {
   Users,
   Webhook,
 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { leadsApi, type LeadStats, type LiveLead } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -143,6 +144,7 @@ const toLead = (l: LiveLead): Lead => ({
 });
 
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
+const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 
 interface LeadsViewProps {
   onOpenNewLead: () => void;
@@ -157,7 +159,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTab, setSelectedTab] = useState<Tab>('all');
+  // ?tab=hot etc. lets other screens (the dashboard) open Leads pre-filtered.
+  const { search } = useLocation();
+  const [selectedTab, setSelectedTab] = useState<Tab>(() => {
+    const t = new URLSearchParams(search).get('tab') as Tab | null;
+    return t && TABS.includes(t) ? t : 'all';
+  });
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
 
@@ -402,11 +409,20 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {data === null ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                    Loading…
-                  </td>
-                </tr>
+                // Skeleton rows in the table's own shape while the first fetch runs.
+                Array.from({ length: 6 }, (_, i) => (
+                  <tr key={i} aria-hidden="true" className="animate-pulse">
+                    <td className="px-4 py-4">
+                      <div className="h-3.5 w-32 rounded bg-slate-800" />
+                      <div className="h-3 w-44 rounded bg-slate-800/70 mt-2" />
+                    </td>
+                    {[16, 28, 20, 24, 20, 10].map((w, j) => (
+                      <td key={j} className="px-4 py-4">
+                        <div className="h-3.5 rounded bg-slate-800/80" style={{ width: `${w * 4}px` }} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
               ) : filteredLeads.length > 0 ? (
                 filteredLeads.map(lead => (
                   <tr
