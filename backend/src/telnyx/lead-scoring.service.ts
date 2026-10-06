@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { LeadStatus, OUTCOME_STATUSES } from '../common/domain';
 import { AppError } from '../common/errors';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService } from './cred-store.service';
@@ -29,8 +30,13 @@ export interface Qualification {
   scoredAt: string;
 }
 
-/** A lead past these has a later status that a call result must never walk back. */
-const SETTLED_STATUSES = ['booked', 'closed', 'lost'];
+/**
+ * A lead in one of these has an outcome a call score must never walk back —
+ * an appointment, an opt-out, an invalid number, a closed deal (legacy
+ * spellings included). Every outcome except `qualified`, which a later call
+ * may legitimately re-score.
+ */
+const SETTLED_STATUSES = OUTCOME_STATUSES.filter((s) => s !== LeadStatus.QUALIFIED);
 
 export interface SignedDelivery {
   signature: string | undefined;
@@ -167,7 +173,7 @@ export class LeadScoringService {
 
     await this.prisma.leads.update({ where: { id: call.lead_id }, data: { score: result.score } });
     if (SETTLED_STATUSES.includes(lead.status) || lead.dnc_status) {
-      // Record what the call showed, but do not reopen a booked/closed/lost or do-not-contact lead.
+      // Record what the call showed, but do not reopen a settled or do-not-contact lead.
       await this.prisma.leads.update({ where: { id: call.lead_id }, data: { temperature: result.temperature } });
     } else {
       await this.engine.qualified(orgId, call.lead_id, result.temperature, leadReason(qualification));

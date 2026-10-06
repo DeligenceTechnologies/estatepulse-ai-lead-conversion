@@ -86,10 +86,25 @@ describe('LeadScoringService', () => {
   });
 
   it('records a booked lead’s score and temperature without reopening it', async () => {
-    const { svc, prisma, engine } = setup({ leadStatus: 'booked' });
+    const { svc, prisma, engine } = setup({ leadStatus: 'appointment_booked' });
     await svc.onInsightsGenerated('v3:ccid', insightPayload({ ...hotFacts, appointment_requested: false }), unsigned);
     expect(engine.qualified).not.toHaveBeenCalled();
     expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { temperature: 'warm' } });
+  });
+
+  it.each(['appointment_booked', 'appointment_requested', 'not_interested', 'dnc', 'invalid', 'closed', 'booked', 'lost'])(
+    'never walks a %s lead back to qualified or nurture',
+    async (status) => {
+      const { svc, engine } = setup({ leadStatus: status });
+      await svc.onInsightsGenerated('v3:ccid', insightPayload(hotFacts), unsigned);
+      expect(engine.qualified).not.toHaveBeenCalled();
+    },
+  );
+
+  it('re-scores a lead that is only qualified', async () => {
+    const { svc, engine } = setup({ leadStatus: 'qualified' });
+    await svc.onInsightsGenerated('v3:ccid', insightPayload(hotFacts), unsigned);
+    expect(engine.qualified).toHaveBeenCalled();
   });
 
   it('does not hand off a do-not-contact lead', async () => {
