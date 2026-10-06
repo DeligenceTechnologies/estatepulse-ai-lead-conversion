@@ -3,7 +3,9 @@ import { TenantGuard, type TenantRequest } from '../../common/guards/tenant.guar
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 
 /**
- * Read-only. There is deliberately no POST or PATCH here.
+ * Read-only. There is deliberately no POST or PATCH here. (Manual assignment,
+ * the one owner write on a lead, lives in LeadAssignmentController: it needs a
+ * signed-in owner, and this controller also accepts API keys.)
  *
  * That is the structural answer to "who owns leads": the API creates leads ONLY
  * via ingestion, and the SPA has no way to write one. The demo store in
@@ -52,6 +54,19 @@ export class LeadsController {
           },
         },
         _count: { select: { leadSubmissions: true } },
+        // The one current assignment, if any. Held to one by
+        // LeadAssignmentService, which locks the lead while it writes; `take`
+        // is belt-and-braces so a stray second row can never widen the shape.
+        lead_assignments: {
+          where: { is_current: true },
+          orderBy: { assigned_at: 'desc' },
+          take: 1,
+          select: {
+            assignment_type: true,
+            assigned_at: true,
+            agent_profiles: { select: { id: true, display_name: true } },
+          },
+        },
       },
     });
 
@@ -101,6 +116,16 @@ export class LeadsController {
             type: l.lead_sources.source_type,
             provider: l.lead_sources.provider,
             connectionMethod: l.lead_sources.connection_method,
+          }
+        : null,
+      // Null is "unassigned" — the honest state for every lead nobody has
+      // routed or handed to an agent yet.
+      assignedAgent: l.lead_assignments[0]
+        ? {
+            id: l.lead_assignments[0].agent_profiles.id,
+            name: l.lead_assignments[0].agent_profiles.display_name,
+            assignmentType: l.lead_assignments[0].assignment_type,
+            assignedAt: l.lead_assignments[0].assigned_at,
           }
         : null,
       createdAt: l.created_at,

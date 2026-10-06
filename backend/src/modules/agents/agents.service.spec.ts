@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import bcrypt from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { AppError } from '../../common/errors';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import type { GuardedPrisma } from '../../prisma/prisma.service';
@@ -56,6 +57,10 @@ interface ProfileRow {
   max_active_leads: number;
   /** Which Calendly member this agent is; null until the roster links them. */
   calendly_user_uri?: string | null;
+  /** The Cal.com equivalent. */
+  cal_user_id?: number | null;
+  /** Column default true, as in Postgres. */
+  routing_enabled?: boolean;
 }
 
 interface Tables {
@@ -65,6 +70,8 @@ interface Tables {
   agent_availability: unknown[];
   agent_territories: unknown[];
   audit_logs: Array<Record<string, unknown>>;
+  /** Office connections only (agent_id null); empty means none connected. */
+  calendar_connections: Array<{ organization_id: string; provider: string }>;
 }
 
 let seq = 0;
@@ -76,7 +83,13 @@ const nextId = (): string => `gen-${(seq += 1)}`;
  * minimum that can prove isolation — with one, every query trivially passes.
  */
 function build(
-  options: { failProfileCreate?: boolean; mailDisabled?: boolean; mailThrows?: boolean } = {},
+  options: {
+    failProfileCreate?: boolean;
+    /** Throw a P2002 from agent_profiles.create, as a lost double-click race would. */
+    profileCreateRaces?: boolean;
+    mailDisabled?: boolean;
+    mailThrows?: boolean;
+  } = {},
 ) {
   const db: Tables = {
     users: [
@@ -93,10 +106,14 @@ function build(
     agent_availability: [],
     agent_territories: [],
     audit_logs: [],
+    calendar_connections: [],
   };
 
   /** Every `where` the service handed to a read or an update, in order. */
   const wheres: Array<{ op: string; where: Record<string, unknown> }> = [];
+
+  /** The concurrently-committed row a lost race leaves behind; see profileCreateRaces. */
+  let raceWinner: ProfileRow | null = null;
 
   const userOf = (id: string): UserRow => db.users.find((u) => u.id === id)!;
 
@@ -118,7 +135,9 @@ function build(
         title: p.title,
         timezone: p.timezone,
         max_active_leads: p.max_active_leads,
+        routing_enabled: p.routing_enabled ?? true,
         calendly_user_uri: p.calendly_user_uri ?? null,
+        cal_user_id: p.cal_user_id ?? null,
         _count: { lead_assignments: 0 },
       })),
   });
@@ -130,6 +149,13 @@ function build(
         if (where['id'] === ORG_A) return { timezone: 'America/New_York', name: 'Org A Realty' };
         if (where['id'] === ORG_B) return { timezone: 'America/New_York', name: 'Org B Realty' };
         return null;
+      },
+    },
+    calendar_connections: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        wheres.push({ op: 'calendar_connections.findFirst', where });
+        const row = db.calendar_connections.find((c) => c.organization_id === where['organization_id']);
+        return row ? { provider: row.provider } : null;
       },
     },
     organization_members: {
@@ -201,6 +227,23 @@ function build(
         };
       }) => {
         if (options.failProfileCreate) throw new Error('boom: agent_profiles insert failed');
+        if (options.profileCreateRaces) {
+          // What the lost race looks like: another transaction committed the
+          // same row first. Parked outside this transaction's snapshot so the
+          // rollback below cannot undo someone else's commit.
+          raceWinner = {
+            ...(data as ProfileRow),
+            id: nextId(),
+            status: 'available',
+            timezone: data.timezone ?? 'America/Chicago',
+            title: null,
+            max_active_leads: 25,
+          };
+          throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002',
+            clientVersion: 'test',
+          });
+        }
         // Honours supplied values and falls back to the column defaults the way
         // Postgres would - a fake that always answered the default could not
         // tell a service that passes one from a service that does not.
@@ -213,7 +256,13 @@ function build(
           max_active_leads: data.max_active_leads ?? 25,
         };
         db.agent_profiles.push(row);
-        return { id: row.id, title: row.title, timezone: row.timezone, max_active_leads: row.max_active_leads };
+        return {
+          id: row.id,
+          title: row.title,
+          timezone: row.timezone,
+          max_active_leads: row.max_active_leads,
+          routing_enabled: row.routing_enabled ?? true,
+        };
       },
       update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         wheres.push({ op: 'agent_profiles.update', where });
@@ -249,6 +298,10 @@ function build(
         }));
         db.agent_profiles = snapshot.agent_profiles.map((p) => ({ ...p }));
         db.audit_logs = snapshot.audit_logs.map((a) => ({ ...a }));
+        if (raceWinner) {
+          db.agent_profiles.push(raceWinner);
+          raceWinner = null;
+        }
         throw err;
       }
     },
@@ -372,7 +425,9 @@ describe('AgentsService.list', () => {
         'maxActiveLeads',
         'memberSince',
         'phone',
+        'profileId',
         'role',
+        'takingLeads',
         'title',
         'status',
         'timezone',
@@ -1123,6 +1178,174 @@ describe('AgentsService.create — credentials email', () => {
     for (const member of roster) {
       expect(member).not.toHaveProperty('credentialsEmail');
     }
+  });
+});
+
+// --- owner who also takes leads ---------------------------------------------
+
+describe('AgentsService.setTakingLeads', () => {
+  it("mints the owner's agent profile on first switch-on", async () => {
+    const { service, db } = build();
+
+    const me = await service.setTakingLeads(ORG_A, OWNER_A, true);
+
+    const profiles = db.agent_profiles.filter((p) => p.user_id === OWNER_A);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].organization_id).toBe(ORG_A);
+    expect(profiles[0].display_name).toBe('Ada Owner');
+    // The login email, so a Calendly seat under the same address matches.
+    expect(profiles[0].email).toBe('owner-a@example.test');
+    // The organization's zone, not the US column default.
+    expect(profiles[0].timezone).toBe('America/New_York');
+    expect(me).toMatchObject({ role: 'owner', hasProfile: true, takingLeads: true, maxActiveLeads: 25 });
+    expect(db.audit_logs.at(-1)).toMatchObject({
+      action: 'member.routing_enabled',
+      actor_id: OWNER_A,
+      entity_id: OWNER_A,
+      organization_id: ORG_A,
+    });
+  });
+
+  it('is idempotent: switching on twice writes one profile and one audit row', async () => {
+    const { service, db } = build();
+
+    await service.setTakingLeads(ORG_A, OWNER_A, true);
+    const again = await service.setTakingLeads(ORG_A, OWNER_A, true);
+
+    expect(db.agent_profiles.filter((p) => p.user_id === OWNER_A)).toHaveLength(1);
+    expect(db.audit_logs.filter((a) => a['action'] === 'member.routing_enabled')).toHaveLength(1);
+    expect(again.takingLeads).toBe(true);
+  });
+
+  it('switching off keeps the profile and only stops new leads', async () => {
+    const { service, db } = build();
+    await service.setTakingLeads(ORG_A, OWNER_A, true);
+    const profileId = db.agent_profiles.find((p) => p.user_id === OWNER_A)!.id;
+
+    const off = await service.setTakingLeads(ORG_A, OWNER_A, false);
+
+    const profile = db.agent_profiles.find((p) => p.user_id === OWNER_A)!;
+    expect(profile.id).toBe(profileId);
+    expect(profile.routing_enabled).toBe(false);
+    expect(off).toMatchObject({ hasProfile: true, takingLeads: false });
+    expect(db.audit_logs.at(-1)).toMatchObject({ action: 'member.routing_disabled' });
+  });
+
+  it('switching back on resumes the same profile rather than minting another', async () => {
+    const { service, db } = build();
+    await service.setTakingLeads(ORG_A, OWNER_A, true);
+    const profileId = db.agent_profiles.find((p) => p.user_id === OWNER_A)!.id;
+    await service.setTakingLeads(ORG_A, OWNER_A, false);
+
+    const on = await service.setTakingLeads(ORG_A, OWNER_A, true);
+
+    const profiles = db.agent_profiles.filter((p) => p.user_id === OWNER_A);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].id).toBe(profileId);
+    expect(on.takingLeads).toBe(true);
+  });
+
+  it('switching off an owner who never took leads creates nothing', async () => {
+    const { service, db } = build();
+
+    const off = await service.setTakingLeads(ORG_A, OWNER_A, false);
+
+    expect(db.agent_profiles).toHaveLength(0);
+    expect(db.audit_logs).toHaveLength(0);
+    expect(off).toMatchObject({ hasProfile: false, takingLeads: false });
+  });
+
+  it('refuses an agent, even though the switch would only touch themselves', async () => {
+    const { service, db } = build();
+
+    await expect(service.setTakingLeads(ORG_A, AGENT_A, true)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(db.agent_profiles).toHaveLength(0);
+  });
+
+  it("writes the profile in the caller's own organization only", async () => {
+    const { service, db, wheres } = build();
+
+    await service.setTakingLeads(ORG_B, OWNER_B, true);
+
+    expect(db.agent_profiles).toHaveLength(1);
+    expect(db.agent_profiles[0]).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
+    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
+      expect(read.where).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
+    }
+  });
+
+  it('treats a lost double-click race as success', async () => {
+    const { service, db } = build({ profileCreateRaces: true });
+
+    const me = await service.setTakingLeads(ORG_A, OWNER_A, true);
+
+    expect(db.agent_profiles.filter((p) => p.user_id === OWNER_A)).toHaveLength(1);
+    expect(me.takingLeads).toBe(true);
+  });
+});
+
+describe('AgentsService.updateProfile — the owner who takes leads', () => {
+  it('lets an owner edit their own profile once they take leads', async () => {
+    const { service, db } = build();
+    await service.setTakingLeads(ORG_A, OWNER_A, true);
+
+    const updated = await service.updateProfile(ORG_A, OWNER_A, OWNER_A, {
+      title: 'Broker',
+      maxActiveLeads: 40,
+      timezone: 'Asia/Kolkata',
+    });
+
+    const profile = db.agent_profiles.find((p) => p.user_id === OWNER_A)!;
+    expect(profile).toMatchObject({ title: 'Broker', max_active_leads: 40, timezone: 'Asia/Kolkata' });
+    expect(updated).toMatchObject({ role: 'owner', title: 'Broker', maxActiveLeads: 40 });
+    // Still an owner: an edit never changes the role.
+    expect(db.organization_members.find((m) => m.user_id === OWNER_A)!.role).toBe('owner');
+  });
+
+  it("never lets one owner edit another owner's profile", async () => {
+    const { service, db } = build();
+    const OWNER_A2 = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    db.users.push({ id: OWNER_A2, email: 'owner-a2@example.test', password_hash: 'x', first_name: 'Cy', last_name: 'Co', phone: null });
+    db.organization_members.push({
+      id: 'm-a-owner2',
+      organization_id: ORG_A,
+      user_id: OWNER_A2,
+      role: 'owner',
+      status: 'active',
+      joined_at: new Date('2026-03-01'),
+      created_at: new Date('2026-03-01'),
+      updated_at: new Date('2026-03-01'),
+    });
+    await service.setTakingLeads(ORG_A, OWNER_A2, true);
+
+    await expect(
+      service.updateProfile(ORG_A, OWNER_A, OWNER_A2, { maxActiveLeads: 1 }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(db.agent_profiles.find((p) => p.user_id === OWNER_A2)!.max_active_leads).toBe(25);
+  });
+});
+
+describe('AgentsService roster — calendarLinked follows the connected provider', () => {
+  const linkedAgent = async (provider: string | null) => {
+    const { service, db } = build();
+    const created = await service.create(ORG_A, OWNER_A, VALID);
+    Object.assign(db.agent_profiles.find((p) => p.user_id === created.id)!, {
+      calendly_user_uri: 'https://api.calendly.com/users/ABC',
+    });
+    if (provider) db.calendar_connections.push({ organization_id: ORG_A, provider });
+    return (await service.list(ORG_A)).find((m) => m.id === created.id)!;
+  };
+
+  it('is linked when the office is on Calendly and the agent has a Calendly member', async () => {
+    expect((await linkedAgent('calendly')).calendarLinked).toBe(true);
+  });
+
+  it('is NOT linked by a leftover Calendly URI once the office is on Cal.com', async () => {
+    expect((await linkedAgent('cal')).calendarLinked).toBe(false);
+  });
+
+  it('is not linked when the office has no calendar at all', async () => {
+    expect((await linkedAgent(null)).calendarLinked).toBe(false);
   });
 });
 

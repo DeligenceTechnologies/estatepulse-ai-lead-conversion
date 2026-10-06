@@ -8,6 +8,7 @@ import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter'
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentsModule } from '../agents/agents.module';
+import { EventsModule } from '../events/events.module';
 import { LeadsModule } from './leads.module';
 
 /**
@@ -75,7 +76,7 @@ async function makeLead(fields: Record<string, unknown>): Promise<string> {
 
 before(async () => {
   const moduleRef = await Test.createTestingModule({
-    imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AgentsModule, LeadsModule],
+    imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, EventsModule, AgentsModule, LeadsModule],
   }).compile();
   app = moduleRef.createNestApplication();
   app.useGlobalFilters(new AllExceptionsFilter());

@@ -12,7 +12,8 @@ import {
   BarChart3,
   Building2,
   LogOut,
-  Webhook
+  Webhook,
+  Clock
 } from 'lucide-react';
 import { useApp, AppView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
@@ -23,7 +24,7 @@ export const Sidebar: React.FC = () => {
     setActiveView, 
     leads
   } = useApp();
-  const { user, role, organization, logout } = useAuth();
+  const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
 
@@ -61,6 +62,11 @@ export const Sidebar: React.FC = () => {
       label: 'Agent Team & Routing', 
       icon: <UserCheck className="w-4 h-4" /> 
     },
+    // Only for an owner who takes leads: an agent profile is what the screen
+    // reads and writes, and an owner without one has no hours to set.
+    ...(isOwner && agentProfileId
+      ? [{ id: 'my_availability' as const, label: 'My Availability', icon: <Clock className="w-4 h-4" /> }]
+      : []),
     {
       id: 'integrations',
       label: 'Integrations & Webhooks',

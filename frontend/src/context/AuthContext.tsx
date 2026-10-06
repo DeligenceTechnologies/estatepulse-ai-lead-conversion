@@ -12,6 +12,7 @@ import {
   type AuthUser,
   type MeResponse,
   type Role,
+  type TeamSize,
 } from '../lib/api';
 import { startIdleWatch } from '../lib/idle';
 
@@ -39,7 +40,13 @@ interface AuthContextType {
     firstName: string;
     lastName: string;
     organizationName: string;
+    teamSize: TeamSize;
   }) => Promise<void>;
+  /**
+   * Re-reads /me. For changes the server made to who this user is — an owner
+   * turning on "I also take leads" gains an agentProfileId — without a re-login.
+   */
+  refreshSession: () => Promise<void>;
   logout: () => void;
   retryRestore: () => void;
 }
@@ -133,23 +140,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   /**
-   * signup and login return {token, user, organization, role} — agentProfileId
-   * is a /me field only, so it stays null until the next session restore.
-   * Nothing in this slice reads it; refetching purely to fill it in would be a
-   * second round trip for an unused value.
+   * signup and login answer agentProfileId alongside the token, the same value
+   * /me gives, so an owner who takes leads is recognised from the first render.
    */
   const login: AuthContextType['login'] = async (email, password) => {
     const session = await api.login({ email, password });
     setToken(session.token);
     setExplicitLogout(false);
-    applySession({ ...session, agentProfileId: null });
+    applySession(session);
   };
 
   const signup: AuthContextType['signup'] = async (input) => {
     const session = await api.signup(input);
     setToken(session.token);
     setExplicitLogout(false);
-    applySession({ ...session, agentProfileId: null });
+    applySession(session);
+  };
+
+  const refreshSession: AuthContextType['refreshSession'] = async () => {
+    applySession(await api.me());
   };
 
   const endSession = (): void => {
@@ -200,6 +209,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         explicitLogout,
         login,
         signup,
+        refreshSession,
         logout,
         retryRestore,
       }}

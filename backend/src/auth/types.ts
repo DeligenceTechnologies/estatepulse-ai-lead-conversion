@@ -30,6 +30,12 @@ export interface AuthSessionDTO {
   user: AuthUserDTO;
   organization: AuthOrgDTO;
   role: Role;
+  /**
+   * The same field /me answers. On the session too, so a client knows from the
+   * first response whether this user takes leads — an owner who signed up as
+   * "Just me" has one — without a second round trip.
+   */
+  agentProfileId: string | null;
 }
 
 /** Response body for GET /api/auth/me. */

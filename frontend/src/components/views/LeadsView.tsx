@@ -12,7 +12,8 @@ import {
   Webhook,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadStatus, LeadTemperature } from '../../types';
@@ -38,6 +39,12 @@ const humanize = (v: string | null | undefined) => (v ? v.replace(/_/g, ' ') : n
 
 const fullName = (l: LiveLead) =>
   [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead';
+
+/** "SP" for "Sunny Patel"; the first two letters of a one-word name. */
+const initialsOf = (name: string) => {
+  const parts = name.trim().split(/\s+/);
+  return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase();
+};
 
 const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
 
@@ -112,7 +119,8 @@ const temperatureTone = (t: string | null) => {
 const toLead = (l: LiveLead): Lead => ({
   id: l.id,
   organizationId: 'live',
-  assignedAgentId: '',
+  assignedAgentId: l.assignedAgent?.id ?? '',
+  assignedAgentName: l.assignedAgent?.name,
   firstName: l.firstName ?? '',
   lastName: l.lastName ?? '',
   email: l.email ?? '',
@@ -149,8 +157,9 @@ interface LeadsViewProps {
 }
 
 export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
+  // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
+  const { agentProfileId } = useAuth();
   const {
-    agents,
     setSelectedLeadId,
     setPreCallLeadId,
     registerExternalLeads,
@@ -177,9 +186,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // together cost far less than the old 5-second interval did alone.
   const { connected } = useLiveEvents(
     useCallback((e) => {
-      if (e.type === 'lead.created') invalidate();
+      if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
     }, [invalidate]),
   );
+
+  // This tab's own assignments refetch at once, stream or no stream.
+  useEffect(() => {
+    const onChanged = (): void => invalidate();
+    window.addEventListener(LEADS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, onChanged);
+  }, [invalidate]);
 
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
@@ -204,6 +220,19 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     return [...seen].map(([id, name]) => ({ id, name }));
   }, [rows]);
 
+  // Agent options from real assignments, like the source options above: an
+  // agent appears once they hold a lead. The reader's own entry, when they take
+  // leads, is first and reads "Mine".
+  const agentOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const l of rows) {
+      if (l.assignedAgent) seen.set(l.assignedAgent.id, l.assignedAgent.id === agentProfileId ? 'Mine' : l.assignedAgent.name);
+    }
+    return [...seen]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name));
+  }, [rows, agentProfileId]);
+
   const filteredLeads = rows.filter(lead => {
     // Tab filter
     if (selectedTab === 'hot' && lead.temperature !== 'hot') return false;
@@ -215,8 +244,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     // Source filter
     if (sourceFilter !== 'all' && lead.source?.id !== sourceFilter) return false;
 
-    // Agent filter — ingestion does not route yet, so every live lead is unassigned.
-    if (agentFilter !== 'all' && agentFilter !== 'unassigned') return false;
+    // Agent filter
+    if (agentFilter === 'unassigned' && lead.assignedAgent) return false;
+    if (agentFilter !== 'all' && agentFilter !== 'unassigned' && lead.assignedAgent?.id !== agentFilter) return false;
 
     // Search query
     if (searchQuery.trim()) {
@@ -375,7 +405,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             >
               <option value="all">All Assigned Agents</option>
               <option value="unassigned">Unassigned</option>
-              {agents.map(a => (
+              {agentOptions.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
@@ -500,14 +530,25 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       </span>
                     </td>
 
-                    {/* Agent — ingestion does not route to an agent yet. */}
+                    {/* Agent — the current assignment, or honestly unassigned. */}
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-[10px] font-bold text-slate-500 flex items-center justify-center">
-                          {DASH}
+                      {lead.assignedAgent ? (
+                        <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${new Date(lead.assignedAgent.assignedAt).toLocaleString()}`}>
+                          <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[9px] font-bold text-emerald-300 flex items-center justify-center">
+                            {initialsOf(lead.assignedAgent.name)}
+                          </div>
+                          <span className="text-slate-200 font-medium">
+                            {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
+                          </span>
                         </div>
-                        <span className="text-slate-500">Unassigned</span>
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-[10px] font-bold text-slate-500 flex items-center justify-center">
+                            {DASH}
+                          </div>
+                          <span className="text-slate-500">Unassigned</span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Status — hover shows why (e.g. a failed/unanswered call) */}

@@ -37,6 +37,10 @@ export const Header: React.FC = () => {
       title: 'Agent Team & Routing Engine', 
       subtitle: 'Manage agent schedules, calendar links, and round-robin routing rules' 
     },
+    my_availability: {
+      title: 'My Availability',
+      subtitle: 'Your working hours and where you stand on the office calendar'
+    },
     integrations: { 
       title: 'Integrations & Webhooks Hub', 
       subtitle: 'Follow Up Boss CRM, Twilio, Retell AI, and Calendly API connections' 

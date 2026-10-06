@@ -12,6 +12,7 @@
     "test:auth": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/auth/auth.test.js",
     "test:agents": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agents.test.js",
     "test:agent-me": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agent-me.test.js",
+    "test:lead-assignment": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/lead-assignment.test.js",
     "test:dashboard": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/owner-dashboard.test.js",
     "db:pull": "prisma db pull",
     "db:generate": "prisma generate",

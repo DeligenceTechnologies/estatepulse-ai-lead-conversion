@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/auth.decorators';
@@ -19,8 +20,10 @@ import { AgentsService } from './agents.service';
 import {
   createAgentSchema,
   isStatusUpdate,
+  takingLeadsSchema,
   updateAgentSchema,
   type CreateAgentInput,
+  type TakingLeadsInput,
   type UpdateAgentInput,
 } from './schemas';
 import type { CreateAgentResultDTO, OrganizationMemberDTO } from './types';
@@ -82,4 +85,19 @@ export class AgentsController {
       : this.agents.updateProfile(auth.organizationId, auth.userId, userId, body);
   }
 
+  /**
+   * The owner's "I also take leads" switch, for the CALLER only — there is no
+   * id in the path or body to point it at anyone else. PUT because the body is
+   * the whole desired state and repeating it changes nothing.
+   *
+   * A literal path, so it can never be read as a :userId: that route is PATCH
+   * and ParseUUIDPipe would refuse "me" regardless.
+   */
+  @Put('me/taking-leads')
+  setTakingLeads(
+    @CurrentUser() auth: AuthContext,
+    @Body(new ZodValidationPipe(takingLeadsSchema, 'Invalid taking-leads switch')) body: TakingLeadsInput,
+  ): Promise<OrganizationMemberDTO> {
+    return this.agents.setTakingLeads(auth.organizationId, auth.userId, body.enabled);
+  }
 }

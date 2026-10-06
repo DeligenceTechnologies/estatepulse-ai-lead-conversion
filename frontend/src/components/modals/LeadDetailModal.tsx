@@ -23,9 +23,12 @@ import {
   Volume2
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { Lead, Channel } from '../../types';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import { messageFor } from '../../lib/api';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const LeadDetailModal: React.FC = () => {
   const { 
@@ -49,9 +52,14 @@ export const LeadDetailModal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments' | 'audit'>('overview');
   const [smsInput, setSmsInput] = useState('');
 
+  // The assignment just made from this modal, shown at once rather than after
+  // the pipeline's refetch lands. Cleared when a different lead is opened.
+  const [assigned, setAssigned] = useState<{ id: string; name: string } | null>(null);
+
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
   useEffect(() => {
+    setAssigned(null);
     setFlow(null);
     if (!selectedLeadId) return;
     let alive = true;
@@ -88,6 +96,17 @@ export const LeadDetailModal: React.FC = () => {
   const leadAppointments = appointments.filter(a => a.leadId === lead.id);
   const leadLogs = auditLogs.filter(log => log.entityId === lead.id);
   const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
+
+  // A database lead carries its real assignment; only a demo-store lead is
+  // resolved against the demo roster. Told apart by id, because the same
+  // database lead can reach here through either of two loaders (see findLead),
+  // and only a database row has a UUID — demo leads are `lead_<timestamp>`.
+  const isLive = UUID.test(lead.id);
+  const liveAgent =
+    assigned ?? (lead.assignedAgentId && lead.assignedAgentName ? { id: lead.assignedAgentId, name: lead.assignedAgentName } : null);
+  const agentLabel = isLive
+    ? liveAgent?.name ?? 'Unassigned'
+    : lead.assignedAgentId ? assignedAgent.name : 'Unassigned';
 
   const handleSendSms = (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,7 +178,7 @@ export const LeadDetailModal: React.FC = () => {
                 <span>{lead.email}</span>
                 <span>•</span>
                 <span className="text-slate-300 font-medium">
-                  Agent: {lead.assignedAgentId ? assignedAgent.name : 'Unassigned'}
+                  Agent: {agentLabel}
                 </span>
                 <span>•</span>
                 <span className="text-emerald-400 font-medium">Source: {lead.source}</span>
@@ -169,6 +188,10 @@ export const LeadDetailModal: React.FC = () => {
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2">
+            {isLive && (
+              <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
+            )}
+
             {/* Only offered while the strategy has not started: once it has, the
                 server ignores a second enrol, so the button would do nothing. */}
             {flow?.phase === 'not_started' && (

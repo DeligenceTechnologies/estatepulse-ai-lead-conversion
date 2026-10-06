@@ -50,7 +50,11 @@ export interface AuthSession {
   user: AuthUser;
   organization: AuthOrganization;
   role: Role;
+  /** Non-null when this user takes leads — an agent, or an owner who does too. */
+  agentProfileId: string | null;
 }
+
+export type TeamSize = 'solo' | 'team';
 
 export interface MeResponse {
   user: AuthUser;
@@ -275,6 +279,8 @@ export const api = {
     firstName: string;
     lastName: string;
     organizationName: string;
+    /** "Just me" also makes the owner an agent; "I have a team" does not. */
+    teamSize: TeamSize;
   }) =>
     apiFetch<AuthSession>('/auth/signup', {
       method: 'POST',
