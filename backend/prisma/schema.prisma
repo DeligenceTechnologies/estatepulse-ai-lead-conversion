@@ -560,6 +560,8 @@ model organizations {
   default_region           String                     @default("US") @db.VarChar(2)
   call_recording_enabled   Boolean                    @default(true)
   call_recording_announce  Boolean                    @default(true)
+  lead_hot_threshold       Int                        @default(75)
+  lead_warm_threshold      Int                        @default(45)
   agent_availability       agent_availability[]
   agent_profiles           agent_profiles[]
   agent_territories        agent_territories[]
