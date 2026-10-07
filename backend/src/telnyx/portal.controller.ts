@@ -194,6 +194,14 @@ export class PortalLeadsController {
   @Post(':id/enroll')
   @HttpCode(HttpStatus.ACCEPTED)
   async enroll(@OrgId() orgId: string, @Param('id') id: string) {
+    // Checked here rather than left to the engine, which returns silently on
+    // an unknown lead (right for its background callers) and short-circuits on
+    // its in-memory map before any lookup. Another tenant's lead is a 404.
+    const lead = await this.prisma.leads.findFirst({
+      where: { id, organization_id: orgId },
+      select: { id: true },
+    });
+    if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
     await this.engine.enroll(orgId, id);
     return { ok: true };
   }
