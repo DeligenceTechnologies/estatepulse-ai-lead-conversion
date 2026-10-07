@@ -651,12 +651,13 @@ export class FollowupService {
   /**
    * Add leads to a sequence, by hand or in bulk.
    *
-   * Inserted one at a time rather than with createMany, deliberately: the
-   * partial unique index is what stops a lead being enrolled twice, and
-   * createMany fails the WHOLE batch on the first lead who is already in a
-   * sequence — which in a bulk add is the common case, not the exception. One
-   * insert each means the rest still go in and the user is told who was left
-   * out and why.
+   * One INSERT for every eligible lead, skipping duplicates. The partial unique
+   * index is what stops a lead being enrolled twice, and in a bulk add a lead
+   * already in a sequence is the common case, not the exception: ON CONFLICT DO
+   * NOTHING leaves those out and inserts the rest, and the rows that come back
+   * say which went in — every other eligible lead is reported already_enrolled,
+   * exactly as the per-lead unique-violation used to be. One statement rather
+   * than one per lead, which at 500 leads was over a minute of round trips.
    */
   async enrollLeads(
     orgId: string,
@@ -664,39 +665,44 @@ export class FollowupService {
     input: EnrollInput,
     userId: string | null,
   ): Promise<EnrollResult> {
-    const sequence = await this.ownedSequence(orgId, sequenceId);
+    // Independent reads, together. The checks below still run in the same
+    // order, so the same input fails with the same error.
+    const [sequence, first] = await Promise.all([
+      this.ownedSequence(orgId, sequenceId),
+      this.prisma.sequence_steps.findFirst({
+        where: { organization_id: orgId, sequence_id: sequenceId },
+        orderBy: { step_order: 'asc' },
+      }),
+    ]);
     if (sequence.status !== 'active') {
       throw new AppError(
         'VALIDATION_ERROR',
         'That sequence is not active, so nothing can be added to it.',
       );
     }
-
-    const first = await this.prisma.sequence_steps.findFirst({
-      where: { organization_id: orgId, sequence_id: sequenceId },
-      orderBy: { step_order: 'asc' },
-    });
     if (!first) throw new AppError('VALIDATION_ERROR', 'That sequence has no steps yet.');
 
     const where: Prisma.leadsWhereInput = input.filter
       ? this.leadWhere(orgId, input.filter)
       : { organization_id: orgId, id: { in: input.leadIds ?? [] } };
 
-    const matchedRows = await this.prisma.leads.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: MAX_ENROLL_PER_CALL,
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        dnc_status: true,
-        status: true,
-        first_contact_at: true,
-        automation_paused: true,
-      },
-    });
-    const matched = await this.prisma.leads.count({ where });
+    const [matchedRows, matched] = await Promise.all([
+      this.prisma.leads.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: MAX_ENROLL_PER_CALL,
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          dnc_status: true,
+          status: true,
+          first_contact_at: true,
+          automation_paused: true,
+        },
+      }),
+      this.prisma.leads.count({ where }),
+    ]);
 
     const nameOf = (l: { first_name: string | null; last_name: string | null }) =>
       [l.first_name, l.last_name].filter(Boolean).join(' ').trim() || 'Unknown lead';
@@ -737,28 +743,29 @@ export class FollowupService {
     const due = nextAllowedAt(tz, quiet, new Date(Date.now() + first.delay_minutes * 60_000));
     const enrolledBy = input.filter ? 'bulk' : 'manual';
 
-    let enrolled = 0;
+    const inserted =
+      eligible.length > 0
+        ? await this.prisma.sequence_enrollments.createManyAndReturn({
+            data: eligible.map((lead) => ({
+              organization_id: orgId,
+              lead_id: lead.id,
+              sequence_id: sequenceId,
+              current_step: first.step_order,
+              status: 'active',
+              next_action_at: due,
+              enrolled_by: enrolledBy,
+              enrolled_by_user_id: userId,
+            })),
+            skipDuplicates: true,
+            select: { lead_id: true },
+          })
+        : [];
+    const insertedIds = new Set(inserted.map((r) => r.lead_id));
+    const enrolled = insertedIds.size;
+    // In the order they were tried, as the per-lead loop reported them.
     for (const lead of eligible) {
-      try {
-        await this.prisma.sequence_enrollments.create({
-          data: {
-            organization_id: orgId,
-            lead_id: lead.id,
-            sequence_id: sequenceId,
-            current_step: first.step_order,
-            status: 'active',
-            next_action_at: due,
-            enrolled_by: enrolledBy,
-            enrolled_by_user_id: userId,
-          },
-        });
-        enrolled++;
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-          skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'already_enrolled' });
-          continue;
-        }
-        throw e;
+      if (!insertedIds.has(lead.id)) {
+        skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'already_enrolled' });
       }
     }
 
