@@ -233,7 +233,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <h3 className="text-base font-bold text-white tracking-tight">
                   Quick Reports &amp; Monthly Performance PDF
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded-full text-2xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   Audit Grade
                 </span>
               </div>
@@ -266,7 +266,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
               </div>
               <button 
                 onClick={() => setExportSuccess(null)} 
-                className="text-emerald-400 hover:text-white underline text-[11px]"
+                className="text-emerald-400 hover:text-white underline text-xs"
               >
                 Dismiss
               </button>
@@ -294,7 +294,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <option value="Q3 2026 Summary">Q3 2026 Executive Summary</option>
                 <option value="Year-to-Date 2026">Year-to-Date 2026</option>
               </select>
-              <span className="text-[10px] text-slate-500 block">
+              <span className="text-2xs text-slate-500 block">
                 Brokerage: <strong className="text-slate-400">{orgSettings?.name || 'Austin Home Advisors'}</strong>
               </span>
             </div>
@@ -309,7 +309,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSelectTemplate('full')}
-                  className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-medium border transition-all ${
+                  className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium border transition-all ${
                     reportTemplate === 'full' 
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
@@ -320,7 +320,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSelectTemplate('executive')}
-                  className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-medium border transition-all ${
+                  className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium border transition-all ${
                     reportTemplate === 'executive' 
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
@@ -331,7 +331,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSelectTemplate('marketing')}
-                  className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-medium border transition-all ${
+                  className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium border transition-all ${
                     reportTemplate === 'marketing' 
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
@@ -342,7 +342,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSelectTemplate('roi')}
-                  className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-medium border transition-all ${
+                  className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium border transition-all ${
                     reportTemplate === 'roi' 
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
@@ -359,7 +359,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <Sliders className="w-3.5 h-3.5 text-purple-400" />
                 Include in PDF
               </label>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px]">
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
                 <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
@@ -407,7 +407,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <FileText className="w-3.5 h-3.5 text-emerald-400" />
                 Executive Commentary &amp; Strategy Notes (Included in PDF)
               </label>
-              <span className="text-[10px] text-slate-500">Appears in official document</span>
+              <span className="text-2xs text-slate-500">Appears in official document</span>
             </div>
             <textarea
               id="report-executive-notes"
@@ -426,7 +426,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                 <Layers className="w-3.5 h-3.5 text-cyan-400" />
                 Live Document Preview: {selectedMonth}
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">
+              <span className="text-2xs text-slate-400 font-mono">
                 Standard A4 Portrait • Printable Vector Vector PDF
               </span>
             </div>
@@ -440,11 +440,11 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                   <div className="text-sm font-bold text-white tracking-wide">
                     {orgSettings?.name || 'Austin Home Advisors'} — Monthly Performance Report
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-xs text-slate-400">
                     Period: <strong className="text-emerald-300">{selectedMonth}</strong> | Prepared by: {orgSettings?.aiAgentName || 'Alex'} (EstatePulse AI)
                   </div>
                 </div>
-                <div className="text-right text-[10px] text-slate-400 font-mono">
+                <div className="text-right text-2xs text-slate-400 font-mono">
                   <div>STATUS: AUDITED</div>
                   <div className="text-emerald-400">TCPA COMPLIANT</div>
                 </div>
@@ -453,39 +453,39 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
               {/* KPI Mini Grid */}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
                 <div className="bg-slate-900 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Contact Rate</div>
+                  <div className="text-2xs text-slate-400">Contact Rate</div>
                   <div className="text-base font-bold text-white font-mono">92%</div>
                 </div>
                 <div className="bg-slate-900 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Speed to Lead</div>
+                  <div className="text-2xs text-slate-400">Speed to Lead</div>
                   <div className="text-base font-bold text-emerald-400 font-mono">38s</div>
                 </div>
                 <div className="bg-slate-900 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Qualification</div>
+                  <div className="text-2xs text-slate-400">Qualification</div>
                   <div className="text-base font-bold text-cyan-400 font-mono">71%</div>
                 </div>
                 <div className="bg-slate-900 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Appointments</div>
+                  <div className="text-2xs text-slate-400">Appointments</div>
                   <div className="text-base font-bold text-purple-400 font-mono">{appointments.length || 12}</div>
                 </div>
                 <div className="bg-slate-900 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Time Saved</div>
+                  <div className="text-2xs text-slate-400">Time Saved</div>
                   <div className="text-base font-bold text-amber-400 font-mono">42 hrs</div>
                 </div>
                 <div className="bg-emerald-950/60 p-2 rounded-lg border border-emerald-500/30">
-                  <div className="text-[10px] text-emerald-300">Added GCI</div>
+                  <div className="text-2xs text-emerald-300">Added GCI</div>
                   <div className="text-base font-bold text-emerald-400 font-mono">${estimatedRevenue.toLocaleString()}</div>
                 </div>
               </div>
 
               {/* Source & Funnel Preview */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-1.5">
                   <span className="font-semibold text-slate-300 block flex items-center gap-1">
                     <PieChart className="w-3.5 h-3.5 text-blue-400" />
                     Inbound Source Attribution
                   </span>
-                  <div className="space-y-1 text-[10px]">
+                  <div className="space-y-1 text-2xs">
                     {sources.map(s => (
                       <div key={s.name} className="flex justify-between text-slate-400 border-b border-slate-800/60 pb-1">
                         <span>{s.name}</span>
@@ -500,18 +500,18 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
                     <Flame className="w-3.5 h-3.5 text-rose-400" />
                     Lead Segmentation
                   </span>
-                  <div className="flex gap-2 text-center text-[10px]">
+                  <div className="flex gap-2 text-center text-2xs">
                     <div className="flex-1 bg-rose-950/30 border border-rose-500/30 p-1.5 rounded">
                       <div className="text-rose-300 font-bold">Hot: {hotCount}</div>
-                      <div className="text-[9px] text-slate-400">&lt;60 days</div>
+                      <div className="text-2xs text-slate-400">&lt;60 days</div>
                     </div>
                     <div className="flex-1 bg-amber-950/30 border border-amber-500/30 p-1.5 rounded">
                       <div className="text-amber-300 font-bold">Warm: {warmCount}</div>
-                      <div className="text-[9px] text-slate-400">3-6 mo</div>
+                      <div className="text-2xs text-slate-400">3-6 mo</div>
                     </div>
                     <div className="flex-1 bg-cyan-950/30 border border-cyan-500/30 p-1.5 rounded">
                       <div className="text-cyan-300 font-bold">Cold: {coldCount}</div>
-                      <div className="text-[9px] text-slate-400">Nurture</div>
+                      <div className="text-2xs text-slate-400">Nurture</div>
                     </div>
                   </div>
                 </div>
@@ -544,11 +544,11 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
               type="button"
               onClick={handleExportPDF}
               disabled={isExporting}
-              className="flex-1 sm:flex-none px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition-all shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-5 py-2 rounded-xl text-xs font-bold text-on-accent bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition-all shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2"
             >
               {isExporting ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-on-accent border-t-transparent rounded-full animate-spin" />
                   <span>Generating PDF...</span>
                 </>
               ) : (

@@ -16,13 +16,13 @@ const Card: React.FC<{
 }> = ({ label, value, hint, icon }) => (
   <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-2">
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[11px] text-slate-400 font-semibold">{label}</span>
+      <span className="text-xs text-slate-400 font-semibold">{label}</span>
       <span className="text-slate-500">{icon}</span>
     </div>
     <div className="text-2xl font-bold text-white font-mono">
       {value === null ? <Loader2 className="w-5 h-5 animate-spin text-slate-600" /> : value}
     </div>
-    <p className="text-[10px] text-slate-500 leading-relaxed">{hint}</p>
+    <p className="text-2xs text-slate-500 leading-relaxed">{hint}</p>
   </div>
 );
 

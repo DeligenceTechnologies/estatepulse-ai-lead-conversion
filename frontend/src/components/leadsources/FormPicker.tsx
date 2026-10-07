@@ -40,7 +40,7 @@ export const FormPicker: React.FC<{
       <div className="text-center space-y-2 py-6">
         <FileQuestion className="w-6 h-6 text-slate-600 mx-auto" />
         <div className="text-xs text-slate-400">No forms in this account yet.</div>
-        <div className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+        <div className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
           Build and publish a form with your provider, then refresh.
         </div>
         <button
@@ -77,7 +77,7 @@ export const FormPicker: React.FC<{
 
       {/* The picker cannot detect this for sources created the old way:
           external_form_id is null on every one of them. */}
-      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2 text-[11px] text-amber-200 leading-relaxed flex gap-2">
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2 text-xs text-amber-200 leading-relaxed flex gap-2">
         <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
         Already pasted our webhook URL into one of these by hand? Remove it there first — otherwise
         every submission arrives twice.
@@ -101,7 +101,7 @@ export const FormPicker: React.FC<{
             >
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-white truncate">{f.name}</div>
-                <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
+                <div className="text-2xs text-slate-500 flex items-center gap-2 mt-0.5">
                   {f.status && <span className="font-mono">{f.status.toLowerCase()}</span>}
                   <span>{f.submissionCount ?? 0} submissions</span>
                   {f.isClosed && <span className="text-amber-400">closed</span>}
@@ -114,7 +114,7 @@ export const FormPicker: React.FC<{
                     e.stopPropagation();
                     onOpenSource(f.connectedLeadSourceId!);
                   }}
-                  className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold shrink-0 transition-colors cursor-pointer flex items-center gap-1"
+                  className="text-2xs text-cyan-400 hover:text-cyan-300 font-semibold shrink-0 transition-colors cursor-pointer flex items-center gap-1"
                 >
                   connected
                   <ExternalLink className="w-3 h-3" />
@@ -131,7 +131,7 @@ export const FormPicker: React.FC<{
         })}
 
         {visible.length === 0 && (
-          <div className="text-[11px] text-slate-500 text-center py-4">No form matches "{query}".</div>
+          <div className="text-xs text-slate-500 text-center py-4">No form matches "{query}".</div>
         )}
       </div>
     </div>

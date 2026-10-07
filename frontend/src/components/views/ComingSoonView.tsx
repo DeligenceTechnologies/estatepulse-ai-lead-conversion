@@ -17,7 +17,7 @@ export const ComingSoonView: React.FC<{ title: string }> = ({ title }) => (
 
       <div className="flex items-center gap-2">
         <h2 className="text-xl font-bold text-white tracking-tight">{title}</h2>
-        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800/40">
+        <span className="text-2xs uppercase font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800/40">
           Pending
         </span>
       </div>

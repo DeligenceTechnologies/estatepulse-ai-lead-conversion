@@ -16,7 +16,7 @@ export const CopyField: React.FC<{ label: string; value: string; mono?: boolean 
   const [copied, setCopied] = useState(false);
   return (
     <div className="space-y-1">
-      <div className="text-[11px] text-slate-400 font-medium">{label}</div>
+      <div className="text-xs text-slate-400 font-medium">{label}</div>
       <div className="flex items-stretch gap-2">
         <div
           className={`flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-cyan-300 overflow-x-auto whitespace-nowrap ${

@@ -31,7 +31,7 @@ export const CredentialField: React.FC<{
 
   return (
     <div className="space-y-1">
-      <div className="text-[11px] text-slate-400 font-medium">{label}</div>
+      <div className="text-xs text-slate-400 font-medium">{label}</div>
       <div className="flex items-stretch gap-2">
         <input
           autoFocus

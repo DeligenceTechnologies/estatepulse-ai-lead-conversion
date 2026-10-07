@@ -140,7 +140,7 @@ export const FollowUpsView: React.FC = () => {
           {isOwner && sequences.length > 0 && (
             <button
               onClick={() => setEditing(null)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               New sequence
@@ -150,7 +150,7 @@ export const FollowUpsView: React.FC = () => {
       </div>
 
       {(sequencesQuery.stale || enrollmentsQuery.stale) && (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5" />
           Showing the last good result — the most recent refresh failed.
         </div>
@@ -161,7 +161,7 @@ export const FollowUpsView: React.FC = () => {
         <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
         <div>
           <div className="font-bold text-slate-100">What stops a sequence</div>
-          <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+          <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
             A reply of STOP or UNSUBSCRIBE, a booking, a human takeover, the lead going hot, or
             running out of steps. Nothing else. Any other inbound reply pauses the sequence so we
             are not texting over a live conversation, and every step is held back until the
@@ -201,13 +201,13 @@ export const FollowUpsView: React.FC = () => {
                 {isOwner ? (
                   <button
                     onClick={() => setEditing(null)}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     Create a sequence
                   </button>
                 ) : (
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Ask an owner to set one up.
                   </p>
                 )}
@@ -232,7 +232,7 @@ export const FollowUpsView: React.FC = () => {
                       out on hover: which leads land here is the question asked
                       of this screen, and it does not fit in a pill. */}
                   <span
-                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                    className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
                       seq.enrollTriggers.length
                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                         : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -251,7 +251,7 @@ export const FollowUpsView: React.FC = () => {
                       : 'manual only'}
                   </span>
                   <span
-                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                    className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
                       STATUS_STYLES[seq.status] ?? STATUS_STYLES.completed
                     }`}
                   >
@@ -266,7 +266,7 @@ export const FollowUpsView: React.FC = () => {
               </div>
 
               <div className="space-y-2 pt-2 border-t border-slate-800">
-                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                   Steps
                 </div>
                 {seq.steps.map((step, idx) => (
@@ -274,7 +274,7 @@ export const FollowUpsView: React.FC = () => {
                     key={step.stepOrder}
                     className="flex items-start gap-2.5 text-xs bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/60"
                   >
-                    <div className="w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
+                    <div className="w-5 h-5 rounded-full bg-slate-800 text-2xs font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
                       {step.stepOrder}
                     </div>
                     <div className="space-y-0.5 min-w-0">
@@ -292,11 +292,11 @@ export const FollowUpsView: React.FC = () => {
                           <Clock className="w-3 h-3" />
                           day {days[idx]}
                         </span>
-                        <span className="text-slate-600 text-[10px]">
+                        <span className="text-slate-600 text-2xs">
                           (+{formatDelay(step.delayMinutes)})
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                      <p className="text-xs text-slate-400 leading-relaxed">
                         {step.messageTemplate ?? step.voicePrompt}
                       </p>
                     </div>
@@ -313,7 +313,7 @@ export const FollowUpsView: React.FC = () => {
                 ].map(([label, count, color]) => (
                   <div key={String(label)}>
                     <div className={`font-mono font-bold text-sm ${color}`}>{count}</div>
-                    <div className="text-[10px] text-slate-500 uppercase">{label}</div>
+                    <div className="text-2xs text-slate-500 uppercase">{label}</div>
                   </div>
                 ))}
               </div>
@@ -328,7 +328,7 @@ export const FollowUpsView: React.FC = () => {
                         ? undefined
                         : 'Only an active sequence can accept leads'
                     }
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
                     Add leads
@@ -360,7 +360,7 @@ export const FollowUpsView: React.FC = () => {
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
           <span className="text-sm font-bold text-white">Enrolled leads</span>
-          <span className="text-[11px] text-slate-500">{enrollments.length} shown</span>
+          <span className="text-xs text-slate-500">{enrollments.length} shown</span>
         </div>
 
         {enrollments.length === 0 ? (
@@ -372,7 +372,7 @@ export const FollowUpsView: React.FC = () => {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="text-[10px] uppercase text-slate-500 bg-slate-950/60">
+              <thead className="text-2xs uppercase text-slate-500 bg-slate-950/60">
                 <tr>
                   <th className="text-left font-semibold px-5 py-2">Lead</th>
                   <th className="text-left font-semibold px-3 py-2">Sequence</th>
@@ -393,15 +393,15 @@ export const FollowUpsView: React.FC = () => {
                   >
                     <td className="px-5 py-2.5">
                       <div className="font-semibold text-slate-100">{e.leadName}</div>
-                      <div className="text-[10px] text-slate-500 font-mono">{e.leadPhone}</div>
+                      <div className="text-2xs text-slate-500 font-mono">{e.leadPhone}</div>
                     </td>
-                    <td className="px-3 py-2.5 text-slate-300 font-mono text-[11px]">
+                    <td className="px-3 py-2.5 text-slate-300 font-mono text-xs">
                       {e.sequenceCode}
                     </td>
                     <td className="px-3 py-2.5 text-slate-400">{e.currentStep}</td>
                     <td className="px-3 py-2.5">
                       <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                        className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
                           STATUS_STYLES[e.status] ?? STATUS_STYLES.completed
                         }`}
                       >
@@ -413,7 +413,7 @@ export const FollowUpsView: React.FC = () => {
                     </td>
                     <td className="px-3 py-2.5">
                       <span
-                        className={`text-[10px] uppercase font-semibold ${
+                        className={`text-2xs uppercase font-semibold ${
                           e.enrolledBy === 'auto' ? 'text-slate-500' : 'text-cyan-400'
                         }`}
                       >

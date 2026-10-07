@@ -51,7 +51,7 @@ export const ManualWebhookPanel: React.FC<{
 
         {/* The single most expensive thing a customer can misunderstand on this
             screen, so it is stated before they close it rather than in a doc. */}
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 leading-relaxed flex gap-2">
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
           <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           <span>
             <strong>The signing secret is shown once.</strong> It is encrypted at rest and no API
@@ -60,7 +60,7 @@ export const ManualWebhookPanel: React.FC<{
           </span>
         </div>
 
-        <ol className="text-[11px] text-slate-300 space-y-1 list-decimal list-inside leading-relaxed">
+        <ol className="text-xs text-slate-300 space-y-1 list-decimal list-inside leading-relaxed">
           <li>In Tally, open your form → <strong>Integrations</strong> → <strong>Webhooks</strong> → Add webhook.</li>
           <li>Paste the <strong>Webhook URL</strong>.</li>
           <li>Expand <strong>Signing secret</strong> and paste the secret.</li>
@@ -70,7 +70,7 @@ export const ManualWebhookPanel: React.FC<{
         <div className="flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
           >
             Done
           </button>
@@ -81,7 +81,7 @@ export const ManualWebhookPanel: React.FC<{
 
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-slate-400 leading-relaxed">
+      <p className="text-xs text-slate-400 leading-relaxed">
         We generate a webhook URL and a signing secret. You paste them into your form tool yourself —
         we never ask for an API key, and we hold no credential for your account. The trade-off is
         that we cannot repair, pause or remove the webhook for you later.
@@ -90,12 +90,12 @@ export const ManualWebhookPanel: React.FC<{
       {error && (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-          <div className="text-[11px] text-rose-200 leading-relaxed">{error}</div>
+          <div className="text-xs text-rose-200 leading-relaxed">{error}</div>
         </div>
       )}
 
       <div className="space-y-1">
-        <div className="text-[11px] text-slate-400 font-medium">Name this lead source</div>
+        <div className="text-xs text-slate-400 font-medium">Name this lead source</div>
         <input
           autoFocus
           value={name}
@@ -116,7 +116,7 @@ export const ManualWebhookPanel: React.FC<{
         <button
           onClick={() => void handleCreate()}
           disabled={creating || !name.trim()}
-          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
         >
           {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           Create & show secret

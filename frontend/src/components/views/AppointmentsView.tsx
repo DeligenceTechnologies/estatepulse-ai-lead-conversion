@@ -114,7 +114,7 @@ export const AppointmentsView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">Scheduled Appointments</h2>
-            <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/40">
+            <span className="text-2xs uppercase font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/40">
               Live
             </span>
           </div>
@@ -210,12 +210,12 @@ export const AppointmentsView: React.FC = () => {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span
-                      className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${statusTone(appt.status)}`}
+                      className={`text-2xs uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${statusTone(appt.status)}`}
                     >
                       {appt.status}
                     </span>
                     {appt.appointmentType && (
-                      <span className="text-[11px] text-slate-400 truncate max-w-[55%]">
+                      <span className="text-xs text-slate-400 truncate max-w-[55%]">
                         {appt.appointmentType}
                       </span>
                     )}
@@ -262,7 +262,7 @@ export const AppointmentsView: React.FC = () => {
                   </div>
 
                   {cancelled && appt.canceledReason && (
-                    <p className="text-[11px] text-slate-400 italic bg-slate-950/40 p-2 rounded-lg border border-slate-800/50">
+                    <p className="text-xs text-slate-400 italic bg-slate-950/40 p-2 rounded-lg border border-slate-800/50">
                       "{appt.canceledReason}"
                     </p>
                   )}
@@ -281,7 +281,7 @@ export const AppointmentsView: React.FC = () => {
                       href={appt.meetingUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Video className="w-3.5 h-3.5" />
                       <span>Join Link</span>

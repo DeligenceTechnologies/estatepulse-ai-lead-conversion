@@ -34,7 +34,7 @@ interface Props {
   onSave: (tool: AssistantTool) => Promise<void>;
 }
 
-const label = 'block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1';
+const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1';
 const input =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600';
 
@@ -184,7 +184,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
             <h3 className="text-base font-bold text-white">
               {isNew ? 'Add a tool' : 'Edit tool'}
             </h3>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-xs text-slate-400">
               Something the agent can do during a call, beyond talking.
             </p>
           </div>
@@ -222,7 +222,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
             ) : (
               <div className="text-xs text-slate-300 font-semibold">{TOOL_TYPE_INFO[type]?.label ?? type}</div>
             )}
-            <p className="text-[11px] text-slate-500 mt-1.5">{TOOL_TYPE_INFO[type]?.blurb}</p>
+            <p className="text-xs text-slate-500 mt-1.5">{TOOL_TYPE_INFO[type]?.blurb}</p>
           </div>
 
           {type === 'webhook' && w && (
@@ -281,7 +281,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                   />
                 </div>
               </div>
-              <p className="text-[11px] text-slate-500 -mt-2">
+              <p className="text-xs text-slate-500 -mt-2">
                 <span className="text-slate-400">{'{{leadId}}'}</span> and the other lead variables can be used
                 anywhere in the URL, headers or parameters.
               </p>
@@ -292,12 +292,12 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                   <label className={label}>Headers</label>
                   <button
                     onClick={() => setHeaders([...headers, { name: '', value: '' }])}
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3" /> Add header
                   </button>
                 </div>
-                {headers.length === 0 && <p className="text-[11px] text-slate-600">None.</p>}
+                {headers.length === 0 && <p className="text-xs text-slate-600">None.</p>}
                 <div className="space-y-2">
                   {headers.map((h, i) => (
                     <div key={i} className="flex gap-2 items-center">
@@ -333,12 +333,12 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                   </label>
                   <button
                     onClick={() => setParams([...params, { name: '', type: 'string', description: '', required: false }])}
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3" /> Add parameter
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-500 mb-2">
+                <p className="text-xs text-slate-500 mb-2">
                   The agent decides what to put in each of these, reading the description. Be specific.
                 </p>
                 <div className="space-y-2">
@@ -365,7 +365,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                         onChange={(e) => setParams(params.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))}
                         placeholder="hot, warm or cold — how ready the buyer is"
                       />
-                      <label className="flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer whitespace-nowrap">
+                      <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={p.required}
@@ -382,7 +382,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                       </button>
                     </div>
                   ))}
-                  {params.length === 0 && <p className="text-[11px] text-slate-600">None.</p>}
+                  {params.length === 0 && <p className="text-xs text-slate-600">None.</p>}
                 </div>
               </div>
             </>
@@ -399,12 +399,12 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
                       transfer: { ...d.transfer!, targets: [...(d.transfer?.targets ?? []), { name: '', to: '' }] },
                     }))
                   }
-                  className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                  className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3 h-3" /> Add destination
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500 mb-2">
+              <p className="text-xs text-slate-500 mb-2">
                 The agent picks by name, so name them the way you would say it out loud — "the listing agent",
                 "the front desk".
               </p>
@@ -512,7 +512,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
               <h4 className="text-xs font-bold text-white flex items-center gap-2 mb-2">
                 <Beaker className="w-3.5 h-3.5 text-amber-400" /> Test it
               </h4>
-              <p className="text-[11px] text-slate-500 mb-2">
+              <p className="text-xs text-slate-500 mb-2">
                 Calls the webhook for real, with these arguments in place of the ones the agent would choose.
                 Lead variables are filled with example values.
               </p>
@@ -537,7 +537,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
               )}
               {testResult && (
                 <div
-                  className={`mt-2 rounded-lg px-3 py-2 text-[11px] border ${
+                  className={`mt-2 rounded-lg px-3 py-2 text-xs border ${
                     testResult.success
                       ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-200'
                       : 'bg-rose-950/30 border-rose-800/40 text-rose-200'
@@ -557,7 +557,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
             </div>
           )}
           {type === 'webhook' && !canTest && (
-            <p className="text-[11px] text-slate-600 border-t border-slate-800 pt-4">
+            <p className="text-xs text-slate-600 border-t border-slate-800 pt-4">
               Save the tool to be able to send it a test request.
             </p>
           )}
@@ -573,7 +573,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
           <button
             onClick={save}
             disabled={saving}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
           >
             {saving ? 'Saving…' : isNew ? 'Add tool' : 'Save tool'}
           </button>

@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
-import { Header } from './components/layout/Header';
+import { AppShell } from './components/layout/AppShell';
 
 // Views. Only the sections under active development are imported; the rest
 // render ComingSoonView, so their prototype dummy data never reaches the UI.
@@ -37,31 +37,23 @@ const AppContent: React.FC = () => {
   const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-white">
-      {/* Structural Sidebar */}
-      <Sidebar />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header />
-
-        <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/40">
-          {activeView === 'dashboard' && <DashboardView />}
-          {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
-          {activeView === 'conversations' && <ConversationsView />}
-          {activeView === 'calls' && <CallsView />}
-          {activeView === 'appointments' && <AppointmentsView />}
-          {activeView === 'followups' && <FollowUpsView />}
-          {activeView === 'agents' && <AgentsView />}
-          {activeView === 'my_availability' && <AgentAvailability />}
-          {activeView === 'integrations' && (
-            <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
-          )}
-          {activeView === 'lead_sources' && <LeadSourcesView />}
-          {activeView === 'ai_settings' && <AISettingsView />}
-          {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
-        </main>
-      </div>
+    <>
+      <AppShell sidebar={<Sidebar />}>
+        {activeView === 'dashboard' && <DashboardView />}
+        {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
+        {activeView === 'conversations' && <ConversationsView />}
+        {activeView === 'calls' && <CallsView />}
+        {activeView === 'appointments' && <AppointmentsView />}
+        {activeView === 'followups' && <FollowUpsView />}
+        {activeView === 'agents' && <AgentsView />}
+        {activeView === 'my_availability' && <AgentAvailability />}
+        {activeView === 'integrations' && (
+          <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
+        )}
+        {activeView === 'lead_sources' && <LeadSourcesView />}
+        {activeView === 'ai_settings' && <AISettingsView />}
+        {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
+      </AppShell>
 
       {/* Global Modals */}
       <LeadDetailModal />
@@ -75,7 +67,7 @@ const AppContent: React.FC = () => {
         isOpen={isWebhookTesterOpen} 
         onClose={() => setIsWebhookTesterOpen(false)} 
       />
-    </div>
+    </>
   );
 };
 

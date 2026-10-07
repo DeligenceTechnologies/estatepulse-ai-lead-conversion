@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
-import { useApp, type AppView } from '../../context/AppContext';
+import { useNavigate } from 'react-router-dom';
 import { getOwnerDashboard, type OwnerDashboard } from '../../utils/dashboardApi';
 import { LEAD_STATUSES, STATUS_LABELS } from '../../lib/leadStatus';
 import { listMembers, memberName, type OrganizationMember } from '../../utils/agentsApi';
@@ -50,11 +50,11 @@ const Card: React.FC<{ label: string; value: React.ReactNode; hint: string; icon
 }) => (
   <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-2">
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[11px] text-slate-400 font-semibold">{label}</span>
+      <span className="text-xs text-slate-400 font-semibold">{label}</span>
       <span className="text-slate-500">{icon}</span>
     </div>
     <div className="text-2xl font-bold text-white font-mono">{value}</div>
-    <p className="text-[10px] text-slate-500 leading-relaxed">{hint}</p>
+    <p className="text-2xs text-slate-500 leading-relaxed">{hint}</p>
   </div>
 );
 
@@ -70,7 +70,7 @@ const Panel: React.FC<{ title: string; icon: React.ReactNode; aside?: string; ch
         <span className="text-slate-500">{icon}</span>
         <h3 className="text-sm font-bold text-white">{title}</h3>
       </div>
-      {aside && <span className="text-[10px] text-slate-500">{aside}</span>}
+      {aside && <span className="text-2xs text-slate-500">{aside}</span>}
     </div>
     {children}
   </div>
@@ -110,7 +110,7 @@ const BarRow: React.FC<{ label: string; value: number; max: number; suffix?: str
  */
 export const DashboardView: React.FC = () => {
   const { user, organization } = useAuth();
-  const { setActiveView } = useApp();
+  const navigate = useNavigate();
   const [data, setData] = useState<OwnerDashboard | null>(null);
   const [members, setMembers] = useState<OrganizationMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,31 +134,32 @@ export const DashboardView: React.FC = () => {
     void load();
   }, [load]);
 
-  const spinner = <Loader2 className="w-5 h-5 animate-spin text-slate-600" />;
+  const spinner = <span aria-label="Loading" className="block h-7 w-14 rounded-md bg-slate-800 animate-pulse" />;
   const agents = (members ?? []).filter((m) => m.hasProfile && m.status !== 'suspended');
   const statusMax = data ? Math.max(0, ...LEAD_STATUSES.map((s) => data.leads.byStatus[s] ?? 0)) : 0;
   const callRows = data ? Object.entries(data.calls7Days.byStatus).sort((a, b) => b[1] - a[1]) : [];
   const sourceMax = data ? Math.max(0, ...data.sources30Days.map((s) => s.count)) : 0;
 
-  const attention: { label: string; hint: string; count: number; view: AppView }[] = data
+  // Each item opens Leads already filtered to what it counts.
+  const attention: { label: string; hint: string; count: number; to: string }[] = data
     ? [
         {
           label: 'Hot leads with no agent',
           hint: 'Open hot leads nobody currently holds.',
           count: data.attention.hotUnassigned,
-          view: 'leads',
+          to: '/leads?tab=hot',
         },
         {
           label: 'Not contacted yet',
           hint: 'New leads with no outreach sent.',
           count: data.attention.neverContacted,
-          view: 'leads',
+          to: '/leads?tab=new',
         },
         {
           label: 'Flagged for review',
           hint: 'Ingested with a data problem (e.g. invalid phone).',
           count: data.attention.needsReview,
-          view: 'leads',
+          to: '/leads',
         },
       ]
     : [];
@@ -226,6 +227,21 @@ export const DashboardView: React.FC = () => {
         />
       </div>
 
+      {/* Panel-shaped placeholders while the first load runs. */}
+      {!data && !error && (
+        <div aria-hidden="true" className="space-y-6 animate-pulse">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-5 h-64 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="lg:col-span-7 h-64 rounded-2xl bg-slate-900 border border-slate-800" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+            <div className="h-40 rounded-2xl bg-slate-900 border border-slate-800" />
+          </div>
+        </div>
+      )}
+
       {data && (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -235,12 +251,12 @@ export const DashboardView: React.FC = () => {
                   {attention.map((a) => (
                     <button
                       key={a.label}
-                      onClick={() => setActiveView(a.view)}
+                      onClick={() => navigate(a.to)}
                       className="w-full p-3 bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-semibold text-slate-200">{a.label}</div>
-                        <div className="text-[10px] text-slate-500">{a.hint}</div>
+                        <div className="text-2xs text-slate-500">{a.hint}</div>
                       </div>
                       <span
                         className={`font-mono font-bold text-sm shrink-0 ${a.count > 0 ? 'text-amber-300' : 'text-slate-500'}`}
@@ -270,9 +286,9 @@ export const DashboardView: React.FC = () => {
                       ))}
                     </div>
                     <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] text-slate-500">Open leads by temperature:</span>
+                      <span className="text-2xs text-slate-500">Open leads by temperature:</span>
                       {TEMPERATURES.map((t) => (
-                        <span key={t.key} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${t.tone}`}>
+                        <span key={t.key} className={`text-2xs font-semibold px-2 py-0.5 rounded-full ${t.tone}`}>
                           {t.label} {data.leads.byTemperature[t.key]}
                         </span>
                       ))}

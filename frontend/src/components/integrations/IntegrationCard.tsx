@@ -36,11 +36,11 @@ export const IntegrationCard: React.FC<{
         {icon}
         <div className="min-w-0">
           <h3 className="text-base font-bold text-white">{title}</h3>
-          <p className="text-[11px] text-slate-400 truncate">{blurb}</p>
+          <p className="text-xs text-slate-400 truncate">{blurb}</p>
         </div>
       </div>
       <span
-        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 shrink-0 ${
+        className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 shrink-0 ${
           connected && !loading
             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
             : 'bg-slate-800 text-slate-400 border-slate-700'

@@ -50,6 +50,8 @@ export const appointmentRangeSchema = z.object({
   to: z.coerce.date().optional(),
   status: z.string().max(20).optional(),
   agentId: z.string().uuid().optional(),
+  /** One lead's appointments (the lead detail view). A filter within the session's org. */
+  leadId: z.string().uuid().optional(),
 });
 
 export type AppointmentRangeQuery = z.infer<typeof appointmentRangeSchema>;

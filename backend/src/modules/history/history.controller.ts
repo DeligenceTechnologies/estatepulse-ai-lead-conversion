@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query, Req, UseGuards } from '@nestjs/common';
 import { SessionGuard, type SessionRequest } from '../../common/guards/session.guard';
 import { HistoryService } from './history.service';
 
@@ -25,8 +25,11 @@ export class HistoryController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('q') q?: string,
+    // One lead's calls (the lead detail view). Combined with the session's org
+    // and, for an agent, their visibility rules — never a way around either.
+    @Query('leadId', new ParseUUIDPipe({ optional: true })) leadId?: string,
   ) {
-    return this.history.listCalls(req.auth, { limit, agentId, outcome, temperature, from, to, q });
+    return this.history.listCalls(req.auth, { limit, agentId, outcome, temperature, from, to, q, leadId });
   }
 
   @Get('calls/:id')
@@ -35,8 +38,12 @@ export class HistoryController {
   }
 
   @Get('conversations')
-  listConversations(@Req() req: SessionRequest, @Query('limit') limit?: string) {
-    return this.history.listConversations(req.auth, limit);
+  listConversations(
+    @Req() req: SessionRequest,
+    @Query('limit') limit?: string,
+    @Query('leadId', new ParseUUIDPipe({ optional: true })) leadId?: string,
+  ) {
+    return this.history.listConversations(req.auth, limit, leadId);
   }
 
   @Get('conversations/:id/messages')

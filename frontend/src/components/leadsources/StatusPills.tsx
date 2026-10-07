@@ -92,7 +92,7 @@ export function sourceTone(s: LeadSourceConfig): Tone {
   };
 }
 
-const PILL = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1';
+const PILL = 'text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1';
 
 export const SourceStatusPill: React.FC<{ source: LeadSourceConfig }> = ({ source }) => {
   const t = sourceTone(source);

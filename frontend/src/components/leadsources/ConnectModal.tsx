@@ -36,8 +36,8 @@ const Option: React.FC<{
     <div className="mt-0.5 shrink-0">{icon}</div>
     <div className="min-w-0 flex-1">
       <div className="text-sm font-bold text-white">{title}</div>
-      <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{blurb}</div>
-      <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">{detail}</div>
+      <div className="text-xs text-slate-400 mt-0.5 leading-relaxed">{blurb}</div>
+      <div className="text-xs text-slate-500 mt-1.5 leading-relaxed">{detail}</div>
     </div>
     <ChevronRight className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
   </button>
@@ -83,7 +83,7 @@ export const ConnectModal: React.FC<{
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white">Connect a lead source</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   Where should new leads come from?
                 </p>
               </div>

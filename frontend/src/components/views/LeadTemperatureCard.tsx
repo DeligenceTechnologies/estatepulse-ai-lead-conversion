@@ -58,7 +58,7 @@ export const LeadTemperatureCard: React.FC = () => {
           <Flame className="w-4 h-4 text-rose-400" />
           Lead Temperature Thresholds
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1">
+        <p className="text-xs text-slate-400 mt-1">
           After each AI call the lead is scored 0–100 from what the caller said. Hot leads wait for an agent; warm and
           cold leads go to nurture. A caller who asks for a person is always hot.
         </p>
@@ -91,16 +91,16 @@ export const LeadTemperatureCard: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-            <p className="text-[11px] text-slate-500 min-w-0 truncate">
+            <p className="text-xs text-slate-500 min-w-0 truncate">
               {valid ? `${hot}–100 hot • ${warm}–${hot - 1} warm • 0–${warm - 1} cold` : 'Warm must be lower than hot, both whole numbers 1–100.'}
             </p>
             <div className="flex items-center gap-2 shrink-0">
-              {saved && <span className="text-[11px] text-emerald-400 font-semibold">Saved</span>}
+              {saved && <span className="text-xs text-emerald-400 font-semibold">Saved</span>}
               <button
                 type="button"
                 onClick={() => void save()}
                 disabled={saving || !valid}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer"
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
               >
                 {saving ? 'Saving…' : 'Save thresholds'}
               </button>

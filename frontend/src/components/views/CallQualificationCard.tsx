@@ -57,7 +57,7 @@ export const CallQualificationCard: React.FC<Props> = ({ callId, extractedIntel,
           <button
             onClick={() => void classify()}
             disabled={busy}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium border border-slate-700 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
           >
             {busy && <Loader2 className="w-3 h-3 animate-spin" />}
             {busy ? 'Classifying…' : q ? 'Re-classify from transcript' : 'Classify from transcript'}
@@ -65,7 +65,7 @@ export const CallQualificationCard: React.FC<Props> = ({ callId, extractedIntel,
         )}
       </div>
 
-      {error && <p className="text-[11px] text-rose-300">{error}</p>}
+      {error && <p className="text-xs text-rose-300">{error}</p>}
 
       {q ? (
         <>
@@ -78,13 +78,13 @@ export const CallQualificationCard: React.FC<Props> = ({ callId, extractedIntel,
               {q.temperature === 'hot' && <Flame className="w-3.5 h-3.5 text-rose-400" />}
               {q.temperature.toUpperCase()} — {q.score}
             </span>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-xs text-slate-500">
               Hot from {q.thresholds.hot}, warm from {q.thresholds.warm} •{' '}
               {q.source === 'telnyx_insights' ? 'scored when the call ended' : 'classified from the transcript'}
             </span>
           </div>
 
-          {q.override && <p className="text-[11px] text-amber-300">{q.override}</p>}
+          {q.override && <p className="text-xs text-amber-300">{q.override}</p>}
 
           {q.reasons.length > 0 ? (
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -102,11 +102,11 @@ export const CallQualificationCard: React.FC<Props> = ({ callId, extractedIntel,
               ))}
             </ul>
           ) : (
-            <p className="text-[11px] text-slate-500">The caller gave none of the qualifying details.</p>
+            <p className="text-xs text-slate-500">The caller gave none of the qualifying details.</p>
           )}
         </>
       ) : (
-        <p className="text-[11px] text-slate-500">
+        <p className="text-xs text-slate-500">
           Not scored yet. Calls are scored automatically when they end; this one was recorded before that was set up.
         </p>
       )}

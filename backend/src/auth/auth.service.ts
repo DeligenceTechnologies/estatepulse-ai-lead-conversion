@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import jwt from 'jsonwebtoken';
 import { AppError } from '../common/errors';
+import { perfEnabled, recordGuard } from '../common/perf/perf-timing';
 import {
   EMAIL_CONSTRAINTS,
   SLUG_CONSTRAINTS,
@@ -124,10 +125,12 @@ export class AuthService {
    */
   async authenticate(token: string): Promise<{ sessionId: string; auth: AuthContext }> {
     const { userId, sessionId } = this.verifyToken(token);
+    const started = perfEnabled ? Date.now() : 0;
     const [session, context] = await Promise.allSettled([
       this.assertSessionLive(sessionId, userId),
       this.loadAuthContext(userId),
     ]);
+    if (perfEnabled) recordGuard(Date.now() - started);
     if (session.status === 'rejected') throw session.reason;
     if (context.status === 'rejected') throw context.reason;
     return { sessionId, auth: context.value };

@@ -66,7 +66,7 @@ const blankStep = (): StepDraft => ({
   maxAttempts: 1,
 });
 
-const label = 'block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1';
+const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1';
 const input =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600';
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl';
@@ -224,7 +224,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
               {!isNew && (
                 <>
                   <span
-                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-bold uppercase border ${
                       status === 'active'
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                         : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -235,13 +235,13 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     )}
                     {status}
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  <span className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                     {sequence.code}
                   </span>
                 </>
               )}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-slate-400 mt-1">
               Steps run in order. Each delay is measured from the step before it.
             </p>
           </div>
@@ -272,7 +272,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     <Settings2 className="w-4 h-4 text-emerald-400" />
                     Sequence details
                   </h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     What it is called and whether it is running.
                   </p>
                 </div>
@@ -291,7 +291,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   <div className="flex items-center justify-between mb-1">
                     <label className={label.replace('mb-1', '')}>Code</label>
                     {!isNew && (
-                      <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                      <span className="text-2xs text-amber-400 font-semibold flex items-center gap-1">
                         <Lock className="w-3 h-3" />
                         Permanent
                       </span>
@@ -306,7 +306,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     }
                     placeholder="OPEN_HOUSE"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-2xs text-slate-500 mt-1">
                     {isNew
                       ? 'UPPER_SNAKE_CASE. Permanent once saved.'
                       : 'A code is the stable handle for a sequence and cannot be changed.'}
@@ -345,7 +345,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                           {isArchived ? 'Archived' : isActive ? 'Active Status' : 'Paused'}
                         </span>
                       </span>
-                      <span className="block text-[11px] text-slate-500 mt-0.5 leading-normal">
+                      <span className="block text-xs text-slate-500 mt-0.5 leading-normal">
                         {isActive
                           ? 'Can send sequences and accept new incoming leads'
                           : isArchived
@@ -359,7 +359,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${
                           isActive ? 'left-[22px]' : 'left-0.5'
                         }`}
                       />
@@ -374,14 +374,14 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   sees the whole rule in one place — which is exactly the thing
                   they are trying to get right. */}
               <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-3">
-                <h5 className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <h5 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                   <Route className="w-3.5 h-3.5 text-sky-400" />
                   In plain English
                 </h5>
 
                 <div className="flex gap-2.5">
-                  <span className="text-[10px] font-bold text-slate-600 font-mono mt-0.5 shrink-0">01</span>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <span className="text-2xs font-bold text-slate-600 font-mono mt-0.5 shrink-0">01</span>
+                  <p className="text-xs text-slate-400 leading-relaxed">
                     {chosen.length === 0 ? (
                       <>A lead joins <span className="text-slate-200 font-semibold">only when you add it by hand</span>.</>
                     ) : (
@@ -402,8 +402,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                 </div>
 
                 <div className="flex gap-2.5">
-                  <span className="text-[10px] font-bold text-slate-600 font-mono mt-0.5 shrink-0">02</span>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <span className="text-2xs font-bold text-slate-600 font-mono mt-0.5 shrink-0">02</span>
+                  <p className="text-xs text-slate-400 leading-relaxed">
                     It then gets{' '}
                     <span className="text-slate-200 font-semibold">
                       {smsCount > 0 && `${smsCount} text${smsCount === 1 ? '' : 's'}`}
@@ -416,8 +416,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                 </div>
 
                 <div className="flex gap-2.5">
-                  <span className="text-[10px] font-bold text-slate-600 font-mono mt-0.5 shrink-0">03</span>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <span className="text-2xs font-bold text-slate-600 font-mono mt-0.5 shrink-0">03</span>
+                  <p className="text-xs text-slate-400 leading-relaxed">
                     {isActive ? (
                       <>
                         Sending is <span className="text-emerald-300 font-semibold">on</span>. Quiet
@@ -442,18 +442,18 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       <Users className="w-4.5 h-4.5" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-400">
+                      <div className="text-xs font-medium text-slate-400">
                         Leads in this sequence
                       </div>
                       <div className="text-lg font-bold text-white leading-tight">
                         {sequence.activeCount}
-                        <span className="text-[11px] font-normal text-slate-500 ml-1.5">
+                        <span className="text-xs font-normal text-slate-500 ml-1.5">
                           active
                         </span>
                       </div>
                     </div>
                   </div>
-                  <div className="text-right text-[11px] text-slate-500 shrink-0">
+                  <div className="text-right text-xs text-slate-500 shrink-0">
                     <div>{sequence.completedCount} completed</div>
                     <div>{sequence.stoppedCount} stopped</div>
                   </div>
@@ -469,7 +469,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     <Zap className="w-4 h-4 text-amber-400" />
                     Add leads automatically when…
                   </h4>
-                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                     Nothing ticked means this sequence only ever takes leads you add by hand. Only
                     one active sequence can claim each condition.
                   </p>
@@ -480,11 +480,11 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   return (
                     <div key={group.key} className="mb-5 last:mb-0">
                       <div className="flex items-center justify-between mb-2">
-                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <h5 className="text-2xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                           <span className={`w-1.5 h-1.5 rounded-full ${group.dot}`} />
                           {group.title}
                         </h5>
-                        <span className="text-[10px] text-slate-500 font-medium">
+                        <span className="text-2xs text-slate-500 font-medium">
                           {items.length} conditions
                         </span>
                       </div>
@@ -518,13 +518,13 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                                   </span>
                                   {t.badge && (
                                     <span
-                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider border ${t.badge.className}`}
+                                      className={`px-1.5 py-0.5 rounded text-2xs font-bold tracking-wider border ${t.badge.className}`}
                                     >
                                       {t.badge.text}
                                     </span>
                                   )}
                                 </span>
-                                <span className="block text-[11px] text-slate-500 mt-0.5 leading-normal">
+                                <span className="block text-xs text-slate-500 mt-0.5 leading-normal">
                                   {t.hint}
                                 </span>
                               </span>
@@ -541,7 +541,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   several of these at once, so saying which one wins is the
                   difference between a predictable setup and a surprising one. */}
               {triggers.filter((t) => !t.startsWith('qualified_')).length > 1 && (
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 flex items-start gap-2.5 text-[11px] text-slate-400">
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-slate-400">
                   <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
                     <span className="text-slate-200 font-semibold">More than one can match.</span>{' '}
@@ -556,7 +556,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
               {/* Says what actually happens, which is a refusal rather than a
                   silent takeover: claiming a condition another active sequence
                   holds is rejected and names the holder. */}
-              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 flex items-start gap-2.5 text-[11px] text-slate-400">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-slate-400">
                 <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
                   <span className="text-slate-200 font-semibold">One sequence per condition.</span>{' '}
@@ -575,13 +575,13 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   <MessageSquare className="w-4 h-4 text-emerald-400" />
                   Steps
                 </h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   {steps.length} step{steps.length === 1 ? '' : 's'} over {daysLabel}.
                 </p>
               </div>
               <button
                 onClick={() => setSteps((p) => [...p, blankStep()])}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-600/30 flex items-center gap-1 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
                 Add step
@@ -595,7 +595,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   className="bg-slate-950/70 border border-slate-800/60 rounded-xl p-3 space-y-2"
                 >
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-slate-800 text-2xs font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
                       {i + 1}
                     </span>
 
@@ -608,7 +608,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       <option value="voice">AI callback</option>
                     </select>
 
-                    <span className="text-[11px] text-slate-500">after</span>
+                    <span className="text-xs text-slate-500">after</span>
                     <input
                       type="number"
                       min={1}
@@ -616,11 +616,11 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       value={step.delayMinutes}
                       onChange={(e) => patchStep(i, { delayMinutes: Number(e.target.value) })}
                     />
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-xs text-slate-500">
                       min ({formatDelay(step.delayMinutes || 0)})
                     </span>
 
-                    <span className="text-[11px] text-amber-400 ml-auto">
+                    <span className="text-xs text-amber-400 ml-auto">
                       lands day {Math.round((cumulative[i] / DAY) * 10) / 10}
                     </span>
 
@@ -658,7 +658,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                         onChange={(e) => patchStep(i, { messageTemplate: e.target.value })}
                         placeholder="Hi {{firstName}}, ..."
                       />
-                      <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                      <p className="text-2xs text-slate-500 mt-1 flex items-center gap-1">
                         <MessageSquare className="w-3 h-3" />
                         {'{{firstName}} and {{brokerage}} are substituted when it sends.'}
                         {i === 0 && ' Include "Reply STOP to opt out" on the first message.'}
@@ -672,7 +672,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                         onChange={(e) => patchStep(i, { voicePrompt: e.target.value })}
                         placeholder="What should the AI try to find out on this call?"
                       />
-                      <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                      <p className="text-2xs text-slate-500 mt-1 flex items-center gap-1">
                         <PhoneCall className="w-3 h-3" />
                         Guidance for the assistant on this callback.
                       </p>
@@ -687,7 +687,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
         {/* Footer. Sticky to the modal's own bottom so the save button stays
             reachable however long the step list grows. */}
         <div className="shrink-0 flex items-center justify-between gap-4 px-6 py-3.5 border-t border-slate-800 bg-slate-950 rounded-b-2xl">
-          <p className="text-[11px] text-slate-500 flex items-center gap-2 min-w-0">
+          <p className="text-xs text-slate-500 flex items-center gap-2 min-w-0">
             {dirty ? (
               <>
                 <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
@@ -714,7 +714,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
             <button
               onClick={() => void save()}
               disabled={saving || !name.trim() || (isNew && !code.trim())}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer"
+              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
             >
               {saving ? 'Saving…' : isNew ? 'Create sequence' : 'Save changes'}
             </button>

@@ -59,11 +59,11 @@ export const TelnyxAccounts: React.FC<{
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <h4 className="text-xs font-semibold text-slate-200">Saved accounts</h4>
-        <span className="text-[11px] text-slate-500">One is active at a time</span>
+        <span className="text-xs text-slate-500">One is active at a time</span>
       </div>
 
       {error && (
-        <div className="flex items-start gap-1.5 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
+        <div className="flex items-start gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -115,7 +115,7 @@ export const TelnyxAccounts: React.FC<{
                     <div className="text-xs font-semibold text-white truncate">
                       {a.label || 'Unnamed account'}
                     </div>
-                    <div className="text-[11px] text-slate-500 truncate font-mono">
+                    <div className="text-xs text-slate-500 truncate font-mono">
                       {/* The masked key used to sit here as a way to tell two
                           accounts apart. The number does that job without
                           putting a credential fragment on screen, and the label
@@ -127,7 +127,7 @@ export const TelnyxAccounts: React.FC<{
               </div>
 
               {a.active ? (
-                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 flex items-center gap-1 shrink-0">
+                <span className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 flex items-center gap-1 shrink-0">
                   <Check className="w-3 h-3" /> Active
                 </span>
               ) : (
@@ -135,7 +135,7 @@ export const TelnyxAccounts: React.FC<{
                   type="button"
                   disabled={busy !== null}
                   onClick={() => void run(`use:${a.id}`, () => activateTelnyxAccount(a.id))}
-                  className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40 shrink-0 flex items-center gap-1.5"
+                  className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40 shrink-0 flex items-center gap-1.5"
                 >
                   {busy === `use:${a.id}` && <Loader2 className="w-3 h-3 animate-spin" />}
                   Use this
@@ -165,7 +165,7 @@ export const TelnyxAccounts: React.FC<{
                 }}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
                   confirmDelete === a.id
-                    ? 'bg-rose-600 text-white'
+                    ? 'bg-rose-600 text-on-accent'
                     : 'text-slate-500 hover:text-rose-300 hover:bg-slate-800'
                 }`}
               >
@@ -176,7 +176,7 @@ export const TelnyxAccounts: React.FC<{
             {/* Deleting the account in use stops calls outright — nothing is
                 promoted in its place, so say so before the second click. */}
             {confirmDelete === a.id && (
-              <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-rose-200 leading-relaxed">
+              <div className="mt-2 pt-2 border-t border-slate-800/80 text-xs text-rose-200 leading-relaxed">
                 {a.active
                   ? 'Click again to forget this account. It is the one in use, so calls and SMS stop until you switch to another.'
                   : 'Click again to forget this account and its stored key.'}

@@ -22,3 +22,6 @@ backend/src/generated/
 
 # compiled test output (see tsconfig.test.json)
 dist-test/
+
+# local perf-measurement build (PERF_TIMING runs)
+backend/dist-perf/

@@ -163,7 +163,7 @@ export const AnalyticsView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">Conversion Analytics &amp; ROI Model</h2>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            <span className="px-2 py-0.5 rounded-full text-2xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               Live Audited
             </span>
           </div>
@@ -192,11 +192,11 @@ export const AnalyticsView: React.FC = () => {
             id="btn-quick-export-current-month"
             onClick={() => handleQuickExport('full')}
             disabled={isQuickExporting}
-            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-950/40 disabled:opacity-50"
+            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-950/40 disabled:opacity-50"
           >
             {isQuickExporting ? (
               <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-on-accent border-t-transparent rounded-full animate-spin" />
                 <span>Exporting...</span>
               </>
             ) : (
@@ -223,7 +223,7 @@ export const AnalyticsView: React.FC = () => {
           </div>
           <button
             onClick={() => setExportedReportNotice(null)}
-            className="text-emerald-400 hover:text-white underline text-[11px]"
+            className="text-emerald-400 hover:text-white underline text-xs"
           >
             Dismiss
           </button>
@@ -245,7 +245,7 @@ export const AnalyticsView: React.FC = () => {
                 <h3 className="text-sm font-bold text-white tracking-wide">
                   Quick Reports &amp; Monthly Performance Summaries
                 </h3>
-                <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
+                <span className="text-2xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
                   PDF Export
                 </span>
               </div>
@@ -270,20 +270,20 @@ export const AnalyticsView: React.FC = () => {
           
           <div className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3 rounded-xl space-y-2 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-emerald-400" />
                 Monthly Executive Brief
               </span>
-              <span className="text-[10px] text-emerald-400 font-mono font-semibold">Sep 2026</span>
+              <span className="text-2xs text-emerald-400 font-mono font-semibold">Sep 2026</span>
             </div>
-            <p className="text-[11px] text-slate-400 line-clamp-2">
+            <p className="text-xs text-slate-400 line-clamp-2">
               All core KPIs: 92% autonomous contact rate, 38s speed-to-lead SLA, appointment volume, and added GCI.
             </p>
             <button
               id="btn-export-exec-brief"
               onClick={() => handleQuickExport('full')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5"
+              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
             >
               <ArrowDownToLine className="w-3.5 h-3.5" />
               <span>1-Click Download PDF</span>
@@ -292,20 +292,20 @@ export const AnalyticsView: React.FC = () => {
 
           <div className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3 rounded-xl space-y-2 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <PieChart className="w-3.5 h-3.5 text-cyan-400" />
                 Lead &amp; Channels Audit
               </span>
-              <span className="text-[10px] text-cyan-400 font-mono font-semibold">Attribution</span>
+              <span className="text-2xs text-cyan-400 font-mono font-semibold">Attribution</span>
             </div>
-            <p className="text-[11px] text-slate-400 line-clamp-2">
+            <p className="text-xs text-slate-400 line-clamp-2">
               Breakdown across Meta Ads, Zillow Premier, Google PPC, and Website IDX forms with temperature funnel.
             </p>
             <button
               id="btn-export-channels-brief"
               onClick={() => handleQuickExport('marketing')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-cyan-600/20 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5"
+              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-cyan-600/20 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
             >
               <ArrowDownToLine className="w-3.5 h-3.5" />
               <span>Download Marketing PDF</span>
@@ -314,20 +314,20 @@ export const AnalyticsView: React.FC = () => {
 
           <div className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3 rounded-xl space-y-2 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
                 Revenue &amp; ROI Model
               </span>
-              <span className="text-[10px] text-emerald-400 font-mono font-semibold">${estimatedRevenue.toLocaleString()} GCI</span>
+              <span className="text-2xs text-emerald-400 font-mono font-semibold">${estimatedRevenue.toLocaleString()} GCI</span>
             </div>
-            <p className="text-[11px] text-slate-400 line-clamp-2">
+            <p className="text-xs text-slate-400 line-clamp-2">
               Economic conversion funnel forecasting inbound volume, qualification, appointments, and gross commission.
             </p>
             <button
               id="btn-export-roi-brief"
               onClick={() => handleQuickExport('roi')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-amber-600/20 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/40 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5"
+              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-amber-600/20 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
             >
               <ArrowDownToLine className="w-3.5 h-3.5" />
               <span>Download Revenue PDF</span>
@@ -342,25 +342,25 @@ export const AnalyticsView: React.FC = () => {
         <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-1">
           <span className="text-xs text-slate-400">Autonomous Contact Rate</span>
           <div className="text-2xl font-bold text-white font-mono">92%</div>
-          <span className="text-[11px] text-emerald-400">&lt;60s first touch</span>
+          <span className="text-xs text-emerald-400">&lt;60s first touch</span>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-1">
           <span className="text-xs text-slate-400">Qualification Rate</span>
           <div className="text-2xl font-bold text-white font-mono">71%</div>
-          <span className="text-[11px] text-cyan-400">Structured data complete</span>
+          <span className="text-xs text-cyan-400">Structured data complete</span>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-1">
           <span className="text-xs text-slate-400">Appointment Conversion</span>
           <div className="text-2xl font-bold text-white font-mono">28.4%</div>
-          <span className="text-[11px] text-purple-400">From qualified buyer leads</span>
+          <span className="text-xs text-purple-400">From qualified buyer leads</span>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-1">
           <span className="text-xs text-slate-400">Agent Handling Time Saved</span>
           <div className="text-2xl font-bold text-white font-mono">42 hrs</div>
-          <span className="text-[11px] text-amber-400">Per agent each month</span>
+          <span className="text-xs text-amber-400">Per agent each month</span>
         </div>
       </div>
 
@@ -401,25 +401,25 @@ export const AnalyticsView: React.FC = () => {
 
           <div className="grid grid-cols-3 gap-3 text-center pt-2">
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[11px] font-bold text-rose-400 uppercase">🔥 Hot</span>
+              <span className="text-xs font-bold text-rose-400 uppercase">🔥 Hot</span>
               <div className="text-2xl font-bold font-mono text-white">{hotCount}</div>
-              <span className="text-[10px] text-slate-500">Score 75–100</span>
+              <span className="text-2xs text-slate-500">Score 75–100</span>
             </div>
 
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[11px] font-bold text-amber-400 uppercase">☀️ Warm</span>
+              <span className="text-xs font-bold text-amber-400 uppercase">☀️ Warm</span>
               <div className="text-2xl font-bold font-mono text-white">{warmCount}</div>
-              <span className="text-[10px] text-slate-500">Score 45–74</span>
+              <span className="text-2xs text-slate-500">Score 45–74</span>
             </div>
 
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[11px] font-bold text-cyan-400 uppercase">❄️ Cold</span>
+              <span className="text-xs font-bold text-cyan-400 uppercase">❄️ Cold</span>
               <div className="text-2xl font-bold font-mono text-white">{coldCount}</div>
-              <span className="text-[10px] text-slate-500">Score 0–44</span>
+              <span className="text-2xs text-slate-500">Score 0–44</span>
             </div>
           </div>
 
-          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400">
+          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400">
             Hot leads automatically trigger instant agent transfer alerts and priority appointment prompts.
           </div>
         </div>
@@ -446,7 +446,7 @@ export const AnalyticsView: React.FC = () => {
               onChange={(e) => setMonthlyLeads(Number(e.target.value))}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono"
             />
-            <span className="text-[10px] text-slate-500">Meta, Zillow, Google, Website</span>
+            <span className="text-2xs text-slate-500">Meta, Zillow, Google, Website</span>
           </div>
 
           <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
@@ -458,7 +458,7 @@ export const AnalyticsView: React.FC = () => {
               onChange={(e) => setAvgCommission(Number(e.target.value))}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono"
             />
-            <span className="text-[10px] text-slate-500">e.g. 2.5% on $500,000 average home</span>
+            <span className="text-2xs text-slate-500">e.g. 2.5% on $500,000 average home</span>
           </div>
 
           <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
@@ -470,29 +470,29 @@ export const AnalyticsView: React.FC = () => {
               onChange={(e) => setCloseRate(Number(e.target.value))}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono"
             />
-            <span className="text-[10px] text-slate-500">Benchmark: 3% – 5%</span>
+            <span className="text-2xs text-slate-500">Benchmark: 3% – 5%</span>
           </div>
         </div>
 
         {/* ROI Funnel Breakdown */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
           <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-            <span className="text-slate-400 block text-[10px]">Contacted Leads</span>
+            <span className="text-slate-400 block text-2xs">Contacted Leads</span>
             <span className="text-lg font-bold text-white font-mono">{estimatedConversations}</span>
           </div>
 
           <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-            <span className="text-slate-400 block text-[10px]">Qualified Conversations</span>
+            <span className="text-slate-400 block text-2xs">Qualified Conversations</span>
             <span className="text-lg font-bold text-cyan-400 font-mono">{estimatedQualified}</span>
           </div>
 
           <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-            <span className="text-slate-400 block text-[10px]">Booked Appointments</span>
+            <span className="text-slate-400 block text-2xs">Booked Appointments</span>
             <span className="text-lg font-bold text-purple-400 font-mono">{estimatedAppointments}</span>
           </div>
 
           <div className="p-3 bg-emerald-950/60 rounded-xl border border-emerald-500/40">
-            <span className="text-emerald-300 block text-[10px] font-bold">Estimated Added GCI</span>
+            <span className="text-emerald-300 block text-2xs font-bold">Estimated Added GCI</span>
             <span className="text-lg font-extrabold text-emerald-400 font-mono">
               ${estimatedRevenue.toLocaleString()}
             </span>

@@ -13,6 +13,7 @@ import { AppModule } from './app.module';
 import { sha256Hex } from './common/crypto';
 import { AppError } from './common/errors';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { perfEnabled, perfMiddleware } from './common/perf/perf-timing';
 
 /**
  * One NestJS application. Express appears here only as the HTTP adapter
@@ -50,6 +51,8 @@ async function bootstrap(): Promise<void> {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
+  // Dev-only per-request timing; a no-op unless PERF_TIMING=1.
+  if (perfEnabled) app.use(perfMiddleware);
   app.use(helmet());
 
   // Cap request size. Tally payloads are single-digit KB; anything near this

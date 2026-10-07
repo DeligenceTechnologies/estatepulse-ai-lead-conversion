@@ -6,6 +6,7 @@ import {
   OUTCOME_STATUSES,
   normalizeLeadStatus,
 } from '../common/domain';
+import { AppError } from '../common/errors';
 import { deferredResume, inQuietHours, type QuietHours } from '../common/quiet-hours';
 import { FollowupService } from '../modules/followup/followup.service';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
@@ -124,7 +125,9 @@ export class EngineService implements OnModuleDestroy {
    */
   async enroll(orgId: string, leadId: string): Promise<void> {
     if (this.active.has(leadId)) return;
-    const lead = await this.prisma.leads.findUnique({ where: { id: leadId } });
+    // Scoped by organization: `id` alone satisfies the tenancy guard, so an
+    // unscoped lookup would enroll another tenant's lead on this org's account.
+    const lead = await this.prisma.leads.findFirst({ where: { id: leadId, organization_id: orgId } });
     if (!lead || lead.dnc_status || lead.automation_paused) return;
 
     // Claim atomically: only the caller that flips first_contact_at from null
@@ -516,14 +519,17 @@ export class EngineService implements OnModuleDestroy {
   async qualified(orgId: string, leadId: string, temperature: string, summary?: string): Promise<void> {
     const isHot = temperature === 'hot';
 
-    await this.prisma.leads.update({
-      where: { id: leadId },
+    // Scoped by organization in the write itself, so a lead id from another
+    // tenant is not found — the same 404 as one that does not exist.
+    const updated = await this.prisma.leads.updateMany({
+      where: { id: leadId, organization_id: orgId },
       data: {
         status: isHot ? LeadStatus.QUALIFIED : LeadStatus.NURTURE,
         temperature,
         ...(summary ? { ai_summary: summary } : {}),
       },
     });
+    if (updated.count === 0) throw new AppError('NOT_FOUND', 'No such lead in this organization');
     const e = this.active.get(leadId);
     if (e) this.stop(e);
 
