@@ -79,6 +79,14 @@ export function useLiveQuery<T>(
   // reschedule loop.
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  // The cadence too: a caller may change it while mounted (LeadsView slows down
+  // while its live stream is up). That re-times the next poll — see the effect
+  // below the main one — rather than restarting the query, which would clear
+  // `data` and refetch.
+  const baseRef = useRef(baseIntervalMs);
+  baseRef.current = baseIntervalMs;
+  const maxRef = useRef(maxIntervalMs);
+  maxRef.current = maxIntervalMs;
 
   const alive = useRef(true);
   const inFlight = useRef(false);
@@ -86,10 +94,11 @@ export function useLiveQuery<T>(
   const delay = useRef(baseIntervalMs);
   const lastPayload = useRef<string | null>(null);
   const run = useRef<(reason: 'auto' | 'manual') => Promise<void>>(async () => {});
+  const reschedule = useRef<() => void>(() => {});
 
   useEffect(() => {
     alive.current = true;
-    delay.current = baseIntervalMs;
+    delay.current = baseRef.current;
     // A different key means different data. Forget what the last one returned so
     // an identical-looking payload is not mistaken for "nothing changed".
     lastPayload.current = null;
@@ -125,12 +134,12 @@ export function useLiveQuery<T>(
         // cost of the comparison buys two things rather than one.
         const encoded = JSON.stringify(next) ?? '';
         if (encoded === lastPayload.current) {
-          delay.current = Math.min(delay.current * 2, maxIntervalMs);
+          delay.current = Math.min(delay.current * 2, maxRef.current);
         } else {
           lastPayload.current = encoded;
           setData(next);
           // Something moved. Watch closely again — activity comes in bursts.
-          delay.current = baseIntervalMs;
+          delay.current = baseRef.current;
         }
         setError(null);
       } catch (e) {
@@ -142,7 +151,7 @@ export function useLiveQuery<T>(
         // Backing off on failure matters more than on success: the most likely
         // cause is that we are being rate-limited, and retrying at full speed is
         // what got us limited.
-        delay.current = Math.min(Math.max(delay.current, baseIntervalMs) * 2, maxIntervalMs);
+        delay.current = Math.min(Math.max(delay.current, baseRef.current) * 2, maxRef.current);
       } finally {
         inFlight.current = false;
         if (reason === 'manual' && alive.current) setRefreshing(false);
@@ -151,6 +160,7 @@ export function useLiveQuery<T>(
     };
 
     run.current = tick;
+    reschedule.current = schedule;
 
     const onVisibility = () => {
       if (hidden()) {
@@ -159,7 +169,7 @@ export function useLiveQuery<T>(
       }
       // Back from a hidden tab. The data is as old as the time away, so refetch
       // now and resume fast rather than wherever the backoff had climbed to.
-      delay.current = baseIntervalMs;
+      delay.current = baseRef.current;
       void tick('auto');
     };
 
@@ -171,18 +181,28 @@ export function useLiveQuery<T>(
       clear();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [enabled, baseIntervalMs, maxIntervalMs, refreshKey]);
+  }, [enabled, refreshKey]);
+
+  // A new cadence applies from now: the pending poll is re-timed at the new
+  // base, through the same single timer, so a switch can never leave two loops
+  // running. No fetch and no reset — nothing about the data changed. A tick in
+  // flight picks the new cadence up when it schedules its successor. On mount
+  // this finds the first tick in flight and does nothing.
+  useEffect(() => {
+    delay.current = baseIntervalMs;
+    if (!inFlight.current) reschedule.current();
+  }, [baseIntervalMs, maxIntervalMs]);
 
   const refresh = useCallback(() => {
-    delay.current = baseIntervalMs;
+    delay.current = baseRef.current;
     void run.current('manual');
-  }, [baseIntervalMs]);
+  }, []);
 
   /** The push path's entry point: silent, so no spinner flashes on every event. */
   const invalidate = useCallback(() => {
-    delay.current = baseIntervalMs;
+    delay.current = baseRef.current;
     void run.current('auto');
-  }, [baseIntervalMs]);
+  }, []);
 
   return { data, error, refreshing, stale: error !== null && data !== null, refresh, invalidate };
 }
