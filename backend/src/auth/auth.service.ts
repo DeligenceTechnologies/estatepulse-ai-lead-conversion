@@ -173,8 +173,10 @@ export class AuthService {
 
   /**
    * Creates three rows - users, organizations, organization_members(owner) - in
-   * one interactive transaction. No agent_profiles row: not every user is an
-   * agent. No organization_settings row: that table does not exist.
+   * one interactive transaction, plus an agent_profiles row when the owner said
+   * "Just me": a one-person office is an owner who takes their own leads. A
+   * team signup creates no profile, because not every owner is an agent. No
+   * organization_settings row: that table does not exist.
    *
    * The bcrypt hash is computed before the transaction opens, so a ~250ms CPU
    * burn never holds a database connection idle.
@@ -205,7 +207,7 @@ export class AuthService {
           // day out of the box instead of a guess.
           const organization = await tx.organizations.create({
             data: { name: input.organizationName, slug, timezone: input.timezone },
-            select: { id: true, name: true, slug: true },
+            select: { id: true, name: true, slug: true, timezone: true },
           });
 
           await tx.organization_members.create({
@@ -218,6 +220,23 @@ export class AuthService {
             },
             select: { id: true },
           });
+
+          // The same columns AgentsService fills for an owner who turns on
+          // "I also take leads" later, so the two routes to a solo owner
+          // produce the same row. Everything else keeps its column default.
+          const profile =
+            input.teamSize === 'solo'
+              ? await tx.agent_profiles.create({
+                  data: {
+                    organization_id: organization.id,
+                    user_id: user.id,
+                    display_name: `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email,
+                    email: user.email,
+                    timezone: organization.timezone,
+                  },
+                  select: { id: true },
+                })
+              : null;
 
           // Inside the transaction: a session for a user whose signup rolled
           // back would be a row pointing at nothing.
@@ -234,8 +253,9 @@ export class AuthService {
               firstName: user.first_name,
               lastName: user.last_name,
             },
-            organization,
+            organization: { id: organization.id, name: organization.name, slug: organization.slug },
             role: 'owner' as const,
+            agentProfileId: profile?.id ?? null,
           };
         });
       } catch (err) {
@@ -300,6 +320,7 @@ export class AuthService {
       user: context.user,
       organization: context.organization,
       role: context.role,
+      agentProfileId: context.agentProfileId,
     };
   }
 

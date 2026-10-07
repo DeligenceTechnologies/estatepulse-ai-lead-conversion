@@ -113,6 +113,12 @@ export interface NormalizedAttendee {
   rescheduled: boolean;
   /** Provider reference, kept in appointments.metadata for support questions. */
   externalId: string | null;
+  /**
+   * The lead id our own booking link carried, when the booking came through
+   * one (Calendly `utm_content`, Cal.com `metadata[leadId]`). An unverified
+   * claim: the reconciler only trusts it for a lead in the same organization.
+   */
+  leadRef: string | null;
 }
 
 /** One member of the office's scheduling team. */
@@ -140,6 +146,11 @@ export interface NormalizedEventType {
   poolingType: string | null;
   ownerName: string | null;
   ownerType: string | null;
+  /**
+   * Who hosts it, as HOST_ID_COLUMN values. Empty when the provider does not
+   * say — which means "not offered as anyone's own page", never "everyone's".
+   */
+  hostIds: string[];
 }
 
 /** One page of bookings, plus wherever the next one starts. */

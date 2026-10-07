@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { DeliveryOutcome, MappingOrigin, MappingStatus, QueueState } from '../../common/domain';
+import { DeliveryOutcome, LeadStatus, MappingOrigin, MappingStatus, QueueState } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
@@ -639,8 +639,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           email_valid: emailValid,
           needs_review: reviewReasons.length > 0,
           review_reasons: reviewReasons,
-          // Always starts at 'new'. Downstream stages move it forward.
-          status: 'new',
+          // Starts at 'new' and downstream stages move it forward — unless
+          // there is no way to reach the person at all, which no stage can fix.
+          status: normalizedPhone || emailValid ? LeadStatus.NEW : LeadStatus.INVALID,
           temperature: 'cold',
           score: 0,
           location: str(values.location),

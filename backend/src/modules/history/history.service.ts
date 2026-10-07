@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AuthContext } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { normalizeLeadStatus } from '../../common/domain';
 
 /**
  * Call and message history for the office.
@@ -165,12 +166,11 @@ export class HistoryService {
   private static withLeadOutcome(base: CallOutcome, leadStatus: string, isLatest: boolean): CallOutcome {
     if (!isLatest) return base;
     if (base === 'NOT_INTERESTED' || base === 'HUMAN_HANDOFF') return base;
-    // Both spellings: domain.ts says `appointment_booked`, parts of the engine
-    // still branch on `booked`. Accepting either is cheaper than a migration
-    // that has to catch every branch at once.
-    if (leadStatus === 'appointment_booked' || leadStatus === 'booked') return 'APPOINTMENT_BOOKED';
-    if (leadStatus === 'qualified') return 'QUALIFIED';
-    if (leadStatus === 'dnc') return 'NOT_INTERESTED';
+    // Legacy 'booked' still reads as booked (normalizeLeadStatus).
+    const status = normalizeLeadStatus(leadStatus);
+    if (status === 'appointment_booked') return 'APPOINTMENT_BOOKED';
+    if (status === 'qualified' || status === 'appointment_requested') return 'QUALIFIED';
+    if (status === 'dnc' || status === 'not_interested') return 'NOT_INTERESTED';
     return base;
   }
 

@@ -13,10 +13,13 @@ import {
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
+import { messageFor } from '../../lib/api';
 import { Lead, LeadStatus, LeadTemperature } from '../../types';
+import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
 
 /**
  * Lead pipeline — live rows only.
@@ -39,6 +42,12 @@ const humanize = (v: string | null | undefined) => (v ? v.replace(/_/g, ' ') : n
 
 const fullName = (l: LiveLead) =>
   [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead';
+
+/** "SP" for "Sunny Patel"; the first two letters of a one-word name. */
+const initialsOf = (name: string) => {
+  const parts = name.trim().split(/\s+/);
+  return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase();
+};
 
 const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
 
@@ -68,27 +77,6 @@ const sourceLabel = (l: LiveLead): string => {
   return s.type ?? 'webhook';
 };
 
-/** The demo store's status vocabulary; the backend calls a booked lead 'booked'. */
-const toDemoStatus = (status: string): LeadStatus =>
-  status === 'booked' ? 'appointment_booked' : (status as LeadStatus);
-
-const statusTone = (status: string) => {
-  switch (status) {
-    case 'booked':
-    case 'appointment_booked':
-      return 'bg-purple-950 text-purple-300 border border-purple-800/40';
-    case 'qualified':
-      return 'bg-emerald-950 text-emerald-300 border border-emerald-800/40';
-    case 'contacted':
-      return 'bg-cyan-950 text-cyan-300 border border-cyan-800/40';
-    case 'nurture':
-      return 'bg-amber-950 text-amber-300 border border-amber-800/40';
-    case 'lost':
-      return 'bg-rose-950 text-rose-300 border border-rose-800/40';
-    default:
-      return 'bg-slate-800 text-slate-300';
-  }
-};
 
 const temperatureTone = (t: string | null) => {
   switch (t) {
@@ -113,7 +101,8 @@ const temperatureTone = (t: string | null) => {
 const toLead = (l: LiveLead): Lead => ({
   id: l.id,
   organizationId: 'live',
-  assignedAgentId: '',
+  assignedAgentId: l.assignedAgent?.id ?? '',
+  assignedAgentName: l.assignedAgent?.name,
   firstName: l.firstName ?? '',
   lastName: l.lastName ?? '',
   email: l.email ?? '',
@@ -123,7 +112,7 @@ const toLead = (l: LiveLead): Lead => ({
   // nothing branches on this value; it is displayed and nothing more.
   source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
-  status: toDemoStatus(l.status),
+  status: normalizeStatus(l.status, l.dncStatus),
   leadType: 'buyer',
   preferredLocation: l.location ?? '',
   budgetMin: l.minBudget ?? 0,
@@ -151,8 +140,10 @@ interface LeadsViewProps {
 }
 
 export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
+  // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
+  const { agentProfileId, role } = useAuth();
+  const isOwner = role === 'owner';
   const {
-    agents,
     setSelectedLeadId,
     setPreCallLeadId,
     registerExternalLeads,
@@ -184,12 +175,35 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // together cost far less than the old 5-second interval did alone.
   const { connected } = useLiveEvents(
     useCallback((e) => {
-      if (e.type === 'lead.created') invalidate();
+      if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
     }, [invalidate]),
   );
 
+  // This tab's own assignments refetch at once, stream or no stream.
+  useEffect(() => {
+    const onChanged = (): void => invalidate();
+    window.addEventListener(LEADS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, onChanged);
+  }, [invalidate]);
+
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
+
+  const [savingStatus, setSavingStatus] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null);
+
+  const changeStatus = async (id: string, status: LeadStatus): Promise<void> => {
+    setSavingStatus(id);
+    setStatusError(null);
+    try {
+      await leadsApi.setStatus(id, status);
+      invalidate();
+    } catch (e) {
+      setStatusError({ id, message: messageFor(e) });
+    } finally {
+      setSavingStatus(null);
+    }
+  };
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -211,19 +225,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     return [...seen].map(([id, name]) => ({ id, name }));
   }, [rows]);
 
+  // Agent options from real assignments, like the source options above: an
+  // agent appears once they hold a lead. The reader's own entry, when they take
+  // leads, is first and reads "Mine".
+  const agentOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const l of rows) {
+      if (l.assignedAgent) seen.set(l.assignedAgent.id, l.assignedAgent.id === agentProfileId ? 'Mine' : l.assignedAgent.name);
+    }
+    return [...seen]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name));
+  }, [rows, agentProfileId]);
+
   const filteredLeads = rows.filter(lead => {
     // Tab filter
     if (selectedTab === 'hot' && lead.temperature !== 'hot') return false;
     if (selectedTab === 'warm' && lead.temperature !== 'warm') return false;
     if (selectedTab === 'cold' && lead.temperature !== 'cold') return false;
     if (selectedTab === 'new' && lead.status !== 'new') return false;
-    if (selectedTab === 'booked' && lead.status !== 'booked') return false;
+    if (selectedTab === 'booked' && normalizeStatus(lead.status) !== 'appointment_booked') return false;
 
     // Source filter
     if (sourceFilter !== 'all' && lead.source?.id !== sourceFilter) return false;
 
-    // Agent filter — ingestion does not route yet, so every live lead is unassigned.
-    if (agentFilter !== 'all' && agentFilter !== 'unassigned') return false;
+    // Agent filter
+    if (agentFilter === 'unassigned' && lead.assignedAgent) return false;
+    if (agentFilter !== 'all' && agentFilter !== 'unassigned' && lead.assignedAgent?.id !== agentFilter) return false;
 
     // Search query
     if (searchQuery.trim()) {
@@ -331,7 +359,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             { id: 'warm', label: `☀️ Warm (${rows.filter(l => l.temperature === 'warm').length})` },
             { id: 'cold', label: `❄️ Cold (${rows.filter(l => l.temperature === 'cold').length})` },
             { id: 'new', label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
-            { id: 'booked', label: `Appointments (${rows.filter(l => l.status === 'booked').length})` },
+            { id: 'booked', label: `Appointments (${rows.filter(l => normalizeStatus(l.status) === 'appointment_booked').length})` },
           ].map(tab => (
             <button
               key={tab.id}
@@ -382,7 +410,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             >
               <option value="all">All Assigned Agents</option>
               <option value="unassigned">Unassigned</option>
-              {agents.map(a => (
+              {agentOptions.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
@@ -525,24 +553,56 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       </span>
                     </td>
 
-                    {/* Agent — ingestion does not route to an agent yet. */}
+                    {/* Agent — the current assignment, or honestly unassigned. */}
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-500 flex items-center justify-center">
-                          {DASH}
+                      {lead.assignedAgent ? (
+                        <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${new Date(lead.assignedAgent.assignedAt).toLocaleString()}`}>
+                          <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-2xs font-bold text-emerald-300 flex items-center justify-center">
+                            {initialsOf(lead.assignedAgent.name)}
+                          </div>
+                          <span className="text-slate-200 font-medium">
+                            {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
+                          </span>
                         </div>
-                        <span className="text-slate-500">Unassigned</span>
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-500 flex items-center justify-center">
+                            {DASH}
+                          </div>
+                          <span className="text-slate-500">Unassigned</span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Status — hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5">
-                      <span
-                        title={lead.statusReason || undefined}
-                        className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                      >
-                        {humanize(lead.status)}
-                      </span>
+                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                      {isOwner ? (
+                        // Owner-only: the API refuses anyone else. The only way
+                        // into 'closed', and the correction path for automation.
+                        <select
+                          value={normalizeStatus(lead.status, lead.dncStatus)}
+                          disabled={savingStatus === lead.id}
+                          onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
+                          title={lead.statusReason || 'Change status'}
+                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase cursor-pointer focus:outline-none disabled:opacity-50 ${statusTone(lead.status)}`}
+                        >
+                          {LEAD_STATUSES.map((s) => (
+                            <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
+                              {STATUS_LABELS[s]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span
+                          title={lead.statusReason || undefined}
+                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                        >
+                          {statusLabel(lead.status)}
+                        </span>
+                      )}
+                      {statusError?.id === lead.id && (
+                        <p className="text-2xs text-rose-400 mt-1">{statusError.message}</p>
+                      )}
                     </td>
 
                     {/* Actions */}

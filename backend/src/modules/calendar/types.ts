@@ -406,3 +406,19 @@ export interface SyncResultDTO {
    */
   skippedNoAgent: number;
 }
+
+/**
+ * Why a lead cannot be booked yet, in the order the UI explains it:
+ * no agent assigned → no scheduling account connected → the agent is not
+ * linked to a team member (Sync agents) → the agent hosts no event type.
+ */
+export type LeadBookingBlocker = 'no_agent' | 'no_calendar' | 'agent_not_linked' | 'no_event_types';
+
+/** `GET /api/leads/:leadId/booking-options` */
+export interface LeadBookingOptionsDTO {
+  agent: { id: string; name: string } | null;
+  provider: 'calendly' | 'cal' | null;
+  /** The assigned agent's own event types, each as a link pre-filled for this lead. */
+  eventTypes: Array<{ id: string; name: string; durationMinutes: number; bookingUrl: string }>;
+  blocker: LeadBookingBlocker | null;
+}

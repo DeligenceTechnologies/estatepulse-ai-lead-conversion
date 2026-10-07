@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { OwnerGuard } from '../common/guards/owner.guard';
 import { PortalIngestModule } from '../ingest/portal-ingest.module';
 import { FollowupModule } from '../modules/followup/followup.module';
 import { ActivityService } from './activity.service';
@@ -7,6 +8,9 @@ import { AssistantService } from './assistant.service';
 import { CredStoreService } from './cred-store.service';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
+import { LeadInsightsService } from './lead-insights.service';
+import { LeadScoringController } from './lead-scoring.controller';
+import { LeadScoringService } from './lead-scoring.service';
 import { LeadWatcherService } from './lead-watcher.service';
 import { NumbersService } from './numbers.service';
 import {
@@ -41,6 +45,7 @@ import { VoiceService } from './voice.service';
     PortalLeadsController,
     IngestSourcesController,
     TelnyxWebhookController,
+    LeadScoringController,
   ],
   providers: [
     SecretCipherService,
@@ -54,6 +59,9 @@ import { VoiceService } from './voice.service';
     StrategyStoreService,
     EngineService,
     LeadWatcherService,
+    LeadInsightsService,
+    LeadScoringService,
+    OwnerGuard,
   ],
   // The follow-up runner sends through these; StrategyStoreService is where
   // the quiet-hours guardrails live, so nurture obeys the same window.

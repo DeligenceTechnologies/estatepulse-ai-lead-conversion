@@ -100,7 +100,7 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                   <p className="text-xs text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 leading-relaxed">
                     This agent is not on the office’s scheduling team, so bookings cannot be
                     attributed to them. Invite them in Calendly or Cal.com using their email, then
-                    press <span className="text-slate-200">Match to agents</span> on Integrations.
+                    press <span className="text-slate-200">Sync agents</span> on Integrations.
                   </p>
                 )}
               </section>

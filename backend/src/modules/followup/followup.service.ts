@@ -12,6 +12,7 @@ import type {
   ReplaceStepsInput,
   UpdateSequenceInput,
 } from './schemas';
+import { IN_STRATEGY_STATUSES, LeadStatus, normalizeLeadStatus, statusFilterValues } from '../../common/domain';
 
 /**
  * How each condition is named to a person. Used in conflict messages, so the
@@ -47,12 +48,11 @@ export interface EnrollResult {
 const MAX_ENROLL_PER_CALL = 500;
 
 /**
- * Statuses a lead still holds while the strategy engine is working it. It
- * leaves them the moment the strategy ends, by either route — exitStrategy()
- * moves new|contacted to 'nurture', and qualified() sets 'qualified' or
- * 'nurture'.
+ * Statuses a lead still holds while the strategy engine is working it
+ * (IN_STRATEGY_STATUSES, common/domain). It leaves them the moment the strategy
+ * ends, by any route — exitStrategy() moves it to 'follow_up' or 'nurture',
+ * qualified() to 'qualified' or 'nurture'.
  */
-const IN_STRATEGY_STATUSES = ['new', 'contacted'];
 
 /**
  * Is the strategy engine still working this lead?
@@ -591,7 +591,7 @@ export class FollowupService {
       // added. Offering to text them at all is the wrong question to ask.
       dnc_status: false,
       ...(f.temperature ? { temperature: f.temperature } : {}),
-      ...(f.status ? { status: f.status } : {}),
+      ...(f.status ? { status: { in: statusFilterValues(f.status) } } : {}),
       ...(f.sourceId ? { lead_source_id: f.sourceId } : {}),
       ...(f.createdFrom || f.createdTo
         ? {
@@ -643,7 +643,7 @@ export class FollowupService {
         name: [l.first_name, l.last_name].filter(Boolean).join(' ').trim() || 'Unknown lead',
         phone: l.phone,
         temperature: l.temperature,
-        status: l.status,
+        status: normalizeLeadStatus(l.status),
       })),
     };
   }
@@ -764,15 +764,16 @@ export class FollowupService {
 
     // A lead in a nurture sequence should read as 'nurture' in the pipeline
     // rather than still looking untouched. Only statuses that have not moved
-    // past engagement are rewritten: a qualified or booked lead keeps its own.
+    // past engagement are rewritten: a qualified, booked or follow-up lead
+    // keeps its own.
     if (enrolled > 0) {
       await this.prisma.leads.updateMany({
         where: {
           organization_id: orgId,
           id: { in: matchedRows.map((l) => l.id) },
-          status: { in: ['new', 'contacted'] },
+          status: { in: IN_STRATEGY_STATUSES },
         },
-        data: { status: 'nurture' },
+        data: { status: LeadStatus.NURTURE },
       });
     }
 

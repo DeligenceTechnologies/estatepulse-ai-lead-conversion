@@ -147,29 +147,128 @@ export const ConsentStatus = {
 } as const;
 export type ConsentStatus = (typeof ConsentStatus)[keyof typeof ConsentStatus];
 
-/** leads.status — matches the SPA's LeadStatus union in src/types.ts. */
+/**
+ * leads.status — matches the SPA's LeadStatus union in src/types.ts and the
+ * leads_status_check constraint (migration 20261006000001_lead_status_v2).
+ *
+ * Lifecycle, left to right:
+ *   new -> contacting -> contacted -> engaged -> qualified
+ *       -> appointment_requested -> appointment_booked
+ * Parked: follow_up (we reached them, no outcome yet), nurture (warm/cold or
+ * never reached — a drip owns them).
+ * Out: not_interested, dnc, invalid, closed.
+ */
 export const LeadStatus = {
   NEW: 'new',
+  CONTACTING: 'contacting',
   CONTACTED: 'contacted',
   ENGAGED: 'engaged',
   QUALIFIED: 'qualified',
+  APPOINTMENT_REQUESTED: 'appointment_requested',
   APPOINTMENT_BOOKED: 'appointment_booked',
+  FOLLOW_UP: 'follow_up',
   NURTURE: 'nurture',
-  HUMAN_HANDOFF: 'human_handoff',
-  CLOSED: 'closed',
+  NOT_INTERESTED: 'not_interested',
   DNC: 'dnc',
-  LOST: 'lost',
+  INVALID: 'invalid',
+  CLOSED: 'closed',
 } as const;
 export type LeadStatus = (typeof LeadStatus)[keyof typeof LeadStatus];
 
+export const LEAD_STATUSES: readonly LeadStatus[] = Object.values(LeadStatus);
+
 /**
- * Status ladder for the merge policy: a re-submission must never regress a lead
- * that is already mid-conversation. Higher wins.
+ * The pre-v2 values. The constraint still accepts them so that a process
+ * running older code against the same database keeps working; nothing in this
+ * codebase writes them any more, and every read goes through
+ * normalizeLeadStatus so they never reach the UI.
  */
-export const LEAD_STATUS_RANK: Record<string, number> = {
-  [LeadStatus.NEW]: 0,
-  [LeadStatus.CONTACTED]: 1,
-  [LeadStatus.ENGAGED]: 2,
-  [LeadStatus.QUALIFIED]: 3,
-  [LeadStatus.APPOINTMENT_BOOKED]: 4,
+export const LEGACY_BOOKED = 'booked';
+export const LEGACY_LOST = 'lost';
+
+/** A legacy or current status, as the current vocabulary. */
+export function normalizeLeadStatus(status: string | null | undefined, dnc = false): LeadStatus {
+  if (status === LEGACY_BOOKED) return LeadStatus.APPOINTMENT_BOOKED;
+  // 'lost' carried both opt-outs (with dnc_status) and exhausted nurture.
+  if (status === LEGACY_LOST) return dnc ? LeadStatus.DNC : LeadStatus.NOT_INTERESTED;
+  return (LEAD_STATUSES as readonly string[]).includes(status ?? '')
+    ? (status as LeadStatus)
+    : LeadStatus.NEW;
+}
+
+/** The stored values a status filter must match, legacy spellings included. */
+export function statusFilterValues(status: string): string[] {
+  if (status === LeadStatus.APPOINTMENT_BOOKED) return [status, LEGACY_BOOKED];
+  if (status === LeadStatus.NOT_INTERESTED) return [status, LEGACY_LOST];
+  return [status];
+}
+
+/**
+ * Group-by counts with legacy values folded into their current name. Group by
+ * ['status', 'dnc_status'] so a legacy 'lost' opt-out lands under 'dnc'.
+ */
+export function normalizeStatusCounts(
+  rows: { status: string; dnc_status?: boolean; _count: { _all: number } }[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const g of rows) {
+    const s = normalizeLeadStatus(g.status, !!g.dnc_status);
+    out[s] = (out[s] ?? 0) + g._count._all;
+  }
+  return out;
+}
+
+/**
+ * The strategy engine is still working the lead. A lead leaves these the moment
+ * the strategy ends, by any route.
+ */
+export const IN_STRATEGY_STATUSES: string[] = [
+  LeadStatus.NEW,
+  LeadStatus.CONTACTING,
+  LeadStatus.CONTACTED,
+  LeadStatus.ENGAGED,
+];
+
+/**
+ * A result was reached: automation (strategy steps, drip steps) stops for good.
+ * Includes the legacy spellings so a row written by older code still stops.
+ */
+export const OUTCOME_STATUSES: string[] = [
+  LeadStatus.QUALIFIED,
+  LeadStatus.APPOINTMENT_REQUESTED,
+  LeadStatus.APPOINTMENT_BOOKED,
+  LeadStatus.NOT_INTERESTED,
+  LeadStatus.DNC,
+  LeadStatus.INVALID,
+  LeadStatus.CLOSED,
+  LEGACY_BOOKED,
+  LEGACY_LOST,
+];
+
+/** Out of the pipeline entirely — not a lead anybody is working. */
+export const INACTIVE_STATUSES: string[] = [
+  LeadStatus.NOT_INTERESTED,
+  LeadStatus.DNC,
+  LeadStatus.INVALID,
+  LeadStatus.CLOSED,
+  LEGACY_LOST,
+];
+
+/**
+ * Where a lead may be moved FROM to reach `target` automatically.
+ *
+ * The outreach ladder only moves forward, so a late webhook (call.answered
+ * arriving after the AI already qualified the lead) can never walk a lead back.
+ * Parked leads (follow_up, nurture) re-enter at engaged when they reply.
+ */
+export const AUTO_FROM: Partial<Record<LeadStatus, string[]>> = {
+  [LeadStatus.CONTACTING]: [LeadStatus.NEW],
+  [LeadStatus.CONTACTED]: [LeadStatus.NEW, LeadStatus.CONTACTING],
+  [LeadStatus.ENGAGED]: [
+    LeadStatus.NEW,
+    LeadStatus.CONTACTING,
+    LeadStatus.CONTACTED,
+    LeadStatus.FOLLOW_UP,
+    LeadStatus.NURTURE,
+  ],
 };

@@ -12,7 +12,8 @@ import {
   BarChart3,
   Building2,
   LogOut,
-  Webhook
+  Webhook,
+  Clock
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
@@ -22,7 +23,7 @@ type NavItem = { id: AppView; label: string; icon: React.ReactNode; badge?: numb
 
 export const Sidebar: React.FC = () => {
   const { activeView, setActiveView, leads } = useApp();
-  const { user, role, organization, logout } = useAuth();
+  const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
 
@@ -40,7 +41,17 @@ export const Sidebar: React.FC = () => {
         { id: 'followups', label: 'Follow-ups', icon: <GitFork className="w-[18px] h-[18px]" /> },
       ],
     },
-    { label: 'Team', items: [{ id: 'agents', label: 'Agents', icon: <UserCheck className="w-[18px] h-[18px]" /> }] },
+    {
+      label: 'Team',
+      items: [
+        { id: 'agents', label: 'Agents', icon: <UserCheck className="w-[18px] h-[18px]" /> },
+        // Only for an owner who takes leads: an agent profile is what the screen
+        // reads and writes, and an owner without one has no hours to set.
+        ...(isOwner && agentProfileId
+          ? [{ id: 'my_availability' as const, label: 'My Availability', icon: <Clock className="w-[18px] h-[18px]" /> }]
+          : []),
+      ],
+    },
     {
       label: 'Setup',
       items: [

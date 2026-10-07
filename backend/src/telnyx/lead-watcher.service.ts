@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { ConfigService } from '@nestjs/config';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { EngineService } from './engine.service';
+import { IN_STRATEGY_STATUSES } from '../common/domain';
 
 /**
  * Auto-kickoff: polls for new leads and enrolls them into their org's strategy.
@@ -86,7 +87,7 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
     const inFlight = await this.prisma.leads.findMany({
       where: {
         organization_id: organizationId,
-        status: { in: ['new', 'contacted'] },
+        status: { in: IN_STRATEGY_STATUSES },
         first_contact_at: { gte: this.staleBefore() },
         automation_paused: false,
         dnc_status: false,
@@ -105,7 +106,7 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
     const stranded = await this.prisma.leads.findMany({
       where: {
         organization_id: organizationId,
-        status: { in: ['new', 'contacted'] },
+        status: { in: IN_STRATEGY_STATUSES },
         first_contact_at: { not: null, lt: before },
         automation_paused: false,
         dnc_status: false,

@@ -53,13 +53,16 @@ const memberSelect = (organizationId: string) =>
             title: true,
             timezone: true,
             max_active_leads: true,
-            // NOT a count of calendar_connections. Calendly belongs to the
+            routing_enabled: true,
+            // NOT a count of calendar_connections. The calendar belongs to the
             // organization now, so the rows that still carry an agent_id are
             // the RETIRED per-agent connections — counting them would report
             // "calendar connected" for anyone who ever connected one, forever.
             // What is true per agent is whether they are on the office's
-            // Calendly, and that is this column.
+            // scheduling team, and that is one of these two columns, picked by
+            // the provider the office is on — see toMemberDTO.
             calendly_user_uri: true,
+            cal_user_id: true,
             _count: {
               select: {
                 lead_assignments: { where: { is_current: true } },
@@ -87,15 +90,34 @@ type MemberRow = {
       title: string | null;
       timezone: string;
       max_active_leads: number;
+      routing_enabled: boolean;
       calendly_user_uri: string | null;
+      cal_user_id: number | null;
       _count: { lead_assignments: number };
     }>;
   };
 };
 
-function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMemberDTO {
+/**
+ * What every roster answer needs beyond the member rows: the organization's
+ * timezone (the fallback for a member with no profile) and which scheduling
+ * provider the office is on (which host-id column says "linked").
+ */
+interface RosterContext {
+  timezone: string;
+  /** calendar_connections.provider of the office connection, or null for none. */
+  provider: string | null;
+}
+
+function toMemberDTO(m: MemberRow, ctx: RosterContext): OrganizationMemberDTO {
   // At most one, guaranteed by the (organization_id, user_id) unique index.
   const profile = m.users.agent_profiles[0];
+
+  // Read for the CONNECTED provider only, the same rule as the owner's
+  // calendar panel: an office that switched from Calendly still has
+  // calendly_user_uri on every agent, and reporting that as linked would say
+  // the roster is fine when no booking can be attributed.
+  const hostId = ctx.provider === 'cal' ? profile?.cal_user_id : profile?.calendly_user_uri;
 
   return {
     id: m.users.id,
@@ -106,15 +128,20 @@ function toMemberDTO(m: MemberRow, organizationTimezone: string): OrganizationMe
     role: toRole(m.role),
     status: m.status,
     memberSince: m.joined_at ?? m.created_at,
-    timezone: profile?.timezone ?? organizationTimezone,
+    timezone: profile?.timezone ?? ctx.timezone,
     title: profile?.title ?? null,
     // Null rather than a stand-in number for a member with no profile: an owner
-    // has no lead cap because nothing routes leads to them, and 0 or 25 would
-    // both be an invented answer to a question that does not apply.
+    // who does not take leads has no lead cap because nothing routes leads to
+    // them, and 0 or 25 would both be an invented answer to a question that
+    // does not apply.
     maxActiveLeads: profile?.max_active_leads ?? null,
     hasProfile: profile !== undefined,
+    profileId: profile?.id ?? null,
+    takingLeads: profile?.routing_enabled ?? false,
     activeLeads: profile?._count.lead_assignments ?? 0,
-    calendarLinked: profile?.calendly_user_uri != null,
+    // No provider connected: nobody is on a scheduling team, whatever a column
+    // left over from an earlier connection says.
+    calendarLinked: ctx.provider !== null && hostId != null,
   };
 }
 
@@ -145,15 +172,9 @@ export class AgentsService {
    * remaining tie, so the order is stable across calls.
    */
   async list(organizationId: string): Promise<OrganizationMemberDTO[]> {
-    // The organization's timezone is the fallback for a member with no agent
-    // profile — an owner, in practice. One row, fetched once for the whole page.
-    const [organization, members] = await Promise.all([
-      // organizations is the tenancy root and is not tenant-scoped: it IS the
-      // scope, addressed here by the id the session resolved.
-      this.prisma.organizations.findUnique({
-        where: { id: organizationId },
-        select: { timezone: true },
-      }),
+    // Fetched once for the whole page, alongside the members.
+    const [ctx, members] = await Promise.all([
+      this.rosterContext(organizationId),
       this.prisma.organization_members.findMany({
         where: { organization_id: organizationId },
         orderBy: [{ role: 'desc' }, { created_at: 'asc' }, { id: 'asc' }],
@@ -161,7 +182,37 @@ export class AgentsService {
       }),
     ]);
 
-    return members.map((m) => toMemberDTO(m, organization?.timezone ?? DEFAULT_TIMEZONE));
+    return members.map((m) => toMemberDTO(m, ctx));
+  }
+
+  /**
+   * The organization's timezone and its scheduling provider, in parallel.
+   *
+   * The connection is read the same way CalendarConnectionsService.activeOrgRow
+   * reads it — the office row, active first, then the most recent — so the
+   * roster and the calendar panel can never disagree about which provider is
+   * current. Read here rather than by injecting that service: this module
+   * would otherwise depend on the whole calendar module for one column.
+   */
+  private async rosterContext(organizationId: string): Promise<RosterContext> {
+    const [organization, connection] = await Promise.all([
+      // organizations is the tenancy root and is not tenant-scoped: it IS the
+      // scope, addressed here by the id the session resolved.
+      this.prisma.organizations.findUnique({
+        where: { id: organizationId },
+        select: { timezone: true },
+      }),
+      this.prisma.calendar_connections.findFirst({
+        where: { organization_id: organizationId, agent_id: null },
+        orderBy: [{ status: 'asc' }, { updated_at: 'desc' }],
+        select: { provider: true },
+      }),
+    ]);
+
+    return {
+      timezone: organization?.timezone ?? DEFAULT_TIMEZONE,
+      provider: connection?.provider ?? null,
+    };
   }
 
   /**
@@ -256,7 +307,7 @@ export class AgentsService {
           // These come back rather than being assumed: undefined above leaves
           // each to its column default, and reading them is how the response
           // stays right if a default moves.
-          select: { id: true, title: true, timezone: true, max_active_leads: true },
+          select: { id: true, title: true, timezone: true, max_active_leads: true, routing_enabled: true },
         });
 
         // Inside the transaction on purpose: the doc comment above promises all
@@ -292,6 +343,8 @@ export class AgentsService {
           title: profile.title,
           maxActiveLeads: profile.max_active_leads,
           hasProfile: true,
+          profileId: profile.id,
+          takingLeads: profile.routing_enabled,
           // Brand new: nothing can be assigned to them and no calendar can be
           // connected yet. Both are facts about the rows just written, not
           // placeholders.
@@ -356,10 +409,13 @@ export class AgentsService {
    *   agent status        — routing is not built; writing either here would be
    *                         configuring a feature that does not exist yet
    *
-   * Only an agent's profile is editable through this route. An owner has no
-   * agent_profiles row by design (signup creates none), so "edit the owner"
-   * would mean minting one, turning that account into a routing target as a
-   * side effect of a name change.
+   * An agent's profile is editable through this route, and so is the CALLING
+   * owner's own — but only once they take leads, i.e. once an agent_profiles
+   * row exists. Editing an owner with no profile would mean the backfill below
+   * minting one, turning that account into a routing target as a side effect of
+   * a name change; that decision belongs to setTakingLeads alone. Another
+   * owner's profile is never editable here: one owner does not reconfigure
+   * another's routing.
    */
   async updateProfile(
     organizationId: string,
@@ -370,11 +426,8 @@ export class AgentsService {
     // The same two reads, the same shape and the same scoping as setStatus
     // below — see the comment there for why this is findFirst rather than a
     // composite findUnique.
-    const [organization, member] = await Promise.all([
-      this.prisma.organizations.findUnique({
-        where: { id: organizationId },
-        select: { timezone: true },
-      }),
+    const [ctx, member] = await Promise.all([
+      this.rosterContext(organizationId),
       this.prisma.organization_members.findFirst({
         where: { organization_id: organizationId, user_id: targetUserId },
         select: { id: true, ...memberSelect(organizationId) },
@@ -388,12 +441,17 @@ export class AgentsService {
       throw new AppError('NOT_FOUND', 'No such member in this organization');
     }
 
-    if (member.role !== 'agent') {
-      throw new AppError('FORBIDDEN', 'Only an agent profile can be edited here');
-    }
-
     // At most one, guaranteed by the (organization_id, user_id) unique index.
     const profile = member.users.agent_profiles[0];
+
+    if (member.role !== 'agent') {
+      if (member.users.id !== callerUserId) {
+        throw new AppError('FORBIDDEN', "Only an agent's profile, or your own, can be edited here");
+      }
+      if (!profile) {
+        throw new AppError('FORBIDDEN', 'Turn on "I also take leads" before editing your agent profile');
+      }
+    }
 
     // '' means "clear it" — the same fold create() applies to a blank phone.
     // undefined still means "leave it alone", which is why this cannot collapse
@@ -517,7 +575,7 @@ export class AgentsService {
       select: memberSelect(organizationId),
     });
 
-    return toMemberDTO(updated ?? member, organization?.timezone ?? DEFAULT_TIMEZONE);
+    return toMemberDTO(updated ?? member, ctx);
   }
 
   /**
@@ -541,11 +599,8 @@ export class AgentsService {
     // recognises `organization_id` (or a globally-unique key) at the top level of
     // `where`, and a nested organization_id_user_id selector reads to it as an
     // unscoped query. This spelling is both scoped and guard-visible.
-    const [organization, member] = await Promise.all([
-      this.prisma.organizations.findUnique({
-        where: { id: organizationId },
-        select: { timezone: true },
-      }),
+    const [ctx, member] = await Promise.all([
+      this.rosterContext(organizationId),
       this.prisma.organization_members.findFirst({
         where: { organization_id: organizationId, user_id: targetUserId },
         // The same shape list() reads, so the response the roster gets back from
@@ -606,6 +661,108 @@ export class AgentsService {
 
     // Everything but the status is unchanged by the update, so the row already
     // read is reused rather than fetched again.
-    return { ...toMemberDTO(member, organization?.timezone ?? DEFAULT_TIMEZONE), status: updated.status };
+    return { ...toMemberDTO(member, ctx), status: updated.status };
+  }
+
+  /**
+   * The owner's "I also take leads" switch. Always the CALLER's own membership:
+   * there is no target id, so one owner cannot volunteer another.
+   *
+   * ON mints the owner's agent_profiles row the first time — the same row an
+   * agent gets from create(), so routing, the calendar roster match and every
+   * /api/agents/me route treat the owner exactly like any other agent — and
+   * afterwards only flips routing_enabled back on.
+   *
+   * OFF never deletes the profile. It only clears routing_enabled, so current
+   * assignments, their history and the Calendly link all stay where they are;
+   * routing simply stops handing this owner NEW leads. Turning it back on
+   * resumes the same profile rather than starting a fresh one.
+   *
+   * Idempotent: asking for the state already in place writes nothing and
+   * leaves no audit row.
+   */
+  async setTakingLeads(
+    organizationId: string,
+    callerUserId: string,
+    enabled: boolean,
+  ): Promise<OrganizationMemberDTO> {
+    const readSelf = () =>
+      this.prisma.organization_members.findFirst({
+        where: { organization_id: organizationId, user_id: callerUserId },
+        select: memberSelect(organizationId),
+      });
+
+    const [ctx, member] = await Promise.all([this.rosterContext(organizationId), readSelf()]);
+
+    // SessionGuard just resolved this membership, so a miss means it vanished
+    // mid-request; the same 404 every other lookup here gives.
+    if (!member) {
+      throw new AppError('NOT_FOUND', 'No such member in this organization');
+    }
+
+    // OwnerGuard already enforces this. Restated because an agent reaching this
+    // method would be switching their own routing, which is the owner's call.
+    if (member.role !== 'owner') {
+      throw new AppError('FORBIDDEN', 'Only an owner can change whether they take leads');
+    }
+
+    const profile = member.users.agent_profiles[0];
+    const current = profile?.routing_enabled ?? false;
+    if (current === enabled) return toMemberDTO(member, ctx);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (profile) {
+          // By primary key, read under the organization scope a moment ago.
+          await tx.agent_profiles.update({
+            where: { id: profile.id },
+            data: { routing_enabled: enabled, updated_at: new Date() },
+          });
+        } else {
+          // Only reachable with enabled=true: no profile means current=false.
+          // The same columns create() fills. The login email is the profile
+          // email to start with; the Edit form can change it afterwards.
+          const displayName =
+            [member.users.first_name, member.users.last_name].filter(Boolean).join(' ').trim() ||
+            member.users.email;
+          await tx.agent_profiles.create({
+            data: {
+              organization_id: organizationId,
+              user_id: callerUserId,
+              display_name: displayName,
+              email: member.users.email,
+              phone: member.users.phone,
+              timezone: ctx.timezone,
+              // max_active_leads, status and routing_enabled (true) keep their
+              // column defaults, exactly as for an agent created by create().
+            },
+          });
+        }
+
+        await tx.audit_logs.create({
+          data: {
+            id: newId(),
+            organization_id: organizationId,
+            actor_type: 'user',
+            actor_id: callerUserId,
+            action: enabled ? 'member.routing_enabled' : 'member.routing_disabled',
+            entity_type: 'member',
+            entity_id: callerUserId,
+            payload: { from: current, to: enabled, profileCreated: !profile } as never,
+          },
+        });
+      });
+    } catch (err) {
+      // A double-click: the other request created the profile between our read
+      // and our insert, and the (organization_id, user_id) unique index refused
+      // the second one. The state asked for is already in place, and the
+      // winning request left the audit row.
+      const raced =
+        !profile && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+      if (!raced) throw err;
+    }
+
+    const updated = await readSelf();
+    return toMemberDTO(updated ?? member, ctx);
   }
 }

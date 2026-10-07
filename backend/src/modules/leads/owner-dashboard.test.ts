@@ -8,6 +8,7 @@ import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter'
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentsModule } from '../agents/agents.module';
+import { EventsModule } from '../events/events.module';
 import { LeadsModule } from './leads.module';
 
 /**
@@ -75,7 +76,7 @@ async function makeLead(fields: Record<string, unknown>): Promise<string> {
 
 before(async () => {
   const moduleRef = await Test.createTestingModule({
-    imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AgentsModule, LeadsModule],
+    imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, EventsModule, AgentsModule, LeadsModule],
   }).compile();
   app = moduleRef.createNestApplication();
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -113,7 +114,8 @@ before(async () => {
   await prisma.lead_assignments.create({
     data: { organization_id: ownerA.orgId, lead_id: held, agent_id: agentProfileId, assignment_type: 'manual' },
   });
-  // Hot but lost: excluded from open temperature counts.
+  // Hot but lost (the legacy spelling, still legal in the database): excluded
+  // from open temperature counts, and reported as 'not_interested'.
   await makeLead({ temperature: 'hot', status: 'lost' });
 });
 
@@ -153,7 +155,7 @@ test('owner sees real counts for their own organization', async () => {
 
   assert.equal(d.leads.total, 5);
   assert.equal(d.leads.last7Days, 5);
-  assert.deepEqual(d.leads.byStatus, { new: 1, contacted: 1, nurture: 1, qualified: 1, lost: 1 });
+  assert.deepEqual(d.leads.byStatus, { new: 1, contacted: 1, nurture: 1, qualified: 1, not_interested: 1 });
   assert.deepEqual(d.leads.byTemperature, { hot: 2, warm: 0, cold: 1, unrated: 1 });
 
   assert.equal(d.attention.hotUnassigned, 1);

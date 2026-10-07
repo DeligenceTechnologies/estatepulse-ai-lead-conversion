@@ -4,14 +4,15 @@ import { OwnerGuard } from '../../common/guards/owner.guard';
 import { SessionGuard } from '../../common/guards/session.guard';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { AuthContext } from '../../auth/types';
+import { INACTIVE_STATUSES, LEGACY_BOOKED, LeadStatus, normalizeStatusCounts } from '../../common/domain';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** leads_status_check, in lifecycle order. byStatus lists only those with a count. */
-const STATUSES = ['new', 'contacted', 'qualified', 'nurture', 'booked', 'closed', 'lost'] as const;
+/** Leads no longer being worked: booked (an agent has it) or out of the pipeline. */
+const CLOSED_STATUSES = [LeadStatus.APPOINTMENT_BOOKED, LEGACY_BOOKED, ...INACTIVE_STATUSES];
 
 interface SummaryRow {
-  by_status: Record<string, number>;
+  by_status: { status: string; dnc_status: boolean; n: number }[];
   temp_hot: number;
   temp_warm: number;
   temp_cold: number;
@@ -56,7 +57,9 @@ export class OwnerDashboardController {
     const since30 = new Date(now - 30 * DAY_MS);
     const nowDate = new Date(now);
 
-    // Closed statuses (booked, closed, lost) are leads_status_check values.
+    // "Open" means not in CLOSED_STATUSES (lead status v2, legacy spellings
+    // included) — the same rule the per-query version applied.
+    const closed = CLOSED_STATUSES as string[];
     const [row] = await this.prisma.$queryRaw<SummaryRow[]>`
       with l as (
         select * from leads where organization_id = ${org}::uuid
@@ -70,16 +73,17 @@ export class OwnerDashboardController {
          where created_at >= ${since30} and first_contact_at is not null
       )
       select
-        (select coalesce(json_object_agg(status, n), '{}'::json)
-           from (select status, count(*)::int as n from l group by status) s) as by_status,
-        count(*) filter (where temperature = 'hot'   and status not in ('booked','closed','lost'))::int as temp_hot,
-        count(*) filter (where temperature = 'warm'  and status not in ('booked','closed','lost'))::int as temp_warm,
-        count(*) filter (where temperature = 'cold'  and status not in ('booked','closed','lost'))::int as temp_cold,
-        count(*) filter (where temperature is null   and status not in ('booked','closed','lost'))::int as temp_unrated,
+        -- Grouped by dnc_status too, so a legacy 'lost' opt-out folds into 'dnc'.
+        (select coalesce(json_agg(json_build_object('status', status, 'dnc_status', dnc_status, 'n', n)), '[]'::json)
+           from (select status, dnc_status, count(*)::int as n from l group by status, dnc_status) s) as by_status,
+        count(*) filter (where temperature = 'hot'   and status <> all(${closed}::text[]))::int as temp_hot,
+        count(*) filter (where temperature = 'warm'  and status <> all(${closed}::text[]))::int as temp_warm,
+        count(*) filter (where temperature = 'cold'  and status <> all(${closed}::text[]))::int as temp_cold,
+        count(*) filter (where temperature is null   and status <> all(${closed}::text[]))::int as temp_unrated,
         count(*) filter (where created_at >= ${since7})::int as last7,
         -- Hot, still open, and nobody currently holds it.
         count(*) filter (
-          where temperature = 'hot' and status not in ('booked','closed','lost')
+          where temperature = 'hot' and status <> all(${closed}::text[])
             and not exists (select 1 from lead_assignments a
                              where a.lead_id = l.id and a.is_current
                                and a.organization_id = ${org}::uuid)
@@ -105,10 +109,9 @@ export class OwnerDashboardController {
       from l
     `;
 
-    const byStatus: Record<string, number> = {};
-    for (const s of STATUSES) if (row.by_status[s]) byStatus[s] = row.by_status[s];
-    // Any value outside the known list (there should be none) is still reported.
-    for (const [s, n] of Object.entries(row.by_status)) if (!(s in byStatus)) byStatus[s] = n;
+    const byStatus = normalizeStatusCounts(
+      row.by_status.map((g) => ({ status: g.status, dnc_status: g.dnc_status, _count: { _all: g.n } })),
+    );
 
     const calls = row.calls_by_status ?? {};
     const sample = row.contacted_sample;

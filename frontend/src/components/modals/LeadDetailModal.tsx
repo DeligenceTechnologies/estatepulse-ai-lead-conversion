@@ -14,6 +14,8 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { AssignAgentControl } from '../leads/AssignAgentControl';
+import { LeadAppointments, LeadBookMeeting } from '../leads/LeadBooking';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import {
   getCall,
@@ -24,34 +26,37 @@ import {
   type CallRow,
   type MessageRow,
 } from '../../utils/historyApi';
-import { listAppointments, type Appointment as CalendarAppointment } from '../../utils/calendarApi';
 import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
+
+/** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface LeadActivity {
   calls: CallRow[];
   messages: MessageRow[];
-  appointments: CalendarAppointment[];
 }
 
 /**
- * Everything that actually happened with one lead, filtered server-side by
- * `?leadId=` (the server keeps it inside the session's org and visibility).
- * Limits are the endpoints' own maximums, so a busy lead is not truncated
- * earlier than the API would truncate it anyway.
+ * The calls and texts for one lead, filtered server-side by `?leadId=` (the
+ * server keeps it inside the session's org and visibility). Appointments are
+ * not here: the Appointments tab is LeadAppointments, which loads its own.
+ *
+ * Only a database lead has a UUID; a demo-store lead has no server history, so
+ * it gets an empty result instead of a request the API would reject.
  */
 async function loadLeadActivity(leadId: string): Promise<LeadActivity> {
-  const [calls, conversations, appointments] = await Promise.all([
+  if (!UUID.test(leadId)) return { calls: [], messages: [] };
+  const [calls, conversations] = await Promise.all([
     listCalls({ leadId, limit: 200 }),
     listConversations(200, leadId),
-    listAppointments({ leadId }),
   ]);
   // The endpoint returns every channel; the SMS tab shows SMS threads only.
   const threads = conversations.filter((c) => c.channel === 'sms');
   const messages = (await Promise.all(threads.map((c) => listMessages(c.id))))
     .flat()
     .sort((a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt));
-  return { calls, messages, appointments };
+  return { calls, messages };
 }
 
 const EmptyTab: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, text }) => (
@@ -132,9 +137,14 @@ export const LeadDetailModal: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments'>('overview');
 
+  // The assignment just made from this modal, shown at once rather than after
+  // the pipeline's refetch lands. Cleared when a different lead is opened.
+  const [assigned, setAssigned] = useState<{ id: string; name: string } | null>(null);
+
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
   useEffect(() => {
+    setAssigned(null);
     setFlow(null);
     if (!selectedLeadId) return;
     let alive = true;
@@ -191,6 +201,18 @@ export const LeadDetailModal: React.FC = () => {
   const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
   const count = (n: number | undefined) => (activity ? ` (${n})` : '');
 
+  // A database lead carries its real assignment; only a demo-store lead is
+  // resolved against the demo roster. Told apart by id, because the same
+  // database lead can reach here through either of two loaders (see findLead),
+  // and only a database row has a UUID — demo leads are `lead_<timestamp>`.
+  const isLive = UUID.test(lead.id);
+  const liveAgent =
+    assigned ?? (lead.assignedAgentId && lead.assignedAgentName ? { id: lead.assignedAgentId, name: lead.assignedAgentName } : null);
+  const agentLabel = isLive
+    ? liveAgent?.name ?? 'Unassigned'
+    : lead.assignedAgentId ? assignedAgent.name : 'Unassigned';
+
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] text-slate-100">
@@ -233,7 +255,7 @@ export const LeadDetailModal: React.FC = () => {
                   lead.phone && <span key="p">{lead.phone}</span>,
                   lead.email && <span key="e">{lead.email}</span>,
                   <span key="a" className="text-slate-300 font-medium">
-                    Agent: {lead.assignedAgentId ? assignedAgent.name : 'Unassigned'}
+                    Agent: {agentLabel}
                   </span>,
                   <span key="s" className="text-emerald-400 font-medium">Source: {lead.source}</span>,
                 ]
@@ -245,6 +267,10 @@ export const LeadDetailModal: React.FC = () => {
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2">
+            {isLive && (
+              <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
+            )}
+
             {/* Only offered while the strategy has not started: once it has, the
                 server ignores a second enrol, so the button would do nothing. */}
             {flow?.phase === 'not_started' && (
@@ -342,7 +368,7 @@ export const LeadDetailModal: React.FC = () => {
             { id: 'overview', label: 'Overview' },
             { id: 'conversation', label: `SMS${count(activity?.messages.length)}` },
             { id: 'calls', label: `AI Calls${count(activity?.calls.length)}` },
-            { id: 'appointments', label: `Appointments${count(activity?.appointments.length)}` },
+            { id: 'appointments', label: 'Appointments' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -417,12 +443,14 @@ export const LeadDetailModal: React.FC = () => {
                 </div>
               )}
 
+              {/* Booking: the assigned agent's own event types, pre-filled for this lead. */}
+              {isLive && <LeadBookMeeting leadId={lead.id} agentKey={liveAgent?.id ?? null} />}
 
             </div>
           )}
 
-          {/* Shared loading / error state for the three activity tabs. */}
-          {activeTab !== 'overview' && !activity && (
+          {/* Shared loading / error state for the SMS and calls tabs. */}
+          {(activeTab === 'conversation' || activeTab === 'calls') && !activity && (
             <div className="p-10 text-center text-xs text-slate-500">
               {activityError ? `Could not load activity: ${activityError}` : 'Loading activity…'}
             </div>
@@ -473,41 +501,11 @@ export const LeadDetailModal: React.FC = () => {
             )
           )}
 
-          {/* TAB 4: APPOINTMENTS — synced from the office calendar. */}
-          {activeTab === 'appointments' && activity && (
-            activity.appointments.length > 0 ? (
-              <div className="space-y-2.5">
-                {activity.appointments.map(appt => (
-                  <div key={appt.id} className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-purple-500/15 text-purple-400 flex items-center justify-center shrink-0">
-                        <Calendar className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-100 truncate">{appt.appointmentType || 'Appointment'}</span>
-                          <span className="text-2xs font-semibold capitalize px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                            {appt.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · {appt.agentName}
-                        </div>
-                      </div>
-                    </div>
-                    {appt.meetingUrl && (
-                      <a
-                        href={appt.meetingUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors shrink-0"
-                      >
-                        Join meeting
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
+          {/* TAB 4: APPOINTMENTS — the lead's bookings and the booking panel
+              (LeadBooking), against the assigned agent's calendar. */}
+          {activeTab === 'appointments' && (
+            isLive ? (
+              <LeadAppointments leadId={lead.id} agentKey={liveAgent?.id ?? null} />
             ) : (
               <EmptyTab icon={<Calendar className="w-6 h-6" />} text="No appointments booked with this lead." />
             )

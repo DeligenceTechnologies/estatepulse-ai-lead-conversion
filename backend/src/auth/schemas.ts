@@ -63,6 +63,14 @@ export const signupSchema = z.object({
   lastName: z.string().trim().min(1, 'Last name is required').max(100),
   organizationName: z.string().trim().min(1, 'Organization name is required').max(255),
   timezone: timezoneSchema,
+  /**
+   * "Just me" or "I have a team". Only 'solo' changes anything: the owner also
+   * gets an agent profile, so leads and calendar bookings can be theirs from
+   * the first minute. Optional so an older client still signs up — absent is
+   * the team flow, which is what signup always did. Either way the owner can
+   * flip "I also take leads" on the Agent Team page later.
+   */
+  teamSize: z.enum(['solo', 'team']).optional(),
 });
 
 export const loginSchema = z.object({

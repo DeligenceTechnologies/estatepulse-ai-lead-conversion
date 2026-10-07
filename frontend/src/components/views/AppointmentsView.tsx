@@ -11,6 +11,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listAppointments, type Appointment } from '../../utils/calendarApi';
 
@@ -54,6 +55,8 @@ function statusTone(status: string): string {
  */
 export const AppointmentsView: React.FC = () => {
   const { setSelectedLeadId, setActiveView } = useApp();
+  // Set when the owner also takes leads: their own bookings get a "Mine" entry.
+  const { agentProfileId } = useAuth();
   const [tab, setTab] = useState<Tab>('upcoming');
   const [agentId, setAgentId] = useState<string>('all');
 
@@ -65,12 +68,15 @@ export const AppointmentsView: React.FC = () => {
   const rows = data ?? [];
 
   // Agent options come from the rows themselves rather than a second request:
-  // an agent with no appointments has nothing to filter to anyway.
+  // an agent with no appointments has nothing to filter to anyway. The
+  // reader's own bookings, when they take leads, are listed first as "Mine".
   const agents = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const r of rows) seen.set(r.agentId, r.agentName);
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [rows]);
+    for (const r of rows) seen.set(r.agentId, r.agentId === agentProfileId ? 'Mine' : r.agentName);
+    return [...seen.entries()].sort(
+      (a, b) => Number(b[0] === agentProfileId) - Number(a[0] === agentProfileId) || a[1].localeCompare(b[1]),
+    );
+  }, [rows, agentProfileId]);
 
   const filtered = useMemo(() => {
     const now = Date.now();
@@ -191,6 +197,9 @@ export const AppointmentsView: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((appt) => {
             const cancelled = appt.status === 'cancelled';
+            // Once a meeting is over there is nothing to join. Judged by the END time,
+            // so a meeting still running (already under Past) can still be joined.
+            const ended = new Date(appt.endTime).getTime() < Date.now();
             return (
               <div
                 key={appt.id}
@@ -267,7 +276,7 @@ export const AppointmentsView: React.FC = () => {
                     View Lead Profile →
                   </button>
 
-                  {!cancelled && appt.meetingUrl && (
+                  {!cancelled && !ended && appt.meetingUrl && (
                     <a
                       href={appt.meetingUrl}
                       target="_blank"

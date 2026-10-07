@@ -260,9 +260,35 @@ export interface LiveLead {
     provider: string | null;
     connectionMethod: string | null;
   } | null;
+  /** The one current assignment; null means unassigned. */
+  assignedAgent: {
+    /** agent_profiles.id */
+    id: string;
+    name: string;
+    /** 'manual' today; routing will add 'geographic' and 'round_robin'. */
+    assignmentType: string;
+    assignedAt: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/** What PUT /v1/leads/:id/assignment answers. */
+export interface LeadAssignment {
+  leadId: string;
+  agent: { id: string; name: string };
+  assignmentType: string;
+  assignedAt: string;
+  /** False when the lead was already with that agent and nothing changed. */
+  changed: boolean;
+}
+
+/**
+ * Fired on window after this tab changes a lead, so the pipeline refetches at
+ * once. The server's live `lead.assigned` event does the same for other tabs;
+ * this one does not depend on the stream being connected.
+ */
+export const LEADS_CHANGED_EVENT = 'estatepulse:leads-changed';
 
 export interface LeadStats {
   byStatus: Record<string, number>;
@@ -400,4 +426,16 @@ export const leadsApi = {
     return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
   },
   stats: () => request<LeadStats>('/v1/leads/stats'),
+  /** Owner-only. Any of the 13 statuses; ends the strategy for an outcome. */
+  setStatus: (leadId: string, status: string, reason?: string) =>
+    request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, ...(reason ? { reason } : {}) }),
+    }),
+  /** Owner-only. Assigning to someone else is a reassignment; the same agent is a no-op. */
+  assign: (leadId: string, agentId: string) =>
+    request<LeadAssignment>(`/v1/leads/${leadId}/assignment`, {
+      method: 'PUT',
+      body: JSON.stringify({ agentId }),
+    }),
 };

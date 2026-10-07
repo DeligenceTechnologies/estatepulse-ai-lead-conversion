@@ -385,3 +385,24 @@ export function openCalendlyPopup(authorizeUrl: string): Promise<'ok' | 'failed'
     }, 500);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Booking for a lead
+// ---------------------------------------------------------------------------
+
+/** Why a lead cannot be booked yet — see LeadBookingService on the backend. */
+export type LeadBookingBlocker = 'no_agent' | 'no_calendar' | 'agent_not_linked' | 'no_event_types';
+
+export interface LeadBookingOptions {
+  agent: { id: string; name: string } | null;
+  provider: 'calendly' | 'cal' | null;
+  /** The assigned agent's own event types, as links pre-filled for this lead. */
+  eventTypes: { id: string; name: string; durationMinutes: number; bookingUrl: string }[];
+  blocker: LeadBookingBlocker | null;
+}
+
+export const getLeadBookingOptions = (leadId: string) =>
+  apiFetch<LeadBookingOptions>(`/leads/${leadId}/booking-options`, { auth: true });
+
+export const getLeadAppointments = (leadId: string) =>
+  apiFetch<Appointment[]>(`/leads/${leadId}/appointments`, { auth: true });

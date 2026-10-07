@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Loader2,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { ApiError, messageFor } from '../../lib/api';
 import {
   DAY_NAMES,
@@ -56,6 +57,10 @@ const PROVIDER_LABEL: Record<string, string> = {
  * matter whether or not a calendar is connected at all.
  */
 export const AgentAvailability: React.FC = () => {
+  // Also rendered for an owner who takes leads. The facts are identical; only
+  // "ask your owner" is wrong when the reader IS the owner, so those few lines
+  // say what to do instead.
+  const isOwner = useAuth().role === 'owner';
   const [status, setStatus] = useState<CalendarStatus | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [days, setDays] = useState<AvailabilityDay[]>([]);
@@ -155,7 +160,9 @@ export const AgentAvailability: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-white">{providerLabel}</h3>
               <p className="text-xs text-slate-400">
-                Your office connects one scheduling account and invites you onto it.
+                {isOwner
+                  ? 'The office’s one scheduling account. You are matched onto it like any agent.'
+                  : 'Your office connects one scheduling account and invites you onto it.'}
               </p>
             </div>
           </div>
@@ -180,14 +187,15 @@ export const AgentAvailability: React.FC = () => {
             that would fail. */}
         {!status.organizationConnected ? (
           <p className="text-xs text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 leading-relaxed">
-            Your office has not connected a scheduling account yet. Once the owner connects
-            Calendly or Cal.com on Integrations and invites you, your bookings appear here.
+            {isOwner
+              ? 'No scheduling account is connected yet. Connect Calendly or Cal.com on Integrations, then press Sync agents — your bookings appear here once you are matched.'
+              : 'Your office has not connected a scheduling account yet. Once the owner connects Calendly or Cal.com on Integrations and invites you, your bookings appear here.'}
           </p>
         ) : !status.schedulingUserId ? (
           <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 leading-relaxed">
-            You are not on your office's {providerLabel} yet, so bookings cannot be attributed to
-            you. Ask your owner to invite you in {providerLabel} using this account's email
-            address.
+            {isOwner
+              ? `You are not matched to a ${providerLabel} member yet, so bookings cannot be attributed to you. Make sure your ${providerLabel} email matches your agent profile email, then press Sync agents on Integrations.`
+              : `You are not on your office's ${providerLabel} yet, so bookings cannot be attributed to you. Ask your owner to invite you in ${providerLabel} using this account's email address.`}
           </p>
         ) : (
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1.5 text-xs">
@@ -198,7 +206,11 @@ export const AgentAvailability: React.FC = () => {
             <div className="flex justify-between gap-3">
               <span className="text-slate-500">Updates</span>
               <span className="text-slate-200">
-                {status.syncEnabled ? 'Checked automatically' : 'Checked when your owner syncs'}
+                {status.syncEnabled
+                  ? 'Checked automatically'
+                  : isOwner
+                    ? 'Checked when you press Sync now'
+                    : 'Checked when your owner syncs'}
               </span>
             </div>
             {status.schedulingUrl && (

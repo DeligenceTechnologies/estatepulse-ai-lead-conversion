@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
+import { AUTO_FROM, IN_STRATEGY_STATUSES, LeadStatus } from '../common/domain';
 import { CredStoreService } from './cred-store.service';
+import { LeadInsightsService } from './lead-insights.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -24,6 +26,7 @@ export class ActivityService {
     // belongs to IS the query, so there is no organization id to scope it by.
     private readonly unscoped: PrismaService,
     private readonly creds: CredStoreService,
+    private readonly insights: LeadInsightsService,
   ) {}
 
   private async findOrCreateConversation(orgId: string, leadId: string, channel: 'sms' | 'voice') {
@@ -36,8 +39,27 @@ export class ActivityService {
     });
   }
 
+  /**
+   * Move a lead forward on the outreach ladder, never back: the update only
+   * applies from the statuses AUTO_FROM allows, so a late webhook cannot undo a
+   * later outcome.
+   */
+  private async advance(leadId: string, to: LeadStatus): Promise<void> {
+    await this.prisma.leads
+      .updateMany({ where: { id: leadId, status: { in: AUTO_FROM[to] ?? [] } }, data: { status: to } })
+      .catch((e) => this.logger.error(`advance ${to}: ${(e as Error).message}`));
+  }
+
+  /** Outreach is under way (a call was dialled) but nobody has been reached yet. */
+  private async markContacting(leadId: string): Promise<void> {
+    await this.advance(leadId, LeadStatus.CONTACTING);
+    await this.prisma.leads
+      .update({ where: { id: leadId }, data: { last_contact_at: new Date() } })
+      .catch(() => undefined);
+  }
+
   private async markContacted(leadId: string, response = false): Promise<void> {
-    await this.prisma.leads.updateMany({ where: { id: leadId, status: 'new' }, data: { status: 'contacted' } });
+    await this.advance(leadId, LeadStatus.CONTACTED);
     await this.prisma.leads
       .update({
         where: { id: leadId },
@@ -103,26 +125,34 @@ export class ActivityService {
     } catch (e) {
       this.logger.error(`startCall: ${(e as Error).message}`);
     }
-    // The lead is 'contacted' once the call is PLACED; the outcome lands on the
-    // call row rather than on the lead.
-    await this.markContacted(leadId);
+    // Dialled is 'contacting'; it becomes 'contacted' only when the call is
+    // answered (onCallAnswered).
+    await this.markContacting(leadId);
   }
 
   /** The call could not be placed at all (provider error). Does NOT exit the strategy. */
   /**
-   * Park a lead in 'nurture' (follow-up needed) with a human reason, so a lead
-   * we could not reach reads as attempted rather than untouched. Per the state
-   * machine: no answer / not ready -> Nurture. The reason surfaces in the UI on
+   * Park a lead the strategy could not convert, with a human reason, so it
+   * reads as attempted rather than untouched. The reason surfaces in the UI on
    * hover (leads.ai_summary -> statusReason).
    *
-   * Only 'new' and 'contacted' move: a lead that already reached qualified,
-   * booked, closed or lost has a further status that this must never walk back.
+   *  - reached (contacted / engaged) -> 'follow_up': a person spoke or replied,
+   *    and somebody should pick the thread back up.
+   *  - never reached (new / contacting) -> 'nurture': a drip's job.
+   *
+   * Only in-strategy statuses move: a lead that already reached an outcome has
+   * a further status that this must never walk back.
    */
   private async moveToFollowup(leadId: string, reason: string): Promise<void> {
+    const data = { ai_summary: reason.slice(0, 2000), last_contact_at: new Date() };
     try {
       await this.prisma.leads.updateMany({
-        where: { id: leadId, status: { in: ['new', 'contacted'] } },
-        data: { status: 'nurture', ai_summary: reason.slice(0, 2000), last_contact_at: new Date() },
+        where: { id: leadId, status: { in: [LeadStatus.CONTACTED, LeadStatus.ENGAGED] } },
+        data: { ...data, status: LeadStatus.FOLLOW_UP },
+      });
+      await this.prisma.leads.updateMany({
+        where: { id: leadId, status: { in: IN_STRATEGY_STATUSES } },
+        data: { ...data, status: LeadStatus.NURTURE },
       });
     } catch (e) {
       this.logger.error(`moveToFollowup: ${(e as Error).message}`);
@@ -199,6 +229,9 @@ export class ActivityService {
 
     // Attach the org's AI assistant so the answered call actually talks.
     if (c.assistantId) {
+      // Make sure Telnyx will score this conversation when it ends. Once per
+      // assistant per process, never blocks the call, and never throws.
+      void this.insights.ensureProvisioned(call.organization_id);
       await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
@@ -350,8 +383,17 @@ ${text}` : text;
     }
   }
 
-  /** Call ended — completed if it had been answered, else no_answer. */
-  async onCallHangup(ccid: string): Promise<void> {
+  /**
+   * Call ended — completed if it had been answered, else no_answer.
+   *
+   * The payload adds two lead-level outcomes:
+   *  - a hangup cause that means the number itself is bad -> 'invalid', and
+   *    automation stops, since every further attempt would fail the same way;
+   *  - an answered call with a real conversation (ENGAGED_TALK_SECS of talk
+   *    time) -> 'engaged'. Talk time is Telnyx's start_time..end_time, which
+   *    starts at answer, not at dial.
+   */
+  async onCallHangup(ccid: string, payload: any = {}): Promise<void> {
     const call = await this.callByProvider(ccid);
     if (!call) return;
     const answered = call.status === 'in_progress';
@@ -362,10 +404,51 @@ ${text}` : text;
       where: { id: call.id },
       data: { status: answered ? 'completed' : 'no_answer', ended_at: new Date(), duration_seconds: dur },
     });
+    if (!call.lead_id) return;
+
+    const cause = String(payload?.hangup_cause ?? '');
+    if (INVALID_NUMBER_CAUSES.has(cause)) {
+      await this.markInvalid(call.lead_id, `Invalid number (${cause})`);
+      return;
+    }
+
+    if (answered) {
+      const start = Date.parse(payload?.start_time ?? '');
+      const end = Date.parse(payload?.end_time ?? '');
+      const talk = Number.isFinite(start) && Number.isFinite(end) ? (end - start) / 1000 : 0;
+      if (talk >= ENGAGED_TALK_SECS) await this.advance(call.lead_id, LeadStatus.ENGAGED);
+      return;
+    }
+
     // No answer is recorded but does NOT end the strategy — the lead continues to
     // its next step, and leaves only once every step is exhausted (see the engine).
-    if (!answered && call.lead_id) {
-      await this.noteAttemptFailure(call.lead_id, 'No answer on the last call');
-    }
+    await this.noteAttemptFailure(
+      call.lead_id,
+      cause ? `No answer on the last call (${cause})` : 'No answer on the last call',
+    );
+  }
+
+  /**
+   * The number cannot be reached at all. Terminal for automation — the engine
+   * and the drip runner both stop on 'invalid' — but not for a person, who can
+   * correct the number and move the lead on by hand.
+   */
+  async markInvalid(leadId: string, reason: string): Promise<void> {
+    await this.prisma.leads
+      .updateMany({
+        where: { id: leadId, status: { in: [...IN_STRATEGY_STATUSES, LeadStatus.FOLLOW_UP, LeadStatus.NURTURE] } },
+        data: { status: LeadStatus.INVALID, lost_reason: reason.slice(0, 255), ai_summary: reason },
+      })
+      .catch((e) => this.logger.error(`markInvalid: ${(e as Error).message}`));
   }
 }
+
+/** Seconds of answered talk time that count as a real conversation. */
+const ENGAGED_TALK_SECS = 30;
+
+/**
+ * Telnyx hangup causes that describe the number, not the moment. Busy, no
+ * answer and rejected are deliberately absent: those are a person, and the
+ * next attempt may well reach them.
+ */
+const INVALID_NUMBER_CAUSES = new Set(['unallocated_number', 'invalid_number_format', 'number_changed']);

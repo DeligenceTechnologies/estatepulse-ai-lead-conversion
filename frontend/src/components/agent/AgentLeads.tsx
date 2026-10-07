@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Inbox, Loader2, Mail, Phone, RefreshCw, X } from 'lucide-react';
 import { messageFor } from '../../lib/api';
+import { LeadAppointments } from '../leads/LeadBooking';
 import {
   getMyLead,
   getMyLeads,
@@ -8,6 +9,7 @@ import {
   type AgentLead,
   type AgentLeadDetail,
 } from '../../utils/agentMeApi';
+import { statusLabel, statusTone } from '../../lib/leadStatus';
 
 /** Same tones the owner's pipeline uses, so one lead reads the same on both screens. */
 const TEMPERATURE_TONE: Record<string, string> = {
@@ -16,13 +18,6 @@ const TEMPERATURE_TONE: Record<string, string> = {
   cold: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
 };
 
-const STATUS_TONE: Record<string, string> = {
-  booked: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
-  qualified: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-  contacted: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-  nurture: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-  lost: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-};
 
 const NEUTRAL = 'bg-slate-800 text-slate-400 border-slate-700';
 const PILL = 'text-2xs font-bold uppercase px-2 py-0.5 rounded-full border font-mono';
@@ -75,8 +70,8 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
             </h3>
             {lead && (
               <div className="flex items-center gap-1.5 mt-1">
-                <span className={`${PILL} ${STATUS_TONE[lead.status] ?? NEUTRAL}`}>
-                  {humanize(lead.status)}
+                <span className={`${PILL} ${statusTone(lead.status)}`}>
+                  {statusLabel(lead.status)}
                 </span>
                 {lead.temperature && (
                   <span className={`${PILL} ${TEMPERATURE_TONE[lead.temperature] ?? NEUTRAL}`}>
@@ -148,6 +143,8 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
                 <span className="text-slate-400 block text-2xs">Latest AI note</span>
                 <p className="text-slate-100 leading-relaxed">{lead.aiSummary ?? DASH}</p>
               </div>
+
+              <LeadAppointments leadId={lead.id} agentKey={null} />
             </>
           )}
         </div>
@@ -265,8 +262,8 @@ export const AgentLeads: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`${PILL} ${STATUS_TONE[lead.status] ?? NEUTRAL}`}>
-                        {humanize(lead.status)}
+                      <span className={`${PILL} ${statusTone(lead.status)}`}>
+                        {statusLabel(lead.status)}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-slate-400">{lead.source?.name ?? DASH}</td>

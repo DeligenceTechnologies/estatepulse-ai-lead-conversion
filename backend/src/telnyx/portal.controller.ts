@@ -14,7 +14,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { OrgId } from '../common/decorators/auth.decorators';
+import {
+  LEAD_STATUSES,
+  LeadStatus,
+  OUTCOME_STATUSES,
+  normalizeLeadStatus,
+} from '../common/domain';
 import { AppError } from '../common/errors';
+import { OwnerGuard } from '../common/guards/owner.guard';
 import { SessionGuard } from '../common/guards/session.guard';
 import { UpstreamErrorInterceptor } from '../common/interceptors/upstream-error.interceptor';
 import { PortalIngestService } from '../ingest/portal-ingest.service';
@@ -27,6 +34,27 @@ import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** Outcomes the AI call may report through POST /api/leads/:id/outcome. */
+const AI_OUTCOMES = [
+  LeadStatus.APPOINTMENT_REQUESTED,
+  LeadStatus.NOT_INTERESTED,
+  LeadStatus.DNC,
+  LeadStatus.FOLLOW_UP,
+] as const;
+
+/** The journey's one-line result for a status that settles it. */
+const OUTCOME_LABELS: Partial<Record<string, string>> = {
+  [LeadStatus.QUALIFIED]: 'Qualified',
+  [LeadStatus.APPOINTMENT_REQUESTED]: 'Appointment requested',
+  [LeadStatus.APPOINTMENT_BOOKED]: 'Appointment booked',
+  [LeadStatus.FOLLOW_UP]: 'Exited strategy — follow-up needed',
+  [LeadStatus.NURTURE]: 'Exited strategy — in nurture',
+  [LeadStatus.NOT_INTERESTED]: 'Not interested',
+  [LeadStatus.DNC]: 'Do not contact',
+  [LeadStatus.INVALID]: 'Invalid number',
+  [LeadStatus.CLOSED]: 'Closed',
+};
+
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
 function mapLead(r: any) {
   return {
@@ -38,7 +66,7 @@ function mapLead(r: any) {
     email: r.email ?? '',
     phone: r.phone ?? '',
     source: 'Website',
-    status: r.status ?? 'new',
+    status: normalizeLeadStatus(r.status, !!r.dnc_status),
     leadType: 'buyer',
     preferredLocation: r.location ?? '',
     budgetMin: r.min_budget != null ? Number(r.min_budget) : 0,
@@ -252,10 +280,10 @@ export class PortalLeadsController {
     if (nextIndex >= 0) stepsOut[nextIndex]!.state = 'current';
     const fired = calls.length + msgs.length;
 
-    const DONE = ['qualified', 'booked', 'closed', 'lost'];
+    const status = normalizeLeadStatus(lead.status, !!lead.dnc_status);
     let phase: 'not_started' | 'strategy' | 'exited' | 'done';
-    if (DONE.includes(lead.status ?? '')) phase = 'done';
-    else if (lead.status === 'nurture') phase = 'exited';
+    if (OUTCOME_STATUSES.includes(status)) phase = 'done';
+    else if (status === LeadStatus.NURTURE || status === LeadStatus.FOLLOW_UP) phase = 'exited';
     else if (lead.first_contact_at) phase = 'strategy';
     else phase = 'not_started';
 
@@ -263,9 +291,8 @@ export class PortalLeadsController {
     const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
     const smsSent = msgs.some((m) => m.delivery_status === 'sent');
     let outcome: string;
-    if (lead.status === 'qualified') outcome = 'Qualified';
-    else if (lead.status === 'booked') outcome = 'Appointment booked';
-    else if (lead.status === 'nurture') outcome = 'Exited strategy — follow-up needed';
+    if (OUTCOME_LABELS[status]) outcome = OUTCOME_LABELS[status]!;
+    else if (status === LeadStatus.ENGAGED) outcome = 'Engaged — in conversation';
     else if (answered) outcome = 'Call answered';
     else if (smsSent) outcome = 'SMS sent';
     else if (fired > 0) outcome = 'Attempted — no success yet';
@@ -273,7 +300,7 @@ export class PortalLeadsController {
 
     return {
       phase,
-      leadStatus: lead.status,
+      leadStatus: status,
       outcome,
       strategyName: strategy.name,
       stepsTotal: steps.length,
@@ -282,6 +309,47 @@ export class PortalLeadsController {
       steps: stepsOut,
       reason: lead.ai_summary ?? null,
     };
+  }
+
+  /**
+   * Move a lead to any status by hand — the only way into 'closed', and the
+   * correction path for everything automation decided. Owner-only: this can
+   * take a lead out of the pipeline (or mark it do-not-contact) for good.
+   */
+  @Patch(':id/status')
+  @UseGuards(OwnerGuard)
+  @HttpCode(HttpStatus.OK)
+  async setStatus(@OrgId() orgId: string, @Param('id') id: string, @Body() body: any) {
+    const { status, reason } = body ?? {};
+    if (!(LEAD_STATUSES as readonly string[]).includes(status)) {
+      throw new AppError('VALIDATION_ERROR', `status must be one of ${LEAD_STATUSES.join('|')}`);
+    }
+    try {
+      await this.engine.setStatus(orgId, id, status as LeadStatus, typeof reason === 'string' ? reason : undefined);
+    } catch (e) {
+      throw new AppError('NOT_FOUND', (e as Error).message);
+    }
+    return { ok: true, status };
+  }
+
+  /**
+   * The AI call reports an outcome that is not a temperature: the lead asked
+   * for an appointment, is not interested, asked not to be called, or wants a
+   * call back. Same caller and auth as /qualified.
+   */
+  @Post(':id/outcome')
+  @HttpCode(HttpStatus.OK)
+  async outcome(@OrgId() orgId: string, @Param('id') id: string, @Body() body: any) {
+    const { outcome, summary } = body ?? {};
+    if (!(AI_OUTCOMES as readonly string[]).includes(outcome)) {
+      throw new AppError('VALIDATION_ERROR', `outcome must be one of ${AI_OUTCOMES.join('|')}`);
+    }
+    try {
+      await this.engine.setStatus(orgId, id, outcome as LeadStatus, typeof summary === 'string' ? summary : undefined);
+    } catch (e) {
+      throw new AppError('NOT_FOUND', (e as Error).message);
+    }
+    return { ok: true };
   }
 
   /** The AI call reports the qualification result -> stop the strategy, hand off. */
