@@ -366,3 +366,93 @@ test("an owner cannot touch another organization's lead or agent", async () => {
 
   assert.equal((await currentRows(leadA)).length, 0);
 });
+
+// --- exact answers and records ----------------------------------------------
+
+test('assign then reassign: exact response, and the history, outbox and audit rows each one writes', async () => {
+  const leadId = await makeLead(ownerA.orgId);
+  const touchedBefore = (await prisma.leads.findUniqueOrThrow({ where: { id: leadId } })).updated_at;
+
+  const first = await assignVia(ownerA.token, leadId, bob.profileId);
+  assert.equal(first.status, 200, first.text);
+  const firstRow = (await currentRows(leadId))[0]!;
+  assert.deepEqual(first.body, {
+    leadId,
+    agent: { id: bob.profileId, name: 'Ag bob' },
+    assignmentType: 'manual',
+    assignedAt: firstRow.assigned_at.toISOString(),
+    changed: true,
+  });
+  assert.ok((await prisma.leads.findUniqueOrThrow({ where: { id: leadId } })).updated_at > touchedBefore);
+
+  const erin = await createAgent(ownerA.token, 'erin');
+  const erinProfile = await profileIdOf(ownerA.orgId, erin.userId);
+  const second = await assignVia(ownerA.token, leadId, erinProfile);
+  assert.equal(second.status, 200, second.text);
+
+  const rows = await prisma.lead_assignments.findMany({ where: { lead_id: leadId }, orderBy: { assigned_at: 'asc' } });
+  assert.deepEqual(
+    rows.map((r) => ({ agent: r.agent_id, type: r.assignment_type, current: r.is_current, org: r.organization_id })),
+    [
+      { agent: bob.profileId, type: 'manual', current: false, org: ownerA.orgId },
+      { agent: erinProfile, type: 'manual', current: true, org: ownerA.orgId },
+    ],
+  );
+  // Retired at the very moment the new one was made.
+  assert.equal(rows[0]!.unassigned_at!.toISOString(), rows[1]!.assigned_at.toISOString());
+  assert.equal(asRecord(second.body)['assignedAt'], rows[1]!.assigned_at.toISOString());
+
+  const events = await prisma.domain_events.findMany({ where: { aggregate_id: leadId }, orderBy: { occurred_at: 'asc' } });
+  assert.deepEqual(
+    events.map((e) => ({ org: e.organization_id, type: e.aggregate_type, event: e.event_type, payload: e.payload })),
+    [
+      { org: ownerA.orgId, type: 'lead', event: 'lead.assigned', payload: { leadId, agentId: bob.profileId, previousAgentId: null, assignmentType: 'manual' } },
+      { org: ownerA.orgId, type: 'lead', event: 'lead.assigned', payload: { leadId, agentId: erinProfile, previousAgentId: bob.profileId, assignmentType: 'manual' } },
+    ],
+  );
+
+  const audits = await prisma.audit_logs.findMany({ where: { entity_id: leadId }, orderBy: { created_at: 'asc' } });
+  assert.deepEqual(
+    audits.map((a) => ({ org: a.organization_id, actorType: a.actor_type, actor: a.actor_id, action: a.action, entity: a.entity_type, payload: a.payload })),
+    [
+      {
+        org: ownerA.orgId, actorType: 'user', actor: ownerA.userId, action: 'lead.assigned', entity: 'lead',
+        payload: { agentId: bob.profileId, agentName: 'Ag bob', previousAgentId: null, assignmentType: 'manual', reason: 'Assigned manually by the owner' },
+      },
+      {
+        org: ownerA.orgId, actorType: 'user', actor: ownerA.userId, action: 'lead.reassigned', entity: 'lead',
+        payload: { agentId: erinProfile, agentName: 'Ag erin', previousAgentId: bob.profileId, assignmentType: 'manual', reason: 'Assigned manually by the owner' },
+      },
+    ],
+  );
+});
+
+test('a lead or agent that does not exist is a 404 and writes nothing', async () => {
+  const leadId = await makeLead(ownerA.orgId);
+  const nobody = '00000000-0000-4000-8000-000000000000';
+
+  const noLead = await assignVia(ownerA.token, nobody, bob.profileId);
+  assert.equal(noLead.status, 404, noLead.text);
+  assert.match(noLead.text, /No such lead in this organization/);
+
+  const noAgent = await assignVia(ownerA.token, leadId, nobody);
+  assert.equal(noAgent.status, 404, noAgent.text);
+  assert.match(noAgent.text, /No such agent in this organization/);
+
+  assert.equal(await prisma.lead_assignments.count({ where: { lead_id: leadId } }), 0);
+  assert.equal(await prisma.audit_logs.count({ where: { entity_id: leadId } }), 0);
+  assert.equal(await prisma.domain_events.count({ where: { aggregate_id: leadId } }), 0);
+});
+
+test("different leads racing for an agent's last free slots: the cap still holds", async () => {
+  const dave = await createAgent(ownerA.token, 'dave');
+  const daveProfile = await profileIdOf(ownerA.orgId, dave.userId);
+  assert.equal((await call('PATCH', `/api/agents/${dave.userId}`, { token: ownerA.token, body: { maxActiveLeads: 2 } })).status, 200);
+
+  const leads = await Promise.all([1, 2, 3, 4, 5].map(() => makeLead(ownerA.orgId)));
+  const results = await Promise.all(leads.map((leadId) => assignVia(ownerA.token, leadId, daveProfile)));
+
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 200, 409, 409, 409], results.map((r) => r.text).join('\n'));
+  for (const r of results.filter((x) => x.status === 409)) assert.match(r.text, /at their lead cap \(2\/2\)/);
+  assert.equal(await prisma.lead_assignments.count({ where: { agent_id: daveProfile, is_current: true } }), 2);
+});

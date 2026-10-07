@@ -76,30 +76,59 @@ export class LeadAssignmentService {
         throw new AppError('NOT_FOUND', 'No such lead in this organization');
       }
 
+      // The agent's row, locked, plus two reads in the same round trip: their
+      // membership status, and the lead's current assignment. The latter is
+      // safe to read here because the lead lock above already freezes it —
+      // nothing else can change it before this transaction ends. The cap count
+      // below is NOT read here: it can be moved by another transaction holding
+      // this agent's lock, so it must be its own statement, run after the lock
+      // is granted and therefore seeing that transaction's commit.
       const agent = await tx.$queryRaw<
-        Array<{ id: string; user_id: string; display_name: string; max_active_leads: number }>
+        Array<{
+          id: string;
+          user_id: string;
+          display_name: string;
+          max_active_leads: number;
+          membership_status: string | null;
+          current_id: string | null;
+          current_agent_id: string | null;
+          current_type: string | null;
+          current_assigned_at: Date | null;
+        }>
       >`
-        select id, user_id, display_name, max_active_leads from agent_profiles
-         where id = ${agentId}::uuid and organization_id = ${organizationId}::uuid
-         for update
+        select ap.id, ap.user_id, ap.display_name, ap.max_active_leads,
+               m.status as membership_status,
+               cur.id as current_id, cur.agent_id as current_agent_id,
+               cur.assignment_type as current_type, cur.assigned_at as current_assigned_at
+          from agent_profiles ap
+          left join organization_members m
+            on m.organization_id = ${organizationId}::uuid and m.user_id = ap.user_id
+          left join lateral (
+            select la.id, la.agent_id, la.assignment_type, la.assigned_at
+              from lead_assignments la
+             where la.organization_id = ${organizationId}::uuid and la.lead_id = ${leadId}::uuid and la.is_current
+             limit 1
+          ) cur on true
+         where ap.id = ${agentId}::uuid and ap.organization_id = ${organizationId}::uuid
+           for update of ap
       `;
       const profile = agent[0];
       if (!profile) {
         throw new AppError('NOT_FOUND', 'No such agent in this organization');
       }
 
-      const membership = await tx.organization_members.findFirst({
-        where: { organization_id: organizationId, user_id: profile.user_id },
-        select: { status: true },
-      });
-      if (membership?.status !== ACTIVE) {
+      if (profile.membership_status !== ACTIVE) {
         throw new AppError('CONFLICT', `${profile.display_name} is not an active member and cannot take leads`);
       }
 
-      const current = await tx.lead_assignments.findFirst({
-        where: { organization_id: organizationId, lead_id: leadId, is_current: true },
-        select: { id: true, agent_id: true, assignment_type: true, assigned_at: true },
-      });
+      const current = profile.current_id
+        ? {
+            id: profile.current_id,
+            agent_id: profile.current_agent_id!,
+            assignment_type: profile.current_type!,
+            assigned_at: profile.current_assigned_at!,
+          }
+        : null;
 
       // Already theirs: answer as a success and write nothing, so a double
       // click or a re-save cannot churn the history or the audit log.
@@ -130,70 +159,52 @@ export class LeadAssignmentService {
       }
 
       const now = new Date();
-      if (current) {
-        // Retired, never deleted: the history of who held a lead is the
-        // assignment audit trail the milestone asks for.
-        await tx.lead_assignments.update({
-          where: { id: current.id },
-          data: { is_current: false, unassigned_at: now },
-        });
-      }
-
-      const created = await tx.lead_assignments.create({
-        data: {
-          organization_id: organizationId,
-          lead_id: leadId,
-          agent_id: profile.id,
-          assignment_type: MANUAL,
-          assigned_at: now,
-        },
-        select: { assigned_at: true },
-      });
-
-      await tx.leads.update({
-        where: { id: leadId },
-        data: { updated_at: now },
-      });
 
       // The outbox seam agent handoff (SMS to the agent) will consume. Written
       // in the same transaction so an assignment and its event exist together
       // or not at all. Nothing reads it yet.
-      await tx.domain_events.create({
-        data: {
-          id: newId(),
-          organization_id: organizationId,
-          aggregate_type: 'lead',
-          aggregate_id: leadId,
-          event_type: 'lead.assigned',
-          payload: {
-            leadId,
-            agentId: profile.id,
-            previousAgentId: current?.agent_id ?? null,
-            assignmentType: MANUAL,
-          } as never,
-        },
-      });
+      const event = {
+        leadId,
+        agentId: profile.id,
+        previousAgentId: current?.agent_id ?? null,
+        assignmentType: MANUAL,
+      };
+      // The reason is part of the record: "manual, by this owner" is the
+      // assignment reason for every row this path writes.
+      const audit = {
+        agentId: profile.id,
+        agentName: profile.display_name,
+        previousAgentId: current?.agent_id ?? null,
+        assignmentType: MANUAL,
+        reason: 'Assigned manually by the owner',
+      };
 
-      await tx.audit_logs.create({
-        data: {
-          id: newId(),
-          organization_id: organizationId,
-          actor_type: 'user',
-          actor_id: callerUserId,
-          action: current ? 'lead.reassigned' : 'lead.assigned',
-          entity_type: 'lead',
-          entity_id: leadId,
-          // The reason is part of the record: "manual, by this owner" is the
-          // assignment reason for every row this path writes.
-          payload: {
-            agentId: profile.id,
-            agentName: profile.display_name,
-            previousAgentId: current?.agent_id ?? null,
-            assignmentType: MANUAL,
-            reason: 'Assigned manually by the owner',
-          } as never,
-        },
-      });
+      // Every write in one statement, inside the same transaction: retire the
+      // current row (retired, never deleted — the history of who held a lead is
+      // the assignment audit trail the milestone asks for; a null id retires
+      // nothing), add the new one, touch the lead, and write the event and the
+      // audit row. One round trip instead of five.
+      const [created] = await tx.$queryRaw<Array<{ assigned_at: Date }>>`
+        with retired as (
+          update lead_assignments set is_current = false, unassigned_at = ${now}
+           where id = ${current?.id ?? null}::uuid and organization_id = ${organizationId}::uuid
+        ), created as (
+          insert into lead_assignments (organization_id, lead_id, agent_id, assignment_type, assigned_at)
+          values (${organizationId}::uuid, ${leadId}::uuid, ${profile.id}::uuid, ${MANUAL}, ${now})
+          returning assigned_at
+        ), touched as (
+          update leads set updated_at = ${now}
+           where id = ${leadId}::uuid and organization_id = ${organizationId}::uuid
+        ), outbox as (
+          insert into domain_events (id, organization_id, aggregate_type, aggregate_id, event_type, payload)
+          values (${newId()}::uuid, ${organizationId}::uuid, 'lead', ${leadId}::uuid, 'lead.assigned', ${JSON.stringify(event)}::jsonb)
+        ), audited as (
+          insert into audit_logs (id, organization_id, actor_type, actor_id, action, entity_type, entity_id, payload)
+          values (${newId()}::uuid, ${organizationId}::uuid, 'user', ${callerUserId}::uuid,
+                  ${current ? 'lead.reassigned' : 'lead.assigned'}, 'lead', ${leadId}::uuid, ${JSON.stringify(audit)}::jsonb)
+        )
+        select assigned_at from created
+      `;
 
       return {
         leadSourceId: lead[0]!.lead_source_id,
@@ -201,7 +212,7 @@ export class LeadAssignmentService {
           leadId,
           agent: { id: profile.id, name: profile.display_name },
           assignmentType: MANUAL,
-          assignedAt: created.assigned_at,
+          assignedAt: created!.assigned_at,
           changed: true,
         },
       };
