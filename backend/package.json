@@ -13,6 +13,7 @@
     "test:agents": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agents.test.js",
     "test:agent-me": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agent-me.test.js",
     "test:lead-assignment": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/lead-assignment.test.js",
+    "test:leads-list": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/leads-list.test.js",
     "test:dashboard": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/owner-dashboard.test.js",
     "test:history": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/history/history.test.js",
     "test:portal-leads": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/telnyx/portal-leads.test.js",
