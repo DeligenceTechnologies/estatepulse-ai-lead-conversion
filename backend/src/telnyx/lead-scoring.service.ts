@@ -6,6 +6,7 @@ import { CredStoreService } from './cred-store.service';
 import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
 import {
+  leadDetailsFrom,
   parseExtraction,
   scoreLead,
   type Extraction,
@@ -217,7 +218,13 @@ export class LeadScoringService {
     });
     if (!lead) return qualification;
 
-    await this.prisma.leads.update({ where: { id: call.lead_id }, data: { score: result.score } });
+    // The score, and whatever details the caller gave (budget, location,
+    // timeline, bedrooms, financing, motivation). Only details actually said
+    // are written, so a call that skipped the budget keeps the one on file.
+    await this.prisma.leads.update({
+      where: { id: call.lead_id },
+      data: { score: result.score, ...leadDetailsFrom(extraction), updated_at: new Date() },
+    });
     if (SETTLED_STATUSES.includes(lead.status) || lead.dnc_status) {
       // Record what the call showed, but do not reopen a settled or do-not-contact lead.
       await this.prisma.leads.update({ where: { id: call.lead_id }, data: { temperature: result.temperature } });

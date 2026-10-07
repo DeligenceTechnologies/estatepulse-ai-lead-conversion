@@ -60,8 +60,31 @@ describe('LeadScoringService', () => {
     expect(callWrite.data.extracted_intel.qualification).toMatchObject({ source: 'telnyx_insights', score: 80, temperature: 'hot' });
     expect(callWrite.data.ai_summary).toBe('Ready to buy in Austin.');
 
-    expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { score: 80 } });
+    expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: expect.objectContaining({ score: 80 }) });
     expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.stringContaining('HOT — 80'));
+  });
+
+  it("fills the lead's budget, location, bedrooms and financing from the call", async () => {
+    const { svc, prisma } = setup();
+    await svc.onInsightsGenerated(
+      'v3:ccid',
+      insightPayload({ ...hotFacts, budget_min: 150000, budget_max: 220000, location: 'California', bedrooms: 4, financing: 'pre_approved' }),
+      unsigned,
+    );
+    expect(prisma.leads.update.mock.calls[0][0].data).toMatchObject({
+      min_budget: 150000,
+      max_budget: 220000,
+      location: 'California',
+      bedrooms: 4,
+      financing_status: 'Pre-approved',
+      timeline: 'Within 30 days',
+    });
+  });
+
+  it('a late result from an older call does not overwrite the lead details either', async () => {
+    const { svc, prisma } = setup({ latestCallId: 'call-2' });
+    await svc.onInsightsGenerated('v3:ccid', insightPayload({ ...hotFacts, location: 'Old City' }), unsigned);
+    expect(prisma.leads.update).not.toHaveBeenCalled();
   });
 
   it('ignores Insight results that are not ours', async () => {

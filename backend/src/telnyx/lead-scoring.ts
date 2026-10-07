@@ -17,6 +17,16 @@ import { z } from 'zod';
 export const TIMELINES = ['within_30_days', '1_3_months', '3_6_months', 'over_6_months', 'unknown'] as const;
 export type Timeline = (typeof TIMELINES)[number];
 
+export const FINANCING = ['pre_approved', 'cash', 'needs_financing', 'unknown'] as const;
+export type Financing = (typeof FINANCING)[number];
+
+/**
+ * A detail the caller may or may not have given. Nullable, and optional so a
+ * result produced before these fields existed (an Insight defined earlier)
+ * still parses and still scores.
+ */
+const maybe = <T extends z.ZodTypeAny>(t: T) => t.nullable().optional();
+
 /** What the AI must return. Every field is required so "not mentioned" is an explicit false, never a gap. */
 export const extractionSchema = z.object({
   timeline: z.enum(TIMELINES),
@@ -29,6 +39,13 @@ export const extractionSchema = z.object({
   invalid_lead: z.boolean(),
   human_requested: z.boolean(),
   summary: z.string().max(2000),
+  // The details themselves, written onto the lead (leadDetailsFrom).
+  budget_min: maybe(z.number().nonnegative().max(1_000_000_000)),
+  budget_max: maybe(z.number().nonnegative().max(1_000_000_000)),
+  location: maybe(z.string().max(255)),
+  bedrooms: maybe(z.number().int().min(0).max(20)),
+  financing: maybe(z.enum(FINANCING)),
+  motivation: maybe(z.string().max(1000)),
 });
 export type Extraction = z.infer<typeof extractionSchema>;
 
@@ -51,6 +68,12 @@ export const EXTRACTION_JSON_SCHEMA = {
     'invalid_lead',
     'human_requested',
     'summary',
+    'budget_min',
+    'budget_max',
+    'location',
+    'bedrooms',
+    'financing',
+    'motivation',
   ],
   properties: {
     timeline: {
@@ -78,6 +101,32 @@ export const EXTRACTION_JSON_SCHEMA = {
     },
     human_requested: { type: 'boolean', description: 'The caller asked to speak with a real person or agent.' },
     summary: { type: 'string', description: 'Two or three sentences on who the caller is and what they want.' },
+    budget_min: {
+      type: ['number', 'null'],
+      description:
+        'Lowest price the caller mentioned, in whole dollars (e.g. "150 to 220 thousand" -> 150000). null if none. ' +
+        'Use the figure the caller confirmed when the assistant restated it.',
+    },
+    budget_max: {
+      type: ['number', 'null'],
+      description: 'Highest price, in whole dollars (e.g. 220000); for a single figure like "up to 500k", 500000. null if none.',
+    },
+    location: {
+      type: ['string', 'null'],
+      description: 'Where they want to buy (city, area, neighbourhood or zip), as the caller said it. null if not said.',
+    },
+    bedrooms: { type: ['integer', 'null'], description: 'Bedrooms they need, as a whole number. null if not said.' },
+    financing: {
+      type: ['string', 'null'],
+      enum: [...FINANCING, null],
+      description: 'pre_approved (has mortgage pre-approval), cash, needs_financing (still sorting a loan), or unknown.',
+    },
+    motivation: {
+      type: ['string', 'null'],
+      description:
+        'The reason the caller gave for moving, in a few words of their own (e.g. "relocating for work", "growing family"). ' +
+        'null if they did not say why. Not a description of how engaged they were.',
+    },
   },
 } as const;
 
@@ -158,6 +207,56 @@ export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS): Sc
   }
 
   return { score, temperature, reasons, override };
+}
+
+const TIMELINE_TEXT: Record<Timeline, string | null> = {
+  within_30_days: 'Within 30 days',
+  '1_3_months': '1–3 months',
+  '3_6_months': '3–6 months',
+  over_6_months: '6+ months',
+  unknown: null,
+};
+
+const FINANCING_TEXT: Record<Financing, string | null> = {
+  pre_approved: 'Pre-approved',
+  cash: 'Cash buyer',
+  needs_financing: 'Needs financing',
+  unknown: null,
+};
+
+/**
+ * The lead columns a call can fill, from what the caller said. Only details
+ * actually given are returned: a call that never mentioned the budget must
+ * not wipe a budget the lead already has. Keys are `leads` column names.
+ */
+export function leadDetailsFrom(x: Extraction): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  const text = (v: string | null | undefined) => v?.trim() || null;
+
+  let min = x.budget_min ?? null;
+  let max = x.budget_max ?? null;
+  if (min != null && max != null && min > max) [min, max] = [max, min];
+  if (min != null) out.min_budget = min;
+  if (max != null) out.max_budget = max;
+
+  const location = text(x.location);
+  if (location) out.location = location.slice(0, 255);
+  if (x.bedrooms != null) out.bedrooms = x.bedrooms;
+
+  const timeline = TIMELINE_TEXT[x.timeline];
+  if (timeline) out.timeline = timeline;
+
+  const financing = x.financing ? FINANCING_TEXT[x.financing] : null;
+  if (financing) {
+    out.financing_status = financing;
+    out.all_cash = x.financing === 'cash';
+  }
+
+  // A real reason has words; a lone token like "high_engagement" is the model
+  // echoing a field name, not something the caller said.
+  const motivation = text(x.motivation);
+  if (motivation && /\s/.test(motivation)) out.motivation = motivation.slice(0, 1000);
+  return out;
 }
 
 /**
