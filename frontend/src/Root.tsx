@@ -1,5 +1,5 @@
 import React from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import App from './App';
 import { AgentApp } from './components/agent/AgentApp';
 import { LoginPage } from './components/auth/LoginPage';
@@ -36,11 +36,19 @@ const RoleShell: React.FC = () => {
  * 'loading' renders nothing on purpose, exactly as RequireAuth does: showing the
  * landing page for the moment it takes /me to answer would flash marketing copy
  * at a user who is already signed in.
+ *
+ * Signed in, it redirects to /dashboard — both shells' default — before either
+ * shell mounts. Rendering the shell here and letting it redirect itself mounted
+ * the whole app twice, because `/` and `*` are different route elements: every
+ * boot request (dashboard, agents, leads) went out once per mount. The query
+ * string goes along for the Calendly fallback's `?calendly=` boot signal, which
+ * AppContext reads at /dashboard instead.
  */
 const Home: React.FC = () => {
   const { status } = useAuth();
+  const { search } = useLocation();
   if (status === 'loading') return null;
-  return status === 'authed' ? <RoleShell /> : <LandingPage />;
+  return status === 'authed' ? <Navigate to={{ pathname: '/dashboard', search }} replace /> : <LandingPage />;
 };
 
 /**
