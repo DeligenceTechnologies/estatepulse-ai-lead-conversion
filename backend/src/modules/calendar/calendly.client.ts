@@ -6,6 +6,9 @@ import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type {
   CalendarConnectionMetadata,
   CalendarTokens,
+  CalendlyAvailableTime,
+  CalendlyCreatedInvitee,
+  CalendlyCreateInviteeBody,
   CalendlyEnvelope,
   CalendlyEventType,
   CalendlyInvitee,
@@ -152,6 +155,12 @@ export class CalendlyClientService implements OnModuleInit {
    *   webhooks:read/write   unused today. A free Calendly plan 403s a webhook
    *                         subscription, so we poll; holding the scopes means
    *                         a later plan upgrade needs no re-consent.
+   *
+   * In-call booking additionally needs `availability:read` (open slots) and
+   * `scheduled_events:write` (POST /invitees — the only write this app makes).
+   * They are NOT in the default list: an app not yet approved for them in the
+   * Calendly developer console would have every connect rejected outright.
+   * Once the app has them, set CALENDLY_BOOKING_SCOPES=1 and reconnect.
    */
   private get scopes(): string {
     const override = this.config.get<string>('CALENDLY_SCOPES')?.trim();
@@ -164,6 +173,9 @@ export class CalendlyClientService implements OnModuleInit {
       'scheduled_events:read',
       'webhooks:read',
       'webhooks:write',
+      ...(this.config.get<string>('CALENDLY_BOOKING_SCOPES') === '1'
+        ? ['availability:read', 'scheduled_events:write']
+        : []),
     ].join(' ');
   }
 
@@ -547,6 +559,72 @@ export class CalendlyClientService implements OnModuleInit {
     eventUri: string,
   ): Promise<CalendlyList<CalendlyInvitee>> {
     return this.authedGet<CalendlyList<CalendlyInvitee>>(conn, `${eventUri}/invitees?count=100`);
+  }
+
+  /**
+   * Open start times of one event type between two instants (at most 31 days
+   * apart, both in the future). For a round-robin event type these are the
+   * pool's combined openings; Calendly picks the host when it is booked.
+   */
+  async listAvailableTimes(
+    conn: ConnectionRef,
+    params: { eventTypeUri: string; start: Date; end: Date },
+  ): Promise<CalendlyList<CalendlyAvailableTime>> {
+    const q = new URLSearchParams({
+      event_type: params.eventTypeUri,
+      start_time: params.start.toISOString(),
+      end_time: params.end.toISOString(),
+    });
+    return this.authedGet<CalendlyList<CalendlyAvailableTime>>(
+      conn,
+      `/event_type_available_times?${q.toString()}`,
+    );
+  }
+
+  /**
+   * Book a meeting (Calendly Scheduling API). Calendly sends its usual
+   * confirmations and, for a round-robin event type, chooses the host.
+   *
+   * A slot taken since it was offered comes back as a 4xx, surfaced as
+   * CONFLICT so the caller can offer other times; anything else is an upstream
+   * error.
+   */
+  async createInvitee(
+    conn: ConnectionRef,
+    body: CalendlyCreateInviteeBody,
+  ): Promise<CalendlyCreatedInvitee> {
+    const res = await this.authedSend(conn, 'POST', '/invitees', body);
+    if (!res.ok) {
+      const text = await res.text();
+      const scope = this.scopeError('/invitees', res.status, text);
+      if (scope) throw scope;
+      if (res.status === 400 || res.status === 409 || res.status === 422) {
+        throw new AppError('CONFLICT', `Calendly could not book that time: ${text.slice(0, 300)}`);
+      }
+      throw new AppError('UPSTREAM_ERROR', `Calendly /invitees failed (${res.status}): ${text.slice(0, 300)}`);
+    }
+    return ((await res.json()) as CalendlyEnvelope<CalendlyCreatedInvitee>).resource;
+  }
+
+  /** One scheduled event, for the host Calendly assigned (`event_memberships`). */
+  async getScheduledEvent(conn: ConnectionRef, eventUri: string): Promise<CalendlyScheduledEvent> {
+    return (await this.authedGet<CalendlyEnvelope<CalendlyScheduledEvent>>(conn, eventUri)).resource;
+  }
+
+  /** A JSON write, with the same one-shot refresh on 401 as authedGet. */
+  private async authedSend(conn: ConnectionRef, method: 'POST', path: string, body: unknown): Promise<Response> {
+    const url = path.startsWith('http') ? path : `${this.apiBase}${path}`;
+    const send = (token: string) =>
+      fetch(url, {
+        method,
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+    let res = await send(await this.accessToken(conn));
+    if (res.status === 401) res = await send((await this.refresh(conn)).access_token);
+    return res;
   }
 
   private get timeoutMs(): number {

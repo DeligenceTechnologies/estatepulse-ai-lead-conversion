@@ -143,4 +143,35 @@ describe('LeadScoringService', () => {
     prisma.voice_calls.findFirst.mockResolvedValueOnce({ ...CALL, transcript: '  ' });
     await expect(svc.classifyCall(ORG, CALL.id)).rejects.toMatchObject({ code: 'CONFLICT' });
   });
+
+  describe('automatic scoring from the transcript (safety net)', () => {
+    it('scores an unscored call from its transcript after the wait — once, however many transcript events arrive', async () => {
+      vi.useFakeTimers();
+      try {
+        const { svc, insights, engine } = setup();
+        await svc.onTranscriptSaved('v3:ccid', 1000);
+        await svc.onTranscriptSaved('v3:ccid', 1000);
+        expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(insights.extractFromTranscript).toHaveBeenCalledTimes(1);
+        expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.any(String));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves a call alone once the Insight (or anyone) has scored it', async () => {
+      const { svc, prisma, insights } = setup();
+      prisma.voice_calls.findFirst.mockResolvedValue({ ...CALL, extracted_intel: { qualification: { score: 80 } } });
+      expect(await svc.scoreIfUnscored(ORG, CALL.id)).toBeNull();
+      expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+    });
+
+    it('does nothing without a transcript', async () => {
+      const { svc, prisma, insights } = setup();
+      prisma.voice_calls.findFirst.mockResolvedValue({ ...CALL, transcript: null });
+      expect(await svc.scoreIfUnscored(ORG, CALL.id)).toBeNull();
+      expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+    });
+  });
 });

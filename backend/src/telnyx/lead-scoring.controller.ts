@@ -1,16 +1,17 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import type { AuthContext } from '../auth/types';
 import { CurrentUser } from '../common/decorators/auth.decorators';
 import { OwnerGuard } from '../common/guards/owner.guard';
 import { SessionGuard } from '../common/guards/session.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { thresholdsSchema, type ThresholdsInput } from './lead-scoring';
-import { LeadScoringService, type Qualification } from './lead-scoring.service';
+import { LeadScoringService } from './lead-scoring.service';
 
 /**
- * Owner-only controls for lead temperature. Scoring itself is automatic (the
- * Telnyx Insight webhook); these are the office's thresholds and a way to
- * classify a call recorded before the Insight was in place.
+ * Owner-only controls for lead temperature: the office's thresholds. Scoring
+ * itself is automatic — the Telnyx Insight webhook, with the transcript as a
+ * fallback (LeadScoringService.onTranscriptSaved) — so there is no manual
+ * classify route.
  *
  * The organization always comes from the session — no route takes one.
  */
@@ -32,14 +33,5 @@ export class LeadScoringController {
   ) {
     const t = await this.scoring.setThresholds(auth.organizationId, body);
     return { hotThreshold: t.hot, warmThreshold: t.warm };
-  }
-
-  @Post('calls/:id/classify')
-  @HttpCode(HttpStatus.OK)
-  classify(
-    @CurrentUser() auth: AuthContext,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<Qualification> {
-    return this.scoring.classifyCall(auth.organizationId, id);
   }
 }

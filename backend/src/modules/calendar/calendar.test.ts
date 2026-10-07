@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter'
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentsModule } from '../agents/agents.module';
+import { EventsModule } from '../events/events.module';
 import { CalendarModule } from './calendar.module';
 
 /**
@@ -139,6 +140,7 @@ before(async () => {
       }),
       PrismaModule,
       AuthModule,
+      EventsModule,
       AgentsModule,
       CalendarModule,
     ],

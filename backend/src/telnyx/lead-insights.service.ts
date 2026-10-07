@@ -71,7 +71,7 @@ export class LeadInsightsService {
     const call = (path: string, init: RequestInit = {}) => telnyx(apiKey, path, init);
 
     // 1. Our Insight, kept in step with the schema this code scores against.
-    const insights: any[] = (await call('/ai/conversations/insights?page[size]=250')).data ?? [];
+    const insights: any[] = (await call('/ai/conversations/insights?page[size]=99')).data ?? [];
     const body = { name: INSIGHT_NAME, instructions: EXTRACTION_INSTRUCTIONS, json_schema: EXTRACTION_JSON_SCHEMA };
     const existing = insights.find((i) => i.name === INSIGHT_NAME);
     const insightId: string = existing
@@ -79,10 +79,12 @@ export class LeadInsightsService {
       : (await call('/ai/conversations/insights', { method: 'POST', body: JSON.stringify(body) })).data.id;
 
     // 2. The assistant's insight group — the office's own if it has one.
-    const assistant = (await call(`/ai/assistants/${assistantId}`)).data ?? {};
+    // GET /ai/assistants/{id} answers with the assistant itself, not under `data`.
+    const raw = await call(`/ai/assistants/${assistantId}`);
+    const assistant = raw?.data ?? raw ?? {};
     let groupId: string | undefined = assistant.insight_settings?.insight_group_id;
     if (!groupId) {
-      const groups: any[] = (await call('/ai/conversations/insight-groups?page[size]=250')).data ?? [];
+      const groups: any[] = (await call('/ai/conversations/insight-groups?page[size]=99')).data ?? [];
       groupId =
         groups.find((g) => g.name === GROUP_NAME)?.id ??
         (await call('/ai/conversations/insight-groups', { method: 'POST', body: JSON.stringify({ name: GROUP_NAME }) })).data.id;
@@ -130,7 +132,8 @@ export class LeadInsightsService {
   }
 }
 
-async function telnyx(apiKey: string, path: string, init: RequestInit = {}): Promise<any> {
+/** A Telnyx v2 API call; non-2xx becomes UPSTREAM_ERROR. Shared with in-call booking's tool setup. */
+export async function telnyx(apiKey: string, path: string, init: RequestInit = {}): Promise<any> {
   let res: Response;
   try {
     res = await fetch(`${API}${path}`, {

@@ -29,9 +29,6 @@ export const getThresholds = () => apiFetch<Thresholds>('/lead-scoring/settings'
 export const saveThresholds = (t: Thresholds) =>
   apiFetch<Thresholds>('/lead-scoring/settings', { method: 'PUT', body: t, auth: true });
 
-export const classifyCall = (callId: string) =>
-  apiFetch<Qualification>(`/lead-scoring/calls/${callId}/classify`, { method: 'POST', auth: true });
-
 /** The qualification on a call's extractedIntel, if it has been scored. */
 export function qualificationOf(extractedIntel: unknown): Qualification | null {
   if (!extractedIntel || typeof extractedIntel !== 'object') return null;
