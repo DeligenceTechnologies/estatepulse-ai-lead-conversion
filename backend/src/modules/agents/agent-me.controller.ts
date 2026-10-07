@@ -43,17 +43,12 @@ export class AgentMeController {
     return auth.agentProfileId;
   }
 
-  /**
-   * Only leads with a CURRENT assignment to this agent. `is_current` matters:
-   * a lead reassigned away from them must stop being theirs, and the history
-   * row that says it once was theirs must not bring it back.
+  /*
+   * The current-assignment rule every query below applies: a lead is the
+   * agent's only while it has a CURRENT assignment to them. `is_current`
+   * matters: a lead reassigned away from them must stop being theirs, and the
+   * history row that says it once was theirs must not bring it back.
    */
-  private assignedToMe(organizationId: string, agentId: string) {
-    return {
-      organization_id: organizationId,
-      lead_assignments: { some: { agent_id: agentId, is_current: true } },
-    };
-  }
 
   /**
    * The four numbers on the dashboard. Every one is a real count over the same
@@ -68,26 +63,46 @@ export class AgentMeController {
   @Get('dashboard')
   async dashboard(@CurrentUser() auth: AuthContext) {
     const agentId = this.agentProfileId(auth);
-    const mine = this.assignedToMe(auth.organizationId, agentId);
 
-    const [totalAssignedLeads, activeLeads, newLeads, upcomingAppointments] = await Promise.all([
-      this.prisma.leads.count({ where: mine }),
-      // "Active" is every lead still in play (INACTIVE_STATUSES, common/domain).
-      this.prisma.leads.count({ where: { ...mine, status: { notIn: INACTIVE_STATUSES } } }),
-      this.prisma.leads.count({ where: { ...mine, status: 'new' } }),
-      this.prisma.appointments.count({
-        where: {
-          organization_id: auth.organizationId,
-          agent_id: agentId,
-          start_at: { gte: new Date() },
-          // Verbatim from appointments_status_check; cancelled, completed and
-          // no_show are not upcoming.
-          status: { in: ['scheduled', 'rescheduled'] },
-        },
-      }),
-    ]);
+    // One statement. As four Prisma counts they were four queries on a
+    // three-connection pool, so the fourth always waited a round trip. The
+    // lead counts share one pass over the leads currently assigned to this
+    // agent (the current-assignment rule, with the assignment also scoped to the
+    // organization); the appointments count rides along as a subquery.
+    const [counts] = await this.prisma.$queryRaw<
+      Array<{ total_assigned_leads: number; active_leads: number; new_leads: number; upcoming_appointments: number }>
+    >`
+      select count(*)::int as total_assigned_leads,
+             -- "Active" is every lead still in play (INACTIVE_STATUSES, common/domain).
+             (count(*) filter (where l.status <> all(${INACTIVE_STATUSES}::text[])))::int as active_leads,
+             (count(*) filter (where l.status = 'new'))::int as new_leads,
+             (select count(*)
+                from appointments ap
+               where ap.organization_id = ${auth.organizationId}::uuid
+                 and ap.agent_id = ${agentId}::uuid
+                 and ap.start_at >= ${new Date()}
+                 -- Verbatim from appointments_status_check; cancelled, completed
+                 -- and no_show are not upcoming.
+                 and ap.status in ('scheduled', 'rescheduled')
+             )::int as upcoming_appointments
+        from leads l
+       where l.organization_id = ${auth.organizationId}::uuid
+         and exists (
+           select 1
+             from lead_assignments la
+            where la.lead_id = l.id
+              and la.organization_id = l.organization_id
+              and la.agent_id = ${agentId}::uuid
+              and la.is_current
+         )
+    `;
 
-    return { activeLeads, newLeads, upcomingAppointments, totalAssignedLeads };
+    return {
+      activeLeads: counts!.active_leads,
+      newLeads: counts!.new_leads,
+      upcomingAppointments: counts!.upcoming_appointments,
+      totalAssignedLeads: counts!.total_assigned_leads,
+    };
   }
 
   /**
@@ -98,7 +113,7 @@ export class AgentMeController {
    * the lead came back with every column. Same filter, order and limit; only
    * the columns the row shape reads.
    *
-   * The lateral join is assignedToMe(): a lead is listed only while it has a
+   * The lateral join is the current-assignment rule: a lead is listed only while it has a
    * CURRENT assignment to this agent, at most once (`limit 1`), and `assignedAt`
    * is that assignment's — when THEY got it, not when some earlier agent did.
    * Every join is scoped to the organization as well as its key.
@@ -167,7 +182,7 @@ export class AgentMeController {
 
     // One statement, the same shape as leads() above: the source and the
     // assignment were each a further sequential query through Prisma. The
-    // lateral join is assignedToMe(), so a lead that is missing, another
+    // lateral join is the current-assignment rule, so a lead that is missing, another
     // agent's, another organization's or reassigned away finds no row — and
     // all four get the same 404.
     const rows = await this.prisma.$queryRaw<
