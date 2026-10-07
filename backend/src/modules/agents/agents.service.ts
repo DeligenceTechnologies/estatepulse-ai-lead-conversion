@@ -20,8 +20,9 @@ const toRole = (value: string): Role => (ROLES.includes(value as Role) ? (value 
 const DEFAULT_TIMEZONE = 'America/Chicago';
 
 /**
- * The one shape the roster is read in, shared by list() and suspend() so both
- * answer with identical data. Columns are named individually and never spread:
+ * The one shape the roster is read in, shared by suspend() and the edits so all
+ * answer with identical data; list() reads the same columns in one statement —
+ * see rosterRows(). Columns are named individually and never spread:
  * password_hash lives on users, and a `select: true` here would ship it.
  *
  * The two counts come back as part of this single query rather than as follow-up
@@ -173,16 +174,88 @@ export class AgentsService {
    */
   async list(organizationId: string): Promise<OrganizationMemberDTO[]> {
     // Fetched once for the whole page, alongside the members.
-    const [ctx, members] = await Promise.all([
-      this.rosterContext(organizationId),
-      this.prisma.organization_members.findMany({
-        where: { organization_id: organizationId },
-        orderBy: [{ role: 'desc' }, { created_at: 'asc' }, { id: 'asc' }],
-        select: memberSelect(organizationId),
-      }),
-    ]);
+    const [ctx, members] = await Promise.all([this.rosterContext(organizationId), this.rosterRows(organizationId)]);
 
     return members.map((m) => toMemberDTO(m, ctx));
+  }
+
+  /**
+   * memberSelect's rows for a whole organization, in ONE statement.
+   *
+   * Through Prisma the nested users and agent_profiles relations are each a
+   * further sequential query — about 145 ms apiece from a distant region — on
+   * the roster every owner screen loads. Same columns, same order, same count;
+   * the rows come back in MemberRow's shape so toMemberDTO derives every field
+   * exactly as for the other roster reads. Keep the two in step.
+   *
+   * No duplicate members: organization_members and agent_profiles are both
+   * unique on (organization_id, user_id), so each member joins at most one
+   * profile — and only the one in this organization. The assignment count is
+   * scoped to the organization as well as the profile.
+   */
+  private async rosterRows(organizationId: string): Promise<MemberRow[]> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        role: string;
+        status: string;
+        joined_at: Date | null;
+        created_at: Date;
+        user_id: string;
+        email: string;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        profile_id: string | null;
+        title: string | null;
+        timezone: string | null;
+        max_active_leads: number | null;
+        routing_enabled: boolean | null;
+        calendly_user_uri: string | null;
+        cal_user_id: number | null;
+        active_leads: number;
+      }>
+    >`
+      select m.role, m.status, m.joined_at, m.created_at,
+             u.id as user_id, u.email, u.first_name, u.last_name, u.phone,
+             ap.id as profile_id, ap.title, ap.timezone, ap.max_active_leads, ap.routing_enabled,
+             ap.calendly_user_uri, ap.cal_user_id,
+             (select count(*) from lead_assignments la
+               where la.agent_id = ap.id and la.organization_id = ap.organization_id and la.is_current
+             )::int as active_leads
+        from organization_members m
+        join users u on u.id = m.user_id
+        left join agent_profiles ap on ap.user_id = m.user_id and ap.organization_id = m.organization_id
+       where m.organization_id = ${organizationId}::uuid
+       order by m.role desc, m.created_at asc, m.id asc
+    `;
+
+    return rows.map((r) => ({
+      role: r.role,
+      status: r.status,
+      joined_at: r.joined_at,
+      created_at: r.created_at,
+      users: {
+        id: r.user_id,
+        email: r.email,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        phone: r.phone,
+        agent_profiles: r.profile_id
+          ? [
+              {
+                id: r.profile_id,
+                title: r.title,
+                timezone: r.timezone!,
+                max_active_leads: r.max_active_leads!,
+                routing_enabled: r.routing_enabled!,
+                calendly_user_uri: r.calendly_user_uri,
+                cal_user_id: r.cal_user_id,
+                _count: { lead_assignments: r.active_leads },
+              },
+            ]
+          : [],
+      },
+    }));
   }
 
   /**

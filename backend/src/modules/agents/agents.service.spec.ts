@@ -159,21 +159,6 @@ function build(
       },
     },
     organization_members: {
-      findMany: async ({ where }: { where: Record<string, unknown> }) => {
-        wheres.push({ op: 'organization_members.findMany', where });
-        return db.organization_members
-          .filter((m) => m.organization_id === where['organization_id'])
-          // The service asks for role desc, created_at asc; reproducing it here
-          // is what lets the ordering assertion below mean anything.
-          .sort((a, b) => b.role.localeCompare(a.role) || a.created_at.getTime() - b.created_at.getTime())
-          .map((m) => ({
-            role: m.role,
-            status: m.status,
-            joined_at: m.joined_at,
-            created_at: m.created_at,
-            users: publicUser(userOf(m.user_id), where['organization_id'] as string),
-          }));
-      },
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
         wheres.push({ op: 'organization_members.findFirst', where });
         const m = db.organization_members.find(
@@ -277,9 +262,49 @@ function build(
         return data;
       },
     },
-    // The lower(email) pre-check. Tagged-template call, so the email is
-    // values[0] — parameterised, never interpolated into the SQL text.
-    $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+    // Tagged-template calls, so every value arrives parameterised in `values`,
+    // never interpolated into the SQL text.
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      // list()'s roster statement: members of one organization, each joined to
+      // their user and LEFT joined to their profile in that same organization,
+      // ordered role desc, created_at asc, id asc — answered as Postgres would.
+      if (strings.join('?').includes('from organization_members m')) {
+        const organizationId = values[0] as string;
+        wheres.push({ op: 'roster.$queryRaw', where: { organization_id: organizationId } });
+        return db.organization_members
+          .filter((m) => m.organization_id === organizationId)
+          .sort(
+            (a, b) =>
+              b.role.localeCompare(a.role) ||
+              a.created_at.getTime() - b.created_at.getTime() ||
+              a.id.localeCompare(b.id),
+          )
+          .map((m) => {
+            const u = userOf(m.user_id);
+            const p = db.agent_profiles.find((r) => r.user_id === m.user_id && r.organization_id === organizationId);
+            return {
+              role: m.role,
+              status: m.status,
+              joined_at: m.joined_at,
+              created_at: m.created_at,
+              user_id: u.id,
+              email: u.email,
+              first_name: u.first_name,
+              last_name: u.last_name,
+              phone: u.phone,
+              profile_id: p?.id ?? null,
+              title: p ? p.title : null,
+              timezone: p ? p.timezone : null,
+              max_active_leads: p ? p.max_active_leads : null,
+              routing_enabled: p ? (p.routing_enabled ?? true) : null,
+              calendly_user_uri: p?.calendly_user_uri ?? null,
+              cal_user_id: p?.cal_user_id ?? null,
+              // Nothing assigns leads here, so the count is 0 — as in publicUser.
+              active_leads: 0,
+            };
+          });
+      }
+      // The lower(email) pre-check: the email is values[0].
       const email = String(values[0]);
       return db.users.filter((u) => u.email.toLowerCase() === email.toLowerCase()).map((u) => ({ id: u.id }));
     },
@@ -360,7 +385,7 @@ describe('AgentsService.list', () => {
 
     // Every read the call made is scoped to ORG_B — the roster by
     // organization_id, the timezone lookup by the organization's own id.
-    const roster = wheres.find((w) => w.op === 'organization_members.findMany')!;
+    const roster = wheres.find((w) => w.op === 'roster.$queryRaw')!;
     expect(roster.where['organization_id']).toBe(ORG_B);
     expect(wheres.find((w) => w.op === 'organizations.findUnique')!.where['id']).toBe(ORG_B);
   });
