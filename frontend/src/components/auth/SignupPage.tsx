@@ -106,12 +106,12 @@ export const SignupPage: React.FC = () => {
                   }`}
                 >
                   <span className="block text-sm font-semibold text-slate-100">{opt.label}</span>
-                  <span className="block text-[11px] text-slate-500 mt-0.5">{opt.hint}</span>
+                  <span className="block text-xs text-slate-500 mt-0.5">{opt.hint}</span>
                 </button>
               );
             })}
           </div>
-          <span className="block text-[11px] text-slate-500 mt-1">
+          <span className="block text-xs text-slate-500 mt-1">
             You can change this later on the Agent Team page.
           </span>
         </fieldset>

@@ -98,7 +98,7 @@ export const LandingPage: React.FC = () => (
           </Link>
           <Link
             to="/signup"
-            className="px-3 sm:px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors"
+            className="px-3 sm:px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-semibold transition-colors"
           >
             Get started
           </Link>
@@ -109,7 +109,7 @@ export const LandingPage: React.FC = () => (
     {/* Hero */}
     <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-16 pb-14 sm:pt-24 sm:pb-20">
       <div className="max-w-3xl space-y-6">
-        <span className="inline-flex items-center gap-1.5 text-[11px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+        <span className="inline-flex items-center gap-1.5 text-xs uppercase font-bold tracking-wider px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
           <Sparkles className="w-3 h-3" />
           Lead conversion for real estate teams
         </span>
@@ -128,7 +128,7 @@ export const LandingPage: React.FC = () => (
         <div className="pt-2">
           <Link
             to="/signup"
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
           >
             Create your organization
             <ArrowRight className="w-4 h-4" />
@@ -210,7 +210,7 @@ export const LandingPage: React.FC = () => (
           </p>
           <Link
             to="/signup"
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
           >
             Get started
             <ArrowRight className="w-4 h-4" />
@@ -234,7 +234,7 @@ export const LandingPage: React.FC = () => (
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-[11px] uppercase tracking-wider font-bold text-slate-300">
+            <h3 className="text-xs uppercase tracking-wider font-bold text-slate-300">
               Product
             </h3>
             <ul className="space-y-2 text-xs text-slate-500">
@@ -252,7 +252,7 @@ export const LandingPage: React.FC = () => (
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-[11px] uppercase tracking-wider font-bold text-slate-300">
+            <h3 className="text-xs uppercase tracking-wider font-bold text-slate-300">
               Account
             </h3>
             <ul className="space-y-2 text-xs text-slate-500">
@@ -271,10 +271,10 @@ export const LandingPage: React.FC = () => (
         </div>
 
         <div className="border-t border-slate-800/70 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-[11px] text-slate-600">
+          <p className="text-xs text-slate-600">
             © {new Date().getFullYear()} EstatePulse AI. All rights reserved.
           </p>
-          <p className="text-[11px] text-slate-600">Built for real estate teams.</p>
+          <p className="text-xs text-slate-600">Built for real estate teams.</p>
         </div>
       </div>
     </footer>

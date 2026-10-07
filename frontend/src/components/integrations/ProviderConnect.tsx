@@ -99,19 +99,19 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
       </div>
 
       {error && (
-        <div className="flex items-center gap-1.5 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
+        <div className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
           <AlertTriangle className="w-3.5 h-3.5" /> {error}
         </div>
       )}
 
       {status.hasIntegration && !status.connected && (
-        <div className="flex items-center justify-between gap-2 text-[11px] bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+        <div className="flex items-center justify-between gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
           <span className="text-slate-300">You have a saved connection that's currently disconnected.</span>
           <button
             type="button"
             disabled={busy !== null}
             onClick={() => run('reconnect', () => reconnectTelnyx())}
-            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-1.5"
+            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5"
           >
             {busy === 'reconnect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             Reconnect
@@ -122,14 +122,14 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
       {/* Step 1 — credentials */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-[11px] font-bold flex items-center justify-center">1</span>
+          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-xs font-bold flex items-center justify-center">1</span>
           <span className="text-xs font-semibold text-slate-200">API credentials</span>
           {status.connected && (
             <button
               type="button"
               disabled={busy !== null}
               onClick={() => run('disconnect', () => disconnectTelnyx())}
-              className="ml-auto text-[11px] text-rose-400 hover:text-rose-300 font-semibold disabled:opacity-50"
+              className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold disabled:opacity-50"
             >
               {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
             </button>
@@ -183,7 +183,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                   <button
                     type="button"
                     onClick={() => { setReplacingKey(false); setApiKey(''); }}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 mt-1.5 cursor-pointer"
+                    className="text-xs text-slate-400 hover:text-slate-200 mt-1.5 cursor-pointer"
                   >
                     Cancel — keep the key already on file
                   </button>
@@ -195,7 +195,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
           <div>
             <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-rose-400 font-normal">* required</span></label>
             <input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+12025550123" className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 ${fromNumber.trim() ? 'border-slate-800' : 'border-rose-900/60'}`} />
-            <p className="text-[10px] text-slate-500 mt-1">The Telnyx number calls are placed from. Required to dial leads.</p>
+            <p className="text-2xs text-slate-500 mt-1">The Telnyx number calls are placed from. Required to dial leads.</p>
           </div>
         </div>
 
@@ -204,17 +204,17 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             results rather than asked for as questions. */}
         {status.connected && (
           <div className="pl-7 space-y-2">
-            <p className="text-[11px] text-slate-500">Detected from your account — nothing to enter:</p>
+            <p className="text-xs text-slate-500">Detected from your account — nothing to enter:</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 min-w-0">
-                <div className="text-[10px] text-slate-500">Voice Connection</div>
-                <div className="text-[11px] font-mono text-slate-200 truncate" title={status.connectionId}>
+                <div className="text-2xs text-slate-500">Voice Connection</div>
+                <div className="text-xs font-mono text-slate-200 truncate" title={status.connectionId}>
                   {status.connectionId || 'not detected'}
                 </div>
               </div>
               <div className="bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 min-w-0">
-                <div className="text-[10px] text-slate-500">Messaging Profile</div>
-                <div className="text-[11px] font-mono text-slate-200 truncate" title={status.messagingProfileId}>
+                <div className="text-2xs text-slate-500">Messaging Profile</div>
+                <div className="text-xs font-mono text-slate-200 truncate" title={status.messagingProfileId}>
                   {status.messagingProfileId || 'none — SMS disabled'}
                 </div>
               </div>
@@ -223,7 +223,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
         )}
 
         {status.connected && (
-          <div className="pl-7 flex flex-wrap items-center gap-3 text-[11px]">
+          <div className="pl-7 flex flex-wrap items-center gap-3 text-xs">
             <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Voice calling ready</span>
             {status.hasMessaging ? (
               <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> SMS messaging ready</span>
@@ -237,7 +237,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
           <button
             type="button"
             onClick={() => setAdvanced((v) => !v)}
-            className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
+            className="text-xs text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
           >
             {advanced ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             Advanced — override the detected IDs
@@ -245,7 +245,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
 
           {advanced && (
             <div className="mt-2 space-y-3">
-              <p className="text-[11px] text-slate-500 leading-relaxed">
+              <p className="text-xs text-slate-500 leading-relaxed">
                 We pick the Call Control Application and Messaging Profile off your API key and fix
                 them if they drift. Set these only when your account has more than one and calls must
                 go through a specific pair. Left blank, detection stays on.
@@ -284,12 +284,12 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                 });
               })
             }
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5"
+            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
           >
             {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
             {status.connected ? 'Save changes' : 'Connect'}
           </button>
-          {!fromNumber.trim() && <p className="text-[10px] text-rose-400 mt-1.5">A From Number is required before you can save.</p>}
+          {!fromNumber.trim() && <p className="text-2xs text-rose-400 mt-1.5">A From Number is required before you can save.</p>}
         </div>
       </div>
 
@@ -310,7 +310,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
+              <p className="text-xs text-slate-400 leading-relaxed">
                 It is saved alongside the others and becomes the active one — calls and SMS switch
                 to it straight away. The account you are on now is kept, not replaced.
               </p>
@@ -355,7 +355,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                     }),
                   )
                 }
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
               >
                 {busy === 'add' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Add and switch to it
@@ -365,7 +365,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             <button
               type="button"
               onClick={() => setAdding(true)}
-              className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
+              className="text-xs text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" /> Add another Telnyx account
             </button>
@@ -376,7 +376,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
       {/* Step 2 — assistant */}
       <div className={`space-y-3 ${status.connected ? '' : 'opacity-40 pointer-events-none'}`}>
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-[11px] font-bold flex items-center justify-center">2</span>
+          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-xs font-bold flex items-center justify-center">2</span>
           <span className="text-xs font-semibold text-slate-200">AI voice assistant</span>
         </div>
 
@@ -384,14 +384,14 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
           {/* Option A: auto-create */}
           <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
             <p className="text-xs font-semibold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> Create with default settings</p>
-            <p className="text-[11px] text-slate-400 mt-1 mb-2">Name it, and we'll create a ready-to-use real-estate qualifier assistant in your account.</p>
+            <p className="text-xs text-slate-400 mt-1 mb-2">Name it, and we'll create a ready-to-use real-estate qualifier assistant in your account.</p>
             <input
               value={assistantName}
               onChange={(e) => setAssistantName(e.target.value)}
               placeholder="Assistant name (e.g. Austin Home Advisors)"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs mb-2 focus:outline-none focus:border-emerald-500"
             />
-            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName))} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5">
+            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName))} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               Create assistant
             </button>
@@ -400,7 +400,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
           {/* Option B: attach existing */}
           <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
             <p className="text-xs font-semibold text-white flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5 text-cyan-400" /> Use an existing assistant</p>
-            <p className="text-[11px] text-slate-400 mt-1 mb-2">Already built one in Telnyx? Paste its ID.</p>
+            <p className="text-xs text-slate-400 mt-1 mb-2">Already built one in Telnyx? Paste its ID.</p>
             <div className="flex items-center gap-2">
               <input value={assistantId} onChange={(e) => setAssistantId(e.target.value)} placeholder="assistant-…" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500" />
               <button type="button" disabled={busy !== null || !assistantId} onClick={() => run('attach', () => attachAssistant(assistantId.trim()))} className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold">

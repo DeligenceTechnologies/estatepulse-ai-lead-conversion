@@ -76,7 +76,7 @@ export const LeadBookMeeting: React.FC<{
           <Calendar className="w-3.5 h-3.5" />
           Book a meeting
         </h4>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-xs text-slate-400">
           {options?.agent
             ? `With ${options.agent.name}, the assigned agent. The booking page opens with this lead's details filled in; the appointment shows up here within a few minutes of booking.`
             : "Meetings are booked with the lead’s assigned agent."}
@@ -84,17 +84,17 @@ export const LeadBookMeeting: React.FC<{
       </div>
 
       {error ? (
-        <p className="text-[11px] text-rose-300 flex items-start gap-1.5">
+        <p className="text-xs text-rose-300 flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           {error}
         </p>
       ) : !options ? (
-        <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+        <p className="text-xs text-slate-500 flex items-center gap-1.5">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading booking
           options…
         </p>
       ) : options.blocker ? (
-        <p className="text-[11px] text-amber-300 flex items-start gap-1.5 leading-relaxed">
+        <p className="text-xs text-amber-300 flex items-start gap-1.5 leading-relaxed">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           {blockerText(options)}
         </p>
@@ -106,7 +106,7 @@ export const LeadBookMeeting: React.FC<{
               href={et.bookingUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1.5"
             >
               <span>
                 {et.name} · {et.durationMinutes} min
@@ -162,18 +162,18 @@ export const LeadAppointments: React.FC<{
         <button
           onClick={load}
           disabled={loading}
-          className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
         >
           <RotateCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />{" "}
           Refresh
         </button>
       </div>
 
-      {error && <p className="text-[11px] text-rose-300">{error}</p>}
+      {error && <p className="text-xs text-rose-300">{error}</p>}
 
       {rows === null ? (
         !error && (
-          <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+          <p className="text-xs text-slate-500 flex items-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading
             appointments…
           </p>
@@ -182,7 +182,7 @@ export const LeadAppointments: React.FC<{
         <div className="p-6 text-center bg-slate-950 border border-slate-800 rounded-xl">
           <Calendar className="w-7 h-7 text-slate-600 mx-auto mb-2" />
           <p className="text-xs text-slate-400">No appointments yet.</p>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1">
             Bookings sync every few minutes; press Refresh after the lead books.
           </p>
         </div>
@@ -207,7 +207,7 @@ export const LeadAppointments: React.FC<{
                       {appt.appointmentType ?? "Meeting"}
                     </h4>
                     <span
-                      className={`text-[10px] px-2 py-0.5 rounded font-mono ${STATUS_STYLES[appt.status] ?? "bg-slate-800 text-slate-300"}`}
+                      className={`text-2xs px-2 py-0.5 rounded font-mono ${STATUS_STYLES[appt.status] ?? "bg-slate-800 text-slate-300"}`}
                     >
                       {appt.status.replace("_", " ").toUpperCase()}
                     </span>
@@ -218,7 +218,7 @@ export const LeadAppointments: React.FC<{
                       timeStyle: "short",
                     })}
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-xs text-slate-400">
                     Agent: {appt.agentName}
                   </div>
                 </div>

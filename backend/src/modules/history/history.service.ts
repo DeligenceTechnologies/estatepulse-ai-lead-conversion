@@ -3,6 +3,7 @@ import type { AuthContext } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { normalizeLeadStatus } from '../../common/domain';
+import { ActivityService } from '../../telnyx/activity.service';
 
 /**
  * Call and message history for the office.
@@ -93,6 +94,8 @@ export interface CallFilters {
   from?: string;
   to?: string;
   q?: string;
+  /** Narrows to one lead, inside the caller's org and visibility — never instead of them. */
+  leadId?: string;
 }
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
@@ -102,7 +105,10 @@ const fullName = (first: string | null, last: string | null, fallback: string): 
 
 @Injectable()
 export class HistoryService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
+    private readonly activity: ActivityService,
+  ) {}
 
   /**
    * What this caller is allowed to see, as a `leads` where-fragment.
@@ -194,9 +200,13 @@ export class HistoryService {
         : {}),
     };
 
-    const rows = await this.prisma.voice_calls.findMany({
+    const org = auth.organizationId;
+    // The calls first; then their leads and current agents in one parallel
+    // round. A nested include loads each level as its own sequential query.
+    const calls = await this.prisma.voice_calls.findMany({
       where: {
-        organization_id: auth.organizationId,
+        organization_id: org,
+        ...(filters.leadId ? { lead_id: filters.leadId } : {}),
         ...(filters.from || filters.to
           ? {
               created_at: {
@@ -209,27 +219,8 @@ export class HistoryService {
       },
       orderBy: { created_at: 'desc' },
       take,
-      include: {
-        leads: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            phone: true,
-            temperature: true,
-            status: true,
-            lead_assignments: {
-              where: { is_current: true },
-              take: 1,
-              select: {
-                agent_id: true,
-                agent_profiles: { select: { users: { select: { first_name: true, last_name: true, email: true } } } },
-              },
-            },
-          },
-        },
-      },
     });
+    const rows = await this.withLeadsAndAgents(org, calls);
 
     // Which call is the newest for its lead, so only that one may carry a
     // relationship-level outcome like APPOINTMENT_BOOKED.
@@ -247,6 +238,49 @@ export class HistoryService {
     // duplicating the rules above in two places. The page size is capped at
     // 200, so doing it here costs nothing and keeps one definition.
     return filters.outcome ? mapped.filter((c) => c.outcome === filters.outcome) : mapped;
+  }
+
+  /**
+   * Attaches each call's lead and that lead's current agent, in the shape
+   * toListRow reads (`leads.lead_assignments[0].agent_profiles.users`).
+   *
+   * Two reads in parallel instead of a four-level include. The agent comes
+   * from one joined row per lead — DISTINCT ON, like the old `take: 1` — so an
+   * agent's id and name can never come from different assignments. Every table
+   * in the join is pinned to the caller's organization.
+   */
+  private async withLeadsAndAgents<T extends { lead_id: string }>(org: string, calls: T[]) {
+    const leadIds = [...new Set(calls.map((c) => c.lead_id))];
+    const [leads, agents] = leadIds.length
+      ? await Promise.all([
+          this.prisma.leads.findMany({
+            where: { organization_id: org, id: { in: leadIds } },
+            select: { id: true, first_name: true, last_name: true, phone: true, temperature: true, status: true },
+          }),
+          this.prisma.$queryRaw<
+            { lead_id: string; agent_id: string; first_name: string | null; last_name: string | null; email: string }[]
+          >`
+            select distinct on (a.lead_id) a.lead_id, a.agent_id, u.first_name, u.last_name, u.email
+              from lead_assignments a
+              join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = ${org}::uuid
+              join users u on u.id = ap.user_id
+             where a.organization_id = ${org}::uuid
+               and a.is_current
+               and a.lead_id = any(${leadIds}::uuid[])`,
+        ])
+      : [[], []];
+
+    const agentByLead = new Map(agents.map((a) => [a.lead_id, a]));
+    const leadById = new Map(
+      leads.map((l) => {
+        const a = agentByLead.get(l.id);
+        const lead_assignments = a
+          ? [{ agent_id: a.agent_id, agent_profiles: { users: { first_name: a.first_name, last_name: a.last_name, email: a.email } } }]
+          : [];
+        return [l.id, { ...l, lead_assignments }];
+      }),
+    );
+    return calls.map((c) => ({ ...c, leads: leadById.get(c.lead_id) ?? null }));
   }
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -289,46 +323,66 @@ export class HistoryService {
    * the difference between a page that loads and one that does not.
    */
   async getCall(auth: AuthContext, id: string): Promise<CallDetail> {
-    const r = await this.prisma.voice_calls.findFirst({
-      where: {
-        id,
-        organization_id: auth.organizationId,
-        ...(auth.role === 'owner' ? {} : { leads: this.leadScope(auth) }),
-      },
-      include: {
-        leads: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            phone: true,
-            temperature: true,
-            status: true,
-            lead_assignments: {
-              where: { is_current: true },
-              take: 1,
-              select: {
-                agent_id: true,
-                agent_profiles: { select: { users: { select: { first_name: true, last_name: true, email: true } } } },
-              },
-            },
-          },
-        },
-      },
-    });
-    if (!r) throw new AppError('NOT_FOUND', 'No such call');
+    const org = auth.organizationId;
+    // "The lead that owns this call", reached through the call id so the three
+    // reads below can run together instead of waiting on each other. Every one
+    // is scoped to the caller's organization.
+    const ownsCall = { voice_calls: { some: { id, organization_id: org } } };
 
-    // A single call fetched by id is always treated as the lead's latest for
-    // outcome purposes: the caller asked about this call specifically.
-    const latest = await this.prisma.voice_calls.findFirst({
-      where: { lead_id: r.lead_id, organization_id: auth.organizationId },
-      orderBy: { created_at: 'desc' },
-      select: { id: true },
-    });
+    const [call, lead, agent, latest] = await Promise.all([
+      // Visibility is decided here, exactly as before: an agent only sees calls
+      // on leads currently assigned to them. The other two reads only enrich a
+      // call that passed this check, and are discarded otherwise.
+      this.prisma.voice_calls.findFirst({
+        where: {
+          id,
+          organization_id: org,
+          ...(auth.role === 'owner' ? {} : { leads: this.leadScope(auth) }),
+        },
+      }),
+      this.prisma.leads.findFirst({
+        where: { organization_id: org, ...ownsCall },
+        select: { id: true, first_name: true, last_name: true, phone: true, temperature: true, status: true },
+      }),
+      // The lead's current agent, as its own read so it does not wait on the
+      // lead: one profile row with its user, so the id and the name always come
+      // from the same assignment (what `lead_assignments: take 1` returned).
+      this.prisma.agent_profiles.findFirst({
+        where: {
+          organization_id: org,
+          lead_assignments: { some: { organization_id: org, is_current: true, leads: ownsCall } },
+        },
+        select: { id: true, users: { select: { first_name: true, last_name: true, email: true } } },
+      }),
+      // A single call fetched by id is always treated as the lead's latest for
+      // outcome purposes: the caller asked about this call specifically.
+      this.prisma.voice_calls.findFirst({
+        where: { organization_id: org, leads: ownsCall },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      }),
+    ]);
+    if (!call) throw new AppError('NOT_FOUND', 'No such call');
+    // Reassembled into the shape toListRow has always read.
+    const r = {
+      ...call,
+      leads: lead && {
+        ...lead,
+        lead_assignments: agent ? [{ agent_id: agent.id, agent_profiles: { users: agent.users } }] : [],
+      },
+    };
+
+    // The stored recording link expires ten minutes after the call; the
+    // detail view is where it is played, so it gets a freshly signed one.
+    const row = this.toListRow(r, latest?.id === r.id);
+    if (row.recordingUrl && r.provider === 'telnyx' && r.provider_call_id) {
+      row.recordingUrl =
+        (await this.activity.freshRecordingUrl(auth.organizationId, r.provider_call_id)) ?? row.recordingUrl;
+    }
 
     return {
-      ...this.toListRow(r, latest?.id === r.id),
-      transcript: r.transcript,
+      ...row,
+      transcript: labelSpeakers(r.transcript, r.leads?.first_name ?? null),
       aiSummary: r.ai_summary,
       extractedIntel: r.extracted_intel,
       handoffRequested: r.handoff_requested,
@@ -337,51 +391,61 @@ export class HistoryService {
   }
 
   /** Every SMS thread in the office, most recently active first. */
-  async listConversations(auth: AuthContext, limitRaw?: string): Promise<ConversationRow[]> {
+  async listConversations(auth: AuthContext, limitRaw?: string, leadId?: string): Promise<ConversationRow[]> {
     const take = Math.min(Number(limitRaw ?? 100) || 100, 200);
     const leadWhere = this.leadScope(auth);
 
-    const rows = await this.prisma.conversations.findMany({
+    const org = auth.organizationId;
+    // Threads first (the message count rides along in the same query), then
+    // everything that hangs off them in one parallel round: Prisma loads each
+    // included relation as its own sequential query, and on a remote database
+    // every one of those is a full round trip.
+    const threads = await this.prisma.conversations.findMany({
       where: {
-        organization_id: auth.organizationId,
+        organization_id: org,
+        // Narrows within the org and the agent's visibility below; a lead the
+        // caller cannot see simply yields no threads.
+        ...(leadId ? { lead_id: leadId } : {}),
         ...(Object.keys(leadWhere).length ? { leads: leadWhere } : {}),
       },
       orderBy: { updated_at: 'desc' },
       take,
-      include: {
-        leads: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            phone: true,
-            temperature: true,
-            dnc_status: true,
-          },
-        },
-        messages: { orderBy: { created_at: 'desc' }, take: 1 },
-        _count: { select: { messages: true } },
-      },
+      include: { _count: { select: { messages: true } } },
     });
+    const ids = threads.map((r) => r.id);
+    const leadIds = [...new Set(threads.map((r) => r.lead_id))];
 
-    // "Has the lead ever replied" in one grouped query rather than one per
-    // thread: it is the flag the UI sorts its attention by, so it must not cost
-    // N round trips.
-    const withInbound = new Set(
-      (
-        await this.prisma.messages.groupBy({
-          by: ['conversation_id'],
-          where: {
-            organization_id: auth.organizationId,
-            direction: 'inbound',
-            conversation_id: { in: rows.map((r) => r.id) },
-          },
-        })
-      ).map((g) => g.conversation_id),
-    );
+    const [leadRows, lastMessages, inbound] = ids.length
+      ? await Promise.all([
+          this.prisma.leads.findMany({
+            where: { organization_id: org, id: { in: leadIds } },
+            select: { id: true, first_name: true, last_name: true, phone: true, temperature: true, dnc_status: true },
+          }),
+          // The newest message per thread — what `messages: { orderBy: created_at
+          // desc, take: 1 }` returned per conversation, as one statement.
+          this.prisma.$queryRaw<{ conversation_id: string; body: string; direction: string; created_at: Date }[]>`
+            select distinct on (conversation_id) conversation_id, body, direction, created_at
+              from messages
+             where organization_id = ${org}::uuid
+               and conversation_id = any(${ids}::uuid[])
+             order by conversation_id, created_at desc`,
+          // "Has the lead ever replied" in one grouped query rather than one per
+          // thread: it is the flag the UI sorts its attention by, so it must not
+          // cost N round trips.
+          this.prisma.messages.groupBy({
+            by: ['conversation_id'],
+            where: { organization_id: org, direction: 'inbound', conversation_id: { in: ids } },
+          }),
+        ])
+      : [[], [], []];
+
+    const leadsById = new Map(leadRows.map((l) => [l.id, l]));
+    const lastByThread = new Map(lastMessages.map((m) => [m.conversation_id, m]));
+    const withInbound = new Set(inbound.map((g) => g.conversation_id));
+    const rows = threads.map((t) => ({ ...t, leads: leadsById.get(t.lead_id) ?? null }));
 
     return rows.map((r) => {
-      const last = r.messages[0];
+      const last = lastByThread.get(r.id);
       return {
         id: r.id,
         leadId: r.lead_id,
@@ -432,4 +496,18 @@ export class HistoryService {
       createdAt: m.created_at.toISOString(),
     }));
   }
+}
+
+/**
+ * Telnyx transcribes a dual-channel recording as "Channel 1:" / "Channel 2:".
+ * Channel 1 is the far end of the call — the lead — and channel 2 is what we
+ * played into it, the assistant. Relabelled for reading only: the stored text
+ * is left as Telnyx wrote it, so transcript re-scoring sees the same input.
+ */
+export function labelSpeakers(transcript: string | null, leadFirstName: string | null): string | null {
+  if (!transcript) return transcript;
+  const lead = leadFirstName?.trim() || 'User';
+  return transcript
+    .replace(/^\s*channel\s*1\s*:/gim, `${lead}:`)
+    .replace(/^\s*channel\s*2\s*:/gim, 'Assistant:');
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '../modules/calendar/in-call-booking/booking-prompt';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService, type Creds } from './cred-store.service';
@@ -72,7 +72,23 @@ const DEFAULT_TEMPLATE = {
   name: 'EstatePulse AI Agent',
   greeting: 'Hi, thanks for reaching out! This is your home-buying assistant. Are you looking to buy a home sometime soon?',
   instructions:
-    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. Qualify inbound home-buyer leads over the phone.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.',
+    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. Qualify inbound home-buyer leads over the phone.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
+};
+
+/**
+ * Telnyx's built-in hangup tool. Without it the assistant has no way to end a
+ * call: it says goodbye and then holds the line open in silence until the
+ * caller gives up or the time limit hits. The description is what the model
+ * reads to decide when to use it, so it carries the rule even for an office
+ * whose own prompt never mentions hanging up.
+ */
+const HANGUP_TOOL = {
+  type: 'hangup',
+  hangup: {
+    description:
+      'End the call. Use it right after saying goodbye — once the conversation is complete, ' +
+      'the caller is not interested, or the caller asks to end the call.',
+  },
 };
 
 /**
@@ -97,6 +113,11 @@ const ASSISTANT_MODELS = [
 
 @Injectable()
 export class AssistantService {
+  private readonly logger = new Logger(AssistantService.name);
+  /** `${orgId}:${assistantId}` keys known to carry the hangup tool in this process. */
+  private readonly hangupReady = new Set<string>();
+  private readonly hangupInflight = new Map<string, Promise<void>>();
+
   constructor(
     private readonly creds: CredStoreService,
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
@@ -311,6 +332,8 @@ export class AssistantService {
     // id and shared are both server-owned. The array is a full replacement, so
     // dropping ids cannot orphan or duplicate anything.
     const tools = (owned ?? []).map(({ id: _id, shared: _shared, ...rest }: any) => rest);
+    // A save that leaves the hangup tool out must not be masked by the cache.
+    this.hangupReady.delete(`${orgId}:${c.assistantId}`);
 
     const res = await fetch(`${BASE}/${c.assistantId}`, {
       method: 'PATCH',
@@ -327,6 +350,40 @@ export class AssistantService {
     }
 
     return shape(await this.fetchRaw(orgId));
+  }
+
+  /**
+   * Make sure the org's assistant can end its own calls. Assistants created
+   * before the hangup tool was part of the template — or picked from the
+   * office's existing Telnyx account — get it added alongside whatever tools
+   * they already have.
+   *
+   * Runs before the assistant is attached to a call, at most once per assistant
+   * per process. Never throws: a call must go ahead even if this fails, and a
+   * failure retries on the next call.
+   */
+  async ensureHangupTool(orgId: string): Promise<void> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return;
+
+    const key = `${orgId}:${c.assistantId}`;
+    if (this.hangupReady.has(key)) return;
+    const running = this.hangupInflight.get(key);
+    if (running) return running;
+
+    const run = (async () => {
+      const cur = await this.fetchRaw(orgId);
+      const tools = (cur.tools ?? []) as any[];
+      if (!tools.some((t) => t?.type === 'hangup')) {
+        await this.setTools(orgId, [...tools.filter((t) => !t?.shared), HANGUP_TOOL]);
+        this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
+      }
+      this.hangupReady.add(key);
+    })()
+      .catch((e) => this.logger.warn(`hangup tool setup for org ${orgId}: ${(e as Error).message}`))
+      .finally(() => this.hangupInflight.delete(key));
+    this.hangupInflight.set(key, run);
+    return run;
   }
 
   /**
@@ -404,6 +461,7 @@ export class AssistantService {
         model,
         instructions: overrides.instructions || DEFAULT_TEMPLATE.instructions,
         greeting,
+        tools: [HANGUP_TOOL],
       };
       const res = await fetch(BASE, { method: 'POST', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.ok) {

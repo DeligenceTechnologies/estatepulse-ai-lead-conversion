@@ -63,7 +63,7 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
         <div className="flex items-center justify-between p-5 border-b border-slate-800">
           <div>
             <h3 className="text-sm font-bold text-white">{memberName}</h3>
-            <p className="text-[11px] text-slate-400">Calendar and working hours</p>
+            <p className="text-xs text-slate-400">Calendar and working hours</p>
           </div>
           <button
             onClick={onClose}
@@ -123,17 +123,17 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                           : 'bg-slate-950 border-slate-800/80'
                       }`}
                     >
-                      <div className="text-[10px] uppercase font-semibold text-slate-400">
+                      <div className="text-2xs uppercase font-semibold text-slate-400">
                         {DAY_SHORT[d.dayOfWeek]}
                       </div>
                       {d.isAvailable ? (
-                        <div className="text-[10px] font-mono text-emerald-300 mt-1 leading-tight">
+                        <div className="text-2xs font-mono text-emerald-300 mt-1 leading-tight">
                           {d.startTime}
                           <br />
                           {d.endTime}
                         </div>
                       ) : (
-                        <div className="text-[10px] text-slate-600 mt-1">Off</div>
+                        <div className="text-2xs text-slate-600 mt-1">Off</div>
                       )}
                     </div>
                   ))}
@@ -165,7 +165,7 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                         <div className="min-w-0 flex-1">
                           <div className="text-slate-200 font-semibold truncate">{a.leadName}</div>
                           {a.appointmentType && (
-                            <div className="text-[11px] text-slate-500 truncate">
+                            <div className="text-xs text-slate-500 truncate">
                               {a.appointmentType}
                             </div>
                           )}
@@ -177,7 +177,7 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                               day: 'numeric',
                             })}
                           </div>
-                          <div className="text-[11px] text-slate-500">
+                          <div className="text-xs text-slate-500">
                             {new Date(a.startTime).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',

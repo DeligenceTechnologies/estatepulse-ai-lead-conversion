@@ -53,6 +53,9 @@ export class AppointmentsService {
         start_at: { gte: from, lte: to },
         ...(q.status ? { status: q.status } : {}),
         ...(q.agentId ? { agent_id: q.agentId } : {}),
+        // Alongside organization_id, never instead of it: another office's
+        // lead id simply matches nothing here.
+        ...(q.leadId ? { lead_id: q.leadId } : {}),
       },
       orderBy: { start_at: 'asc' },
       take: MAX_ROWS,

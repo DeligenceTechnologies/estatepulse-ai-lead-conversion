@@ -127,12 +127,12 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
           aria-label="Assign to agent"
           className="absolute right-0 mt-2 w-72 z-20 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
         >
-          <div className="px-3 py-2 border-b border-slate-800 text-[10px] uppercase font-bold tracking-wide text-slate-500">
+          <div className="px-3 py-2 border-b border-slate-800 text-2xs uppercase font-bold tracking-wide text-slate-500">
             Assign to
           </div>
 
           {error && (
-            <div className="m-2 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-200 flex items-start gap-1.5">
+            <div className="m-2 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -179,7 +179,7 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
                           {memberName(m)}
                           {m.id === user?.id && <span className="text-slate-500 font-normal"> · you</span>}
                         </span>
-                        <span className="block text-[10px] text-slate-500">
+                        <span className="block text-2xs text-slate-500">
                           {m.activeLeads}
                           {m.maxActiveLeads !== null && ` / ${m.maxActiveLeads}`} leads
                           {atCap && ' · at cap'}

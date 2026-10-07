@@ -37,13 +37,13 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
           {q.temperature === 'hot' && <Flame className="w-3.5 h-3.5 text-rose-400" />}
           {q.temperature.toUpperCase()} — {q.score}
         </span>
-        <span className="text-[11px] text-slate-500">
+        <span className="text-xs text-slate-500">
           Hot from {q.thresholds.hot}, warm from {q.thresholds.warm} •{' '}
           {q.source === 'telnyx_insights' ? 'scored when the call ended' : 'scored from the transcript'}
         </span>
       </div>
 
-      {q.override && <p className="text-[11px] text-amber-300">{q.override}</p>}
+      {q.override && <p className="text-xs text-amber-300">{q.override}</p>}
 
       {q.reasons.length > 0 ? (
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -61,7 +61,7 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
           ))}
         </ul>
       ) : (
-        <p className="text-[11px] text-slate-500">The caller gave none of the qualifying details.</p>
+        <p className="text-xs text-slate-500">The caller gave none of the qualifying details.</p>
       )}
     </div>
   );

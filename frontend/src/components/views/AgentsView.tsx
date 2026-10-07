@@ -160,15 +160,10 @@ export const AgentsView: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-white tracking-tight">Agent Team</h2>
-            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-              <Radio className="w-3 h-3" />
-              Live API
-            </span>
+            <h2 className="text-xl font-bold text-white tracking-tight">Agents</h2>
           </div>
           <p className="text-xs text-slate-400">
-            The agents in your organization. Owners can add one, edit their details, or suspend
-            one.
+            Add agents, edit their details, or suspend one.
           </p>
         </div>
 
@@ -183,7 +178,7 @@ export const AgentsView: React.FC = () => {
             </button>
             <button
               onClick={() => setAddOpen(true)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Agent
@@ -195,37 +190,12 @@ export const AgentsView: React.FC = () => {
       {/* Lead Routing (not built). Kept as a statement of intent, deliberately
           inert: nothing in the product assigns a lead to an agent yet, and a
           card that looks selectable would claim otherwise. */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-cyan-400" />
-            Lead Distribution Algorithm
-          </h3>
-          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-            Not implemented
-          </span>
-        </div>
-        <p className="text-xs text-slate-400">
-          Inbound leads are <strong className="text-slate-300">not</strong> routed to agents yet —
-          every lead stays unassigned in the pipeline. These are the policies planned for a later
-          phase; none of them is running.
+      <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex items-center gap-3 text-xs">
+        <GitBranch className="w-4 h-4 text-cyan-400 shrink-0" />
+        <p className="text-slate-400">
+          <span className="font-semibold text-slate-200">Automatic lead routing is coming soon.</span>{' '}
+          Until then every lead stays unassigned — round-robin, area and availability rules are planned.
         </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
-          {[
-            { id: 'round_robin', title: 'Round-Robin', desc: 'Spread leads evenly across eligible agents.' },
-            { id: 'geographic', title: 'Geographic Routing', desc: 'Match a lead to the agent covering its area.' },
-            { id: 'availability', title: 'Availability First', desc: 'Only assign to agents with open calendar slots.' },
-          ].map((opt) => (
-            <div
-              key={opt.id}
-              className="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 space-y-1 opacity-60"
-            >
-              <span className="font-bold text-slate-300 block">{opt.title}</span>
-              <p className="text-[11px] text-slate-500">{opt.desc}</p>
-            </div>
-          ))}
-        </div>
       </div>
 
       {error && (
@@ -255,7 +225,7 @@ export const AgentsView: React.FC = () => {
                   : 'Turn this on if you sell too. You join the team as an agent, and routing treats you like everyone else.'}
             </p>
             {me.takingLeads && !me.calendarLinked && (
-              <p className="text-[11px] text-amber-300/90 leading-relaxed">
+              <p className="text-xs text-amber-300/90 leading-relaxed">
                 Your bookings are not attributed to you yet. Your Calendly or Cal.com email must
                 match {me.email}, then press <strong>Sync agents</strong> on Integrations.
               </p>
@@ -273,7 +243,7 @@ export const AgentsView: React.FC = () => {
             }`}
           >
             <span
-              className={`absolute top-[1px] left-[1px] w-5 h-5 rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+              className={`absolute top-[1px] left-[1px] w-5 h-5 rounded-full bg-on-accent shadow flex items-center justify-center transition-transform ${
                 me.takingLeads ? 'translate-x-5' : ''
               }`}
             >
@@ -328,7 +298,7 @@ export const AgentsView: React.FC = () => {
                       </div>
                       <div className="min-w-0">
                         <h4 className="text-sm font-bold text-white truncate">{memberName(member)}</h4>
-                        <span className="text-[11px] text-slate-400 capitalize">
+                        <span className="text-xs text-slate-400 capitalize">
                           {member.role}
                           {member.id === user?.id && <span className="text-slate-600"> · you</span>}
                         </span>
@@ -342,7 +312,7 @@ export const AgentsView: React.FC = () => {
                         suspend action changes. */}
                     {isSelfOwner ? (
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
+                        className={`text-2xs font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
                           member.takingLeads ? STATUS_STYLES['active'] : NEUTRAL_CHIP
                         }`}
                         title="Whether routing may give you new leads"
@@ -351,7 +321,7 @@ export const AgentsView: React.FC = () => {
                       </span>
                     ) : (
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
+                        className={`text-2xs font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
                           member.hasProfile ? (STATUS_STYLES[member.status] ?? NEUTRAL_CHIP) : NEUTRAL_CHIP
                         }`}
                         title={member.hasProfile ? 'Membership status' : 'No agent profile'}
@@ -394,7 +364,7 @@ export const AgentsView: React.FC = () => {
                       the UI is filling space. */}
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 block text-[10px]">Active Leads</span>
+                      <span className="text-slate-400 block text-2xs">Active Leads</span>
                       <span className="font-bold text-white font-mono text-sm">
                         {member.activeLeads}
                         {/* The cap is a real stored column, so it is shown next
@@ -407,7 +377,7 @@ export const AgentsView: React.FC = () => {
                       </span>
                     </div>
                     <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 block text-[10px]">Member Since</span>
+                      <span className="text-slate-400 block text-2xs">Member Since</span>
                       <span className="font-bold text-white font-mono text-sm">
                         {formatDate(member.memberSince)}
                       </span>
@@ -473,7 +443,7 @@ export const AgentsView: React.FC = () => {
 
                 {isOwner && member.status === 'suspended' && (
                   <div className="-mt-2 space-y-2">
-                    <p className="text-[11px] text-slate-500 text-center">
+                    <p className="text-xs text-slate-500 text-center">
                       Suspended — this member can no longer sign in.
                     </p>
                     <button

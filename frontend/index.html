@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Remix EstatePulse AI - Lead Conversion System</title>
+    <title>EstatePulse AI</title>
+    <script>
+      // Apply the saved theme before first paint (see src/lib/theme.ts).
+      try { if (localStorage.getItem('ep_theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+    </script>
     <meta name="description" content="AI-powered real estate lead conversion platform with instant response, voice qualification, lead scoring, follow-ups, and CRM sync." />
     <meta property="og:title" content="Remix EstatePulse AI - Lead Conversion System" />
     <meta property="og:description" content="AI-powered real estate lead conversion platform with instant response, voice qualification, lead scoring, follow-ups, and CRM sync." />
@@ -20,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-white">
+  <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-on-accent">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

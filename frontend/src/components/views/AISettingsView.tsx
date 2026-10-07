@@ -335,9 +335,9 @@ export const AISettingsView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">AI Agent & Qualification Rules</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">AI Assistant</h2>
           <p className="text-xs text-slate-400">
-            Configure system prompts, voice persona, deterministic scoring rubric, and business hours (PRD Section 44)
+            The prompt, voice and outreach strategy your AI agent uses on every lead.
           </p>
         </div>
 
@@ -423,7 +423,7 @@ export const AISettingsView: React.FC = () => {
                   {status.label || 'Telnyx connected'}
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 </h3>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-xs text-slate-400">
                   {status.accountCount > 1
                     ? `This agent runs on the active one of your ${status.accountCount} Telnyx accounts.`
                     : 'This agent calls and texts from your own Telnyx account.'}
@@ -433,7 +433,7 @@ export const AISettingsView: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveView('integrations')}
-              className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              className="text-xs font-semibold text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             >
               Manage connection
               <ArrowRight className="w-3.5 h-3.5" />
@@ -454,7 +454,7 @@ export const AISettingsView: React.FC = () => {
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-slate-100">Voice calls</div>
-                <div className="text-[11px] text-emerald-400">Ready</div>
+                <div className="text-xs text-emerald-400">Ready</div>
               </div>
             </div>
 
@@ -471,7 +471,7 @@ export const AISettingsView: React.FC = () => {
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-slate-100">SMS messaging</div>
                 <div
-                  className={`text-[11px] ${status.hasMessaging ? 'text-emerald-400' : 'text-amber-400'}`}
+                  className={`text-xs ${status.hasMessaging ? 'text-emerald-400' : 'text-amber-400'}`}
                 >
                   {status.hasMessaging
                     ? 'Ready'
@@ -482,7 +482,7 @@ export const AISettingsView: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-slate-800">
-            <p className="text-[11px] text-slate-500 min-w-0">
+            <p className="text-xs text-slate-500 min-w-0">
               {status.connectedAt
                 ? `Connected ${new Date(status.connectedAt).toLocaleDateString(undefined, {
                     day: 'numeric',
@@ -494,7 +494,7 @@ export const AISettingsView: React.FC = () => {
             </p>
 
             {assistants.length > 0 && (
-              <div className="flex items-center gap-2 text-[11px] ml-auto shrink-0">
+              <div className="flex items-center gap-2 text-xs ml-auto shrink-0">
                 <span className="text-slate-400">Editing agent:</span>
                 <select
                   value={status.assistantId}
@@ -521,7 +521,7 @@ export const AISettingsView: React.FC = () => {
               <Sparkles className="w-4 h-4 text-amber-400" />
               AI Voice Persona
             </h3>
-            <div className="flex items-center gap-2 text-[11px]">
+            <div className="flex items-center gap-2 text-xs">
               {agentLoading ? (
                 <span className="flex items-center gap-1 text-slate-400"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading live agent…</span>
               ) : agentError ? (
@@ -548,7 +548,7 @@ export const AISettingsView: React.FC = () => {
                 onChange={(e) => setAiName(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">Used in voice call greetings & SMS sender IDs</span>
+              <span className="text-xs text-slate-500 mt-1 block">Used in voice call greetings & SMS sender IDs</span>
             </div>
 
             <div>
@@ -573,7 +573,7 @@ export const AISettingsView: React.FC = () => {
                 onChange={(e) => setGreeting(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">First line the agent speaks on a call</span>
+              <span className="text-xs text-slate-500 mt-1 block">First line the agent speaks on a call</span>
             </div>
 
             <div>
@@ -588,7 +588,7 @@ export const AISettingsView: React.FC = () => {
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
-              <span className="text-[11px] text-slate-500 mt-1 block">The LLM powering the conversation</span>
+              <span className="text-xs text-slate-500 mt-1 block">The LLM powering the conversation</span>
             </div>
           </div>
 
@@ -596,7 +596,7 @@ export const AISettingsView: React.FC = () => {
             <label className="block text-slate-300 font-semibold mb-1 flex items-center gap-1.5">
               <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
               AI System Prompt
-              <span className="text-[11px] text-slate-500 font-normal">— deployed live to your AI voice agent on save</span>
+              <span className="text-xs text-slate-500 font-normal">— deployed live to your AI voice agent on save</span>
             </label>
             <textarea
               ref={promptRef}
@@ -607,17 +607,17 @@ export const AISettingsView: React.FC = () => {
               placeholder="Describe how the AI agent should behave and what it must collect…"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-xs leading-relaxed font-mono focus:outline-none focus:border-emerald-500 resize-y"
             />
-            <span className="text-[11px] text-slate-500 mt-1 block">
+            <span className="text-xs text-slate-500 mt-1 block">
               The selected <span className="text-slate-300">Conversational Tone</span> is appended to this prompt automatically when deployed.
             </span>
 
             {/* Variable picker. Every name here is one the backend really sends
                 when a call is answered, so nothing offered renders as braces. */}
             <div className="mt-3">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Insert lead details
               </span>
-              <p className="text-[11px] text-slate-500 mt-0.5 mb-1.5">
+              <p className="text-xs text-slate-500 mt-0.5 mb-1.5">
                 Click to drop one in at the cursor. Each is filled with this lead's own details when the call
                 connects.
               </p>
@@ -628,7 +628,7 @@ export const AISettingsView: React.FC = () => {
                     type="button"
                     onClick={() => insertVariable(v.name)}
                     title={`e.g. ${v.example}`}
-                    className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-emerald-600 hover:text-emerald-300 text-slate-400 rounded-md text-[11px] font-mono cursor-pointer transition"
+                    className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-emerald-600 hover:text-emerald-300 text-slate-400 rounded-md text-xs font-mono cursor-pointer transition"
                   >
                     {`{{${v.name}}}`}
                   </button>
@@ -645,7 +645,7 @@ export const AISettingsView: React.FC = () => {
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Sliders className="w-4 h-4 text-emerald-400" />
             Outbound Communication Strategy
-            <span className="text-[11px] text-slate-500 font-normal">— the voice &amp; SMS sequence run for every new lead</span>
+            <span className="text-xs text-slate-500 font-normal">— the voice &amp; SMS sequence run for every new lead</span>
           </h3>
           <StrategyEditor />
         </div>
@@ -716,7 +716,7 @@ export const AISettingsView: React.FC = () => {
                   className="flex items-center gap-2 text-slate-300"
                 >
                   <span className={`w-9 h-5 rounded-full transition-colors relative ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
                   <span className="font-semibold">{label}</span>
                 </button>
@@ -745,7 +745,7 @@ export const AISettingsView: React.FC = () => {
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-              <span className="text-[11px] text-slate-500 mt-1 block">
+              <span className="text-xs text-slate-500 mt-1 block">
                 Strips road and office noise from the caller's side before the agent hears it.
               </span>
             </div>
@@ -761,7 +761,7 @@ export const AISettingsView: React.FC = () => {
                 placeholder="+15125550147"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">
+              <span className="text-xs text-slate-500 mt-1 block">
                 Leave blank to hang up instead. A caller hearing silence is worse than a caller hearing a person.
               </span>
             </div>
@@ -776,7 +776,7 @@ export const AISettingsView: React.FC = () => {
                 onChange={(e) => setUserIdleReplySecs(Number(e.target.value))}
                 className="w-32 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">
+              <span className="text-xs text-slate-500 mt-1 block">
                 How long the agent waits before asking "are you still there?".
               </span>
             </div>
@@ -799,12 +799,12 @@ export const AISettingsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}
-                  className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 whitespace-nowrap cursor-pointer"
+                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 whitespace-nowrap cursor-pointer"
                 >
                   {interruptThreshold == null ? 'Set manually' : 'Automatic'}
                 </button>
               </div>
-              <span className="text-[11px] text-slate-500 mt-1 block">
+              <span className="text-xs text-slate-500 mt-1 block">
                 Higher means the agent is more certain before it stops talking. Raise it if it keeps cutting
                 itself off on "mm-hmm".
               </span>
@@ -840,7 +840,7 @@ export const AISettingsView: React.FC = () => {
                   className="flex items-center gap-2 text-slate-300 cursor-pointer"
                 >
                   <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
                   <span className="font-semibold flex items-center gap-1.5">{icon}{label}</span>
                 </button>
@@ -891,7 +891,7 @@ export const AISettingsView: React.FC = () => {
                   className="flex items-center gap-2 text-slate-300 cursor-pointer"
                 >
                   <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
                   <span className="font-semibold">{label}</span>
                 </button>
@@ -910,7 +910,7 @@ export const AISettingsView: React.FC = () => {
                 placeholder="https://your-portal.com/api/assistant/context"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">
+              <span className="text-xs text-slate-500 mt-1 block">
                 Called as each conversation starts, to pull the newest details rather than whatever was true when
                 the call was scheduled. The lead's own fields are already sent without this.
               </span>
@@ -950,7 +950,7 @@ export const AISettingsView: React.FC = () => {
               ].map(({ label, on, set }) => (
                 <button key={label} type="button" onClick={() => set(!on)} className="flex items-center gap-2 text-slate-300">
                   <span className={`w-9 h-5 rounded-full transition-colors relative ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
                   <span className="font-semibold">{label}</span>
                 </button>
@@ -997,7 +997,7 @@ export const AISettingsView: React.FC = () => {
           </p>
           <button type="button" onClick={() => setPostCall(!postCall)} className="flex items-center gap-2 text-slate-300 text-xs">
             <span className={`w-9 h-5 rounded-full transition-colors relative ${postCall ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${postCall ? 'left-[18px]' : 'left-0.5'}`} />
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${postCall ? 'left-[18px]' : 'left-0.5'}`} />
             </span>
             <span className="font-semibold">{postCall ? 'Enabled' : 'Disabled'}</span>
           </button>
@@ -1008,12 +1008,12 @@ export const AISettingsView: React.FC = () => {
           <div className="flex items-start justify-between gap-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Sliders className="w-4 h-4 text-amber-400" />
-              Tools / Workflows <span className="text-[11px] text-slate-500 font-normal">— what the agent can do during a call</span>
+              Tools / Workflows <span className="text-xs text-slate-500 font-normal">— what the agent can do during a call</span>
             </h3>
             <button
               onClick={() => { setEditingTool(null); setToolModalOpen(true); }}
               disabled={toolBusy}
-              className="shrink-0 px-3 py-1.5 bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 rounded-lg text-[11px] font-bold hover:bg-emerald-600/30 disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+              className="shrink-0 px-3 py-1.5 bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 rounded-lg text-xs font-bold hover:bg-emerald-600/30 disabled:opacity-50 flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-3 h-3" /> Add tool
             </button>
@@ -1039,7 +1039,7 @@ export const AISettingsView: React.FC = () => {
                     {toolLabel(t)}
                     {t.shared && (
                       <span
-                        className="text-[9px] uppercase font-mono tracking-wide text-sky-400 bg-sky-950/50 border border-sky-800/50 rounded px-1 py-0.5 flex items-center gap-1"
+                        className="text-2xs uppercase font-mono tracking-wide text-sky-400 bg-sky-950/50 border border-sky-800/50 rounded px-1 py-0.5 flex items-center gap-1"
                         title="Shared across your agents. Edit it in the provider console; removing it here only detaches it."
                       >
                         <Lock className="w-2.5 h-2.5" /> shared
@@ -1083,7 +1083,7 @@ export const AISettingsView: React.FC = () => {
             ))}
           </div>
 
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs text-slate-500">
             Tools save as soon as you add or edit one — they are not part of the Deploy button above.
             The one worth adding first: a <span className="text-slate-300 font-mono">report_qualification</span> webhook to
             <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;leadId&#125;&#125;/qualified</span>, so the agent reports
@@ -1096,9 +1096,9 @@ export const AISettingsView: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Building2 className="w-4 h-4 text-cyan-400" />
-              Dynamic Variables <span className="text-[11px] text-slate-500 font-normal">— injected into the prompt as {'{{key}}'}</span>
+              Dynamic Variables <span className="text-xs text-slate-500 font-normal">— injected into the prompt as {'{{key}}'}</span>
             </h3>
-            <button type="button" onClick={addVar} className="text-[11px] text-emerald-400 font-semibold hover:text-emerald-300">+ Add variable</button>
+            <button type="button" onClick={addVar} className="text-xs text-emerald-400 font-semibold hover:text-emerald-300">+ Add variable</button>
           </div>
 
           <div className="space-y-2 text-xs">
@@ -1138,14 +1138,14 @@ export const AISettingsView: React.FC = () => {
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             Compliance
           </h3>
-          <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-[11px] text-slate-300 space-y-1">
+          <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-300 space-y-1">
             <div className="text-emerald-400 font-semibold">Strict TCPA STOP enforcement: active</div>
             <p className="text-slate-400">
               A reply of "STOP", "UNSUBSCRIBE" or similar sets do-not-contact and cancels every
               scheduled step, in the strategy and in every sequence.
             </p>
           </div>
-          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
             <span className="font-semibold text-slate-200">Strict non-goals enforced in the system prompt:</span>
             <p>The AI agent never gives legal advice, never guarantees mortgage approval, never makes unverified pricing promises, and escalates to a human whenever uncertain.</p>
           </div>
@@ -1156,7 +1156,7 @@ export const AISettingsView: React.FC = () => {
           <button
             type="submit"
             disabled={deploying}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 flex items-center gap-2 transition-colors cursor-pointer"
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 flex items-center gap-2 transition-colors cursor-pointer"
           >
             {deploying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             <span>{deploying ? 'Deploying to AI agent…' : 'Save Configuration'}</span>

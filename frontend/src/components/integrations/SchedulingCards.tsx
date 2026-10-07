@@ -58,8 +58,8 @@ import { IntegrationCard } from './IntegrationCard';
 /** One labelled fact about the live connection. Matches TelnyxCard's. */
 const Fact: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
   <div className="flex items-baseline justify-between gap-3">
-    <span className="text-[11px] text-slate-500 shrink-0">{label}</span>
-    <span className={`text-[11px] text-slate-200 truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
+    <span className="text-xs text-slate-500 shrink-0">{label}</span>
+    <span className={`text-xs text-slate-200 truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
   </div>
 );
 
@@ -181,13 +181,13 @@ const CalComConnectModal: React.FC<{
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl text-slate-100">
           <div>
             <h3 className="text-sm font-bold text-white">Connect Cal.com</h3>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-xs text-slate-400">
               Paste an API key from a Cal.com account that owns or administers your team.
             </p>
           </div>
 
           {replacing && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-[11px] text-amber-200 leading-relaxed">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-200 leading-relaxed">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span>
                 This will disconnect <strong>{PROVIDER_LABEL[replacing]}</strong>. Appointments
@@ -198,14 +198,14 @@ const CalComConnectModal: React.FC<{
           )}
 
           {error && (
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-[11px] text-rose-200 leading-relaxed">
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-200 leading-relaxed">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
           <div className="space-y-1.5">
-            <label htmlFor="cal-api-key" className="text-[11px] font-semibold text-slate-300">
+            <label htmlFor="cal-api-key" className="text-xs font-semibold text-slate-300">
               API key
             </label>
             <input
@@ -224,7 +224,7 @@ const CalComConnectModal: React.FC<{
               }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-sky-500/60"
             />
-            <p className="text-[11px] text-slate-500">
+            <p className="text-xs text-slate-500">
               Cal.com → Settings → Developer → API keys. We store it encrypted and use it only to
               read your team's bookings.
             </p>
@@ -235,7 +235,7 @@ const CalComConnectModal: React.FC<{
               type="button"
               disabled={busy || apiKey.trim().length === 0}
               onClick={() => void check()}
-              className="w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+              className="w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-on-accent shadow-md shadow-sky-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
               Check key
@@ -248,7 +248,7 @@ const CalComConnectModal: React.FC<{
               </div>
 
               {usableTeams.length === 0 ? (
-                <div className={`${panel} p-4 text-[11px] text-amber-300 leading-relaxed`}>
+                <div className={`${panel} p-4 text-xs text-amber-300 leading-relaxed`}>
                   This key sees no Cal.com <strong>team</strong>. A personal Cal.com account has no
                   shared roster and no round robin, so there is nothing for an office to book
                   through — create a team in Cal.com and try again.
@@ -261,7 +261,7 @@ const CalComConnectModal: React.FC<{
                 </div>
               ) : (
                 <fieldset className="space-y-1.5">
-                  <legend className="text-[11px] font-semibold text-slate-300 mb-1.5">
+                  <legend className="text-xs font-semibold text-slate-300 mb-1.5">
                     Which team do you book through?
                   </legend>
                   {usableTeams.map((t) => (
@@ -283,7 +283,7 @@ const CalComConnectModal: React.FC<{
                           {t.name}
                         </span>
                         {t.slug && (
-                          <span className="block text-[11px] text-slate-500 truncate font-mono">
+                          <span className="block text-xs text-slate-500 truncate font-mono">
                             /{t.slug}
                           </span>
                         )}
@@ -297,7 +297,7 @@ const CalComConnectModal: React.FC<{
                 type="button"
                 disabled={busy || teamId === null}
                 onClick={() => void connect()}
-                className="w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                className="w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-on-accent shadow-md shadow-sky-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 Connect Cal.com
@@ -407,7 +407,7 @@ const ManageModal: React.FC<{
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-5 shadow-xl text-slate-100">
           <div>
             <h3 className="text-sm font-bold text-white">Office {label}</h3>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-xs text-slate-400">
               {status.connection?.email ?? 'Not connected'}
               {status.workspaceName ? ` · ${status.workspaceName}` : ''}
               {status.workspaceRole ? ` · ${status.workspaceRole}` : ''}
@@ -415,7 +415,7 @@ const ManageModal: React.FC<{
           </div>
 
           {error && (
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-[11px] text-rose-200">
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-200">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -434,7 +434,7 @@ const ManageModal: React.FC<{
                 type="button"
                 disabled={busy !== null}
                 onClick={() => run('members', async () => setMatched(await syncCalendarMembers()))}
-                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40"
+                className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40"
               >
                 {busy === 'members' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -444,14 +444,14 @@ const ManageModal: React.FC<{
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-500 leading-relaxed">
+            <p className="text-xs text-slate-500 leading-relaxed">
               People in your {label} account. <span className="text-slate-300">Sync agents</span>{' '}
               links each one to the EstatePulse agent with the same email, so their bookings show up
               under that agent.
             </p>
 
             {matched && (
-              <div className={`${panel} p-2.5 text-[11px] text-slate-300`}>
+              <div className={`${panel} p-2.5 text-xs text-slate-300`}>
                 {matched.members} team member{matched.members === 1 ? '' : 's'} · {matched.linked} newly
                 linked · {matched.unmatched} with no matching agent · {matched.agentsUnlinked} agent
                 {matched.agentsUnlinked === 1 ? '' : 's'} not in {label}
@@ -459,12 +459,12 @@ const ManageModal: React.FC<{
             )}
 
             {members === null ? (
-              <div className={`${panel} p-4 text-[11px] text-slate-400 flex items-center gap-2`}>
+              <div className={`${panel} p-4 text-xs text-slate-400 flex items-center gap-2`}>
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Reading your {label}{' '}
                 members…
               </div>
             ) : members.length === 0 ? (
-              <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed`}>
+              <div className={`${panel} p-4 text-xs text-slate-400 leading-relaxed`}>
                 No team members found. Invite your agents in {label}, then press Sync agents.
               </div>
             ) : (
@@ -476,12 +476,12 @@ const ManageModal: React.FC<{
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-semibold text-white truncate">{m.name}</div>
-                      <div className="text-[11px] text-slate-500 truncate">{m.email}</div>
+                      <div className="text-xs text-slate-500 truncate">{m.email}</div>
                     </div>
 
                     <span
                       title={`Their role in ${label}`}
-                      className="text-[10px] uppercase font-bold text-slate-500 shrink-0"
+                      className="text-2xs uppercase font-bold text-slate-500 shrink-0"
                     >
                       {MEMBER_ROLE_LABEL[m.role?.toLowerCase()] ?? m.role}
                     </span>
@@ -489,12 +489,12 @@ const ManageModal: React.FC<{
                     {m.agentId ? (
                       <span
                         title="Linked EstatePulse agent"
-                        className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shrink-0 truncate max-w-[11rem]"
+                        className="text-2xs font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shrink-0 truncate max-w-[11rem]"
                       >
                         Agent: {m.agentName}
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-800 text-slate-400 border-slate-700 shrink-0">
+                      <span className="text-2xs font-bold px-2 py-0.5 rounded-full border bg-slate-800 text-slate-400 border-slate-700 shrink-0">
                         Not linked
                       </span>
                     )}
@@ -505,7 +505,7 @@ const ManageModal: React.FC<{
             )}
 
             {unlinked > 0 && (
-              <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
+              <div className="flex items-start gap-1.5 text-xs text-amber-400 leading-relaxed">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 {unlinked} team member{unlinked === 1 ? '' : 's'} not linked to an agent. Their
                 bookings are skipped until their {label} email matches an agent's email.
@@ -518,23 +518,23 @@ const ManageModal: React.FC<{
           {/* ---------------------------------------------------------------- */}
           <section className="space-y-2">
             <h4 className="text-xs font-bold text-white">Event types</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
+            <p className="text-xs text-slate-500 leading-relaxed">
               The meetings leads can book, managed in {label}. Open one to see the booking page a lead
               uses. A <span className="text-slate-300">Round robin</span> event type lets {label}{' '}
               choose which agent hosts.
             </p>
 
             {eventTypesError ? (
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-[11px] text-amber-200 leading-relaxed">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-200 leading-relaxed">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>{eventTypesError}</span>
               </div>
             ) : eventTypes === null ? (
-              <div className={`${panel} p-4 text-[11px] text-slate-400 flex items-center gap-2`}>
+              <div className={`${panel} p-4 text-xs text-slate-400 flex items-center gap-2`}>
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Reading your event types…
               </div>
             ) : eventTypes.length === 0 ? (
-              <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed`}>
+              <div className={`${panel} p-4 text-xs text-slate-400 leading-relaxed`}>
                 No active event types. Create one in {label} — a round robin event type needs a team
                 plan.
               </div>
@@ -544,13 +544,13 @@ const ManageModal: React.FC<{
                   <div key={et.uri} className={`${panel} px-3 py-2 flex items-center gap-2`}>
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-semibold text-white truncate">{et.name}</div>
-                      <div className="text-[11px] text-slate-500 truncate">
+                      <div className="text-xs text-slate-500 truncate">
                         {et.durationMinutes} min{et.ownerName ? ` · Host: ${et.ownerName}` : ''}
                       </div>
                     </div>
 
                     {et.poolingType && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-sky-500/20 text-sky-300 border-sky-500/40 shrink-0">
+                      <span className="text-2xs font-bold px-2 py-0.5 rounded-full border bg-sky-500/20 text-sky-300 border-sky-500/40 shrink-0">
                         {POOLING_LABEL[et.poolingType] ?? et.poolingType}
                       </span>
                     )}
@@ -577,7 +577,7 @@ const ManageModal: React.FC<{
           {/* ---------------------------------------------------------------- */}
           <section className="space-y-2 pt-1 border-t border-slate-800">
             {synced && (
-              <div className={`${panel} p-2.5 text-[11px] text-slate-300`}>
+              <div className={`${panel} p-2.5 text-xs text-slate-300`}>
                 {synced.scanned} booking{synced.scanned === 1 ? '' : 's'} checked · {synced.created}{' '}
                 new · {synced.updated} updated · {synced.skippedNoLead} not from a known lead ·{' '}
                 {synced.skippedNoAgent} hosted by an unlinked team member
@@ -626,7 +626,7 @@ const ManageModal: React.FC<{
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-500 leading-relaxed">
+            <p className="text-xs text-slate-500 leading-relaxed">
               Bookings sync automatically every few minutes; Sync bookings now just does it
               immediately. Disconnecting keeps appointments already synced and each agent's link, so
               reconnecting picks up where it left off.
@@ -703,21 +703,21 @@ export const SchedulingCards: React.FC = () => {
       <Fact label="Members matched" value={relativeTime(status?.membersSyncedAt ?? null)} />
 
       <div className="pt-1.5 mt-1.5 border-t border-slate-800/80 space-y-1">
-        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+        <div className="flex items-center gap-1.5 text-xs text-emerald-400">
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Reading the whole team's bookings
         </div>
         {status?.syncEnabled ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+          <div className="flex items-center gap-1.5 text-xs text-emerald-400">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Background sync running
           </div>
         ) : (
-          <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
+          <div className="flex items-start gap-1.5 text-xs text-amber-400 leading-relaxed">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             Background sync is off on this server — use Sync now to pull bookings
           </div>
         )}
         {status?.membersSyncedAt === null && (
-          <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-relaxed">
+          <div className="flex items-start gap-1.5 text-xs text-amber-400 leading-relaxed">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             No members matched yet — until an agent is linked to a {PROVIDER_LABEL[id]} member,
             their bookings cannot be attributed
@@ -732,13 +732,13 @@ export const SchedulingCards: React.FC = () => {
     const p = providerOf(id);
     if (p && !p.canConnect) {
       return (
-        <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed`}>
+        <div className={`${panel} p-4 text-xs text-slate-400 leading-relaxed`}>
           {p.reason ?? `${PROVIDER_LABEL[id]} is not available on this server yet.`}
         </div>
       );
     }
     return (
-      <div className={`${panel} p-4 text-[11px] text-slate-400 leading-relaxed space-y-2`}>
+      <div className={`${panel} p-4 text-xs text-slate-400 leading-relaxed space-y-2`}>
         {blurb}
         {live && live !== id && (
           <p className="flex items-start gap-1.5 text-amber-400">
@@ -755,7 +755,7 @@ export const SchedulingCards: React.FC = () => {
       {error && (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 lg:col-span-2">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-          <div className="text-[11px] text-rose-200 leading-relaxed">{error}</div>
+          <div className="text-xs text-rose-200 leading-relaxed">{error}</div>
         </div>
       )}
 
@@ -798,16 +798,16 @@ export const SchedulingCards: React.FC = () => {
             if (live === 'calendly' && !needsReauth) setManage(true);
             else void connectCalendly();
           },
-          className: 'bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-950',
+          className: 'bg-sky-600 hover:bg-sky-500 text-on-accent shadow-md shadow-sky-950',
         }}
       >
         {loading ? (
-          <div className={`${panel} p-4 text-[11px] text-slate-400 flex items-center gap-2`}>
+          <div className={`${panel} p-4 text-xs text-slate-400 flex items-center gap-2`}>
             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Checking your Calendly
             connection…
           </div>
         ) : live === 'calendly' && needsReauth ? (
-          <div className={`${panel} p-4 text-[11px] text-amber-300 leading-relaxed flex items-start gap-1.5`}>
+          <div className={`${panel} p-4 text-xs text-amber-300 leading-relaxed flex items-start gap-1.5`}>
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             {conn?.lastError ?? 'Calendly stopped accepting our credentials. Reconnect to resume.'}
           </div>
@@ -865,16 +865,16 @@ export const SchedulingCards: React.FC = () => {
             if (live === 'cal' && !needsReauth) setManage(true);
             else setCalConnect(true);
           },
-          className: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-950',
+          className: 'bg-indigo-600 hover:bg-indigo-500 text-on-accent shadow-md shadow-indigo-950',
         }}
       >
         {loading ? (
-          <div className={`${panel} p-4 text-[11px] text-slate-400 flex items-center gap-2`}>
+          <div className={`${panel} p-4 text-xs text-slate-400 flex items-center gap-2`}>
             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Checking your Cal.com
             connection…
           </div>
         ) : live === 'cal' && needsReauth ? (
-          <div className={`${panel} p-4 text-[11px] text-amber-300 leading-relaxed flex items-start gap-1.5`}>
+          <div className={`${panel} p-4 text-xs text-amber-300 leading-relaxed flex items-start gap-1.5`}>
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             {conn?.lastError ?? 'Cal.com stopped accepting our API key. Reconnect to resume.'}
           </div>

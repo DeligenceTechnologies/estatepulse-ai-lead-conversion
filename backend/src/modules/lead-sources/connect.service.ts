@@ -16,7 +16,15 @@
  * So: never leave a live webhook pointing at a token we have deleted.
  */
 
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnApplicationBootstrap,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SecretBox, ingestTokenAad, signingSecretAad } from '../../common/crypto';
 import {
@@ -44,7 +52,7 @@ export interface ConnectFormInput {
 }
 
 @Injectable()
-export class ConnectService {
+export class ConnectService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ConnectService.name);
   private readonly secretBox: SecretBox;
 
@@ -103,6 +111,69 @@ export class ConnectService {
             'ALLOW_INSECURE_INGEST_URL=true when testing against a fake provider.',
         },
       });
+    }
+  }
+
+  /** The same check as above, as a yes/no for paths that must not throw. */
+  private ingestUrlIsReachable(): boolean {
+    try {
+      this.assertIngestUrlIsReachable();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Point every API-connected form's webhook at the current public URL.
+   *
+   * The public origin is not stable in development: a quick tunnel gets a new
+   * hostname on every restart, and every webhook installed under the old one
+   * goes on delivering into the void. Nothing errors — the form submits, the
+   * provider retries a dead host, and no lead ever appears. Re-pointing on boot
+   * is what makes a restarted tunnel just work.
+   *
+   * Cross-tenant on purpose, hence the raw read past the tenancy guard; every
+   * write after it goes through resync(), scoped to the row's own org. Runs in
+   * the background and never throws: boot must not wait on, or fail because
+   * of, a form provider.
+   */
+  onApplicationBootstrap(): void {
+    if (this.config.get<string>('NODE_ENV') === 'test') return;
+    if (this.config.get<string>('WEBHOOK_URL_SYNC_ON_BOOT') === 'false') return;
+    if (!this.ingestUrlIsReachable()) return;
+    void this.syncAllWebhookUrls();
+  }
+
+  private async syncAllWebhookUrls(): Promise<void> {
+    let rows: { id: string; organization_id: string }[];
+    try {
+      rows = await this.prisma.$queryRaw<{ id: string; organization_id: string }[]>`
+        SELECT id, organization_id FROM lead_sources
+        WHERE connection_method = ${ConnectionMethod.API}
+          AND is_active = true
+          AND provider_credential_id IS NOT NULL
+          AND external_form_id IS NOT NULL`;
+    } catch (e) {
+      this.logger.warn(`webhook URL sync skipped: ${(e as Error).message}`);
+      return;
+    }
+
+    for (const row of rows) {
+      try {
+        const r = await this.resync(row.organization_id, row.id);
+        if (r.urlUpdated) this.logger.log(`lead source ${row.id}: webhook re-pointed at the current public URL`);
+        else if (r.remoteState === RemoteWebhookState.UNINSTALLED) {
+          this.logger.warn(`lead source ${row.id}: webhook missing on the provider — reinstall it`);
+        }
+      } catch (e) {
+        const body = (e as { getResponse?: () => unknown }).getResponse?.() as
+          | { error?: { message?: string } }
+          | undefined;
+        this.logger.warn(
+          `lead source ${row.id}: webhook URL sync failed: ${body?.error?.message ?? (e as Error).message}`,
+        );
+      }
     }
   }
 
@@ -518,7 +589,40 @@ export class ConnectService {
         where: { id: row.id },
         data: { remote_state: RemoteWebhookState.UNINSTALLED, remote_synced_at: new Date() },
       });
-      return { remoteState: RemoteWebhookState.UNINSTALLED, repaired: false, removedDuplicates };
+      return { remoteState: RemoteWebhookState.UNINSTALLED, repaired: false, removedDuplicates, urlUpdated: false };
+    }
+
+    // Matched by externalRef, the webhook can still be aimed at an old origin
+    // (a restarted tunnel, a changed domain). It exists, so it looks healthy,
+    // and every delivery goes nowhere. Re-point it — but never at an address
+    // the provider cannot reach, which would break a webhook that works.
+    let urlUpdated = false;
+    const hook = mine[0];
+    if (
+      (hook.url !== url || !hook.isEnabled) &&
+      adapter.capabilities.supportsWebhookUpdate &&
+      this.ingestUrlIsReachable()
+    ) {
+      // The secret travels with every update: a provider whose PATCH replaces
+      // the webhook (Tally) would otherwise clear it, and every delivery after
+      // would fail signature verification.
+      const secret = row.signing_secret_enc
+        ? this.secretBox.decrypt(row.signing_secret_enc, signingSecretAad(organizationId, row.id))
+        : null;
+      try {
+        await adapter.updateWebhook(
+          credential,
+          { externalFormId: row.external_form_id, externalWebhookId: hook.externalWebhookId },
+          {
+            url,
+            isEnabled: true,
+            ...(adapter.capabilities.supportsSigningSecret && secret ? { signingSecret: secret } : {}),
+          },
+        );
+        urlUpdated = true;
+      } catch (e) {
+        throw this.integrations.toHttp(e);
+      }
     }
 
     await this.prisma.lead_sources.update({
@@ -534,8 +638,9 @@ export class ConnectService {
 
     return {
       remoteState: RemoteWebhookState.INSTALLED,
-      repaired: row.external_webhook_id !== mine[0].externalWebhookId,
+      repaired: row.external_webhook_id !== mine[0].externalWebhookId || urlUpdated,
       removedDuplicates,
+      urlUpdated,
     };
   }
 

@@ -100,7 +100,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Add Agent</h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-xs text-slate-400">
                 Creates a real account in your organization and sets its first password
               </p>
             </div>
@@ -171,7 +171,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               <button
                 type="button"
                 onClick={close}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors cursor-pointer"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold transition-colors cursor-pointer"
               >
                 Done
               </button>
@@ -224,7 +224,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               onChange={(e) => setEmail(e.target.value)}
               className={field}
             />
-            <p className="text-[10px] text-slate-500 mt-1">This is the address they sign in with.</p>
+            <p className="text-2xs text-slate-500 mt-1">This is the address they sign in with.</p>
           </div>
 
           <div>
@@ -256,7 +256,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               onChange={(e) => setLeadCap(e.target.value)}
               className={`${field} font-mono`}
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-2xs text-slate-500 mt-1">
               The most open leads this agent may hold. Stored now; nothing assigns leads yet.
             </p>
           </div>
@@ -273,7 +273,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
               onChange={(e) => setPassword(e.target.value)}
               className={field}
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-2xs text-slate-500 mt-1">
               At least 8 characters. It is emailed to the agent when this server has email
               configured — you will be told either way. They cannot change it from the app yet.
             </p>
@@ -291,7 +291,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
               {saving ? 'Creating…' : 'Create Agent'}

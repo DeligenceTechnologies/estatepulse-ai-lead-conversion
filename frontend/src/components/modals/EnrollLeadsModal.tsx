@@ -31,7 +31,7 @@ interface Props {
 }
 
 
-const label = 'block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1';
+const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1';
 const input =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600';
 
@@ -117,7 +117,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>
             <h3 className="text-base font-bold text-white">Add leads to {sequence.name}</h3>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-xs text-slate-400">
               Nothing is sent until you confirm. Opted-out leads are never included.
             </p>
           </div>
@@ -141,7 +141,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
 
             {result.skipped.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+                <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
                   {result.skipped.length} skipped
                 </p>
                 <div className="max-h-52 overflow-y-auto space-y-1 custom-scrollbar">
@@ -151,7 +151,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
                       className="flex items-center justify-between text-xs bg-slate-950/70 border border-slate-800/60 rounded-lg px-3 py-1.5"
                     >
                       <span className="text-slate-200">{s.leadName}</span>
-                      <span className="text-[10px] text-slate-400">
+                      <span className="text-2xs text-slate-400">
                         {SKIP_REASONS[s.reason]}
                       </span>
                     </div>
@@ -161,7 +161,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
             )}
 
             {result.matched > result.enrolled + result.skipped.length && (
-              <p className="text-[11px] text-amber-300 flex items-start gap-1.5">
+              <p className="text-xs text-amber-300 flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 {result.matched} leads matched but only {preview?.cap ?? 500} can be added at once.
                 Run it again to add the rest.
@@ -283,7 +283,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
                         setMode(mode === 'filter' ? 'picked' : 'filter');
                         setPicked(new Set());
                       }}
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                      className="text-xs text-emerald-400 hover:text-emerald-300 cursor-pointer"
                     >
                       {mode === 'filter' ? 'Pick individually instead' : 'Add all matches instead'}
                     </button>
@@ -315,15 +315,15 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
                           />
                         )}
                         <span className="text-slate-100">{l.name}</span>
-                        <span className="text-slate-500 font-mono text-[10px]">{l.phone}</span>
+                        <span className="text-slate-500 font-mono text-2xs">{l.phone}</span>
                       </span>
-                      <span className="text-[10px] text-slate-400">
+                      <span className="text-2xs text-slate-400">
                         {l.temperature ?? '—'} · {l.status}
                       </span>
                     </div>
                   ))}
                   {preview && preview.total > preview.sample.length && (
-                    <p className="text-[10px] text-slate-500 px-3 py-1">
+                    <p className="text-2xs text-slate-500 px-3 py-1">
                       …and {preview.total - preview.sample.length} more
                       {mode === 'picked' && ' (not shown, so not selectable individually)'}
                     </p>
@@ -333,7 +333,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
             </div>
 
             <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800">
-              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">
                 <Ban className="w-3 h-3" />
                 Opted-out leads are excluded automatically.
               </p>
@@ -347,7 +347,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
                 <button
                   onClick={() => void commit()}
                   disabled={busy || count === 0}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   {busy ? 'Adding…' : `Add ${count} lead${count === 1 ? '' : 's'}`}

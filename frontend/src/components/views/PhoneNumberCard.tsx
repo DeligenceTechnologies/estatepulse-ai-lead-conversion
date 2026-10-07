@@ -74,7 +74,7 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
           <Phone className="w-4 h-4 text-emerald-400" />
           Phone Number
         </h3>
-        <span className="text-[11px] text-slate-400 flex items-center gap-2">
+        <span className="text-xs text-slate-400 flex items-center gap-2">
           {status.fromNumber ? (
             <>
               <span className="text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Active: {status.fromNumber}</span>
@@ -84,13 +84,13 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
         </span>
       </div>
 
-      <div className="flex gap-2 text-[11px]">
+      <div className="flex gap-2 text-xs">
         <button type="button" onClick={() => setTab('search')} className={`px-3 py-1 rounded-lg font-semibold ${tab === 'search' ? 'bg-emerald-600/20 text-emerald-300' : 'text-slate-400 hover:text-slate-200'}`}>Search &amp; buy</button>
         <button type="button" onClick={() => { setTab('owned'); if (!owned) loadOwned(); }} className={`px-3 py-1 rounded-lg font-semibold ${tab === 'owned' ? 'bg-emerald-600/20 text-emerald-300' : 'text-slate-400 hover:text-slate-200'}`}>My numbers</button>
       </div>
 
-      {error && <div className="flex items-center gap-1.5 text-[11px] text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {error}</div>}
-      {note && <div className="flex items-center gap-1.5 text-[11px] text-emerald-300"><CheckCircle2 className="w-3.5 h-3.5" /> {note}</div>}
+      {error && <div className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {error}</div>}
+      {note && <div className="flex items-center gap-1.5 text-xs text-emerald-300"><CheckCircle2 className="w-3.5 h-3.5" /> {note}</div>}
 
       {tab === 'search' && (
         <div className="space-y-3">
@@ -101,12 +101,12 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
             </div>
             <label className="flex items-center gap-1.5 text-slate-300"><input type="checkbox" checked={wantVoice} onChange={(e) => setWantVoice(e.target.checked)} /> Voice</label>
             <label className="flex items-center gap-1.5 text-slate-300"><input type="checkbox" checked={wantSms} onChange={(e) => setWantSms(e.target.checked)} /> SMS</label>
-            <button type="button" onClick={search} disabled={busy !== null} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-1.5">
+            <button type="button" onClick={search} disabled={busy !== null} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5">
               {busy === 'search' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />} Search
             </button>
           </div>
 
-          {available && available.length === 0 && <p className="text-[11px] text-slate-500">No numbers matched — try a different area code or fewer features.</p>}
+          {available && available.length === 0 && <p className="text-xs text-slate-500">No numbers matched — try a different area code or fewer features.</p>}
           <div className="space-y-1.5">
             {(available || []).map((n) => (
               <div key={n.phone_number} className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 text-xs">
@@ -117,21 +117,21 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-slate-400">{cost(n)}</span>
-                  <button type="button" onClick={() => buyAndUse(n)} disabled={busy !== null} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-1.5">
+                  <button type="button" onClick={() => buyAndUse(n)} disabled={busy !== null} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5">
                     {busy === n.phone_number ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />} Buy &amp; use
                   </button>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[11px] text-slate-500">Buying charges your Telnyx account. Numbers are previewed here — nothing is purchased until you click Buy.</p>
+          <p className="text-xs text-slate-500">Buying charges your Telnyx account. Numbers are previewed here — nothing is purchased until you click Buy.</p>
         </div>
       )}
 
       {tab === 'owned' && (
         <div className="space-y-1.5">
-          {busy === 'owned' && <p className="text-[11px] text-slate-400 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading your numbers…</p>}
-          {owned && owned.length === 0 && <p className="text-[11px] text-slate-500">You don't own any numbers yet — search and buy one.</p>}
+          {busy === 'owned' && <p className="text-xs text-slate-400 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading your numbers…</p>}
+          {owned && owned.length === 0 && <p className="text-xs text-slate-500">You don't own any numbers yet — search and buy one.</p>}
           {(owned || []).map((n) => (
             <div key={n.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 text-xs">
               <span className="font-mono text-white">{n.phone_number}</span>

@@ -1,56 +1,141 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  Flame, 
-  Phone, 
-  MessageSquare, 
-  Calendar, 
-  Pause, 
-  Play, 
-  UserCheck, 
-  MapPin, 
-  DollarSign, 
-  Clock, 
-  Home, 
-  CheckCircle2, 
-  RotateCw, 
-  Send, 
-  Share2, 
-  History, 
+import {
+  X,
+  Flame,
+  Phone,
+  MessageSquare,
+  Calendar,
+  MapPin,
+  DollarSign,
+  Clock,
+  Home,
   ShieldCheck,
-  Building2,
   FileText,
-  Volume2
+  ChevronDown,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting } from '../leads/LeadBooking';
-import { Lead, Channel } from '../../types';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import {
+  getCall,
+  listCalls,
+  listConversations,
+  listMessages,
+  type CallDetail,
+  type CallRow,
+  type MessageRow,
+} from '../../utils/historyApi';
+import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
 
+/** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+interface LeadActivity {
+  calls: CallRow[];
+  messages: MessageRow[];
+}
+
+/**
+ * The calls and texts for one lead, filtered server-side by `?leadId=` (the
+ * server keeps it inside the session's org and visibility). Appointments are
+ * not here: the Appointments tab is LeadAppointments, which loads its own.
+ *
+ * Only a database lead has a UUID; a demo-store lead has no server history, so
+ * it gets an empty result instead of a request the API would reject.
+ */
+async function loadLeadActivity(leadId: string): Promise<LeadActivity> {
+  if (!UUID.test(leadId)) return { calls: [], messages: [] };
+  const [calls, conversations] = await Promise.all([
+    listCalls({ leadId, limit: 200 }),
+    listConversations(200, leadId),
+  ]);
+  // The endpoint returns every channel; the SMS tab shows SMS threads only.
+  const threads = conversations.filter((c) => c.channel === 'sms');
+  const messages = (await Promise.all(threads.map((c) => listMessages(c.id))))
+    .flat()
+    .sort((a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt));
+  return { calls, messages };
+}
+
+const EmptyTab: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, text }) => (
+  <div className="py-12 text-center space-y-2">
+    <div className="w-12 h-12 mx-auto rounded-xl bg-slate-800/70 text-slate-500 flex items-center justify-center">{icon}</div>
+    <p className="text-sm text-slate-400">{text}</p>
+  </div>
+);
+
+/** One call; the transcript and summary are fetched only when it is opened. */
+const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<CallDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = () => {
+    setOpen((o) => !o);
+    if (!detail && !error) getCall(call.id).then(setDetail).catch((e) => setError(messageFor(e)));
+  };
+  return (
+    <div className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden">
+      <button onClick={toggle} className="w-full px-4 py-3.5 flex items-center gap-3 text-left hover:bg-slate-800/40 transition-colors cursor-pointer">
+        <div className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+          <Phone className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-slate-100 capitalize">{call.direction} call</span>
+            <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${OUTCOME_STYLES[call.outcome]}`}>
+              {call.outcome.replace(/_/g, ' ').toLowerCase()}
+            </span>
+          </div>
+          <div className="text-xs text-slate-400 mt-0.5">
+            {new Date(call.startedAt ?? call.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+            {' · '}
+            {duration(call.durationSeconds)}
+            {call.agentName && ` · ${call.agentName}`}
+          </div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-800">
+          {call.recordingUrl && <audio controls src={call.recordingUrl} className="w-full h-9 mt-2" />}
+          {error ? (
+            <p className="text-xs text-rose-300">Could not load this call: {error}</p>
+          ) : !detail ? (
+            <p className="text-xs text-slate-500">Loading…</p>
+          ) : (
+            <>
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1">Summary</div>
+                <p className="text-sm text-slate-200 leading-relaxed">{detail.aiSummary || 'No summary was recorded for this call.'}</p>
+              </div>
+              {detail.transcript && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-400 mb-1">Transcript</div>
+                  <pre className="max-h-56 overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs text-slate-300 leading-relaxed bg-slate-900 border border-slate-800 rounded-lg p-3">
+                    {detail.transcript}
+                  </pre>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const LeadDetailModal: React.FC = () => {
-  const { 
-    selectedLeadId, 
-    setSelectedLeadId, 
-    findLead, 
-    conversations, 
-    calls, 
-    appointments, 
-    auditLogs, 
-    sendSmsMessage, 
-    toggleAutomation, 
-    takeOverConversation, 
-    startLiveCallSimulation, 
+  const {
+    selectedLeadId,
+    setSelectedLeadId,
+    findLead,
     setPreCallLeadId,
-    orgSettings,
-    agents 
+    agents
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments' | 'audit'>('overview');
-  const [smsInput, setSmsInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'overview' | 'conversation' | 'calls' | 'appointments'>('overview');
 
   // The assignment just made from this modal, shown at once rather than after
   // the pipeline's refetch lands. Cleared when a different lead is opened.
@@ -66,6 +151,28 @@ export const LeadDetailModal: React.FC = () => {
     getLeadFlow(selectedLeadId).then((f) => { if (alive) setFlow(f); }).catch(() => {});
     return () => { alive = false; };
   }, [selectedLeadId]);
+
+  // The lead's real activity: calls, SMS and appointments from the API.
+  const [activity, setActivity] = useState<LeadActivity | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  useEffect(() => {
+    setActivity(null);
+    setActivityError(null);
+    if (!selectedLeadId) return;
+    let alive = true;
+    loadLeadActivity(selectedLeadId)
+      .then((a) => { if (alive) setActivity(a); })
+      .catch((e) => { if (alive) setActivityError(messageFor(e)); });
+    return () => { alive = false; };
+  }, [selectedLeadId]);
+
+  // Esc closes the dossier, like every other dialog.
+  useEffect(() => {
+    if (!selectedLeadId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedLeadId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedLeadId, setSelectedLeadId]);
 
   // Real outreach: enrols the lead into the office's strategy (call/SMS via Telnyx).
   const [enrolling, setEnrolling] = useState(false);
@@ -91,11 +198,8 @@ export const LeadDetailModal: React.FC = () => {
   const lead = findLead(selectedLeadId);
   if (!lead) return null;
 
-  const conversation = conversations[lead.id];
-  const leadCalls = calls.filter(c => c.leadId === lead.id);
-  const leadAppointments = appointments.filter(a => a.leadId === lead.id);
-  const leadLogs = auditLogs.filter(log => log.entityId === lead.id);
   const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
+  const count = (n: number | undefined) => (activity ? ` (${n})` : '');
 
   // A database lead carries its real assignment; only a demo-store lead is
   // resolved against the demo roster. Told apart by id, because the same
@@ -108,13 +212,6 @@ export const LeadDetailModal: React.FC = () => {
     ? liveAgent?.name ?? 'Unassigned'
     : lead.assignedAgentId ? assignedAgent.name : 'Unassigned';
 
-  const handleSendSms = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!smsInput.trim()) return;
-    sendSmsMessage(lead.id, smsInput.trim(), 'agent');
-    setSmsInput('');
-  };
-
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -123,11 +220,11 @@ export const LeadDetailModal: React.FC = () => {
         {/* Header (PRD Section 38: Name, HOT - 87, Actions) */}
         <div className="p-5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg text-white ${
-              lead.temperature === 'hot' 
-                ? 'bg-gradient-to-tr from-amber-600 to-rose-600 shadow-md shadow-rose-950' 
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg ${
+              lead.temperature === 'hot'
+                ? 'bg-gradient-to-tr from-amber-600 to-rose-600 shadow-md shadow-rose-950 text-on-accent'
                 : lead.temperature === 'warm'
-                ? 'bg-gradient-to-tr from-amber-600 to-yellow-500'
+                ? 'bg-gradient-to-tr from-amber-600 to-yellow-500 text-on-accent'
                 : 'bg-slate-800 text-slate-400'
             }`}>
               {lead.firstName[0]}{lead.lastName[0]}
@@ -147,21 +244,23 @@ export const LeadDetailModal: React.FC = () => {
                   {lead.temperature.toUpperCase()}
                 </span>
 
-                <span className="text-[11px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                <span className="text-xs uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                   {lead.status.replace('_', ' ')}
                 </span>
               </div>
 
               <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                <span>{lead.phone}</span>
-                <span>•</span>
-                <span>{lead.email}</span>
-                <span>•</span>
-                <span className="text-slate-300 font-medium">
-                  Agent: {agentLabel}
-                </span>
-                <span>•</span>
-                <span className="text-emerald-400 font-medium">Source: {lead.source}</span>
+                {/* Only the parts the lead has, so there is never a stray separator. */}
+                {[
+                  lead.phone && <span key="p">{lead.phone}</span>,
+                  lead.email && <span key="e">{lead.email}</span>,
+                  <span key="a" className="text-slate-300 font-medium">
+                    Agent: {agentLabel}
+                  </span>,
+                  <span key="s" className="text-emerald-400 font-medium">Source: {lead.source}</span>,
+                ]
+                  .filter(Boolean)
+                  .flatMap((part, i) => (i === 0 ? [part] : [<span key={`d${i}`} className="text-slate-600">•</span>, part]))}
               </div>
             </div>
           </div>
@@ -179,7 +278,7 @@ export const LeadDetailModal: React.FC = () => {
                 onClick={() => void startOutreach()}
                 disabled={enrolling}
                 title={enrollError ?? 'Start the outbound strategy (AI call / SMS) for this lead now'}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
                 <Phone className="w-3.5 h-3.5" />
                 <span>{enrolling ? 'Starting…' : enrollError ? 'Retry AI Outreach' : 'Start AI Outreach'}</span>
@@ -197,18 +296,6 @@ export const LeadDetailModal: React.FC = () => {
             )}
 
             <button
-              onClick={() => toggleAutomation(lead.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                lead.automationPaused 
-                  ? 'bg-amber-950 text-amber-300 border-amber-700/60' 
-                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-              }`}
-            >
-              {lead.automationPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-              <span>{lead.automationPaused ? 'Resume AI' : 'Pause AI'}</span>
-            </button>
-
-            <button
               onClick={() => setSelectedLeadId(null)}
               className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
             >
@@ -220,7 +307,7 @@ export const LeadDetailModal: React.FC = () => {
         {/* Flow status — where this lead is in its journey (strategy step vs follow-up) */}
         {flow && (
           <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-            <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">Flow</span>
+            <span className="text-2xs uppercase font-bold tracking-wide text-slate-500">Flow</span>
             {(() => {
               const map = {
                 strategy: { label: 'In Strategy', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
@@ -229,7 +316,7 @@ export const LeadDetailModal: React.FC = () => {
                 not_started: { label: 'Not started', cls: 'bg-slate-800 text-slate-400 border-slate-700' },
               } as const;
               const m = map[flow.phase];
-              return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-[10px] ${m.cls}`}>{m.label}</span>;
+              return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-2xs ${m.cls}`}>{m.label}</span>;
             })()}
 
             {/* The real-world outcome (SMS sent / Call answered / Exited …) */}
@@ -244,10 +331,10 @@ export const LeadDetailModal: React.FC = () => {
                     const cls =
                       s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
                       : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
-                      : s.state === 'current' ? 'bg-emerald-500 text-white border-emerald-400 shadow shadow-emerald-950'
+                      : s.state === 'current' ? 'bg-emerald-500 text-on-accent border-emerald-400 shadow shadow-emerald-950'
                       : 'bg-slate-800 text-slate-500 border-slate-700';
                     return (
-                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${cls}`}>
+                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}>
                         {s.index + 1}·{s.outcome ?? name}
                       </span>
                     );
@@ -278,11 +365,10 @@ export const LeadDetailModal: React.FC = () => {
         {/* Tab Navigation */}
         <div className="flex border-b border-slate-800 px-5 bg-slate-950/40 gap-4 text-xs font-medium">
           {[
-            { id: 'overview', label: 'Overview & Qualification' },
-            { id: 'conversation', label: `SMS & Chat (${conversation?.messages.length || 0})` },
-            { id: 'calls', label: `Voice Calls (${leadCalls.length})` },
-            { id: 'appointments', label: isLive ? 'Appointments' : `Appointments (${leadAppointments.length})` },
-            { id: 'audit', label: `Audit Trail (${leadLogs.length})` },
+            { id: 'overview', label: 'Overview' },
+            { id: 'conversation', label: `SMS${count(activity?.messages.length)}` },
+            { id: 'calls', label: `AI Calls${count(activity?.calls.length)}` },
+            { id: 'appointments', label: 'Appointments' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -305,95 +391,30 @@ export const LeadDetailModal: React.FC = () => {
           {activeTab === 'overview' && (
             <div className="space-y-6">
               
-              {/* Top Highlights Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <DollarSign className="w-4 h-4 text-emerald-400" />
-                    <span>Budget Range</span>
+              {/* What the lead told us. Each value is a real field or an honest dash. */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { icon: <DollarSign className="w-4 h-4 text-emerald-400" />, label: 'Budget', value: lead.budgetMin || lead.budgetMax ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K` : '—' },
+                  { icon: <MapPin className="w-4 h-4 text-cyan-400" />, label: 'Location', value: lead.preferredLocation || '—' },
+                  { icon: <Clock className="w-4 h-4 text-amber-400" />, label: 'Timeline', value: lead.timeline || '—' },
+                  { icon: <Home className="w-4 h-4 text-purple-400" />, label: 'Bedrooms', value: lead.bedrooms ? `${lead.bedrooms} beds${lead.propertyType ? ` · ${lead.propertyType}` : ''}` : '—' },
+                ].map((f) => (
+                  <div key={f.label} className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                      {f.icon}
+                      <span>{f.label}</span>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-100 truncate" title={f.value}>{f.value}</div>
                   </div>
-                  <div className="text-base font-bold text-emerald-300 font-mono">
-                    {lead.budgetMin || lead.budgetMax
-                      ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K`
-                      : '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Confirmed in AI conversation</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <MapPin className="w-4 h-4 text-cyan-400" />
-                    <span>Target Location</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200 truncate">
-                    {lead.preferredLocation || '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Target area verified</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <Clock className="w-4 h-4 text-amber-400" />
-                    <span>Buying Timeline</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200">
-                    {lead.timeline || '—'}
-                  </div>
-                  <span className="text-[10px] text-slate-500">High priority urgency</span>
-                </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                    <Home className="w-4 h-4 text-purple-400" />
-                    <span>Bedrooms & Spec</span>
-                  </div>
-                  <div className="text-base font-bold text-slate-200">
-                    {lead.bedrooms ? `${lead.bedrooms} Beds` : '—'}
-                    {lead.propertyType ? ` (${lead.propertyType})` : ''}
-                  </div>
-                  <span className="text-[10px] text-slate-500">Single family preference</span>
-                </div>
+                ))}
               </div>
 
-              {/* Financing, Motivation & CRM Status */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                    Financing & Pre-Approval
-                  </h4>
-                  <div className="text-xs text-slate-200 bg-slate-900 p-3 rounded-lg border border-slate-800">
-                    {lead.financingStatus || '—'}
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Pre-approval Status: <strong className={lead.preapprovalStatus ? 'text-emerald-400' : 'text-amber-400'}>
-                      {lead.preapprovalStatus ? 'Verified Pre-Approved' : 'Needs Lender Connection'}
-                    </strong>
-                  </div>
+              <div className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  <span>Financing</span>
                 </div>
-
-                <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Building2 className="w-4 h-4 text-emerald-400" />
-                    CRM & Pipeline Status
-                  </h4>
-                  <div className="space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Follow Up Boss ID:</span>
-                      <span className="font-mono text-emerald-400">FUB-{lead.id.substring(5, 12)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Next Scheduled Action:</span>
-                      <span className="text-amber-300">{lead.nextFollowupAt || 'None scheduled'}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Communication Opt-in:</span>
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> 10DLC SMS & Voice Consent
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <div className="text-sm text-slate-100">{lead.financingStatus || '—'}</div>
               </div>
 
               {/* Everything the prospect said that has no field of its own.
@@ -405,7 +426,7 @@ export const LeadDetailModal: React.FC = () => {
                     <FileText className="w-4 h-4 text-slate-400" />
                     Other answers from the form
                   </h4>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Captured verbatim. These did not match one of our lead fields, so they are kept
                     here rather than dropped.
                   </p>
@@ -428,200 +449,66 @@ export const LeadDetailModal: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: CONVERSATION (SMS / Chat) */}
-          {activeTab === 'conversation' && (
-            <div className="flex flex-col h-[460px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-              <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="font-semibold text-slate-200">Twilio SMS Thread with {lead.firstName} ({lead.phone})</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => takeOverConversation(lead.id)}
-                    className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
-                  >
-                    Take Over (Human Handoff)
-                  </button>
-                </div>
-              </div>
-
-              {/* Messages Container */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                {conversation && conversation.messages.length > 0 ? (
-                  conversation.messages.map(msg => {
-                    const isLead = msg.sender === 'lead';
-                    const isAi = msg.sender === 'ai';
-                    return (
-                      <div key={msg.id} className={`flex flex-col ${isLead ? 'items-start' : 'items-end'}`}>
-                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-0.5 px-1">
-                          <span className="font-semibold text-slate-300">
-                            {isAi ? `${orgSettings.aiAgentName} (AI)` : isLead ? `${lead.firstName} ${lead.lastName}` : 'Agent (You)'}
-                          </span>
-                          <span>•</span>
-                          <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                        <div className={`p-3 rounded-2xl max-w-[80%] text-xs leading-relaxed ${
-                          isLead 
-                            ? 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700' 
-                            : isAi 
-                            ? 'bg-emerald-950/80 text-emerald-200 border border-emerald-800/60 rounded-tr-sm' 
-                            : 'bg-emerald-600 text-white rounded-tr-sm shadow'
-                        }`}>
-                          {msg.content}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                    No conversation messages logged yet. Send an SMS below.
-                  </div>
-                )}
-              </div>
-
-              {/* Send Box */}
-              <form onSubmit={handleSendSms} className="p-3 bg-slate-900 border-t border-slate-800 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={smsInput}
-                  onChange={(e) => setSmsInput(e.target.value)}
-                  placeholder={`Text ${lead.firstName} directly via Twilio...`}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!smsInput.trim()}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Send</span>
-                </button>
-              </form>
+          {/* Shared loading / error state for the SMS and calls tabs. */}
+          {(activeTab === 'conversation' || activeTab === 'calls') && !activity && (
+            <div className="p-10 text-center text-xs text-slate-500">
+              {activityError ? `Could not load activity: ${activityError}` : 'Loading activity…'}
             </div>
           )}
 
-          {/* TAB 3: VOICE CALLS */}
-          {activeTab === 'calls' && (
-            <div className="space-y-4">
-              {leadCalls.length > 0 ? (
-                leadCalls.map(call => (
-                  <div key={call.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                          <Phone className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-white flex items-center gap-2">
-                            <span>Retell Voice Call ({call.direction.toUpperCase()})</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">
-                              {call.outcome}
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-slate-400">
-                            Duration: {Math.floor(call.durationSeconds / 60)}m {call.durationSeconds % 60}s • {new Date(call.startedAt).toLocaleString()}
-                          </span>
-                        </div>
+          {/* TAB 2: SMS — the real thread, newest at the bottom. Read-only: texts
+              are sent by the strategy and follow-up sequences. */}
+          {activeTab === 'conversation' && activity && (
+            activity.messages.length > 0 ? (
+              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar">
+                {activity.messages.map(msg => {
+                  const inbound = msg.direction === 'inbound';
+                  const failed = msg.deliveryStatus === 'failed';
+                  return (
+                    <div key={msg.id} className={`flex flex-col ${inbound ? 'items-start' : 'items-end'}`}>
+                      <div className="text-2xs text-slate-500 mb-1 px-1">
+                        {inbound ? lead.firstName : msg.senderType === 'ai' ? 'AI assistant' : 'Agent'}
+                        {' · '}
+                        {new Date(msg.sentAt ?? msg.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        {failed && <span className="text-rose-400 font-semibold"> · not delivered</span>}
                       </div>
-
-                      <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-mono">
-                        <Volume2 className="w-4 h-4" />
-                        <span>Audio Logged</span>
+                      <div className={`px-3.5 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed whitespace-pre-wrap ${
+                        inbound
+                          ? 'bg-slate-800 text-slate-100 rounded-tl-sm'
+                          : failed
+                          ? 'bg-rose-500/10 text-rose-200 border border-rose-500/30 rounded-tr-sm'
+                          : 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/25 rounded-tr-sm'
+                      }`}>
+                        {msg.body}
                       </div>
                     </div>
-
-                    <div className="bg-slate-900 border border-slate-800/80 p-3 rounded-lg text-xs text-slate-300 space-y-1">
-                      <div className="font-semibold text-slate-200">AI Call Summary:</div>
-                      <p className="leading-relaxed">{call.summary}</p>
-                    </div>
-
-                    {/* Transcript Accordion */}
-                    <div className="space-y-2 pt-1">
-                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                        Call Transcript ({call.transcript.length} turns)
-                      </div>
-                      <div className="max-h-48 overflow-y-auto space-y-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/60 custom-scrollbar">
-                        {call.transcript.map((t, idx) => (
-                          <div key={idx} className="text-xs flex gap-2">
-                            <span className="font-semibold text-emerald-400 w-20 shrink-0 font-mono text-[11px]">{t.speaker}:</span>
-                            <span className="text-slate-300">{t.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                  <Phone className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="text-xs text-slate-400">No voice calls recorded yet for this lead.</p>
-                  <button
-                    onClick={() => startLiveCallSimulation(lead)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Start Simulated AI Call
-                  </button>
-                </div>
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptyTab icon={<MessageSquare className="w-6 h-6" />} text="No texts with this lead yet." />
+            )
           )}
 
-          {/* TAB 4: APPOINTMENTS */}
+          {/* TAB 3: AI CALLS — every call placed or received, transcript on demand. */}
+          {activeTab === 'calls' && activity && (
+            activity.calls.length > 0 ? (
+              <div className="space-y-2.5">
+                {activity.calls.map(call => <CallItem key={call.id} call={call} />)}
+              </div>
+            ) : (
+              <EmptyTab icon={<Phone className="w-6 h-6" />} text="No AI calls with this lead yet." />
+            )
+          )}
+
+          {/* TAB 4: APPOINTMENTS — the lead's bookings and the booking panel
+              (LeadBooking), against the assigned agent's calendar. */}
           {activeTab === 'appointments' && (
             isLive ? (
               <LeadAppointments leadId={lead.id} agentKey={liveAgent?.id ?? null} />
             ) : (
-              <div className="space-y-4">
-                {leadAppointments.length > 0 ? (
-                  leadAppointments.map(appt => (
-                    <div key={appt.id} className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                        <Calendar className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-white">{appt.appointmentType}</h4>
-                        <div className="text-xs text-slate-300 mt-0.5">
-                          {new Date(appt.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                        </div>
-                        <div className="text-[11px] text-slate-400">Agent: {appt.agentName}</div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl">
-                    <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-xs text-slate-400 mt-3">No appointments currently booked.</p>
-                  </div>
-                )}
-              </div>
+              <EmptyTab icon={<Calendar className="w-6 h-6" />} text="No appointments booked with this lead." />
             )
-          )}
-
-          {/* TAB 5: AUDIT TRAIL (PRD Section 55) */}
-          {activeTab === 'audit' && (
-            <div className="space-y-3">
-              <div className="text-xs text-slate-400 mb-2">
-                Chronological event trail tracking lead capture, automated triggers, score adjustments, and CRM sync:
-              </div>
-              <div className="relative pl-6 border-l border-slate-800 space-y-4">
-                {leadLogs.map(log => (
-                  <div key={log.id} className="relative group">
-                    <div className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-slate-900" />
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-bold text-slate-200">{log.action}</span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                        {log.actor}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{log.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
 
         </div>

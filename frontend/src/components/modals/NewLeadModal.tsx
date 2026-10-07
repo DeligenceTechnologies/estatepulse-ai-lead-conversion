@@ -57,7 +57,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Create / Ingest Inbound Lead</h3>
-              <p className="text-[11px] text-slate-400">Simulate lead arrival from ad campaigns or manual entry</p>
+              <p className="text-xs text-slate-400">Simulate lead arrival from ad campaigns or manual entry</p>
             </div>
           </div>
 
@@ -183,7 +183,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 Trigger Strategy B Instant Response
               </span>
-              <p className="text-[10px] text-slate-400">Instantly fires introductory SMS & dispatches Retell Voice AI</p>
+              <p className="text-2xs text-slate-400">Instantly fires introductory SMS & dispatches Retell Voice AI</p>
             </div>
             <input
               type="checkbox"
@@ -204,7 +204,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-md shadow-emerald-950 transition-colors cursor-pointer"
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-bold shadow-md shadow-emerald-950 transition-colors cursor-pointer"
             >
               Create Lead & Ingest
             </button>

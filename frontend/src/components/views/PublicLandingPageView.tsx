@@ -76,15 +76,15 @@ export const PublicLandingPageView: React.FC = () => {
       {/* Navigation Bar */}
       <header className="h-20 border-b border-slate-800/80 px-6 md:px-12 flex items-center justify-between bg-slate-950/80 backdrop-blur sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white font-bold shadow-lg shadow-emerald-950">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-on-accent font-bold shadow-lg shadow-emerald-950">
             <Building2 className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-base tracking-tight text-white">EstatePulse AI</span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">V1.0</span>
+              <span className="text-2xs uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">V1.0</span>
             </div>
-            <p className="text-[11px] text-slate-400">Lead Conversion System for Real Estate Teams</p>
+            <p className="text-xs text-slate-400">Lead Conversion System for Real Estate Teams</p>
           </div>
         </div>
 
@@ -206,14 +206,14 @@ export const PublicLandingPageView: React.FC = () => {
             </div>
 
             <div className="pt-2 flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">
+              <span className="text-xs text-slate-400">
                 Preset with recommended demo lead: <strong>Sarah Johnson ($500k-$650k, North Austin)</strong>
               </span>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs shadow-xl shadow-emerald-950/60 flex items-center gap-2 transition-all cursor-pointer"
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-on-accent font-bold text-xs shadow-xl shadow-emerald-950/60 flex items-center gap-2 transition-all cursor-pointer"
               >
                 <PhoneCall className="w-4 h-4 animate-pulse" />
                 <span>{isSubmitting ? 'Dispatching AI Voice Call...' : 'Submit & Trigger Instant AI Call'}</span>
@@ -246,7 +246,7 @@ export const PublicLandingPageView: React.FC = () => {
             <div key={idx} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 relative">
               <span className="text-2xl font-black text-slate-700 font-mono block">{item.step}</span>
               <h4 className="text-xs font-bold text-white">{item.title}</h4>
-              <p className="text-[11px] text-slate-400 leading-relaxed">{item.desc}</p>
+              <p className="text-xs text-slate-400 leading-relaxed">{item.desc}</p>
             </div>
           ))}
         </div>

@@ -27,6 +27,13 @@ import { CalendarModule } from './calendar.module';
  * looks like a client bug, and only an end-to-end request can show it.
  */
 
+// CalendarModule pulls in TelnyxModule, whose lead watcher and follow-up runner
+// would otherwise start against the shared database and contact real leads
+// while the suite runs, whatever the developer's .env says.
+process.env['STRATEGY_ENGINE'] = '0';
+process.env['CALENDAR_SYNC'] = '0';
+process.env['WORKER_ENABLED'] = 'false';
+
 const RUN = Date.now().toString(36);
 const emailFor = (tag: string): string => `calendar-${RUN}-${tag}@example.invalid`;
 const PASSWORD = 'correct-horse-battery-staple';
