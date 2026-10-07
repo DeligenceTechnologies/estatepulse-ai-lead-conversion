@@ -2,7 +2,7 @@ import { Controller, Get, Inject, Param, ParseUUIDPipe, UseGuards } from '@nestj
 import { CurrentUser } from '../../common/decorators/auth.decorators';
 import { AppError } from '../../common/errors';
 import { SessionGuard } from '../../common/guards/session.guard';
-import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma, type Prisma } from '../../prisma/prisma.service';
 import type { AuthContext } from '../../auth/types';
 import { INACTIVE_STATUSES, normalizeLeadStatus } from '../../common/domain';
 
@@ -165,21 +165,68 @@ export class AgentMeController {
   async lead(@CurrentUser() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
     const agentId = this.agentProfileId(auth);
 
-    const lead = await this.prisma.leads.findFirst({
-      where: { id: leadId, ...this.assignedToMe(auth.organizationId, agentId) },
-      include: {
-        lead_sources: { select: { name: true, source_type: true, provider: true } },
-        lead_assignments: {
-          where: { agent_id: agentId, is_current: true },
-          select: { assigned_at: true },
-          take: 1,
-        },
-      },
-    });
+    // One statement, the same shape as leads() above: the source and the
+    // assignment were each a further sequential query through Prisma. The
+    // lateral join is assignedToMe(), so a lead that is missing, another
+    // agent's, another organization's or reassigned away finds no row — and
+    // all four get the same 404.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        phone: string | null;
+        status: string;
+        temperature: string | null;
+        created_at: Date;
+        location: string | null;
+        timeline: string | null;
+        buying_intent: string | null;
+        motivation: string | null;
+        ai_summary: string | null;
+        min_budget: Prisma.Decimal | null;
+        max_budget: Prisma.Decimal | null;
+        consent_status: string;
+        dnc_status: boolean;
+        source_name: string | null;
+        source_provider: string | null;
+        assigned_at: Date;
+      }>
+    >`
+      select l.id, l.first_name, l.last_name, l.email, l.phone, l.status, l.temperature, l.created_at,
+             l.location, l.timeline, l.buying_intent, l.motivation, l.ai_summary,
+             l.min_budget, l.max_budget, l.consent_status, l.dnc_status,
+             s.name     as source_name,
+             s.provider as source_provider,
+             a.assigned_at
+        from leads l
+        join lateral (
+          select la.assigned_at
+            from lead_assignments la
+           where la.lead_id = l.id
+             and la.organization_id = l.organization_id
+             and la.agent_id = ${agentId}::uuid
+             and la.is_current
+           limit 1
+        ) a on true
+        left join lead_sources s
+          on s.id = l.lead_source_id and s.organization_id = l.organization_id
+       where l.id = ${leadId}::uuid
+         and l.organization_id = ${auth.organizationId}::uuid
+    `;
+    const row = rows[0];
 
-    if (!lead) {
+    if (!row) {
       throw new AppError('NOT_FOUND', 'No such lead assigned to you');
     }
+
+    const lead = {
+      ...row,
+      // lead_sources.name is NOT NULL, so a null name is exactly "no source".
+      lead_sources: row.source_name !== null ? { name: row.source_name, provider: row.source_provider! } : null,
+      lead_assignments: [{ assigned_at: row.assigned_at }],
+    };
 
     return {
       ...toAgentLead(lead),

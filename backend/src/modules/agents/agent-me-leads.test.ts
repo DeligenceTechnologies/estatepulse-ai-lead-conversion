@@ -159,6 +159,28 @@ before(async () => {
   await assign(ownerA.orgId, id['yours'], Y.profileId, true, 8000);
   id['other'] = await lead(ownerB.orgId, 'OtherOrg', 302);
   await assign(ownerB.orgId, id['other'], W.profileId, true, 0);
+
+  // For the detail route: X's, but older than the 205 above so the list page is unchanged.
+  const detail = async (name: string, minute: number, data: Record<string, unknown>) => {
+    id[name] = (
+      await prisma.leads.create({
+        data: { organization_id: ownerA.orgId, created_at: new Date(t0 - minute * 60e3), ...data },
+        select: { id: true },
+      })
+    ).id;
+    return id[name]!;
+  };
+  const full = await detail('full', 10, {
+    first_name: 'Full', last_name: 'Detail', email: 'full@example.invalid', phone: '+15125550100',
+    status: 'qualified', temperature: 'hot', lead_source_id: sourceId, location: 'Austin, TX',
+    timeline: '0-3 months', buying_intent: 'buy', min_budget: '250000.00', max_budget: '400000.50',
+    motivation: 'relocating', ai_summary: 'Wants a call', consent_status: 'granted',
+  });
+  await assign(ownerA.orgId, full, X.profileId, false, -20_000); // retired
+  await assign(ownerA.orgId, full, X.profileId, true, -10_000); // current
+  await assign(ownerA.orgId, await detail('bare', 11, {}), X.profileId, true, -11_000);
+  await assign(ownerA.orgId, await detail('legacy', 12, { first_name: 'Legacy', status: 'booked', dnc_status: true, consent_status: 'revoked' }), X.profileId, true, -12_000);
+  await assign(ownerA.orgId, await detail('zeroBudget', 13, { first_name: 'Zero', min_budget: '0.00', max_budget: '0.00' }), X.profileId, true, -13_000);
 });
 
 after(async () => {
@@ -245,4 +267,88 @@ test('an owner without an agent profile is forbidden; no or bad token is unauthe
   assert.equal((await list(ownerA.token)).status, 403);
   assert.equal((await list()).status, 401);
   assert.equal((await list('not-a-jwt')).status, 401);
+});
+
+// --- GET /api/agents/me/leads/:leadId ------------------------------------------
+
+const DETAIL_KEYS = [
+  ...KEYS, 'location', 'timeline', 'buyingIntent', 'minBudget', 'maxBudget', 'motivation', 'aiSummary', 'consentStatus', 'dncStatus',
+];
+/** The one answer every not-found case gives, so none of them reveals which it was. */
+const NOT_FOUND = '{"error":{"code":"NOT_FOUND","message":"No such lead assigned to you"}}';
+
+async function open(leadId: string, token?: string): Promise<{ status: number; body: Lead; text: string }> {
+  const res = await fetch(`${base}/api/agents/me/leads/${leadId}`, token ? { headers: { authorization: `Bearer ${token}` } } : {});
+  const text = await res.text();
+  let body: Lead = {};
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // raw text is still in the assertion message
+  }
+  return { status: res.status, body, text };
+}
+
+test('detail: a full lead, every field in order; assignedAt is the current assignment', async () => {
+  const res = await open(id['full']!, X.token);
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(Object.keys(res.body), DETAIL_KEYS);
+  assert.deepEqual(res.body, {
+    id: id['full'], firstName: 'Full', lastName: 'Detail', email: 'full@example.invalid', phone: '+15125550100',
+    status: 'qualified', temperature: 'hot', source: { name: 'Buyer Inquiry', provider: 'tally' },
+    createdAt: new Date(t0 - 10 * 60e3).toISOString(), assignedAt: new Date(t0 - 10_000).toISOString(),
+    location: 'Austin, TX', timeline: '0-3 months', buyingIntent: 'buy', minBudget: 250000, maxBudget: 400000.5,
+    motivation: 'relocating', aiSummary: 'Wants a call', consentStatus: 'granted', dncStatus: false,
+  });
+});
+
+test('detail: no source and every optional field null', async () => {
+  const res = await open(id['bare']!, X.token);
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(res.body, {
+    id: id['bare'], firstName: null, lastName: null, email: null, phone: null, status: 'new', temperature: null,
+    source: null, createdAt: new Date(t0 - 11 * 60e3).toISOString(), assignedAt: new Date(t0 - 11_000).toISOString(),
+    location: null, timeline: null, buyingIntent: null, minBudget: null, maxBudget: null, motivation: null,
+    aiSummary: null, consentStatus: 'pending', dncStatus: false,
+  });
+});
+
+test('detail: legacy booked reads appointment_booked, with DNC not folded into the status', async () => {
+  const res = await open(id['legacy']!, X.token);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.body['status'], 'appointment_booked');
+  assert.equal(res.body['dncStatus'], true);
+  assert.equal(res.body['consentStatus'], 'revoked');
+  assert.equal(res.body['source'], null);
+});
+
+test('detail: a zero budget is 0, not null', async () => {
+  const res = await open(id['zeroBudget']!, X.token);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.body['minBudget'], 0);
+  assert.equal(res.body['maxBudget'], 0);
+});
+
+test('detail: a reassigned lead is the new holder\'s, and the same 404 for the old one', async () => {
+  const old = await open(id['moved']!, X.token);
+  assert.equal(old.status, 404);
+  assert.equal(old.text, NOT_FOUND);
+  const now = await open(id['moved']!, Y.token);
+  assert.equal(now.status, 200, now.text);
+  assert.equal(now.body['assignedAt'], new Date(t0 + 7000).toISOString());
+});
+
+test("detail: another agent's lead, another organization's and a missing one are the same 404", async () => {
+  for (const leadId of [id['yours']!, id['other']!, '00000000-0000-4000-8000-000000000000']) {
+    const res = await open(leadId, X.token);
+    assert.equal(res.status, 404, leadId);
+    assert.equal(res.text, NOT_FOUND);
+  }
+});
+
+test('detail: malformed id 400; owner without a profile 403; no or bad token 401', async () => {
+  assert.equal((await open('not-a-uuid', X.token)).status, 400);
+  assert.equal((await open(id['full']!, ownerA.token)).status, 403);
+  assert.equal((await open(id['full']!)).status, 401);
+  assert.equal((await open(id['full']!, 'not-a-jwt')).status, 401);
 });
