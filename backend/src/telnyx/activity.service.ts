@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { AUTO_FROM, IN_STRATEGY_STATUSES, LeadStatus } from '../common/domain';
+import { AssistantService } from './assistant.service';
 import { CredStoreService } from './cred-store.service';
 import { LeadInsightsService } from './lead-insights.service';
 
@@ -18,6 +19,8 @@ import { LeadInsightsService } from './lead-insights.service';
 @Injectable()
 export class ActivityService {
   private readonly logger = new Logger(ActivityService.name);
+  /** Signed recording links, by `${orgId}:${callControlId}`. See freshRecordingUrl. */
+  private readonly recordingLinks = new Map<string, { url: string; until: number }>();
 
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
@@ -27,6 +30,7 @@ export class ActivityService {
     private readonly unscoped: PrismaService,
     private readonly creds: CredStoreService,
     private readonly insights: LeadInsightsService,
+    private readonly assistants: AssistantService,
   ) {}
 
   private async findOrCreateConversation(orgId: string, leadId: string, channel: 'sms' | 'voice') {
@@ -232,6 +236,10 @@ export class ActivityService {
       // Make sure Telnyx will score this conversation when it ends. Once per
       // assistant per process, never blocks the call, and never throws.
       void this.insights.ensureProvisioned(call.organization_id);
+      // Awaited, unlike the insight: the assistant reads its tools when it
+      // starts, so the hangup tool must be in place before the attach below.
+      // Only the first call per assistant per process pays for it.
+      await this.assistants.ensureHangupTool(call.organization_id);
       await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
@@ -354,6 +362,54 @@ export class ActivityService {
   }
 
   /**
+   * A playable link to a call's recording, minted now.
+   *
+   * The URL Telnyx sends with `call.recording.saved` is a pre-signed S3 link
+   * that expires ten minutes later (X-Amz-Expires=600), so the one stored on
+   * the call is dead by the time anybody opens it — S3 answers 403 and the
+   * player shows nothing. Telnyx signs a fresh link on every read of the
+   * recording, so this asks again each time the call is opened.
+   *
+   * Never throws: null means "use what is stored", which is no worse than
+   * before. The last recording wins, matching onRecordingSaved, which keeps
+   * the last one to arrive.
+   */
+  async freshRecordingUrl(orgId: string, callControlId: string): Promise<string | null> {
+    // Reused for half the link's life. The call view polls every few seconds,
+    // and a new link on every poll changes the payload each time — the player's
+    // src changes under it and playback restarts, and the poll never backs off.
+    const key = `${orgId}:${callControlId}`;
+    const hit = this.recordingLinks.get(key);
+    if (hit && hit.until > Date.now()) return hit.url;
+    try {
+      const c = await this.creds.getCreds(orgId);
+      if (!c?.apiKey) return null;
+      const res = await fetch(
+        `https://api.telnyx.com/v2/recordings?filter[call_control_id]=${encodeURIComponent(callControlId)}`,
+        { headers: { Authorization: `Bearer ${c.apiKey}` } },
+      );
+      if (!res.ok) {
+        this.logger.warn(`recordings ${callControlId}: ${res.status}`);
+        return null;
+      }
+      const rows = (((await res.json()) as any).data ?? []) as any[];
+      const urls = rows
+        .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+        .map((r) => r.download_urls?.mp3 ?? r.download_urls?.wav)
+        .filter(Boolean);
+      const url = urls.length ? urls[urls.length - 1] : null;
+      if (url) {
+        if (this.recordingLinks.size > 500) this.recordingLinks.clear();
+        this.recordingLinks.set(key, { url, until: Date.now() + RECORDING_LINK_REUSE_MS });
+      }
+      return url;
+    } catch (e) {
+      this.logger.warn(`recordings ${callControlId}: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
    * `call.recording.transcription.saved` — store what was said.
    *
    * Appends rather than overwrites: a call can produce more than one recording
@@ -442,6 +498,9 @@ ${text}` : text;
       .catch((e) => this.logger.error(`markInvalid: ${(e as Error).message}`));
   }
 }
+
+/** Telnyx signs recording links for ten minutes; reuse one for five. */
+const RECORDING_LINK_REUSE_MS = 5 * 60 * 1000;
 
 /** Seconds of answered talk time that count as a real conversation. */
 const ENGAGED_TALK_SECS = 30;

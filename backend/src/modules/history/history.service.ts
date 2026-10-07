@@ -3,6 +3,7 @@ import type { AuthContext } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { normalizeLeadStatus } from '../../common/domain';
+import { ActivityService } from '../../telnyx/activity.service';
 
 /**
  * Call and message history for the office.
@@ -104,7 +105,10 @@ const fullName = (first: string | null, last: string | null, fallback: string): 
 
 @Injectable()
 export class HistoryService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
+    private readonly activity: ActivityService,
+  ) {}
 
   /**
    * What this caller is allowed to see, as a `leads` where-fragment.
@@ -368,9 +372,17 @@ export class HistoryService {
       },
     };
 
+    // The stored recording link expires ten minutes after the call; the
+    // detail view is where it is played, so it gets a freshly signed one.
+    const row = this.toListRow(r, latest?.id === r.id);
+    if (row.recordingUrl && r.provider === 'telnyx' && r.provider_call_id) {
+      row.recordingUrl =
+        (await this.activity.freshRecordingUrl(auth.organizationId, r.provider_call_id)) ?? row.recordingUrl;
+    }
+
     return {
-      ...this.toListRow(r, latest?.id === r.id),
-      transcript: r.transcript,
+      ...row,
+      transcript: labelSpeakers(r.transcript, r.leads?.first_name ?? null),
       aiSummary: r.ai_summary,
       extractedIntel: r.extracted_intel,
       handoffRequested: r.handoff_requested,
@@ -484,4 +496,18 @@ export class HistoryService {
       createdAt: m.created_at.toISOString(),
     }));
   }
+}
+
+/**
+ * Telnyx transcribes a dual-channel recording as "Channel 1:" / "Channel 2:".
+ * Channel 1 is the far end of the call — the lead — and channel 2 is what we
+ * played into it, the assistant. Relabelled for reading only: the stored text
+ * is left as Telnyx wrote it, so transcript re-scoring sees the same input.
+ */
+export function labelSpeakers(transcript: string | null, leadFirstName: string | null): string | null {
+  if (!transcript) return transcript;
+  const lead = leadFirstName?.trim() || 'User';
+  return transcript
+    .replace(/^\s*channel\s*1\s*:/gim, `${lead}:`)
+    .replace(/^\s*channel\s*2\s*:/gim, 'Assistant:');
 }

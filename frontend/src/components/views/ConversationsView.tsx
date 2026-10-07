@@ -213,12 +213,12 @@ export const ConversationsView: React.FC = () => {
                   {current.hasInboundReply && <> • the lead has replied</>}
                 </p>
               </div>
-              <button
+              {/* <button
                 onClick={() => setSelectedLeadId(current.leadId)}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
               >
                 View Lead Dossier
-              </button>
+              </button> */}
             </div>
 
             {current.dncStatus && (
