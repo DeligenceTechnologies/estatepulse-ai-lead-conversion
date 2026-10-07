@@ -90,28 +90,67 @@ export class AgentMeController {
     return { activeLeads, newLeads, upcomingAppointments, totalAssignedLeads };
   }
 
-  /** The agent's own leads, newest assignment first. */
+  /**
+   * The agent's own leads, newest assignment first.
+   *
+   * One statement. Through Prisma the source and the assignment were each a
+   * further sequential query — about 145 ms apiece from a distant region — and
+   * the lead came back with every column. Same filter, order and limit; only
+   * the columns the row shape reads.
+   *
+   * The lateral join is assignedToMe(): a lead is listed only while it has a
+   * CURRENT assignment to this agent, at most once (`limit 1`), and `assignedAt`
+   * is that assignment's — when THEY got it, not when some earlier agent did.
+   * Every join is scoped to the organization as well as its key.
+   */
   @Get('leads')
   async leads(@CurrentUser() auth: AuthContext) {
     const agentId = this.agentProfileId(auth);
 
-    const rows = await this.prisma.leads.findMany({
-      where: this.assignedToMe(auth.organizationId, agentId),
-      orderBy: { created_at: 'desc' },
-      take: 200,
-      include: {
-        lead_sources: { select: { name: true, source_type: true, provider: true } },
-        // Scoped to this agent's current row so `assignedAt` is when THEY got
-        // it, not when some earlier agent did.
-        lead_assignments: {
-          where: { agent_id: agentId, is_current: true },
-          select: { assigned_at: true },
-          take: 1,
-        },
-      },
-    });
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        phone: string | null;
+        status: string;
+        temperature: string | null;
+        created_at: Date;
+        source_name: string | null;
+        source_provider: string | null;
+        assigned_at: Date;
+      }>
+    >`
+      select l.id, l.first_name, l.last_name, l.email, l.phone, l.status, l.temperature, l.created_at,
+             s.name     as source_name,
+             s.provider as source_provider,
+             a.assigned_at
+        from leads l
+        join lateral (
+          select la.assigned_at
+            from lead_assignments la
+           where la.lead_id = l.id
+             and la.organization_id = l.organization_id
+             and la.agent_id = ${agentId}::uuid
+             and la.is_current
+           limit 1
+        ) a on true
+        left join lead_sources s
+          on s.id = l.lead_source_id and s.organization_id = l.organization_id
+       where l.organization_id = ${auth.organizationId}::uuid
+       order by l.created_at desc
+       limit 200
+    `;
 
-    return rows.map((l) => toAgentLead(l));
+    return rows.map((r) =>
+      toAgentLead({
+        ...r,
+        // lead_sources.name is NOT NULL, so a null name is exactly "no source".
+        lead_sources: r.source_name !== null ? { name: r.source_name, provider: r.source_provider! } : null,
+        lead_assignments: [{ assigned_at: r.assigned_at }],
+      }),
+    );
   }
 
   /**
@@ -169,7 +208,7 @@ function toAgentLead(l: {
   status: string;
   temperature: string | null;
   created_at: Date;
-  lead_sources: { name: string; source_type: string; provider: string } | null;
+  lead_sources: { name: string; provider: string } | null;
   lead_assignments: Array<{ assigned_at: Date }>;
 }) {
   return {
