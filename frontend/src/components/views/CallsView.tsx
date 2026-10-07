@@ -75,6 +75,31 @@ export const duration = (s: number | null): string => {
 const selectClass =
   'bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-600';
 
+/**
+ * The recording, with a src that holds still.
+ *
+ * The detail view polls, and every poll can carry a newly signed link to the
+ * same file. Handing each one straight to <audio> resets playback a few seconds
+ * in, so the link is taken once per call and replaced only when it fails —
+ * which is what an expired link does (Telnyx signs them for ten minutes).
+ */
+const RecordingPlayer: React.FC<{ url: string }> = ({ url }) => {
+  const [src, setSrc] = useState(url);
+  return (
+    <audio
+      controls
+      preload="none"
+      src={src}
+      onError={() => {
+        if (url !== src) setSrc(url);
+      }}
+      className="w-full"
+    >
+      Your browser cannot play this recording.
+    </audio>
+  );
+};
+
 export const CallsView: React.FC = () => {
   const { setSelectedLeadId } = useApp();
   const { role } = useAuth();
@@ -354,12 +379,12 @@ export const CallsView: React.FC = () => {
                   {detail.agentName && <> • owned by {detail.agentName}</>}
                 </p>
               </div>
-              <button
+              {/* <button
                 onClick={() => setSelectedLeadId(detail.leadId)}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer shrink-0"
               >
                 View Lead Dossier
-              </button>
+              </button> */}
             </div>
 
             {/* Recording */}
@@ -372,9 +397,7 @@ export const CallsView: React.FC = () => {
                 <span className="font-mono text-slate-400">{duration(detail.durationSeconds)}</span>
               </div>
               {detail.recordingUrl ? (
-                <audio controls preload="none" src={detail.recordingUrl} className="w-full">
-                  Your browser cannot play this recording.
-                </audio>
+                <RecordingPlayer key={detail.id} url={detail.recordingUrl} />
               ) : (
                 <p className="text-xs text-slate-500">
                   No recording. Either the office has call recording switched off, or the file has

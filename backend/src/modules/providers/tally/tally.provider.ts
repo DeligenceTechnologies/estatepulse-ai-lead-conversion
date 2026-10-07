@@ -178,10 +178,16 @@ export class TallyProviderAdapter implements FormProviderAdapter {
     ref: ProviderWebhookRef,
     patch: UpdateWebhookPatch,
   ): Promise<ProviderWebhook> {
+    // Tally's PATCH is a replacement, not a merge: it rejects a body without
+    // formId ("formId" is required), and a field left out is cleared — omit
+    // signingSecret and the webhook stops signing, so every delivery after that
+    // fails verification. Callers must therefore pass the secret on every update.
     const updated = await this.http.patch<TallyWebhook>(
       cred.apiKey,
       `/webhooks/${encodeURIComponent(ref.externalWebhookId)}`,
       {
+        formId: ref.externalFormId,
+        eventTypes: ['FORM_RESPONSE'],
         ...(patch.url === undefined ? {} : { url: patch.url }),
         ...(patch.signingSecret === undefined ? {} : { signingSecret: patch.signingSecret }),
         ...(patch.isEnabled === undefined ? {} : { isEnabled: patch.isEnabled }),
