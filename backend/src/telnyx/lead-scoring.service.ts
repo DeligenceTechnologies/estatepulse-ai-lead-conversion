@@ -6,6 +6,7 @@ import { CredStoreService } from './cred-store.service';
 import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
 import {
+  leadDetailsFrom,
   parseExtraction,
   scoreLead,
   type Extraction,
@@ -31,6 +32,13 @@ export interface Qualification {
 }
 
 /**
+ * How long after a transcript lands to wait for Telnyx's Insight before scoring
+ * from the transcript instead. The Insight is the better source (the whole
+ * conversation, not a possibly truncated transcript), so it gets first go.
+ */
+export const TRANSCRIPT_FALLBACK_MS = 90_000;
+
+/**
  * A lead in one of these has an outcome a call score must never walk back —
  * an appointment, an opt-out, an invalid number, a closed deal (legacy
  * spellings included). Every outcome except `qualified`, which a later call
@@ -53,6 +61,8 @@ export interface SignedDelivery {
 @Injectable()
 export class LeadScoringService {
   private readonly logger = new Logger(LeadScoringService.name);
+  /** Calls with a transcript fallback already scheduled — one per call, however many transcript events arrive. */
+  private readonly pendingFallback = new Set<string>();
 
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
@@ -95,7 +105,44 @@ export class LeadScoringService {
     await this.apply(call, extraction, 'telnyx_insights');
   }
 
-  /** Owner action: score a call from its stored transcript (calls made before the Insight existed). */
+  /**
+   * `call.recording.transcription.saved` — the safety net that makes scoring
+   * automatic even when the Insight result never arrives (Insight not set up
+   * yet, Telnyx not delivering it, a webhook lost). Waits for the Insight first;
+   * if the call is still unscored after that, scores it from the transcript —
+   * exactly what the owner's "Classify from transcript" button does.
+   *
+   * In-process timer: a restart in that window loses it, and the button remains
+   * for that case. Never throws into the webhook.
+   */
+  async onTranscriptSaved(ccid: string, delayMs = TRANSCRIPT_FALLBACK_MS): Promise<void> {
+    const call = await this.unscoped.voice_calls.findFirst({
+      where: { provider_call_id: ccid },
+      orderBy: { created_at: 'desc' },
+      select: { id: true, organization_id: true },
+    });
+    if (!call || this.pendingFallback.has(call.id)) return;
+    this.pendingFallback.add(call.id);
+
+    const timer = setTimeout(() => {
+      void this.scoreIfUnscored(call.organization_id, call.id)
+        .catch((e) => this.logger.warn(`transcript scoring for call ${call.id}: ${(e as Error).message}`))
+        .finally(() => this.pendingFallback.delete(call.id));
+    }, delayMs);
+    timer.unref?.();
+  }
+
+  /** Score from the transcript only if nothing has scored this call yet. */
+  async scoreIfUnscored(orgId: string, callId: string): Promise<Qualification | null> {
+    const call = await this.prisma.voice_calls.findFirst({ where: { id: callId, organization_id: orgId } });
+    if (!call?.transcript?.trim()) return null;
+    const intel = (call.extracted_intel ?? {}) as Record<string, unknown>;
+    if (intel.qualification) return null;
+    this.logger.log(`call ${callId}: no Insight result, scoring from the transcript`);
+    return this.classifyCall(orgId, callId);
+  }
+
+  /** Score a call from its stored transcript — the automatic fallback when no Insight result arrived. */
   async classifyCall(orgId: string, callId: string): Promise<Qualification> {
     const call = await this.prisma.voice_calls.findFirst({ where: { id: callId, organization_id: orgId } });
     if (!call) throw new AppError('NOT_FOUND', 'No such call');
@@ -171,7 +218,13 @@ export class LeadScoringService {
     });
     if (!lead) return qualification;
 
-    await this.prisma.leads.update({ where: { id: call.lead_id }, data: { score: result.score } });
+    // The score, and whatever details the caller gave (budget, location,
+    // timeline, bedrooms, financing, motivation). Only details actually said
+    // are written, so a call that skipped the budget keeps the one on file.
+    await this.prisma.leads.update({
+      where: { id: call.lead_id },
+      data: { score: result.score, ...leadDetailsFrom(extraction), updated_at: new Date() },
+    });
     if (SETTLED_STATUSES.includes(lead.status) || lead.dnc_status) {
       // Record what the call showed, but do not reopen a settled or do-not-contact lead.
       await this.prisma.leads.update({ where: { id: call.lead_id }, data: { temperature: result.temperature } });

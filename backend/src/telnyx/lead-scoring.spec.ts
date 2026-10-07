@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseExtraction, scoreLead, thresholdsSchema, type Extraction } from './lead-scoring';
+import { leadDetailsFrom, parseExtraction, scoreLead, thresholdsSchema, type Extraction } from './lead-scoring';
 
 const base: Extraction = {
   timeline: 'unknown',
@@ -142,3 +142,57 @@ describe('thresholdsSchema', () => {
     expect(thresholdsSchema.safeParse({ hotThreshold: 75, warmThreshold: 45, organizationId: 'x' }).success).toBe(false);
   });
 });
+
+describe('leadDetailsFrom', () => {
+  it('turns what the caller said into lead columns', () => {
+    expect(
+      leadDetailsFrom(
+        x({
+          timeline: '1_3_months',
+          budget_min: 150000,
+          budget_max: 220000,
+          location: '  Austin, TX ',
+          bedrooms: 4,
+          financing: 'pre_approved',
+          motivation: 'relocating for work',
+        }),
+      ),
+    ).toEqual({
+      min_budget: 150000,
+      max_budget: 220000,
+      location: 'Austin, TX',
+      bedrooms: 4,
+      timeline: '1–3 months',
+      financing_status: 'Pre-approved',
+      all_cash: false,
+      motivation: 'relocating for work',
+    });
+  });
+
+  it('writes nothing the caller did not say — no blanking of existing details', () => {
+    expect(leadDetailsFrom(base)).toEqual({});
+    expect(leadDetailsFrom(x({ location: '   ', financing: 'unknown', budget_min: null }))).toEqual({});
+  });
+
+  it('marks a cash buyer, and keeps a single budget figure as the maximum', () => {
+    expect(leadDetailsFrom(x({ financing: 'cash', budget_max: 500000 }))).toEqual({
+      financing_status: 'Cash buyer',
+      all_cash: true,
+      max_budget: 500000,
+    });
+  });
+
+  it('puts a reversed budget range the right way round', () => {
+    expect(leadDetailsFrom(x({ budget_min: 300000, budget_max: 200000 }))).toMatchObject({ min_budget: 200000, max_budget: 300000 });
+  });
+
+  it('ignores a motivation that is just a token, not something the caller said', () => {
+    expect(leadDetailsFrom(x({ motivation: 'high_engagement' }))).toEqual({});
+  });
+
+  it('still parses a result from before these fields existed', () => {
+    const old = { ...base } as Record<string, unknown>;
+    expect(parseExtraction(JSON.stringify(old))).not.toBeNull();
+  });
+});
+

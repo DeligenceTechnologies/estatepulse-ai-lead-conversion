@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../auth/auth.module';
+import { OwnerGuard } from '../../common/guards/owner.guard';
 import { TelnyxModule } from '../../telnyx/telnyx.module';
+import { LeadsModule } from '../leads/leads.module';
 import { AgentCalendarController } from './agent-calendar.controller';
 import { AppointmentsService } from './appointments.service';
 import { AvailabilityService } from './availability.service';
@@ -8,6 +10,13 @@ import { CalendarConnectionsService } from './calendar-connections.service';
 import { CalendarPollerService } from './calendar-poller.service';
 import { CalendarSyncService } from './calendar-sync.service';
 import { CalendlyClientService } from './calendly.client';
+import {
+  InCallBookingSettingsController,
+  InCallBookingToolController,
+} from './in-call-booking/in-call-booking.controller';
+import { InCallBookingSettingsService } from './in-call-booking/in-call-booking-settings.service';
+import { InCallBookingService } from './in-call-booking/in-call-booking.service';
+import { ToolAuthService } from './in-call-booking/tool-auth.service';
 import { LeadBookingController } from './lead-booking.controller';
 import { LeadBookingService } from './lead-booking.service';
 import { CalComClientService } from './providers/calcom.client';
@@ -35,7 +44,9 @@ import { OwnerCalendarController } from './owner-calendar.controller';
  * @Global() and need no import.
  */
 @Module({
-  imports: [AuthModule, TelnyxModule],
+  // LeadsModule for LeadAssignmentService: in-call booking assigns the lead to
+  // the agent Calendly picked.
+  imports: [AuthModule, TelnyxModule, LeadsModule],
   // ORDER IS LOAD-BEARING. AgentCalendarController serves
   // `GET /api/agents/me/calendar`; OwnerCalendarController serves
   // `GET /api/agents/:userId/calendar`. Both patterns match the literal URL
@@ -51,6 +62,8 @@ import { OwnerCalendarController } from './owner-calendar.controller';
     OrganizationCalendarController,
     CalendlyOAuthController,
     LeadBookingController,
+    InCallBookingToolController,
+    InCallBookingSettingsController,
   ],
   providers: [
     // The provider layer. CalendarProviderRegistry is what every neutral
@@ -70,6 +83,10 @@ import { OwnerCalendarController } from './owner-calendar.controller';
     AvailabilityService,
     AppointmentsService,
     LeadBookingService,
+    InCallBookingSettingsService,
+    InCallBookingService,
+    ToolAuthService,
+    OwnerGuard,
   ],
   exports: [CalendarSyncService, CalendarConnectionsService],
 })

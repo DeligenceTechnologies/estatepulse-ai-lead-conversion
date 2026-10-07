@@ -7,6 +7,26 @@ import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 
 /** Verbatim from lead_assignments_type_check. */
 const MANUAL = 'manual';
+
+/**
+ * Who made an assignment, and why — written to lead_assignments.assignment_type
+ * and the audit log. Values are verbatim from lead_assignments_type_check and
+ * audit_logs_actor_type_check.
+ */
+export interface AssignedBy {
+  actorType: 'user' | 'ai';
+  /** users.id for a person; null for the AI. */
+  actorId: string | null;
+  assignmentType: 'manual' | 'round_robin';
+  reason: string;
+}
+
+const byOwner = (userId: string): AssignedBy => ({
+  actorType: 'user',
+  actorId: userId,
+  assignmentType: MANUAL,
+  reason: 'Assigned manually by the owner',
+});
 /** Verbatim from organization_members_status_check. */
 const ACTIVE = 'active';
 
@@ -57,12 +77,20 @@ export class LeadAssignmentService {
     private readonly events: EventsBus,
   ) {}
 
+  /**
+   * `by` defaults to the owner's manual assignment, which is what the owner
+   * route passes `callerUserId` for. Automation (the AI booking a meeting during
+   * a call) passes its own actor so the history says who really decided.
+   */
   async assign(
     organizationId: string,
-    callerUserId: string,
+    callerUserId: string | null,
     leadId: string,
     agentId: string,
+    actor?: AssignedBy,
   ): Promise<LeadAssignmentDTO> {
+    const by = actor ?? (callerUserId ? byOwner(callerUserId) : null);
+    if (!by) throw new Error('assign() needs either a calling user or an explicit actor');
     const result = await this.withLockTimeout(() => this.prisma.$transaction(async (tx) => {
       // Scoped by organization in the same statement that locks it, so a lead
       // id from another tenant is simply not found — the same 404 as a lead
@@ -144,7 +172,7 @@ export class LeadAssignmentService {
           organization_id: organizationId,
           lead_id: leadId,
           agent_id: profile.id,
-          assignment_type: MANUAL,
+          assignment_type: by.assignmentType,
           assigned_at: now,
         },
         select: { assigned_at: true },
@@ -169,7 +197,7 @@ export class LeadAssignmentService {
             leadId,
             agentId: profile.id,
             previousAgentId: current?.agent_id ?? null,
-            assignmentType: MANUAL,
+            assignmentType: by.assignmentType,
           } as never,
         },
       });
@@ -178,19 +206,18 @@ export class LeadAssignmentService {
         data: {
           id: newId(),
           organization_id: organizationId,
-          actor_type: 'user',
-          actor_id: callerUserId,
+          actor_type: by.actorType,
+          actor_id: by.actorId,
           action: current ? 'lead.reassigned' : 'lead.assigned',
           entity_type: 'lead',
           entity_id: leadId,
-          // The reason is part of the record: "manual, by this owner" is the
-          // assignment reason for every row this path writes.
+          // The reason is part of the record, so the trail says why this agent.
           payload: {
             agentId: profile.id,
             agentName: profile.display_name,
             previousAgentId: current?.agent_id ?? null,
-            assignmentType: MANUAL,
-            reason: 'Assigned manually by the owner',
+            assignmentType: by.assignmentType,
+            reason: by.reason,
           } as never,
         },
       });
@@ -200,7 +227,7 @@ export class LeadAssignmentService {
         dto: {
           leadId,
           agent: { id: profile.id, name: profile.display_name },
-          assignmentType: MANUAL,
+          assignmentType: by.assignmentType,
           assignedAt: created.assigned_at,
           changed: true,
         },

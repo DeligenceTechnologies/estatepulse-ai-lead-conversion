@@ -51,6 +51,7 @@ import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
 import { ContactWindowCard } from './ContactWindowCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
+import { InCallBookingCard } from './InCallBookingCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 
 export const AISettingsView: React.FC = () => {
@@ -1128,6 +1129,8 @@ export const AISettingsView: React.FC = () => {
         <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
 
         <LeadTemperatureCard />
+
+        <InCallBookingCard />
 
         {/* Statements of behaviour, not settings — nothing here is editable. */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">

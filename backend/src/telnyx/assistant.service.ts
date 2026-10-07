@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { withBookingSection } from '../modules/calendar/in-call-booking/booking-prompt';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService, type Creds } from './cred-store.service';
 
@@ -157,6 +158,26 @@ export class AssistantService {
     return j.data ?? j;
   }
 
+  /**
+   * While in-call booking is on, its prompt section is part of the prompt no
+   * matter what the editor sends. The AI Settings page holds the prompt it
+   * loaded, so saving after the section was added would otherwise silently
+   * drop it — the tools stay attached but the AI loses its instructions. The
+   * section is managed by the In-call booking switch; turning that off is the
+   * way to remove it.
+   */
+  private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
+    const row = await this.prisma.integrations
+      .findFirst({
+        where: { organization_id: orgId, provider: 'in_call_booking', status: 'active' },
+        select: { metadata: true },
+      })
+      .catch(() => null);
+    const cfg = (row?.metadata ?? null) as { eventTypeName?: string; durationMinutes?: number } | null;
+    if (!cfg?.eventTypeName || !cfg.durationMinutes) return instructions;
+    return withBookingSection(String(instructions), cfg.eventTypeName, cfg.durationMinutes);
+  }
+
   async getAssistant(orgId: string) {
     const c = await this.creds.getCreds(orgId);
     if (!c || !c.apiKey || !c.assistantId) return null;
@@ -167,7 +188,7 @@ export class AssistantService {
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
     const body: any = {};
-    if (patch.instructions != null) body.instructions = patch.instructions;
+    if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
     if (patch.greeting != null) body.greeting = patch.greeting;
     if (patch.model != null) body.model = patch.model;
     if (patch.description != null) body.description = patch.description;
@@ -444,7 +465,14 @@ export class AssistantService {
       };
       const res = await fetch(BASE, { method: 'POST', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.ok) {
-        const a = ((await res.json()) as any).data ?? {};
+        // Create answers with the assistant itself, not wrapped in `data` (the
+        // OpenAPI schema for POST /ai/assistants has id/name/model at the top
+        // level). Reading only `.data` saved an empty id: the assistant existed
+        // in Telnyx but was never linked to the office, so every retry made
+        // another orphan. Accept both shapes, as the attach path already does.
+        const j = (await res.json()) as any;
+        const a = j?.data ?? j ?? {};
+        if (!a.id) throw new Error('Telnyx created the assistant but returned no id; attach it by id instead.');
         await this.creds.saveCreds(orgId, { assistantId: a.id });
         return shape(a);
       }
@@ -455,9 +483,16 @@ export class AssistantService {
     throw new Error(lastErr);
   }
 
-  async setAssistantId(orgId: string, assistantId: string) {
+  async setAssistantId(orgId: string, pasted: string) {
     const c = await this.requireCreds(orgId);
-    const res = await fetch(`${BASE}/${assistantId}`, { headers: authHeaders(c.apiKey) });
+    // Pasted ids arrive with whatever came along from where they were copied —
+    // backticks, quotes, zero-width characters — and any of those in the URL
+    // path is a 404 for an assistant that exists. Take just the id itself.
+    const assistantId = /assistant-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(pasted ?? '')?.[0];
+    if (!assistantId) {
+      throw new Error('That does not look like a Telnyx assistant id (assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).');
+    }
+    const res = await fetch(`${BASE}/${encodeURIComponent(assistantId)}`, { headers: authHeaders(c.apiKey) });
     if (!res.ok) throw new Error(`Could not find that assistant in your account (${res.status})`);
     await this.creds.saveCreds(orgId, { assistantId });
     const j = (await res.json()) as any;
