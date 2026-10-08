@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronRight,
   Flame,
   Plus,
@@ -501,8 +502,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        {/* One contact line: only what the lead actually has. */}
-                        <div className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                        {/* Only what the lead actually has. Wraps so the table fits without horizontal scroll. */}
+                        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 min-w-0">
                           {lead.phone && (
                             <span className="flex items-center gap-1 shrink-0">
                               {lead.phone}
@@ -514,7 +515,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               )}
                             </span>
                           )}
-                          {lead.phone && lead.email && <span className="text-slate-600">·</span>}
                           {lead.email && (
                             <span className="flex items-center gap-1 min-w-0">
                               <span className="truncate max-w-[200px]">{lead.email}</span>
@@ -588,19 +588,29 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       {isOwner ? (
                         // Owner-only: the API refuses anyone else. The only way
                         // into 'closed', and the correction path for automation.
-                        <select
-                          value={normalizeStatus(lead.status, lead.dncStatus)}
-                          disabled={savingStatus === lead.id}
-                          onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
-                          title={lead.statusReason || 'Change status'}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase cursor-pointer focus:outline-none disabled:opacity-50 ${statusTone(lead.status)}`}
-                        >
-                          {LEAD_STATUSES.map((s) => (
-                            <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
-                              {STATUS_LABELS[s]}
-                            </option>
-                          ))}
-                        </select>
+                        // A select's label can't wrap, so a long status would widen
+                        // the column and push Actions off-screen: the badge shows
+                        // (and wraps) the label, the real select sits invisibly on top.
+                        <div className={`relative inline-flex rounded-md has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-emerald-400 ${savingStatus === lead.id ? 'opacity-50' : ''}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase inline-flex items-center gap-1 ${statusTone(lead.status)}`}>
+                            {STATUS_LABELS[normalizeStatus(lead.status, lead.dncStatus)]}
+                            <ChevronDown className="w-3 h-3 shrink-0" />
+                          </span>
+                          <select
+                            value={normalizeStatus(lead.status, lead.dncStatus)}
+                            disabled={savingStatus === lead.id}
+                            onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
+                            title={lead.statusReason || 'Change status'}
+                            aria-label="Lead status"
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default"
+                          >
+                            {LEAD_STATUSES.map((s) => (
+                              <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
+                                {STATUS_LABELS[s]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       ) : (
                         <span
                           title={lead.statusReason || undefined}
