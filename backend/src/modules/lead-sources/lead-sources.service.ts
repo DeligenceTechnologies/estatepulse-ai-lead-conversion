@@ -236,6 +236,24 @@ export class LeadSourcesService {
       where: { organization_id: organizationId, lead_source_id: id },
       orderBy: { received_at: 'desc' },
       take: Math.min(limit, 100),
+      // Only what the answer below reads. The row also carries raw_body — the
+      // exact request bytes, about the size of the payload again — plus headers
+      // and warnings, none of which are shown; on up to 100 rows that is
+      // roughly doubling what crosses the wire for nothing.
+      select: {
+        id: true,
+        received_at: true,
+        external_event_id: true,
+        signature_state: true,
+        used_previous_secret: true,
+        queue_state: true,
+        outcome: true,
+        outcome_reason: true,
+        error_message: true,
+        content_length: true,
+        payload: true,
+        mapping_trace: true,
+      },
     });
 
     return rows.map((r) => {
