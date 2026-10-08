@@ -160,13 +160,22 @@ describe('LeadBookingService.options', () => {
 });
 
 describe('LeadBookingService.appointmentsFor', () => {
-  it('reads appointments only after the visibility check passes', async () => {
+  it("reads in the caller's organization, scoped to an agent's current leads", async () => {
     const ok = setup();
     await ok.svc.appointmentsFor(owner, LEAD);
-    expect(ok.appointments.forLead).toHaveBeenCalledWith(ORG, LEAD);
+    expect(ok.appointments.forLead).toHaveBeenCalledWith(ORG, LEAD, null);
 
-    const hidden = setup({ lead: null });
+    await ok.svc.appointmentsFor(agent, LEAD);
+    expect(ok.appointments.forLead).toHaveBeenLastCalledWith(ORG, LEAD, AGENT_PROFILE);
+  });
+
+  it('is NOT_FOUND for a lead the caller cannot see, or a malformed id', async () => {
+    const hidden = setup();
+    hidden.appointments.forLead.mockResolvedValue(null);
     await expect(hidden.svc.appointmentsFor(agent, LEAD)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    expect(hidden.appointments.forLead).not.toHaveBeenCalled();
+
+    const { svc, appointments } = setup();
+    await expect(svc.appointmentsFor(owner, 'not-a-uuid')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(appointments.forLead).not.toHaveBeenCalled();
   });
 });

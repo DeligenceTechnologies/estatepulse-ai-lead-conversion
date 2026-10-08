@@ -83,10 +83,19 @@ export class LeadBookingService {
   }
 
   async appointmentsFor(auth: AuthContext, leadId: string): Promise<AppointmentDTO[]> {
-    const lead = await this.visibleLead(auth, leadId);
-    return this.appointments.forLead(auth.organizationId, lead.id);
+    // visibleLead's check and the read in one statement — see forLead.
+    const appointments = UUID.test(leadId)
+      ? await this.appointments.forLead(
+          auth.organizationId,
+          leadId,
+          auth.role === 'owner' ? null : (auth.agentProfileId ?? ''),
+        )
+      : null;
+    if (!appointments) throw new AppError('NOT_FOUND', 'No such lead');
+    return appointments;
   }
 
+  /** AppointmentsService.forLead applies this same rule in SQL. */
   private async visibleLead(auth: AuthContext, leadId: string) {
     const lead = UUID.test(leadId)
       ? await this.prisma.leads.findFirst({
