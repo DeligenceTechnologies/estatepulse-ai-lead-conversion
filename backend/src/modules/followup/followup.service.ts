@@ -905,15 +905,21 @@ export class FollowupService {
   /** The enrolments themselves, so the screen can answer "who is in this, and what next". */
   async listEnrollments(orgId: string, limitRaw?: string) {
     const take = Math.min(Number(limitRaw ?? 100) || 100, 200);
-    const rows = await this.prisma.sequence_enrollments.findMany({
-      where: { organization_id: orgId },
-      orderBy: [{ status: 'asc' }, { next_action_at: 'asc' }],
-      take,
-      include: {
-        leads: { select: { id: true, first_name: true, last_name: true, phone: true, temperature: true } },
-        followup_sequences: { select: { code: true, name: true } },
-      },
-    });
+    // A whole, positive page size — every request the screen makes — is one
+    // statement: see enrollmentPage. A negative or fractional ?limit= keeps
+    // Prisma's own reading of `take`.
+    const rows =
+      Number.isInteger(take) && take > 0
+        ? await this.enrollmentPage(orgId, take)
+        : await this.prisma.sequence_enrollments.findMany({
+            where: { organization_id: orgId },
+            orderBy: [{ status: 'asc' }, { next_action_at: 'asc' }],
+            take,
+            include: {
+              leads: { select: { id: true, first_name: true, last_name: true, phone: true, temperature: true } },
+              followup_sequences: { select: { code: true, name: true } },
+            },
+          });
 
     return rows.map((e) => ({
       id: e.id,
@@ -931,6 +937,73 @@ export class FollowupService {
       stoppedReason: e.stopped_reason,
       lastError: e.last_error,
       enrolledBy: e.enrolled_by,
+    }));
+  }
+
+  /**
+   * One page of enrolments with each one's lead and sequence, in ONE statement
+   * where Prisma took three sequential round trips (the page, then the leads,
+   * then the sequences) — in the same shape, so listEnrollments maps it as it
+   * always has.
+   *
+   * The page is the same query: this organization, status then next action
+   * ascending (no next action last), `take` rows. Rows tied on both keys have
+   * no defined order, as before. The lead and sequence are joined within the
+   * organization too, which a valid row always matches.
+   */
+  private async enrollmentPage(orgId: string, take: number) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        lead_id: string;
+        current_step: number;
+        status: string;
+        next_action_at: Date | null;
+        enrolled_at: Date;
+        stopped_reason: string | null;
+        last_error: string | null;
+        enrolled_by: string;
+        lead_found: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        temperature: string | null;
+        sequence_found: string | null;
+        sequence_code: string | null;
+        sequence_name: string | null;
+      }>
+    >`
+      select e.id, e.lead_id, e.current_step, e.status, e.next_action_at, e.enrolled_at,
+             e.stopped_reason, e.last_error, e.enrolled_by,
+             l.id as lead_found, l.first_name, l.last_name, l.phone, l.temperature,
+             s.id as sequence_found, s.code as sequence_code, s.name as sequence_name
+        from (
+          select id, organization_id, lead_id, sequence_id, current_step, status, next_action_at,
+                 enrolled_at, stopped_reason, last_error, enrolled_by
+            from sequence_enrollments
+           where organization_id = ${orgId}::uuid
+           order by status asc, next_action_at asc
+           limit ${take}
+        ) e
+        left join leads l on l.id = e.lead_id and l.organization_id = e.organization_id
+        left join followup_sequences s on s.id = e.sequence_id and s.organization_id = e.organization_id
+       order by e.status asc, e.next_action_at asc
+    `;
+
+    return rows.map((r) => ({
+      id: r.id,
+      lead_id: r.lead_id,
+      current_step: r.current_step,
+      status: r.status,
+      next_action_at: r.next_action_at,
+      enrolled_at: r.enrolled_at,
+      stopped_reason: r.stopped_reason,
+      last_error: r.last_error,
+      enrolled_by: r.enrolled_by,
+      leads: r.lead_found
+        ? { first_name: r.first_name, last_name: r.last_name, phone: r.phone, temperature: r.temperature }
+        : null,
+      followup_sequences: r.sequence_found ? { code: r.sequence_code!, name: r.sequence_name! } : null,
     }));
   }
 }
