@@ -13,9 +13,10 @@ import { CalendarModule } from './calendar.module';
 
 /**
  * Integration suite for GET /api/appointments — the owner's appointment list —
- * and GET /api/agents/me/appointments — an agent's own, the same query with the
- * agent forced to theirs — against the real database. Run with
- * `npm run test:owner-appointments`.
+ * GET /api/agents/me/appointments — an agent's own, the same query with the
+ * agent forced to theirs — and GET /api/agents/:userId/calendar — one agent's
+ * week and upcoming appointments, as the owner sees them — against the real
+ * database. Run with `npm run test:owner-appointments`.
  *
  * Pins the whole answer: which appointments (this organization, the date
  * window, the filters, at most 500), in start-time order, each with its lead
@@ -66,7 +67,7 @@ async function signupOwner(tag: string) {
   const body = JSON.parse(res.text);
   createdUserIds.push(body.user.id);
   createdOrgIds.push(body.organization.id);
-  return { token: body.token as string, orgId: body.organization.id as string };
+  return { token: body.token as string, orgId: body.organization.id as string, userId: body.user.id as string };
 }
 
 /** An agent with a profile in `orgId`; signed in if `login`. */
@@ -84,16 +85,17 @@ async function agent(orgId: string, tag: string, displayName: string, login = fa
     assert.equal(res.status, 200, res.text);
     token = JSON.parse(res.text).token;
   }
-  return { profileId: profile.id, token };
+  return { profileId: profile.id, token, userId: user.id };
 }
 
-let ownerA = { token: '', orgId: '' };
+let ownerA = { token: '', orgId: '', userId: '' };
 let ownerB = { token: '', orgId: '' };
 let agentToken = '';
 let annId = '';
 let bobId = '';
+let annUserId = '';
 let leadIds: Record<string, string> = {};
-let otherOrg = { agentId: '', leadId: '', agentToken: '' };
+let otherOrg = { agentId: '', leadId: '', agentToken: '', agentUserId: '' };
 /** Every appointment of org A, as the list must send it, in start-time order. */
 const all: Row[] = [];
 const inDefaultWindow = () => all.filter((r) => r['window'] === true).map(({ window: _w, ...r }) => r as Row);
@@ -119,6 +121,7 @@ before(async () => {
   const ann = await agent(ownerA.orgId, 'ann', 'Ann Agent', true);
   agentToken = ann.token;
   annId = ann.profileId;
+  annUserId = ann.userId;
   bobId = (await agent(ownerA.orgId, 'bob', 'Bob Broker')).profileId;
 
   const lead = async (orgId: string, data: Record<string, unknown>) =>
@@ -178,7 +181,7 @@ before(async () => {
   await prisma.appointments.create({
     data: { organization_id: ownerB.orgId, lead_id: otherLead, agent_id: otherAgent.profileId, provider: 'calendly', start_at: new Date(NOW + DAY), end_at: new Date(NOW + DAY + 30 * 60e3) },
   });
-  otherOrg = { agentId: otherAgent.profileId, leadId: otherLead, agentToken: otherAgent.token };
+  otherOrg = { agentId: otherAgent.profileId, leadId: otherLead, agentToken: otherAgent.token, agentUserId: otherAgent.userId };
 });
 
 after(async () => {
@@ -335,4 +338,104 @@ test("an agent's own list: an owner without an agent profile is refused, malform
     assert.equal((await mine(query)).status, 400, query);
   }
   assert.equal((await call('/api/agents/me/appointments')).status, 401);
+});
+
+// --- one agent's calendar, as the owner sees it: GET /api/agents/:userId/calendar --
+
+const calendarOf = (userId: string, token = ownerA.token) => call(`/api/agents/${userId}/calendar`, token);
+const DEFAULT_WEEK = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+  dayOfWeek, isAvailable: dayOfWeek >= 1 && dayOfWeek <= 5, startTime: '09:00', endTime: '17:00',
+}));
+/** Ann's appointments still to come and still on — scheduled or rescheduled — by start time. */
+const annsUpcoming = () =>
+  all
+    .filter((r) => r['agentId'] === annId && ['scheduled', 'rescheduled'].includes(r['status'] as string) && Date.parse(r.startTime) >= Date.now())
+    .map(({ window: _w, ...r }) => r);
+
+test("an agent's calendar: who they are, their week and their upcoming appointments — every field as sent", async () => {
+  const res = await calendarOf(annUserId);
+  assert.equal(res.status, 200, res.text);
+  const { upcoming, ...rest } = JSON.parse(res.text) as { upcoming: Row[] } & Record<string, unknown>;
+  assert.equal(
+    JSON.stringify(rest),
+    JSON.stringify({
+      agentId: annId, agentName: 'Ann Agent', schedulingUserId: null, schedulingUrl: null,
+      // Never configured: the default week, in the profile's timezone.
+      availability: { timezone: 'America/Chicago', days: DEFAULT_WEEK },
+    }),
+  );
+  // Past, cancelled and completed appointments are not upcoming; one 100 days
+  // out still is — there is no far edge.
+  assertSameUpToTies(JSON.stringify(upcoming), annsUpcoming() as Row[]);
+  assert.equal(upcoming.length, 2);
+});
+
+test("an agent's calendar: the scheduling identity of the office's provider, and the week they saved", async () => {
+  await prisma.agent_profiles.update({
+    where: { id: annId },
+    data: { timezone: 'Asia/Kolkata', calendly_user_uri: `https://api.calendly.com/users/${RUN}-ann`, calendly_url: 'https://calendly.com/ann', cal_user_id: 42 },
+  });
+  const at = (h: number, m = 0) => new Date(Date.UTC(1970, 0, 1, h, m));
+  await prisma.agent_availability.createMany({
+    data: [3, 1, 2].map((d) => ({ organization_id: ownerA.orgId, agent_id: annId, day_of_week: d, is_available: d !== 2, start_time: at(8, 30), end_time: at(16 + d) })),
+  });
+  // An office calendar on Calendly, parked — nothing syncs it.
+  const connection = await prisma.calendar_connections.create({
+    data: { organization_id: ownerA.orgId, provider: 'calendly', status: 'inactive' },
+  });
+  try {
+    const res = await calendarOf(annUserId);
+    assert.equal(res.status, 200, res.text);
+    const { upcoming: _u, ...rest } = JSON.parse(res.text) as Record<string, unknown>;
+    assert.deepEqual(rest, {
+      agentId: annId, agentName: 'Ann Agent', schedulingUserId: `https://api.calendly.com/users/${RUN}-ann`, schedulingUrl: 'https://calendly.com/ann',
+      availability: {
+        timezone: 'Asia/Kolkata',
+        days: [
+          { dayOfWeek: 1, isAvailable: true, startTime: '08:30', endTime: '17:00' },
+          { dayOfWeek: 2, isAvailable: false, startTime: '08:30', endTime: '18:00' },
+          { dayOfWeek: 3, isAvailable: true, startTime: '08:30', endTime: '19:00' },
+        ],
+      },
+    });
+  } finally {
+    await prisma.calendar_connections.delete({ where: { id: connection.id } });
+  }
+});
+
+test("an agent's calendar: at most 50 upcoming, the earliest first", async () => {
+  const office = await signupOwner('cal-many');
+  const theAgent = await agent(office.orgId, 'cal-many-agent', 'Busy Agent');
+  const theLead = (await prisma.leads.create({ data: { organization_id: office.orgId, status: 'new' }, select: { id: true } })).id;
+  await prisma.appointments.createMany({
+    data: Array.from({ length: 52 }, (_, i) => (i * 7) % 52).map((m) => ({
+      organization_id: office.orgId, lead_id: theLead, agent_id: theAgent.profileId, provider: 'calendly', status: m % 2 ? 'rescheduled' : 'scheduled',
+      start_at: new Date(NOW + DAY + m * 60e3), end_at: new Date(NOW + DAY + m * 60e3 + 30 * 60e3),
+    })),
+  });
+  const res = await calendarOf(theAgent.userId, office.token);
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(
+    (JSON.parse(res.text).upcoming as Row[]).map((r) => r.startTime),
+    Array.from({ length: 50 }, (_, m) => new Date(NOW + DAY + m * 60e3).toISOString()),
+  );
+});
+
+test("an agent's calendar: another office's agent, an owner without a profile and an unknown user are the same 404", async () => {
+  const notFound = '{"error":{"code":"NOT_FOUND","message":"This member has no agent profile"}}';
+  for (const [userId, token] of [
+    [annUserId, ownerB.token],
+    [otherOrg.agentUserId, ownerA.token],
+    ['00000000-0000-4000-8000-000000000000', ownerA.token],
+  ] as const) {
+    const res = await calendarOf(userId, token);
+    assert.equal(res.status, 404, res.text);
+    assert.equal(res.text, notFound);
+  }
+  // The owner themselves: no agent profile.
+  assert.equal((await calendarOf(ownerA.userId)).text, notFound);
+
+  assert.equal((await calendarOf('not-a-uuid')).status, 400);
+  assert.equal((await calendarOf(annUserId, agentToken)).status, 403);
+  assert.equal((await call(`/api/agents/${annUserId}/calendar`)).status, 401);
 });

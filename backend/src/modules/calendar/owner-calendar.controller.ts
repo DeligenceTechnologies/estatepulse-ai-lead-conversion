@@ -72,6 +72,13 @@ export class OwnerCalendarController {
     @CurrentUser() auth: AuthContext,
     @Param('userId', ParseUUIDPipe) userId: string,
   ): Promise<AgentCalendarDTO> {
+    // The office's calendar depends only on the organization, so it is read
+    // alongside the profile rather than after everything else. It is awaited
+    // where it always was — last — so a 404 or a failure of the reads below
+    // answers exactly as before.
+    const connection = this.connections.activeOrgRow(auth.organizationId);
+    connection.catch(() => undefined);
+
     // Scoped by organization_id as well as user_id: a profile from another
     // office must be indistinguishable from one that does not exist, or the
     // 404-vs-200 difference leaks the roster.
@@ -104,7 +111,7 @@ export class OwnerCalendarController {
     // Read for the CONNECTED provider only. An office that switched from
     // Calendly still has calendly_user_uri on every agent, and showing that as
     // linked would say the roster is fine when no booking can be attributed.
-    const conn = await this.connections.activeOrgRow(auth.organizationId);
+    const conn = await connection;
     const hostId = conn?.provider === 'cal' ? profile.cal_user_id : profile.calendly_user_uri;
 
     return {

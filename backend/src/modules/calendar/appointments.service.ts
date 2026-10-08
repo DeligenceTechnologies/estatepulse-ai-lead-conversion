@@ -117,27 +117,76 @@ export class AppointmentsService {
     );
   }
 
-  /** Upcoming appointments for one agent — the owner's per-agent panel. */
+  /**
+   * Upcoming appointments for one agent — the owner's per-agent panel.
+   *
+   * ONE statement, each appointment with its lead and agent, where Prisma took
+   * three sequential round trips (the appointments, then each relation). Rows
+   * sharing a start time have no defined order, as before. The lead and agent
+   * are joined within the organization too, which a valid row always matches.
+   */
   async upcomingForAgent(organizationId: string, agentId: string): Promise<AppointmentDTO[]> {
-    const rows = await this.prisma.appointments.findMany({
-      where: {
-        organization_id: organizationId,
-        agent_id: agentId,
-        start_at: { gte: new Date() },
-        // Verbatim from appointments_status_check, and the same pair
-        // agent-me.controller.ts counts as "upcoming" — the two must agree or
-        // the agent's badge and the owner's list disagree about the same day.
-        status: { in: ['scheduled', 'rescheduled'] },
-      },
-      orderBy: { start_at: 'asc' },
-      take: 50,
-      include: {
-        leads: { select: { first_name: true, last_name: true, email: true, phone: true, status: true } },
-        agent_profiles: { select: { display_name: true } },
-      },
-    });
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        lead_id: string;
+        agent_id: string;
+        provider: string;
+        external_event_id: string | null;
+        status: string;
+        start_at: Date;
+        end_at: Date;
+        meeting_url: string | null;
+        notes: string | null;
+        metadata: unknown;
+        created_at: Date;
+        lead_found: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        phone: string | null;
+        lead_status: string | null;
+        agent_name: string | null;
+      }>
+    >`
+      select a.id, a.lead_id, a.agent_id, a.provider, a.external_event_id, a.status, a.start_at, a.end_at,
+             a.meeting_url, a.notes, a.metadata, a.created_at,
+             l.id as lead_found, l.first_name, l.last_name, l.email, l.phone, l.status as lead_status,
+             ap.display_name as agent_name
+        from appointments a
+        left join leads l on l.id = a.lead_id and l.organization_id = a.organization_id
+        left join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = a.organization_id
+       where a.organization_id = ${organizationId}::uuid
+         and a.agent_id = ${agentId}::uuid
+         and a.start_at >= ${new Date()}::timestamptz
+         -- Verbatim from appointments_status_check, and the same pair
+         -- agent-me.controller.ts counts as "upcoming": the two must agree or
+         -- the agent's badge and the owner's list disagree about the same day.
+         and a.status in ('scheduled', 'rescheduled')
+       order by a.start_at asc
+       limit 50
+    `;
 
-    return rows.map((r) => this.toDto(r as AppointmentRow));
+    return rows.map((r) =>
+      this.toDto({
+        id: r.id,
+        lead_id: r.lead_id,
+        agent_id: r.agent_id,
+        provider: r.provider,
+        external_event_id: r.external_event_id,
+        status: r.status,
+        start_at: r.start_at,
+        end_at: r.end_at,
+        meeting_url: r.meeting_url,
+        notes: r.notes,
+        metadata: r.metadata,
+        created_at: r.created_at,
+        leads: r.lead_found
+          ? { first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, status: r.lead_status! }
+          : null,
+        agent_profiles: r.agent_name === null ? null : { display_name: r.agent_name },
+      }),
+    );
   }
 
   /**
