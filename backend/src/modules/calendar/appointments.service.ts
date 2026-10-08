@@ -37,50 +37,19 @@ export class AppointmentsService {
   constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
 
   /**
-   * Appointments for an organization, optionally narrowed to one agent.
-   *
-   * `agentId` is a FILTER, never an authorization decision — the caller's right
-   * to see these rows is settled by the guard on the route, and the
-   * organization comes from their session either way.
-   */
-  async list(organizationId: string, q: AppointmentRangeQuery): Promise<AppointmentDTO[]> {
-    const day = 24 * 60 * 60 * 1000;
-    const from = q.from ?? new Date(Date.now() - DEFAULT_PAST_DAYS * day);
-    const to = q.to ?? new Date(Date.now() + DEFAULT_FUTURE_DAYS * day);
-
-    const rows = await this.prisma.appointments.findMany({
-      where: {
-        organization_id: organizationId,
-        start_at: { gte: from, lte: to },
-        ...(q.status ? { status: q.status } : {}),
-        ...(q.agentId ? { agent_id: q.agentId } : {}),
-        // Alongside organization_id, never instead of it: another office's
-        // lead id simply matches nothing here.
-        ...(q.leadId ? { lead_id: q.leadId } : {}),
-      },
-      orderBy: { start_at: 'asc' },
-      take: MAX_ROWS,
-      include: {
-        leads: { select: { first_name: true, last_name: true, email: true, phone: true, status: true } },
-        agent_profiles: { select: { display_name: true } },
-      },
-    });
-
-    return rows.map((r) => this.toDto(r as AppointmentRow));
-  }
-
-  /**
-   * The owner's appointment list (GET /api/appointments) in ONE statement: the
-   * same appointments as list() — this organization, starting between `from`
+   * Appointments for an organization, in ONE statement: starting between `from`
    * and `to` (by default 30 days back to 90 ahead), optionally one status,
    * agent or lead, by start time, at most MAX_ROWS — each with its lead and
-   * agent, where list() takes three sequential round trips (the appointments,
-   * then each relation). Rows sharing a start time have no defined order, as
-   * before. The lead and agent are joined within the organization too, which a
-   * valid row always matches.
+   * agent. Serves the owner's list (GET /api/appointments) and an agent's own
+   * (GET /api/agents/me/appointments, agentId forced to their profile).
    *
-   * list() still serves the agent's own route; keep the two in step until that
-   * route moves here.
+   * `agentId` and `leadId` are FILTERS, never authorization decisions — the
+   * caller's right to see these rows is settled by the guard on the route, and
+   * the organization comes from their session either way, so another office's
+   * agent or lead id simply matches nothing.
+   *
+   * Rows sharing a start time have no defined order. The lead and agent are
+   * joined within the organization too, which a valid row always matches.
    */
   async listInRange(organizationId: string, q: AppointmentRangeQuery): Promise<AppointmentDTO[]> {
     const day = 24 * 60 * 60 * 1000;

@@ -13,7 +13,9 @@ import { CalendarModule } from './calendar.module';
 
 /**
  * Integration suite for GET /api/appointments — the owner's appointment list —
- * against the real database. Run with `npm run test:owner-appointments`.
+ * and GET /api/agents/me/appointments — an agent's own, the same query with the
+ * agent forced to theirs — against the real database. Run with
+ * `npm run test:owner-appointments`.
  *
  * Pins the whole answer: which appointments (this organization, the date
  * window, the filters, at most 500), in start-time order, each with its lead
@@ -91,7 +93,7 @@ let agentToken = '';
 let annId = '';
 let bobId = '';
 let leadIds: Record<string, string> = {};
-let otherOrg = { agentId: '', leadId: '' };
+let otherOrg = { agentId: '', leadId: '', agentToken: '' };
 /** Every appointment of org A, as the list must send it, in start-time order. */
 const all: Row[] = [];
 const inDefaultWindow = () => all.filter((r) => r['window'] === true).map(({ window: _w, ...r }) => r as Row);
@@ -171,12 +173,12 @@ before(async () => {
   all.sort((x, y) => (x.startTime < y.startTime ? -1 : x.startTime > y.startTime ? 1 : 0));
 
   // Another organization with an appointment of its own.
-  const otherAgent = await agent(ownerB.orgId, 'other', 'Other Agent');
+  const otherAgent = await agent(ownerB.orgId, 'other', 'Other Agent', true);
   const otherLead = await lead(ownerB.orgId, { status: 'new', first_name: 'Other' });
   await prisma.appointments.create({
     data: { organization_id: ownerB.orgId, lead_id: otherLead, agent_id: otherAgent.profileId, provider: 'calendly', start_at: new Date(NOW + DAY), end_at: new Date(NOW + DAY + 30 * 60e3) },
   });
-  otherOrg = { agentId: otherAgent.profileId, leadId: otherLead };
+  otherOrg = { agentId: otherAgent.profileId, leadId: otherLead, agentToken: otherAgent.token };
 });
 
 after(async () => {
@@ -289,4 +291,48 @@ test('at most 500, the earliest first', async () => {
     (JSON.parse(res.text) as Row[]).map((r) => r.startTime),
     Array.from({ length: 500 }, (_, m) => new Date(NOW + DAY + m * 60e3).toISOString()),
   );
+});
+
+// --- an agent's own: GET /api/agents/me/appointments ---------------------------
+
+const mine = (query: string, token = agentToken) => call(`/api/agents/me/appointments${query}`, token);
+const annsInWindow = () => inDefaultWindow().filter((r) => r['agentId'] === annId);
+
+test("an agent's own list: only their appointments, in the default window, by start time — every field as sent", async () => {
+  const res = await mine('');
+  assert.equal(res.status, 200, res.text);
+  assertSameUpToTies(res.text, annsInWindow());
+  assert.equal(JSON.parse(res.text).length, 2);
+});
+
+test("an agent's own list: a colleague's agentId is ignored; status, leadId and the window narrow within their own", async () => {
+  const ownEverything = all.filter((r) => r['agentId'] === annId).map(({ window: _w, ...r }) => r as Row);
+  for (const [query, expected] of [
+    [`?agentId=${bobId}`, annsInWindow()],
+    ['?status=cancelled', annsInWindow().filter((r) => r['status'] === 'cancelled')],
+    [`?leadId=${leadIds['named']}`, annsInWindow().filter((r) => r['leadId'] === leadIds['named'])],
+    [`?leadId=${leadIds['nothing']}`, []],
+    [`?from=${new Date(NOW - 50 * DAY).toISOString()}&to=${new Date(NOW + 120 * DAY).toISOString()}`, ownEverything],
+  ] as const) {
+    const res = await mine(query);
+    assert.equal(res.status, 200, `${query}: ${res.text}`);
+    assertSameUpToTies(res.text, [...expected]);
+  }
+});
+
+test("an agent's own list: another organization's agent sees only their own", async () => {
+  const res = await mine('', otherOrg.agentToken);
+  assert.equal(res.status, 200, res.text);
+  const rows = JSON.parse(res.text) as Row[];
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!['agentId'], otherOrg.agentId);
+});
+
+test("an agent's own list: an owner without an agent profile is refused, malformed filters are a 400, no session a 401", async () => {
+  const owner = await mine('', ownerA.token);
+  assert.equal(owner.status, 403, owner.text);
+  for (const query of ['?agentId=not-a-uuid', '?leadId=nope', '?from=yesterday-ish']) {
+    assert.equal((await mine(query)).status, 400, query);
+  }
+  assert.equal((await call('/api/agents/me/appointments')).status, 401);
 });
