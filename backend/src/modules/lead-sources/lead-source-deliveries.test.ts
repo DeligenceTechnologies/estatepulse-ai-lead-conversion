@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import bcrypt from 'bcrypt';
 import { AuthModule } from '../../auth/auth.module';
 import { envSchema } from '../../app.module';
 import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
@@ -12,8 +13,9 @@ import { LeadSourcesModule } from './lead-sources.module';
 
 /**
  * Integration suite for GET /api/v1/lead-sources/:id/deliveries — a source's
- * recent webhook deliveries, parsed — against the real database. Run with
- * `npm run test:lead-source-deliveries`.
+ * recent webhook deliveries, parsed — and GET /api/v1/lead-sources — the
+ * organization's sources with their counts — against the real database. Run
+ * with `npm run test:lead-source-deliveries`.
  *
  * The read is scoped by the caller's organization AND the source id, so a
  * source that is not theirs — another tenant's, or one that does not exist —
@@ -235,7 +237,8 @@ before(async () => {
 
 after(async () => {
   try {
-    // Deliveries before their sources, sources before the users and orgs.
+    // Leads and deliveries before their sources, sources before the users and orgs.
+    await prisma.leads.deleteMany({ where: { organization_id: { in: createdOrgIds } } });
     await prisma.webhook_events.deleteMany({ where: { lead_source_id: { in: createdSourceIds } } });
     await prisma.lead_sources.deleteMany({ where: { id: { in: createdSourceIds } } });
     await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
@@ -339,4 +342,91 @@ test('a payload that is not a Tally webhook is listed with its parse error, not 
   assert.match(row!.parseError ?? '', /^Not a recognisable Tally webhook payload: /);
   assert.equal(row!.formName, null);
   assert.equal(row!.mapping, null);
+});
+
+// --- the list: GET /api/v1/lead-sources ------------------------------------------
+
+/** An agent member of `orgId`, signed in. */
+async function signedInAgent(orgId: string, tag: string): Promise<string> {
+  const user = await prisma.users.create({
+    data: { email: emailFor(tag), first_name: 'Agent', last_name: tag, password_hash: await bcrypt.hash(PASSWORD, 4) },
+    select: { id: true },
+  });
+  createdUserIds.push(user.id);
+  await prisma.organization_members.create({ data: { organization_id: orgId, user_id: user.id, role: 'agent', status: 'active' } });
+  const res = await call('/api/auth/login', undefined, { method: 'POST', body: { email: emailFor(tag), password: PASSWORD } });
+  assert.equal(res.status, 200, res.text);
+  return JSON.parse(res.text).token as string;
+}
+
+test('the list: live webhook sources, newest first, each as its own page shows it plus its delivery and lead counts', async () => {
+  // Leads from one source, and some from none; an archived source and a
+  // non-webhook source, neither of which is listed.
+  await prisma.leads.createMany({
+    data: [
+      ...Array.from({ length: 3 }, (_, i) => ({ organization_id: ownerA.orgId, lead_source_id: sourceFull, status: 'new', first_name: `Full${i}` })),
+      { organization_id: ownerA.orgId, status: 'new', first_name: 'Sourceless' },
+    ],
+  });
+  const archived = await createSource(ownerA.token, 'Disconnected');
+  await prisma.webhook_events.create({ data: { organization_id: ownerA.orgId, lead_source_id: archived, provider: 'tally', event_type: 'FORM_RESPONSE', payload: tallyPayload(1) } });
+  await prisma.lead_sources.update({ where: { id: archived }, data: { archived_at: new Date(), is_active: false } });
+  const manual = await prisma.lead_sources.create({
+    data: { organization_id: ownerA.orgId, name: 'Manual entry', code: `manual-${RUN}`, source_type: 'manual' },
+    select: { id: true },
+  });
+  createdSourceIds.push(manual.id);
+
+  // What the list must hold, worked out independently: every live webhook
+  // source of the organization, newest first, each exactly as GET /:id shows
+  // it, with counts read straight from the tables.
+  const live = await prisma.lead_sources.findMany({
+    where: { organization_id: ownerA.orgId, source_type: 'webhook', archived_at: null },
+    orderBy: { created_at: 'desc' },
+    select: { id: true },
+  });
+  assert.ok(live.length >= 3 && !live.some((s) => s.id === archived || s.id === manual.id));
+  const expected: unknown[] = [];
+  for (const { id } of live) {
+    const page = await call(`/api/v1/lead-sources/${id}`, ownerA.token);
+    assert.equal(page.status, 200, page.text);
+    expected.push({
+      ...JSON.parse(page.text),
+      deliveryCount: await prisma.webhook_events.count({ where: { organization_id: ownerA.orgId, lead_source_id: id } }),
+      leadCount: await prisma.leads.count({ where: { organization_id: ownerA.orgId, lead_source_id: id } }),
+    });
+  }
+
+  const res = await call('/api/v1/lead-sources', ownerA.token);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.text, JSON.stringify(expected));
+  const full = (JSON.parse(res.text) as Array<{ id: string; deliveryCount: number; leadCount: number }>).find((s) => s.id === sourceFull);
+  assert.deepEqual([full?.deliveryCount, full?.leadCount], [2, 3]);
+  // Never a secret.
+  assert.ok(!/signing_secret|secret_enc|ingest_token_enc/.test(res.text));
+});
+
+test('the list: an agent of the organization reads the same list', async () => {
+  const agentToken = await signedInAgent(ownerA.orgId, 'list-agent');
+  const [asOwner, asAgent] = await Promise.all([call('/api/v1/lead-sources', ownerA.token), call('/api/v1/lead-sources', agentToken)]);
+  assert.equal(asAgent.status, 200, asAgent.text);
+  assert.equal(asAgent.text, asOwner.text);
+});
+
+test("the list: each organization sees only its own sources; one with none gets an empty list", async () => {
+  const b = await call('/api/v1/lead-sources', ownerB.token);
+  assert.equal(b.status, 200, b.text);
+  assert.deepEqual(
+    (JSON.parse(b.text) as Array<{ id: string; deliveryCount: number; leadCount: number }>).map((s) => [s.id, s.deliveryCount, s.leadCount]),
+    [[sourceOtherOrg, 1, 0]],
+  );
+  const empty = await signupOwner('list-empty');
+  const none = await call('/api/v1/lead-sources', empty.token);
+  assert.equal(none.status, 200, none.text);
+  assert.equal(none.text, '[]');
+});
+
+test('the list: no credential, or a garbage one, is a 401', async () => {
+  assert.equal((await call('/api/v1/lead-sources')).status, 401);
+  assert.equal((await call('/api/v1/lead-sources', 'not-a-token')).status, 401);
 });
