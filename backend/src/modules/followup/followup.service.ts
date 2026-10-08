@@ -815,25 +815,67 @@ export class FollowupService {
     return one;
   }
 
-  /** The Follow-ups screen: every sequence with its steps and how many leads are in it. */
+  /**
+   * The Follow-ups screen: every sequence with its steps and how many leads are
+   * in it.
+   *
+   * ONE statement: Prisma loaded the sequences, then their steps, then their
+   * triggers, then the enrolment counts — four sequential round trips. Steps
+   * come back in step order and triggers in trigger order, as before; every
+   * part is scoped to the session's organization.
+   */
   async listSequences(orgId: string) {
-    const rows = await this.prisma.followup_sequences.findMany({
-      where: { organization_id: orgId },
-      orderBy: { created_at: 'asc' },
-      include: {
-        sequence_steps: { orderBy: { step_order: 'asc' } },
-        sequence_enroll_triggers: { orderBy: { trigger: 'asc' }, select: { trigger: true } },
-      },
-    });
-
-    const counts = await this.prisma.sequence_enrollments.groupBy({
-      by: ['sequence_id', 'status'],
-      where: { organization_id: orgId },
-      _count: { _all: true },
-    });
-
-    const byStatus = (id: string, status: string) =>
-      counts.find((c) => c.sequence_id === id && c.status === status)?._count._all ?? 0;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        description: string | null;
+        status: string;
+        created_at: Date;
+        enroll_triggers: string[];
+        steps: Array<{
+          step_order: number;
+          action_type: string;
+          delay_minutes: number;
+          message_template: string | null;
+          voice_prompt: string | null;
+          max_attempts: number;
+        }>;
+        active_count: number;
+        paused_count: number;
+        completed_count: number;
+        stopped_count: number;
+      }>
+    >`
+      select s.id, s.code, s.name, s.description, s.status, s.created_at,
+             coalesce((
+               select json_agg(t.trigger order by t.trigger)
+                 from sequence_enroll_triggers t
+                where t.organization_id = s.organization_id and t.sequence_id = s.id
+             ), '[]'::json) as enroll_triggers,
+             coalesce((
+               select json_agg(json_build_object(
+                        'step_order', st.step_order, 'action_type', st.action_type,
+                        'delay_minutes', st.delay_minutes, 'message_template', st.message_template,
+                        'voice_prompt', st.voice_prompt, 'max_attempts', st.max_attempts
+                      ) order by st.step_order)
+                 from sequence_steps st
+                where st.organization_id = s.organization_id and st.sequence_id = s.id
+             ), '[]'::json) as steps,
+             counts.active_count, counts.paused_count, counts.completed_count, counts.stopped_count
+        from followup_sequences s
+        cross join lateral (
+          select count(*) filter (where e.status = 'active')::int as active_count,
+                 count(*) filter (where e.status = 'paused')::int as paused_count,
+                 count(*) filter (where e.status = 'completed')::int as completed_count,
+                 count(*) filter (where e.status = 'stopped')::int as stopped_count
+            from sequence_enrollments e
+           where e.organization_id = s.organization_id and e.sequence_id = s.id
+        ) counts
+       where s.organization_id = ${orgId}::uuid
+       order by s.created_at asc
+    `;
 
     return rows.map((s) => ({
       id: s.id,
@@ -843,13 +885,13 @@ export class FollowupService {
       status: s.status,
       // Every condition the office ticked, in force or not: an inactive
       // sequence must show its configuration rather than an empty checklist.
-      enrollTriggers: s.sequence_enroll_triggers.map((t) => t.trigger),
-      activeCount: byStatus(s.id, 'active'),
-      pausedCount: byStatus(s.id, 'paused'),
-      completedCount: byStatus(s.id, 'completed'),
-      stoppedCount: byStatus(s.id, 'stopped'),
+      enrollTriggers: s.enroll_triggers,
+      activeCount: s.active_count,
+      pausedCount: s.paused_count,
+      completedCount: s.completed_count,
+      stoppedCount: s.stopped_count,
       createdAt: s.created_at.toISOString(),
-      steps: s.sequence_steps.map((st) => ({
+      steps: s.steps.map((st) => ({
         stepOrder: st.step_order,
         actionType: st.action_type,
         delayMinutes: st.delay_minutes,
