@@ -248,3 +248,126 @@ test('a malformed leadId is rejected', async () => {
     assert.equal(res.status, 400, `${path}: ${res.text}`);
   }
 });
+
+// --- one lead's SMS messages: GET /api/v1/messages?leadId= ----------------------
+
+/** What the lead view used to assemble: the thread list, then each SMS thread's messages, in order. */
+async function messagesThreadByThread(leadId: string, token: string): Promise<string> {
+  const threads = await call(`/api/v1/conversations?limit=200&leadId=${leadId}`, token);
+  assert.equal(threads.status, 200, threads.text);
+  const parts: unknown[] = [];
+  for (const thread of (threads.body as Array<{ id: string; channel: string }>).filter((t) => t.channel === 'sms')) {
+    const res = await call(`/api/v1/conversations/${thread.id}/messages`, token);
+    assert.equal(res.status, 200, res.text);
+    parts.push(...(res.body as unknown[]));
+  }
+  return JSON.stringify(parts);
+}
+
+/** A lead of alice's with two SMS threads, a voice thread with messages, and distinct timestamps throughout. */
+async function leadWithThreads(): Promise<string> {
+  const lead = await prisma.leads.create({
+    data: { organization_id: ownerA.orgId, status: 'contacted', first_name: 'Threads' },
+    select: { id: true },
+  });
+  createdLeadIds.push(lead.id);
+  await prisma.lead_assignments.create({
+    data: { organization_id: ownerA.orgId, lead_id: lead.id, agent_id: alice.profileId, assignment_type: 'manual' },
+  });
+  const start = Date.parse('2026-09-01T12:00:00.000Z');
+  let n = 0;
+  for (const [channel, count, updated] of [
+    ['sms', 4, '2026-10-02'],
+    ['voice', 2, '2026-10-05'],
+    ['sms', 3, '2026-10-04'],
+  ] as const) {
+    const thread = await prisma.conversations.create({
+      data: { organization_id: ownerA.orgId, lead_id: lead.id, channel, updated_at: new Date(updated) },
+      select: { id: true },
+    });
+    await prisma.messages.createMany({
+      data: Array.from({ length: count }, (_, i) => {
+        const at = new Date(start + n++ * 60e3);
+        return {
+          organization_id: ownerA.orgId,
+          conversation_id: thread.id,
+          sender_type: i % 2 ? 'lead' : 'ai',
+          direction: i % 2 ? 'inbound' : 'outbound',
+          body: `${channel} ${updated} #${i}`,
+          delivery_status: i % 3 === 2 ? 'failed' : 'delivered',
+          sent_at: i % 2 ? null : new Date(at.getTime() + 1000),
+          created_at: at,
+        };
+      }),
+    });
+  }
+  return lead.id;
+}
+
+test("lead messages: exactly the thread list's SMS threads, each thread's messages in order, in one request", async () => {
+  const leadId = await leadWithThreads();
+  for (const token of [ownerA.token, alice.token]) {
+    const expected = await messagesThreadByThread(leadId, token);
+    const res = await call(`/api/v1/messages?leadId=${leadId}`, token);
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.text, expected);
+    // Newest thread first, SMS only: the voice thread's messages are not in it.
+    assert.deepEqual(
+      (res.body as Array<{ body: string }>).map((m) => m.body),
+      ['sms 2026-10-04 #0', 'sms 2026-10-04 #1', 'sms 2026-10-04 #2', 'sms 2026-10-02 #0', 'sms 2026-10-02 #1', 'sms 2026-10-02 #2', 'sms 2026-10-02 #3'],
+    );
+  }
+});
+
+test('lead messages: each thread keeps its own 500-message cap, oldest first', async () => {
+  const lead = await prisma.leads.create({ data: { organization_id: ownerA.orgId, status: 'contacted' }, select: { id: true } });
+  createdLeadIds.push(lead.id);
+  const thread = await prisma.conversations.create({
+    data: { organization_id: ownerA.orgId, lead_id: lead.id, channel: 'sms' },
+    select: { id: true },
+  });
+  const start = Date.parse('2026-09-01T00:00:00.000Z');
+  await prisma.messages.createMany({
+    data: Array.from({ length: 502 }, (_, i) => ({
+      organization_id: ownerA.orgId,
+      conversation_id: thread.id,
+      sender_type: 'ai',
+      direction: 'outbound',
+      body: `#${i}`,
+      created_at: new Date(start + i * 1000),
+    })),
+  });
+
+  const res = await call(`/api/v1/messages?leadId=${lead.id}`, ownerA.token);
+  assert.equal(res.status, 200, res.text.slice(0, 200));
+  assert.equal(res.text, await messagesThreadByThread(lead.id, ownerA.token));
+  assert.equal(res.body.length, 500);
+  assert.equal(res.body[499].body, '#499');
+});
+
+test("lead messages: an agent gets nothing for a colleague's lead, and nobody for another organization's", async () => {
+  for (const [leadId, token] of [
+    [leadBob, alice.token],
+    [leadOtherOrg, ownerA.token],
+    [leadOtherOrg, alice.token],
+    ['00000000-0000-4000-8000-000000000000', ownerA.token],
+  ] as const) {
+    const res = await call(`/api/v1/messages?leadId=${leadId}`, token);
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body, []);
+  }
+  // The scoping, not missing data: each lead's own office sees its texts.
+  const own = await call(`/api/v1/messages?leadId=${leadOtherOrg}`, ownerB.token);
+  assert.equal(own.body.length, 1);
+  const bobs = await call(`/api/v1/messages?leadId=${leadBob}`, ownerA.token);
+  assert.equal(bobs.body.length, 1);
+});
+
+test('lead messages: a missing or malformed leadId is a 400, and no session a 401', async () => {
+  for (const path of ['/api/v1/messages', '/api/v1/messages?leadId=not-a-uuid']) {
+    const res = await call(path, ownerA.token);
+    assert.equal(res.status, 400, `${path}: ${res.text}`);
+  }
+  const anonymous = await call(`/api/v1/messages?leadId=${leadAlice}`);
+  assert.equal(anonymous.status, 401, anonymous.text);
+});

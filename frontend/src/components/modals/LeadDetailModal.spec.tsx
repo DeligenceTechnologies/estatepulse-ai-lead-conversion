@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { messageFor } from '../../lib/api';
 import type { Lead } from '../../types';
 import type { LeadBookingOptions } from '../../utils/calendarApi';
+import type { MessageRow } from '../../utils/historyApi';
 import { LeadAppointments } from '../leads/LeadBooking';
 import { LeadDetailModal } from './LeadDetailModal';
 
@@ -25,10 +26,17 @@ vi.mock('../../utils/assistantApi', () => ({
   getLeadFlow: () => Promise.reject(new Error('not under test')),
   enrollLead: () => Promise.resolve(),
 }));
+const history = vi.hoisted(() => ({
+  calls: null as unknown as Mock,
+  leadMessages: null as unknown as Mock,
+  conversations: null as unknown as Mock,
+  threadMessages: null as unknown as Mock,
+}));
 vi.mock('../../utils/historyApi', () => ({
-  listCalls: () => Promise.resolve([]),
-  listConversations: () => Promise.resolve([]),
-  listMessages: () => Promise.resolve([]),
+  listCalls: (filters: unknown) => history.calls(filters),
+  listLeadMessages: (leadId: string) => history.leadMessages(leadId),
+  listConversations: (...args: unknown[]) => history.conversations(...args),
+  listMessages: (id: string) => history.threadMessages(id),
   getCall: () => Promise.resolve(null),
 }));
 vi.mock('../views/CallsView', () => ({ OUTCOME_STYLES: {}, duration: () => '' }));
@@ -176,6 +184,10 @@ const requests = () => api.bookingOptions.mock.calls.length;
 
 beforeEach(async () => {
   api.bookingOptions = vi.fn(() => Promise.resolve(OPTIONS));
+  history.calls = vi.fn(() => Promise.resolve([]));
+  history.leadMessages = vi.fn(() => Promise.resolve([]));
+  history.conversations = vi.fn(() => Promise.resolve([]));
+  history.threadMessages = vi.fn(() => Promise.resolve([]));
   app.selectedLeadId = null;
   strict = false;
   await mount();
@@ -266,5 +278,60 @@ describe('LeadDetailModal: booking options', () => {
     await tab('Appointments');
 
     expect(requests()).toBe(afterOpen);
+  });
+});
+
+describe('LeadDetailModal: SMS history', () => {
+  const message = (over: Partial<MessageRow>): MessageRow => ({
+    id: 'm', direction: 'outbound', senderType: 'ai', channel: 'sms', body: '', deliveryStatus: 'delivered',
+    sentAt: null, deliveredAt: null, failedAt: null, createdAt: '2026-10-01T10:00:00.000Z', ...over,
+  });
+
+  it("reads all of the lead's texts in one request — never the thread list, never thread by thread", async () => {
+    // Two threads' messages, as the server returns them: thread by thread,
+    // each oldest first. The modal shows them as one timeline by time sent.
+    history.leadMessages.mockResolvedValueOnce([
+      message({ id: 'a1', body: 'Thread A, first', createdAt: '2026-10-01T10:00:00.000Z', sentAt: '2026-10-01T10:00:05.000Z' }),
+      message({ id: 'a2', body: 'Thread A, reply', direction: 'inbound', senderType: 'lead', createdAt: '2026-10-03T09:00:00.000Z' }),
+      message({ id: 'b1', body: 'Thread B, between', createdAt: '2026-10-02T08:00:00.000Z', deliveryStatus: 'failed' }),
+    ]);
+    await open(lead());
+
+    expect(history.leadMessages.mock.calls).toEqual([[LEAD_ID]]);
+    expect(history.calls.mock.calls).toEqual([[{ leadId: LEAD_ID, limit: 200 }]]);
+    expect(history.conversations).not.toHaveBeenCalled();
+    expect(history.threadMessages).not.toHaveBeenCalled();
+
+    expect(text()).toContain('SMS (3)');
+    await tab('SMS');
+    const shown = text();
+    const order = ['Thread A, first', 'Thread B, between', 'Thread A, reply'].map((b) => shown.indexOf(b));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((x, y) => x - y));
+    expect(shown).toContain('not delivered');
+  });
+
+  it('a lead with no texts shows the empty state', async () => {
+    await open(lead());
+    await tab('SMS');
+
+    expect(text()).toContain('SMS (0)');
+    expect(text()).toContain('No texts with this lead yet.');
+  });
+
+  it('a failed read shows the activity error', async () => {
+    const failure = new Error('history unavailable');
+    history.leadMessages.mockRejectedValueOnce(failure);
+    await open(lead());
+    await tab('SMS');
+
+    expect(text()).toContain(`Could not load activity: ${messageFor(failure)}`);
+  });
+
+  it('a demo lead (no database id) asks for no history at all', async () => {
+    await open(lead({ id: 'lead_1700000000000' }));
+
+    expect(history.leadMessages).not.toHaveBeenCalled();
+    expect(history.calls).not.toHaveBeenCalled();
   });
 });

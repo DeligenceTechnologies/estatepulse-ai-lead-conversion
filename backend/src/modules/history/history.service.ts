@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { AuthContext } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
@@ -101,6 +102,31 @@ const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() 
 
 const fullName = (first: string | null, last: string | null, fallback: string): string =>
   [first, last].filter(Boolean).join(' ').trim() || fallback;
+
+/** One message as both message reads answer it. */
+const toMessageRow = (m: {
+  id: string;
+  direction: string;
+  sender_type: string;
+  channel: string;
+  body: string;
+  delivery_status: string;
+  sent_at: Date | null;
+  delivered_at: Date | null;
+  failed_at: Date | null;
+  created_at: Date;
+}): MessageRow => ({
+  id: m.id,
+  direction: m.direction,
+  senderType: m.sender_type,
+  channel: m.channel,
+  body: m.body,
+  deliveryStatus: m.delivery_status,
+  sentAt: iso(m.sent_at),
+  deliveredAt: iso(m.delivered_at),
+  failedAt: iso(m.failed_at),
+  createdAt: m.created_at.toISOString(),
+});
 
 @Injectable()
 export class HistoryService {
@@ -471,17 +497,52 @@ export class HistoryService {
       take: 500,
     });
 
-    return rows.map((m) => ({
-      id: m.id,
-      direction: m.direction,
-      senderType: m.sender_type,
-      channel: m.channel,
-      body: m.body,
-      deliveryStatus: m.delivery_status,
-      sentAt: iso(m.sent_at),
-      deliveredAt: iso(m.delivered_at),
-      failedAt: iso(m.failed_at),
-      createdAt: m.created_at.toISOString(),
-    }));
+    return rows.map(toMessageRow);
+  }
+
+  /**
+   * Every message in one lead's SMS threads — what the lead detail view shows —
+   * exactly as the thread list plus listMessages per SMS thread return them
+   * together: the lead's threads in the thread list's order (latest activity
+   * first, the same 200 cap), the SMS ones only, each thread's messages oldest
+   * first up to the same 500. ONE statement where the view made 2 + N requests.
+   *
+   * Visibility is the thread list's: the session's organization, and for an
+   * agent only a lead currently assigned to them — leadScope, in SQL; keep the
+   * two in step. A lead the caller cannot see has no threads, so the answer is
+   * an empty list, as the thread list's was.
+   */
+  async listLeadMessages(auth: AuthContext, leadId: string): Promise<MessageRow[]> {
+    const org = auth.organizationId;
+    const rows = await this.prisma.$queryRaw<Parameters<typeof toMessageRow>[0][]>`
+      select m.id, m.direction, m.sender_type, m.channel, m.body, m.delivery_status,
+             m.sent_at, m.delivered_at, m.failed_at, m.created_at
+        from (
+          select c.id, c.channel, row_number() over (order by c.updated_at desc) as position
+            from conversations c
+           where c.organization_id = ${org}::uuid and c.lead_id = ${leadId}::uuid
+                 ${
+                   auth.role === 'owner'
+                     ? Prisma.empty
+                     : Prisma.sql`and exists (
+                         select 1 from lead_assignments la
+                          where la.organization_id = c.organization_id and la.lead_id = c.lead_id
+                            and la.agent_id = ${auth.agentProfileId ?? ''}::uuid and la.is_current
+                       )`
+                 }
+           order by c.updated_at desc
+           limit 200
+        ) t
+        cross join lateral (
+          select * from messages m
+           where m.organization_id = ${org}::uuid and m.conversation_id = t.id
+           order by m.created_at asc
+           limit 500
+        ) m
+       where t.channel = 'sms'
+       order by t.position, m.created_at asc
+    `;
+
+    return rows.map(toMessageRow);
   }
 }

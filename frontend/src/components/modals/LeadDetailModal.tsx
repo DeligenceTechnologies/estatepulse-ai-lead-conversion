@@ -20,8 +20,7 @@ import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi
 import {
   getCall,
   listCalls,
-  listConversations,
-  listMessages,
+  listLeadMessages,
   type CallDetail,
   type CallRow,
   type MessageRow,
@@ -47,15 +46,15 @@ interface LeadActivity {
  */
 async function loadLeadActivity(leadId: string): Promise<LeadActivity> {
   if (!UUID.test(leadId)) return { calls: [], messages: [] };
-  const [calls, conversations] = await Promise.all([
+  const [calls, threadMessages] = await Promise.all([
     listCalls({ leadId, limit: 200 }),
-    listConversations(200, leadId),
+    // All of the lead's SMS threads at once, rather than the thread list and
+    // then one request per thread.
+    listLeadMessages(leadId),
   ]);
-  // The endpoint returns every channel; the SMS tab shows SMS threads only.
-  const threads = conversations.filter((c) => c.channel === 'sms');
-  const messages = (await Promise.all(threads.map((c) => listMessages(c.id))))
-    .flat()
-    .sort((a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt));
+  const messages = threadMessages.sort(
+    (a, b) => Date.parse(a.sentAt ?? a.createdAt) - Date.parse(b.sentAt ?? b.createdAt),
+  );
   return { calls, messages };
 }
 
