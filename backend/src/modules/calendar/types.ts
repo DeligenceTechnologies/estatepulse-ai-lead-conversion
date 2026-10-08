@@ -422,3 +422,39 @@ export interface LeadBookingOptionsDTO {
   eventTypes: Array<{ id: string; name: string; durationMinutes: number; bookingUrl: string }>;
   blocker: LeadBookingBlocker | null;
 }
+
+// ---------------------------------------------------------------------------
+// Calendly Scheduling API (in-call booking)
+// ---------------------------------------------------------------------------
+
+/** `GET /event_type_available_times` — one bookable start time. */
+export interface CalendlyAvailableTime {
+  status: string;
+  invitees_remaining: number;
+  /** UTC ISO. */
+  start_time: string;
+  scheduling_url: string;
+}
+
+/** `POST /invitees` body. */
+export interface CalendlyCreateInviteeBody {
+  event_type: string;
+  /** UTC ISO; must be an open slot at the moment of booking. */
+  start_time: string;
+  invitee: {
+    name: string;
+    email: string;
+    timezone: string;
+    text_reminder_number?: string;
+  };
+  tracking?: Record<string, string>;
+}
+
+/** `POST /invitees` response resource. */
+export interface CalendlyCreatedInvitee {
+  uri: string;
+  /** The scheduled event this booking created. */
+  event: string;
+  cancel_url: string | null;
+  reschedule_url: string | null;
+}

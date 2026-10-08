@@ -13,7 +13,7 @@ import { LeadScoringService } from './lead-scoring.service';
  *   call.hangup   -> completed (if answered) or no_answer; lead 'engaged' after a
  *                    real conversation, 'invalid' on a bad-number hangup cause
  *   call.recording.saved                 -> the audio URL
- *   call.recording.transcription.saved   -> what was said
+ *   call.recording.transcription.saved   -> what was said (+ transcript scoring fallback)
  *   call.conversation_insights.generated -> lead score + temperature
  *
  * The two recording events arrive well after hangup — Telnyx transcribes once
@@ -51,8 +51,12 @@ export class TelnyxWebhookController {
         else if (type === 'call.hangup') await this.activity.onCallHangup(ccid, payload);
         else if (type === 'call.recording.saved')
           await this.activity.onRecordingSaved(ccid, payload);
-        else if (type === 'call.recording.transcription.saved')
+        else if (type === 'call.recording.transcription.saved') {
           await this.activity.onTranscriptionSaved(ccid, payload);
+          // Automatic scoring's safety net: score from the transcript if the
+          // Insight has not scored the call shortly after.
+          await this.scoring.onTranscriptSaved(ccid);
+        }
         else if (type === 'call.conversation_insights.generated')
           await this.scoring.onInsightsGenerated(ccid, payload, {
             signature: req.header('telnyx-signature-ed25519'),

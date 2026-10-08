@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { withBookingSection } from '../modules/calendar/in-call-booking/booking-prompt';
 import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService, type Creds } from './cred-store.service';
 
@@ -71,7 +72,23 @@ const DEFAULT_TEMPLATE = {
   name: 'EstatePulse AI Agent',
   greeting: 'Hi, thanks for reaching out! This is your home-buying assistant. Are you looking to buy a home sometime soon?',
   instructions:
-    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. Qualify inbound home-buyer leads over the phone.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.',
+    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. Qualify inbound home-buyer leads over the phone.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
+};
+
+/**
+ * Telnyx's built-in hangup tool. Without it the assistant has no way to end a
+ * call: it says goodbye and then holds the line open in silence until the
+ * caller gives up or the time limit hits. The description is what the model
+ * reads to decide when to use it, so it carries the rule even for an office
+ * whose own prompt never mentions hanging up.
+ */
+const HANGUP_TOOL = {
+  type: 'hangup',
+  hangup: {
+    description:
+      'End the call. Use it right after saying goodbye — once the conversation is complete, ' +
+      'the caller is not interested, or the caller asks to end the call.',
+  },
 };
 
 /**
@@ -96,6 +113,11 @@ const ASSISTANT_MODELS = [
 
 @Injectable()
 export class AssistantService {
+  private readonly logger = new Logger(AssistantService.name);
+  /** `${orgId}:${assistantId}` keys known to carry the hangup tool in this process. */
+  private readonly hangupReady = new Set<string>();
+  private readonly hangupInflight = new Map<string, Promise<void>>();
+
   constructor(
     private readonly creds: CredStoreService,
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
@@ -136,6 +158,26 @@ export class AssistantService {
     return j.data ?? j;
   }
 
+  /**
+   * While in-call booking is on, its prompt section is part of the prompt no
+   * matter what the editor sends. The AI Settings page holds the prompt it
+   * loaded, so saving after the section was added would otherwise silently
+   * drop it — the tools stay attached but the AI loses its instructions. The
+   * section is managed by the In-call booking switch; turning that off is the
+   * way to remove it.
+   */
+  private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
+    const row = await this.prisma.integrations
+      .findFirst({
+        where: { organization_id: orgId, provider: 'in_call_booking', status: 'active' },
+        select: { metadata: true },
+      })
+      .catch(() => null);
+    const cfg = (row?.metadata ?? null) as { eventTypeName?: string; durationMinutes?: number } | null;
+    if (!cfg?.eventTypeName || !cfg.durationMinutes) return instructions;
+    return withBookingSection(String(instructions), cfg.eventTypeName, cfg.durationMinutes);
+  }
+
   async getAssistant(orgId: string) {
     const c = await this.creds.getCreds(orgId);
     if (!c || !c.apiKey || !c.assistantId) return null;
@@ -146,7 +188,7 @@ export class AssistantService {
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
     const body: any = {};
-    if (patch.instructions != null) body.instructions = patch.instructions;
+    if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
     if (patch.greeting != null) body.greeting = patch.greeting;
     if (patch.model != null) body.model = patch.model;
     if (patch.description != null) body.description = patch.description;
@@ -290,6 +332,8 @@ export class AssistantService {
     // id and shared are both server-owned. The array is a full replacement, so
     // dropping ids cannot orphan or duplicate anything.
     const tools = (owned ?? []).map(({ id: _id, shared: _shared, ...rest }: any) => rest);
+    // A save that leaves the hangup tool out must not be masked by the cache.
+    this.hangupReady.delete(`${orgId}:${c.assistantId}`);
 
     const res = await fetch(`${BASE}/${c.assistantId}`, {
       method: 'PATCH',
@@ -306,6 +350,40 @@ export class AssistantService {
     }
 
     return shape(await this.fetchRaw(orgId));
+  }
+
+  /**
+   * Make sure the org's assistant can end its own calls. Assistants created
+   * before the hangup tool was part of the template — or picked from the
+   * office's existing Telnyx account — get it added alongside whatever tools
+   * they already have.
+   *
+   * Runs before the assistant is attached to a call, at most once per assistant
+   * per process. Never throws: a call must go ahead even if this fails, and a
+   * failure retries on the next call.
+   */
+  async ensureHangupTool(orgId: string): Promise<void> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return;
+
+    const key = `${orgId}:${c.assistantId}`;
+    if (this.hangupReady.has(key)) return;
+    const running = this.hangupInflight.get(key);
+    if (running) return running;
+
+    const run = (async () => {
+      const cur = await this.fetchRaw(orgId);
+      const tools = (cur.tools ?? []) as any[];
+      if (!tools.some((t) => t?.type === 'hangup')) {
+        await this.setTools(orgId, [...tools.filter((t) => !t?.shared), HANGUP_TOOL]);
+        this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
+      }
+      this.hangupReady.add(key);
+    })()
+      .catch((e) => this.logger.warn(`hangup tool setup for org ${orgId}: ${(e as Error).message}`))
+      .finally(() => this.hangupInflight.delete(key));
+    this.hangupInflight.set(key, run);
+    return run;
   }
 
   /**
@@ -383,10 +461,18 @@ export class AssistantService {
         model,
         instructions: overrides.instructions || DEFAULT_TEMPLATE.instructions,
         greeting,
+        tools: [HANGUP_TOOL],
       };
       const res = await fetch(BASE, { method: 'POST', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.ok) {
-        const a = ((await res.json()) as any).data ?? {};
+        // Create answers with the assistant itself, not wrapped in `data` (the
+        // OpenAPI schema for POST /ai/assistants has id/name/model at the top
+        // level). Reading only `.data` saved an empty id: the assistant existed
+        // in Telnyx but was never linked to the office, so every retry made
+        // another orphan. Accept both shapes, as the attach path already does.
+        const j = (await res.json()) as any;
+        const a = j?.data ?? j ?? {};
+        if (!a.id) throw new Error('Telnyx created the assistant but returned no id; attach it by id instead.');
         await this.creds.saveCreds(orgId, { assistantId: a.id });
         return shape(a);
       }
@@ -397,9 +483,16 @@ export class AssistantService {
     throw new Error(lastErr);
   }
 
-  async setAssistantId(orgId: string, assistantId: string) {
+  async setAssistantId(orgId: string, pasted: string) {
     const c = await this.requireCreds(orgId);
-    const res = await fetch(`${BASE}/${assistantId}`, { headers: authHeaders(c.apiKey) });
+    // Pasted ids arrive with whatever came along from where they were copied —
+    // backticks, quotes, zero-width characters — and any of those in the URL
+    // path is a 404 for an assistant that exists. Take just the id itself.
+    const assistantId = /assistant-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(pasted ?? '')?.[0];
+    if (!assistantId) {
+      throw new Error('That does not look like a Telnyx assistant id (assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).');
+    }
+    const res = await fetch(`${BASE}/${encodeURIComponent(assistantId)}`, { headers: authHeaders(c.apiKey) });
     if (!res.ok) throw new Error(`Could not find that assistant in your account (${res.status})`);
     await this.creds.saveCreds(orgId, { assistantId });
     const j = (await res.json()) as any;

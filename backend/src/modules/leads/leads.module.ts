@@ -15,5 +15,7 @@ import { OwnerDashboardController } from './owner-dashboard.controller';
   imports: [PrismaModule, AuthModule],
   controllers: [LeadsController, LeadAssignmentController, OwnerDashboardController],
   providers: [LeadAssignmentService, OwnerGuard],
+  // In-call booking (CalendarModule) assigns the lead to the agent Calendly picked.
+  exports: [LeadAssignmentService],
 })
 export class LeadsModule {}

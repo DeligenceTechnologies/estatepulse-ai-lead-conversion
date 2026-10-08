@@ -10,6 +10,7 @@ import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter'
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CalendarModule } from './calendar.module';
+import { EventsModule } from '../events/events.module';
 
 /**
  * Integration suite for GET /api/appointments — the owner's appointment list —
@@ -106,6 +107,7 @@ before(async () => {
       ConfigModule.forRoot({ isGlobal: true, validate: (raw) => ({ ...raw, ...envSchema.parse(raw) }) }),
       PrismaModule,
       AuthModule,
+      EventsModule,
       CalendarModule,
     ],
   }).compile();

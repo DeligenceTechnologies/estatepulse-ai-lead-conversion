@@ -10,6 +10,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentsModule } from '../agents/agents.module';
 import { CalendarModule } from './calendar.module';
+import { EventsModule } from '../events/events.module';
 
 /**
  * Integration suite for GET /api/leads/:leadId/appointments — the lead
@@ -120,6 +121,7 @@ before(async () => {
       ConfigModule.forRoot({ isGlobal: true, validate: (raw) => ({ ...raw, ...envSchema.parse(raw) }) }),
       PrismaModule,
       AuthModule,
+      EventsModule,
       AgentsModule,
       CalendarModule,
     ],

@@ -10,6 +10,7 @@ import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter'
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CalendarModule } from './calendar.module';
+import { EventsModule } from '../events/events.module';
 import { leadBookingUrl } from './lead-booking-link';
 import { CalendarProviderRegistry } from './providers/provider.registry';
 import type { CalendarProvider, NormalizedEventType } from './providers/types';
@@ -161,6 +162,7 @@ before(async () => {
       ConfigModule.forRoot({ isGlobal: true, validate: (raw) => ({ ...raw, ...envSchema.parse(raw) }) }),
       PrismaModule,
       AuthModule,
+      EventsModule,
       CalendarModule,
     ],
   }).compile();

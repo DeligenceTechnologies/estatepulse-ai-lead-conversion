@@ -60,8 +60,31 @@ describe('LeadScoringService', () => {
     expect(callWrite.data.extracted_intel.qualification).toMatchObject({ source: 'telnyx_insights', score: 80, temperature: 'hot' });
     expect(callWrite.data.ai_summary).toBe('Ready to buy in Austin.');
 
-    expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { score: 80 } });
+    expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: expect.objectContaining({ score: 80 }) });
     expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.stringContaining('HOT — 80'));
+  });
+
+  it("fills the lead's budget, location, bedrooms and financing from the call", async () => {
+    const { svc, prisma } = setup();
+    await svc.onInsightsGenerated(
+      'v3:ccid',
+      insightPayload({ ...hotFacts, budget_min: 150000, budget_max: 220000, location: 'California', bedrooms: 4, financing: 'pre_approved' }),
+      unsigned,
+    );
+    expect(prisma.leads.update.mock.calls[0][0].data).toMatchObject({
+      min_budget: 150000,
+      max_budget: 220000,
+      location: 'California',
+      bedrooms: 4,
+      financing_status: 'Pre-approved',
+      timeline: 'Within 30 days',
+    });
+  });
+
+  it('a late result from an older call does not overwrite the lead details either', async () => {
+    const { svc, prisma } = setup({ latestCallId: 'call-2' });
+    await svc.onInsightsGenerated('v3:ccid', insightPayload({ ...hotFacts, location: 'Old City' }), unsigned);
+    expect(prisma.leads.update).not.toHaveBeenCalled();
   });
 
   it('ignores Insight results that are not ours', async () => {
@@ -142,5 +165,36 @@ describe('LeadScoringService', () => {
     await expect(svc.classifyCall('other-org', CALL.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     prisma.voice_calls.findFirst.mockResolvedValueOnce({ ...CALL, transcript: '  ' });
     await expect(svc.classifyCall(ORG, CALL.id)).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  describe('automatic scoring from the transcript (safety net)', () => {
+    it('scores an unscored call from its transcript after the wait — once, however many transcript events arrive', async () => {
+      vi.useFakeTimers();
+      try {
+        const { svc, insights, engine } = setup();
+        await svc.onTranscriptSaved('v3:ccid', 1000);
+        await svc.onTranscriptSaved('v3:ccid', 1000);
+        expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(insights.extractFromTranscript).toHaveBeenCalledTimes(1);
+        expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.any(String));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves a call alone once the Insight (or anyone) has scored it', async () => {
+      const { svc, prisma, insights } = setup();
+      prisma.voice_calls.findFirst.mockResolvedValue({ ...CALL, extracted_intel: { qualification: { score: 80 } } });
+      expect(await svc.scoreIfUnscored(ORG, CALL.id)).toBeNull();
+      expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+    });
+
+    it('does nothing without a transcript', async () => {
+      const { svc, prisma, insights } = setup();
+      prisma.voice_calls.findFirst.mockResolvedValue({ ...CALL, transcript: null });
+      expect(await svc.scoreIfUnscored(ORG, CALL.id)).toBeNull();
+      expect(insights.extractFromTranscript).not.toHaveBeenCalled();
+    });
   });
 });

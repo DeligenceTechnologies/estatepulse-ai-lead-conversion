@@ -322,13 +322,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          <button
+          {/* <button
             onClick={onOpenNewLead}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add New Lead</span>
-          </button>
+          </button> */}
         </div>
       </div>
 
