@@ -265,14 +265,19 @@ function build(
     // Tagged-template calls, so every value arrives parameterised in `values`,
     // never interpolated into the SQL text.
     $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
-      // list()'s roster statement: members of one organization, each joined to
-      // their user and LEFT joined to their profile in that same organization,
+      // The roster statement: members of one organization — narrowed to one
+      // user by the optional `and m.user_id` fragment — each joined to their
+      // user and LEFT joined to their profile in that same organization,
       // ordered role desc, created_at asc, id asc — answered as Postgres would.
       if (strings.join('?').includes('from organization_members m')) {
         const organizationId = values[0] as string;
-        wheres.push({ op: 'roster.$queryRaw', where: { organization_id: organizationId } });
+        const userId = (values[1] as Prisma.Sql).values[0] as string | undefined;
+        wheres.push({
+          op: 'roster.$queryRaw',
+          where: { organization_id: organizationId, ...(userId === undefined ? {} : { user_id: userId }) },
+        });
         return db.organization_members
-          .filter((m) => m.organization_id === organizationId)
+          .filter((m) => m.organization_id === organizationId && (userId === undefined || m.user_id === userId))
           .sort(
             (a, b) =>
               b.role.localeCompare(a.role) ||
@@ -283,6 +288,7 @@ function build(
             const u = userOf(m.user_id);
             const p = db.agent_profiles.find((r) => r.user_id === m.user_id && r.organization_id === organizationId);
             return {
+              id: m.id,
               role: m.role,
               status: m.status,
               joined_at: m.joined_at,
@@ -707,7 +713,7 @@ describe('AgentsService.setStatus', () => {
 
     await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
 
-    const lookup = wheres.find((w) => w.op === 'organization_members.findFirst')!;
+    const lookup = wheres.find((w) => w.op === 'roster.$queryRaw')!;
     expect(lookup.where['organization_id']).toBe(ORG_A);
     expect(lookup.where['user_id']).toBe(AGENT_A);
   });
@@ -920,8 +926,11 @@ describe('AgentsService.updateProfile', () => {
 
     await service.updateProfile(ORG_A, OWNER_A, agentId, { title: 'Buyer Agent' });
 
-    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
-      expect(read.where['organization_id']).toBe(ORG_A);
+    const reads = wheres.filter((w) => w.op === 'roster.$queryRaw');
+    // The read before the write and the re-read after it.
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(read.where).toEqual({ organization_id: ORG_A, user_id: agentId });
     }
   });
 

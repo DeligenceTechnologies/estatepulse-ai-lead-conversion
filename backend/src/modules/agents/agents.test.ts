@@ -942,6 +942,135 @@ test('a team signup (or an older client sending nothing) creates no profile', as
   assert.equal(bad.status, 400, bad.text);
 });
 
+// --- what an update answers ---------------------------------------------------
+
+/** The member's row exactly as a roster reload would show it. */
+async function rosterRow(token: string, userId: string): Promise<Record<string, unknown> | undefined> {
+  const res = await call('GET', '/api/agents', { token });
+  assert.equal(res.status, 200, res.text);
+  return (res.body as unknown as Array<Record<string, unknown>>).find((m) => m['id'] === userId);
+}
+
+test("an edit, a suspend and a reinstatement each answer the roster's own row, counts included", async () => {
+  // An office calendar the agent is linked to and two current leads (plus one
+  // retired), so calendarLinked and activeLeads are real values, not defaults.
+  const created = await call('POST', '/api/agents', {
+    token: ownerA.token,
+    body: { email: emailFor('answers'), password: PASSWORD, firstName: 'Ada', lastName: 'Answer' },
+  });
+  assert.equal(created.status, 201, created.text);
+  const userId = (created.body as unknown as Member).id;
+  createdUserIds.push(userId);
+
+  const profile = await prisma.agent_profiles.update({
+    where: { id: (created.body as unknown as { profileId: string }).profileId },
+    data: { calendly_user_uri: `https://api.calendly.com/users/${RUN}` },
+  });
+  const connection = await prisma.calendar_connections.create({
+    data: { organization_id: ownerA.orgId, provider: 'calendly', status: 'active' },
+  });
+  const leadIds: string[] = [];
+  try {
+    for (const isCurrent of [true, true, false]) {
+      const lead = await prisma.leads.create({ data: { organization_id: ownerA.orgId, status: 'new' } });
+      leadIds.push(lead.id);
+      await prisma.lead_assignments.create({
+        data: {
+          organization_id: ownerA.orgId,
+          lead_id: lead.id,
+          agent_id: profile.id,
+          assignment_type: 'manual',
+          is_current: isCurrent,
+        },
+      });
+    }
+
+    const edit = await call('PATCH', `/api/agents/${userId}`, {
+      token: ownerA.token,
+      body: { maxActiveLeads: 3, title: 'Closer' },
+    });
+    assert.equal(edit.status, 200, edit.text);
+    assert.deepEqual(edit.body, await rosterRow(ownerA.token, userId));
+    assert.equal(edit.body['maxActiveLeads'], 3);
+    assert.equal(edit.body['title'], 'Closer');
+    assert.equal(edit.body['activeLeads'], 2);
+    assert.equal(edit.body['calendarLinked'], true);
+
+    for (const [status, action] of [
+      ['suspended', 'member.suspended'],
+      ['active', 'member.reactivated'],
+    ] as const) {
+      const res = await call('PATCH', `/api/agents/${userId}`, { token: ownerA.token, body: { status } });
+      assert.equal(res.status, 200, res.text);
+      assert.deepEqual(res.body, await rosterRow(ownerA.token, userId));
+      assert.equal(res.body['status'], status);
+      assert.equal(res.body['activeLeads'], 2);
+
+      const [entry] = await prisma.audit_logs.findMany({
+        where: { organization_id: ownerA.orgId, entity_id: userId, action },
+        select: { actor_type: true, actor_id: true, entity_type: true, payload: true },
+      });
+      assert.deepEqual(entry, {
+        actor_type: 'user',
+        actor_id: ownerA.userId,
+        entity_type: 'member',
+        payload: { from: status === 'suspended' ? 'active' : 'suspended', to: status },
+      });
+    }
+  } finally {
+    // Deleting the leads takes their assignments with them, which is what lets
+    // after() remove this agent's profile.
+    await prisma.leads.deleteMany({ where: { id: { in: leadIds } } });
+    await prisma.calendar_connections.delete({ where: { id: connection.id } });
+  }
+});
+
+test('an agent whose profile row is missing gets one from their first edit', async () => {
+  // A membership with no agent_profiles row, as rows predating create() have.
+  const user = await prisma.users.create({
+    data: {
+      email: emailFor('no-profile'),
+      first_name: 'Pat',
+      last_name: 'Legacy',
+      phone: '512-555-0199',
+      password_hash: await bcrypt.hash(PASSWORD, 4),
+    },
+  });
+  createdUserIds.push(user.id);
+  await prisma.organization_members.create({
+    data: { organization_id: ownerA.orgId, user_id: user.id, role: 'agent', status: 'active' },
+  });
+
+  const res = await call('PATCH', `/api/agents/${user.id}`, {
+    token: ownerA.token,
+    body: { title: 'Rejoined', maxActiveLeads: 4 },
+  });
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(res.body, await rosterRow(ownerA.token, user.id));
+
+  const profile = await prisma.agent_profiles.findFirst({
+    where: { organization_id: ownerA.orgId, user_id: user.id },
+  });
+  assert.ok(profile, 'no profile was backfilled');
+  assert.equal(res.body['hasProfile'], true);
+  assert.equal(res.body['profileId'], profile.id);
+  assert.equal(res.body['title'], 'Rejoined');
+  assert.equal(res.body['maxActiveLeads'], 4);
+  assert.equal(res.body['activeLeads'], 0);
+  // Everything not supplied comes from the user row or the column defaults.
+  assert.equal(profile.display_name, 'Pat Legacy');
+  assert.equal(profile.email, emailFor('no-profile'));
+  assert.equal(profile.phone, '512-555-0199');
+  assert.equal(profile.timezone, 'America/Chicago');
+  assert.equal(profile.routing_enabled, true);
+
+  const entries = await prisma.audit_logs.findMany({
+    where: { organization_id: ownerA.orgId, entity_id: user.id, action: 'member.updated' },
+    select: { actor_id: true, payload: true },
+  });
+  assert.deepEqual(entries, [{ actor_id: ownerA.userId, payload: { changed: ['title', 'maxActiveLeads'] } }]);
+});
+
 test('no response in this suite contained a password or a hash', () => {
   for (const body of allResponseBodies) {
     assert.ok(!body.includes(PASSWORD), `a response echoed the password: ${body}`);
