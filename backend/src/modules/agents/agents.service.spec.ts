@@ -159,22 +159,6 @@ function build(
       },
     },
     organization_members: {
-      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-        wheres.push({ op: 'organization_members.findFirst', where });
-        const m = db.organization_members.find(
-          (r) => r.organization_id === where['organization_id'] && r.user_id === where['user_id'],
-        );
-        return m
-          ? {
-              id: m.id,
-              role: m.role,
-              status: m.status,
-              joined_at: m.joined_at,
-              created_at: m.created_at,
-              users: publicUser(userOf(m.user_id), where['organization_id'] as string),
-            }
-          : null;
-      },
       update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         wheres.push({ op: 'organization_members.update', where });
         const m = db.organization_members.find((r) => r.id === where['id'])!;
@@ -1303,8 +1287,11 @@ describe('AgentsService.setTakingLeads', () => {
 
     expect(db.agent_profiles).toHaveLength(1);
     expect(db.agent_profiles[0]).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
-    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
-      expect(read.where).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
+    const reads = wheres.filter((w) => w.op === 'roster.$queryRaw');
+    // The read before the write and the re-read after it.
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(read.where).toEqual({ organization_id: ORG_B, user_id: OWNER_B });
     }
   });
 

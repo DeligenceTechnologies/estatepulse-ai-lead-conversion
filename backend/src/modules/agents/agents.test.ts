@@ -893,6 +893,109 @@ test('turning "I also take leads" off keeps the profile and is idempotent', asyn
   assert.equal(audits.length, 1);
 });
 
+test('turning it back on resumes the same profile; each answer is the roster row, leads and cap untouched', async () => {
+  const profile = await prisma.agent_profiles.findFirstOrThrow({
+    where: { organization_id: ownerB.orgId, user_id: ownerB.userId },
+  });
+  // At their cap, with two current leads (and one retired) and a linked office
+  // calendar: the switch is not a capacity rule, and must leave all of it be.
+  await prisma.agent_profiles.update({
+    where: { id: profile.id },
+    data: { max_active_leads: 2, calendly_user_uri: `https://api.calendly.com/users/owner-${RUN}` },
+  });
+  const connection = await prisma.calendar_connections.create({
+    data: { organization_id: ownerB.orgId, provider: 'calendly', status: 'active' },
+  });
+  const leadIds: string[] = [];
+  try {
+    for (const isCurrent of [true, true, false]) {
+      const lead = await prisma.leads.create({ data: { organization_id: ownerB.orgId, status: 'new' } });
+      leadIds.push(lead.id);
+      await prisma.lead_assignments.create({
+        data: {
+          organization_id: ownerB.orgId,
+          lead_id: lead.id,
+          agent_id: profile.id,
+          assignment_type: 'manual',
+          is_current: isCurrent,
+        },
+      });
+    }
+
+    for (const enabled of [true, false]) {
+      const res = await call('PUT', '/api/agents/me/taking-leads', { token: ownerB.token, body: { enabled } });
+      assert.equal(res.status, 200, res.text);
+      assert.deepEqual(res.body, await rosterRow(ownerB.token, ownerB.userId));
+      assert.equal(res.body['takingLeads'], enabled);
+      assert.equal(res.body['profileId'], profile.id);
+      assert.equal(res.body['maxActiveLeads'], 2);
+      assert.equal(res.body['activeLeads'], 2);
+      assert.equal(res.body['calendarLinked'], true);
+    }
+
+    const after = await prisma.agent_profiles.findMany({ where: { user_id: ownerB.userId } });
+    assert.deepEqual(
+      after.map((p) => [p.id, p.organization_id, p.routing_enabled]),
+      [[profile.id, ownerB.orgId, false]],
+    );
+    assert.equal(await prisma.lead_assignments.count({ where: { agent_id: profile.id, is_current: true } }), 2);
+
+    // Every switch this owner has made, in order — and none for the repeat.
+    const entries = await prisma.audit_logs.findMany({
+      where: { organization_id: ownerB.orgId, entity_id: ownerB.userId, action: { startsWith: 'member.routing_' } },
+      orderBy: { created_at: 'asc' },
+      select: { actor_type: true, actor_id: true, action: true, entity_type: true, payload: true },
+    });
+    const entry = (action: string, from: boolean, to: boolean, profileCreated: boolean) => ({
+      actor_type: 'user',
+      actor_id: ownerB.userId,
+      action,
+      entity_type: 'member',
+      payload: { from, to, profileCreated },
+    });
+    assert.deepEqual(entries, [
+      entry('member.routing_enabled', false, true, true),
+      entry('member.routing_disabled', true, false, false),
+      entry('member.routing_enabled', false, true, false),
+      entry('member.routing_disabled', true, false, false),
+    ]);
+  } finally {
+    // Deleting the leads takes their assignments with them, which is what lets
+    // after() remove this owner's profile.
+    await prisma.leads.deleteMany({ where: { id: { in: leadIds } } });
+    await prisma.calendar_connections.delete({ where: { id: connection.id } });
+  }
+});
+
+test('a double-click on "I also take leads" makes one profile and one audit row, and every click answers the same', async () => {
+  const owner = await signupOwner('double-click', `Agents Test Double ${RUN}`);
+
+  const clicks = await Promise.all(
+    [0, 1, 2].map(() => call('PUT', '/api/agents/me/taking-leads', { token: owner.token, body: { enabled: true } })),
+  );
+  for (const res of clicks) {
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.text, clicks[0]!.text);
+  }
+  assert.deepEqual(clicks[0]!.body, await rosterRow(owner.token, owner.userId));
+  assert.equal(clicks[0]!.body['takingLeads'], true);
+
+  const profiles = await prisma.agent_profiles.findMany({ where: { user_id: owner.userId } });
+  assert.deepEqual(
+    profiles.map((p) => [p.id, p.organization_id, p.routing_enabled]),
+    [[clicks[0]!.body['profileId'], owner.orgId, true]],
+  );
+  const entries = await prisma.audit_logs.findMany({
+    where: { organization_id: owner.orgId, entity_id: owner.userId, action: { startsWith: 'member.routing_' } },
+    select: { action: true, payload: true },
+  });
+  assert.deepEqual(entries, [{ action: 'member.routing_enabled', payload: { from: false, to: true, profileCreated: true } }]);
+
+  // Another organization's roster never sees it.
+  const other = await call('GET', '/api/agents', { token: ownerA.token });
+  assert.ok(!(other.body as unknown as Member[]).some((m) => m.id === owner.userId));
+});
+
 test('a "Just me" signup starts the owner with an agent profile', async () => {
   const res = await call('POST', '/api/auth/signup', {
     body: {

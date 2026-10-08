@@ -21,61 +21,22 @@ const DEFAULT_TIMEZONE = 'America/Chicago';
 
 /**
  * The one shape the roster is read in, so every roster answer carries identical
- * data. setTakingLeads reads it through Prisma; list(), setStatus and the edits
- * read the same columns in one statement — see rosterRows(). Columns are named
- * individually and never spread:
- * password_hash lives on users, and a `select: true` here would ship it.
+ * data — see rosterRows(), the only place it is read. Columns are named
+ * individually and never spread: password_hash lives on users, and a `u.*`
+ * would ship it.
  *
- * The two counts come back as part of this single query rather than as follow-up
- * round trips. Both tables are real and both are empty today — nothing assigns
- * leads and nothing connects calendars yet — so the honest answer is 0/false and
- * it starts being right on its own the day those features land.
+ * agent_profiles is the member's profile in THIS organization only: a user
+ * could in principle hold one in another tenant, and that one must not be read.
+ * Its id is there so an edit can address the row it just read by primary key.
+ *
+ * calendly_user_uri / cal_user_id are NOT a count of calendar_connections. The
+ * calendar belongs to the organization now, so the rows that still carry an
+ * agent_id are the RETIRED per-agent connections — counting them would report
+ * "calendar connected" for anyone who ever connected one, forever. What is true
+ * per agent is whether they are on the office's scheduling team, and that is
+ * one of these two columns, picked by the provider the office is on — see
+ * toMemberDTO.
  */
-const memberSelect = (organizationId: string) =>
-  ({
-    role: true,
-    status: true,
-    joined_at: true,
-    created_at: true,
-    users: {
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        phone: true,
-        // A list relation scoped to this organization: a user could in principle
-        // hold a profile in another tenant, and that one must not be read here.
-        agent_profiles: {
-          where: { organization_id: organizationId },
-          select: {
-            // The profile's own id, so an edit can address the row it just read
-            // by primary key instead of re-finding it.
-            id: true,
-            title: true,
-            timezone: true,
-            max_active_leads: true,
-            routing_enabled: true,
-            // NOT a count of calendar_connections. The calendar belongs to the
-            // organization now, so the rows that still carry an agent_id are
-            // the RETIRED per-agent connections — counting them would report
-            // "calendar connected" for anyone who ever connected one, forever.
-            // What is true per agent is whether they are on the office's
-            // scheduling team, and that is one of these two columns, picked by
-            // the provider the office is on — see toMemberDTO.
-            calendly_user_uri: true,
-            cal_user_id: true,
-            _count: {
-              select: {
-                lead_assignments: { where: { is_current: true } },
-              },
-            },
-          },
-        },
-      },
-    },
-  }) satisfies Prisma.organization_membersSelect;
-
 type MemberRow = {
   role: string;
   status: string;
@@ -181,15 +142,14 @@ export class AgentsService {
   }
 
   /**
-   * memberSelect's rows for a whole organization — or, given a userId, for that
+   * The roster's rows for a whole organization — or, given a userId, for that
    * one member of it — in ONE statement.
    *
    * Through Prisma the nested users and agent_profiles relations are each a
    * further sequential query — about 145 ms apiece from a distant region — on
-   * the roster every owner screen loads, and twice on every agent edit. Same
-   * columns, same order, same count; the rows come back in MemberRow's shape so
-   * toMemberDTO derives every field exactly as for the other roster reads, plus
-   * the membership's own id for setStatus to update by. Keep the two in step.
+   * the roster every owner screen loads, and twice on every agent edit or
+   * taking-leads switch. The rows come back in MemberRow's shape for
+   * toMemberDTO, plus the membership's own id for setStatus to update by.
    *
    * No duplicate members: organization_members and agent_profiles are both
    * unique on (organization_id, user_id), so each member joins at most one
@@ -753,11 +713,7 @@ export class AgentsService {
     callerUserId: string,
     enabled: boolean,
   ): Promise<OrganizationMemberDTO> {
-    const readSelf = () =>
-      this.prisma.organization_members.findFirst({
-        where: { organization_id: organizationId, user_id: callerUserId },
-        select: memberSelect(organizationId),
-      });
+    const readSelf = async () => (await this.rosterRows(organizationId, callerUserId))[0];
 
     const [ctx, member] = await Promise.all([this.rosterContext(organizationId), readSelf()]);
 
