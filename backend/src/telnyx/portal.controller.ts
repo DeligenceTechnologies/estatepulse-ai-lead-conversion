@@ -55,8 +55,18 @@ const OUTCOME_LABELS: Partial<Record<string, string>> = {
   [LeadStatus.CLOSED]: 'Closed',
 };
 
+/**
+ * Where the lead came from, as the pipeline badges it (LeadsView's sourceLabel
+ * on the frontend): the provider for a form we connected through its API, the
+ * transport for a URL the customer pasted, 'manual' when there is no source.
+ */
+function sourceLabel(s: { source_type: string; provider: string; connection_method: string } | undefined) {
+  if (!s) return 'manual';
+  return s.connection_method.toUpperCase() === 'API' && s.provider ? s.provider.toLowerCase() : s.source_type;
+}
+
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
-function mapLead(r: any) {
+function mapLead(r: any, source: string) {
   return {
     id: r.id,
     organizationId: r.organization_id,
@@ -65,7 +75,7 @@ function mapLead(r: any) {
     lastName: r.last_name ?? '',
     email: r.email ?? '',
     phone: r.phone ?? '',
-    source: 'Website',
+    source,
     status: normalizeLeadStatus(r.status, !!r.dnc_status),
     leadType: 'buyer',
     preferredLocation: r.location ?? '',
@@ -181,7 +191,14 @@ export class PortalLeadsController {
 
   @Get()
   async list(@OrgId() orgId: string) {
-    const rows = await this.prisma.leads.findMany({
+    // The org's sources, read alongside the leads rather than as a relation
+    // (a second round trip after it). Only this org's sources are in the map,
+    // so a lead can never be labelled with another organization's source.
+    const sourcesP = this.prisma.lead_sources.findMany({
+      where: { organization_id: orgId },
+      select: { id: true, source_type: true, provider: true, connection_method: true },
+    });
+    const rowsP = this.prisma.leads.findMany({
       where: { organization_id: orgId },
       orderBy: { created_at: 'desc' },
       take: 500,
@@ -191,6 +208,7 @@ export class PortalLeadsController {
       select: {
         id: true,
         organization_id: true,
+        lead_source_id: true,
         takeover_user_id: true,
         first_name: true,
         last_name: true,
@@ -214,7 +232,9 @@ export class PortalLeadsController {
         motivation: true,
       },
     });
-    return { leads: rows.map(mapLead) };
+    const [sources, rows] = await Promise.all([sourcesP, rowsP]);
+    const byId = new Map(sources.map((s) => [s.id, s]));
+    return { leads: rows.map((r) => mapLead(r, sourceLabel(byId.get(r.lead_source_id ?? '')))) };
   }
 
   /** Where is this lead in the journey: which strategy step, with what real outcome? */

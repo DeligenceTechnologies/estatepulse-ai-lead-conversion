@@ -221,9 +221,14 @@ async function signedInAgent(orgId: string, tag: string) {
   return { userId: user.id, profileId: profile.id, token: login.body.token as string };
 }
 
-async function leadSource(orgId: string, code: string, sourceType: string): Promise<string> {
+async function leadSource(
+  orgId: string,
+  code: string,
+  sourceType: string,
+  extra: { provider?: string; connection_method?: string } = {},
+): Promise<string> {
   const row = await prisma.lead_sources.create({
-    data: { organization_id: orgId, name: code, code: `${code}-${RUN}`, source_type: sourceType },
+    data: { organization_id: orgId, name: code, code: `${code}-${RUN}`, source_type: sourceType, ...extra },
     select: { id: true },
   });
   createdSourceIds.push(row.id);
@@ -300,8 +305,9 @@ test("list: every lead in the caller's organization, newest first, each legacy f
     updated_at: new Date('2026-07-01T00:00:00.000Z'),
   });
 
-  // The legacy constants every lead carries, whatever its source.
-  const fixed = { source: 'Website', leadType: 'buyer', propertyType: '', preapprovalStatus: false };
+  // The legacy constants every lead carries. Source is not one of them: it is
+  // the lead's own (see the next test).
+  const fixed = { leadType: 'buyer', propertyType: '', preapprovalStatus: false };
   const expected = JSON.stringify({
     leads: [
       {
@@ -313,7 +319,7 @@ test("list: every lead in the caller's organization, newest first, each legacy f
         lastName: 'Buyer',
         email: 'bea@example.invalid',
         phone: '+15125550123',
-        source: fixed.source,
+        source: 'website',
         status: 'qualified',
         leadType: fixed.leadType,
         preferredLocation: 'Austin, TX — Zilker',
@@ -336,11 +342,11 @@ test("list: every lead in the caller's organization, newest first, each legacy f
       },
       ...(
         [
-          [bare, '', 'appointment_booked', 'pending', false, false, '2026-07-03T00:00:00.000Z'],
-          [optedOut, 'Otto', 'dnc', 'pending', true, false, '2026-07-02T00:00:00.000Z'],
-          [gaveUp, 'Gail', 'not_interested', 'revoked', false, true, '2026-07-01T00:00:00.000Z'],
+          [bare, '', 'zillow', 'appointment_booked', 'pending', false, false, '2026-07-03T00:00:00.000Z'],
+          [optedOut, 'Otto', 'manual', 'dnc', 'pending', true, false, '2026-07-02T00:00:00.000Z'],
+          [gaveUp, 'Gail', 'manual', 'not_interested', 'revoked', false, true, '2026-07-01T00:00:00.000Z'],
         ] as const
-      ).map(([id, firstName, status, consentStatus, dncStatus, automationPaused, at]) => ({
+      ).map(([id, firstName, source, status, consentStatus, dncStatus, automationPaused, at]) => ({
         id,
         organizationId: owner.orgId,
         assignedAgentId: '',
@@ -348,7 +354,7 @@ test("list: every lead in the caller's organization, newest first, each legacy f
         lastName: '',
         email: '',
         phone: '',
-        source: fixed.source,
+        source,
         status,
         leadType: fixed.leadType,
         preferredLocation: '',
@@ -380,6 +386,30 @@ test("list: every lead in the caller's organization, newest first, each legacy f
   const asAgent = await call('/api/leads', agent.token);
   assert.equal(asAgent.status, 200, asAgent.text);
   assert.equal(asAgent.text, expected);
+});
+
+// Regression: every lead used to read source 'Website', whatever it came from,
+// and the lead detail modal showed that instead of the pipeline's badge.
+test('list: each lead carries its own source, labelled as the pipeline badges it', async () => {
+  const owner = await signupOwner('list-sources');
+  const pasted = await leadSource(owner.orgId, 'pasted', 'webhook');
+  const viaApi = await leadSource(owner.orgId, 'via-api', 'webhook', { provider: 'TALLY', connection_method: 'API' });
+  const foreign = await leadSource(ownerB.orgId, 'foreign', 'website');
+
+  const leads = {
+    [await lead({ organization_id: owner.orgId, lead_source_id: pasted })]: 'webhook',
+    [await lead({ organization_id: owner.orgId, lead_source_id: viaApi })]: 'tally',
+    [await lead({ organization_id: owner.orgId })]: 'manual',
+    // Another organization's source never labels this organization's lead.
+    [await lead({ organization_id: owner.orgId, lead_source_id: foreign })]: 'manual',
+  };
+
+  const res = await call('/api/leads', owner.token);
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(
+    Object.fromEntries(res.body.leads.map((l: { id: string; source: string }) => [l.id, l.source])),
+    leads,
+  );
 });
 
 test('list: an organization with no leads is an empty list', async () => {
