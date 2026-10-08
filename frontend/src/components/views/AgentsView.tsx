@@ -1,492 +1,532 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Briefcase,
-  Calendar,
-  Clock,
-  GitBranch,
+  ArrowDown,
+  ArrowUp,
+  CircleDot,
+  CalendarArrowDown,
+  CalendarArrowUp,
+  CalendarDays,
   Loader2,
-  Mail,
   Pencil,
   Phone,
   Plus,
-  Radio,
-  RefreshCw,
+  Search,
   ShieldCheck,
-  UserMinus,
-  UserCheck,
-  UserPlus,
+  Trash2,
   Users,
+  X,
 } from 'lucide-react';
 import { ApiError, messageFor } from '../../lib/api';
-import { useAuth } from '../../context/AuthContext';
+import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
 import {
+  deleteMember,
   listMembers,
-  memberInitials,
-  memberName,
-  setAgentStatus,
-  setTakingLeads,
-  type OrganizationMember,
-} from '../../utils/agentsApi';
-import { AddAgentModal } from '../modals/AddAgentModal';
-import { AgentCalendarPanel } from '../agents/AgentCalendarPanel';
-import { EditAgentModal } from '../modals/EditAgentModal';
+  listRoles,
+  type Paginated,
+  type Role,
+  type TeamMember,
+  type UserStatus,
+} from '../../utils/usersApi';
+import { FilterDropdown } from '../common/FilterDropdown';
+import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
+import { MemberFormModal } from '../modals/MemberFormModal';
 
-const STATUS_STYLES: Record<string, string> = {
-  active: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-  invited: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
-  suspended: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+const PAGE_SIZES = PAGE_SIZE_OPTIONS;
+const PAGE_SIZE_KEY = 'ep_agents_page_size';
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** The list sorts by join date only. */
+type SortOrder = 'asc' | 'desc';
+
+/** Spelled out in words, not just an arrow: which end of the timeline comes first. */
+const SORT_OPTIONS: { value: SortOrder; label: string; short: string; icon: React.ReactNode }[] = [
+  { value: 'desc', label: 'Newest first', short: 'Newest', icon: <CalendarArrowDown className="w-3.5 h-3.5 text-slate-400" /> },
+  { value: 'asc', label: 'Oldest first', short: 'Oldest', icon: <CalendarArrowUp className="w-3.5 h-3.5 text-slate-400" /> },
+];
+
+const STATUS_STYLES: Record<UserStatus, string> = {
+  active: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  inactive: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
 };
 
-const NEUTRAL_CHIP = 'bg-slate-800 text-slate-400 border-slate-700';
-
-/** "9/16/2026", or an em dash when the column is null. */
 const formatDate = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleDateString() : '—';
+  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+/** The value, `delay` ms after it last changed — so search does not fire per keystroke. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+/** The remembered rows-per-page, or the smallest size. */
+function readPageSize(): number {
+  try {
+    const stored = Number(localStorage.getItem(PAGE_SIZE_KEY));
+    return (PAGE_SIZES as readonly number[]).includes(stored) ? stored : PAGE_SIZES[0];
+  } catch {
+    return PAGE_SIZES[0];
+  }
+}
 
 /**
- * The organization's people: who is in it, adding someone, suspending someone.
+ * The organization's team: every user, agents and owners alike. Search,
+ * filters, sorting and pagination all happen server-side. The list scrolls
+ * between a fixed header and a fixed pagination bar.
  *
- * Real data from Postgres via /api/agents — there is no demo roster behind this
- * screen any more. The owner-only controls below are a convenience: the server
- * answers an agent with a 403 whatever the UI renders.
+ * Controls follow the caller's permissions (user.create / user.update /
+ * user.delete). That is a courtesy: the server checks every one of them.
  */
 export const AgentsView: React.FC = () => {
-  const { user, role, refreshSession } = useAuth();
-  const isOwner = role === 'owner';
+  const { user, organization, can, refreshSession } = useAuth();
+  const orgId = organization?.id;
 
-  const [members, setMembers] = useState<OrganizationMember[] | null>(null);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<UserStatus | ''>('');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [pageSize, setPageSize] = useState(readPageSize);
+  const [page, setPage] = useState(1);
+
+  const [result, setResult] = useState<Paginated<TeamMember> | null>(null);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  /** The member whose calendar panel is open, if any. */
-  const [calendarFor, setCalendarFor] = useState<OrganizationMember | null>(null);
-  /**
-   * The id of the agent being edited, or null. An id rather than a copy of the
-   * row: the member is re-resolved from the roster below on every render, so a
-   * reload underneath an open modal cannot leave it showing stale values.
-   */
-  const [editingId, setEditingId] = useState<string | null>(null);
-  /** The member whose status request is in flight, so only that card spins. */
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  /** The owner's "I also take leads" request is in flight. */
-  const [switching, setSwitching] = useState(false);
+
+  /** null = closed; 'new' = adding; a member = editing them. */
+  const [form, setForm] = useState<TeamMember | 'new' | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Any change to what is being asked for starts again from page one.
+  useEffect(() => setPage(1), [debouncedSearch, roleFilter, statusFilter, sortOrder, pageSize]);
+
+  /** Only the newest request may update the screen; an older, slower one is dropped. */
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    if (!orgId) return;
+    const seq = ++requestSeq.current;
+    setLoading(true);
     try {
-      setMembers(await listMembers());
+      const next = await listMembers({
+        page,
+        limit: pageSize,
+        search: debouncedSearch,
+        roleIds: roleFilter ? [roleFilter] : undefined,
+        status: statusFilter || undefined,
+        sortOrder,
+      });
+      if (seq !== requestSeq.current) return;
+      // Deleting the last row of the last page leaves that page empty: step back.
+      if (next.data.length === 0 && page > 1 && next.meta.total > 0) {
+        setPage(Math.max(1, next.meta.totalPages));
+        return;
+      }
+      setResult(next);
       setError(null);
       setForbidden(false);
     } catch (e) {
-      // A 403 is not a failure to report as an error — it is the answer for an
-      // agent, and the screen says so instead of showing a red banner.
-      setForbidden(e instanceof ApiError && e.code === 'FORBIDDEN');
-      setError(e instanceof ApiError && e.code === 'FORBIDDEN' ? null : messageFor(e));
-      setMembers([]);
+      if (seq !== requestSeq.current) return;
+      // A 403 is the answer for someone without user.read, not a failure.
+      const isForbidden = e instanceof ApiError && e.code === 'FORBIDDEN';
+      setForbidden(isForbidden);
+      setError(isForbidden ? null : messageFor(e));
+      setResult(null);
+    } finally {
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, []);
+  }, [orgId, page, pageSize, debouncedSearch, roleFilter, statusFilter, sortOrder]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  /** The signed-in member's own row — for an owner, where their switch lives. */
-  const me = members?.find((m) => m.id === user?.id) ?? null;
+  // Roles feed the filter and the add/edit form. Without role.read the list
+  // still works; only the role picker is empty.
+  useEffect(() => {
+    listRoles()
+      .then(setRoles)
+      .catch(() => setRoles([]));
+  }, []);
 
-  /**
-   * Agents, plus the reader themselves once they take leads. Other owners are
-   * not someone this screen manages: they cannot be suspended or edited here.
-   * An owner WITH a profile is on the team as an agent — lead cap, hours,
-   * calendar link — so their own card appears (first, as the list is
-   * owner-first). Filtered here rather than in the query so the endpoint stays
-   * the organization's full member list.
-   */
-  const agents =
-    members === null
-      ? null
-      : members.filter((m) => m.role === 'agent' || (m.id === user?.id && m.hasProfile));
+  const changePageSize = (size: number): void => {
+    setPageSize(size);
+    try {
+      localStorage.setItem(PAGE_SIZE_KEY, String(size));
+    } catch {
+      /* the choice just will not be remembered */
+    }
+  };
 
-  // Resolved from the current roster rather than stored as a snapshot: if the
-  // list reloads underneath an open modal, the modal is looking at the same row
-  // the server last returned. A member who disappeared closes it.
-  const editing = agents?.find((m) => m.id === editingId) ?? null;
+  const clearFilters = (): void => {
+    setSearch('');
+    setRoleFilter('');
+    setStatusFilter('');
+  };
 
-  const handleSetStatus = async (
-    member: OrganizationMember,
-    status: 'suspended' | 'active',
-  ): Promise<void> => {
-    // Only the lockout asks. Reinstating is the undo, and putting a dialog in
-    // front of the undo is how people stay stuck.
+  const handleDelete = async (member: TeamMember): Promise<void> => {
     if (
-      status === 'suspended' &&
       !window.confirm(
-        `Suspend ${memberName(member)}? They are signed out immediately and ` +
-          `cannot sign in until you reactivate them.`,
+        `Delete ${displayName(member)}? Their account is removed and they are signed out immediately. This cannot be undone.`,
       )
     ) {
       return;
     }
-
-    setPendingId(member.id);
+    setDeletingId(member.id);
     setError(null);
     try {
-      await setAgentStatus(member.id, status);
+      await deleteMember(member.id);
       await load();
     } catch (e) {
       setError(messageFor(e));
     } finally {
-      setPendingId(null);
+      setDeletingId(null);
     }
   };
 
-  const handleTakingLeads = async (enabled: boolean): Promise<void> => {
-    setSwitching(true);
-    setError(null);
-    try {
-      await setTakingLeads(enabled);
-      // The session too: the first switch-on gives this owner an agent profile,
-      // which is what their own availability and "Mine" filters key on.
-      await Promise.all([load(), refreshSession()]);
-    } catch (e) {
-      setError(messageFor(e));
-    } finally {
-      setSwitching(false);
-    }
+  const canCreate = can('user.create');
+  const canUpdate = can('user.update');
+  const canDelete = can('user.delete');
+  const hasFilters = Boolean(search || roleFilter || statusFilter);
+  const members = result?.data ?? [];
+  const meta = result?.meta;
+
+
+  const actions = (member: TeamMember): React.ReactNode => {
+    const isSelf = member.id === user?.id;
+    const deleting = deletingId === member.id;
+    if (!canUpdate && !(canDelete && !isSelf)) return null;
+    return (
+      <div className="flex items-center justify-end gap-1">
+        {canUpdate && (
+          <button
+            onClick={() => setForm(member)}
+            disabled={deleting || roles.length === 0}
+            title="Edit"
+            aria-label={`Edit ${displayName(member)}`}
+            className="p-2 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-600/15 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {canDelete && !isSelf && (
+          <button
+            onClick={() => void handleDelete(member)}
+            disabled={deleting}
+            title="Delete"
+            aria-label={`Delete ${displayName(member)}`}
+            className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-600/15 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+          </button>
+        )}
+      </div>
+    );
   };
+
+  const identity = (member: TeamMember): React.ReactNode => (
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
+        {initialsFor(member)}
+      </div>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-slate-100 truncate">
+          {displayName(member)}
+          {member.id === user?.id && <span className="ml-1.5 text-2xs font-medium text-slate-500">(you)</span>}
+        </div>
+        <div className="text-xs text-slate-500 truncate">{member.email}</div>
+      </div>
+    </div>
+  );
+
+  const roleBadge = (member: TeamMember): React.ReactNode => (
+    <span
+      className={`inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full border ${
+        member.role.isSystem
+          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+          : 'bg-slate-800 text-slate-300 border-slate-700'
+      }`}
+    >
+      {member.role.isSystem && <ShieldCheck className="w-3 h-3" />}
+      {member.role.name}
+    </span>
+  );
+
+  const statusBadge = (member: TeamMember): React.ReactNode => (
+    <span className={`inline-flex items-center gap-1.5 text-2xs font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLES[member.status]}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      {member.status}
+    </span>
+  );
+
+  const currentSort = SORT_OPTIONS.find((o) => o.value === sortOrder) ?? SORT_OPTIONS[0];
+
+  /**
+   * The Joined column header says in words how the list is ordered ("Newest ↓")
+   * and flips it on click — the list's only sort.
+   */
+  const joinedHeader = (
+    <th
+      className="px-4 py-3 font-semibold hidden md:table-cell"
+      aria-sort={sortOrder === 'asc' ? 'ascending' : 'descending'}
+    >
+      <div className="flex items-center gap-2">
+        <span className="uppercase tracking-wider">Joined</span>
+        <button
+          onClick={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+          title={`Sorted ${currentSort.label.toLowerCase()} — click for ${
+            sortOrder === 'desc' ? 'oldest' : 'newest'
+          } first`}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-2xs font-semibold normal-case tracking-normal hover:bg-emerald-500/20 cursor-pointer transition-colors"
+        >
+          {currentSort.short}
+          {sortOrder === 'desc' ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />}
+        </button>
+      </div>
+    </th>
+  );
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
+    <div className="h-full flex flex-col text-slate-100">
+      {/* Header + toolbar: fixed above the scrolling list */}
+      <div className="shrink-0 px-6 pt-6 pb-4 space-y-4 max-w-7xl w-full mx-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
             <h2 className="text-xl font-bold text-white tracking-tight">Agents</h2>
+            <p className="text-xs text-slate-400">Everyone in your organization, their role and contact details.</p>
           </div>
-          <p className="text-xs text-slate-400">
-            Add agents, edit their details, or suspend one.
-          </p>
+          {canCreate && (
+            <button
+              onClick={() => setForm('new')}
+              disabled={roles.length === 0}
+              title={roles.length === 0 ? 'Roles could not be loaded' : undefined}
+              className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-4 h-4" />
+              Add Agent
+            </button>
+          )}
         </div>
 
-        {isOwner && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => void load()}
-              className="px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${members === null ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              onClick={() => setAddOpen(true)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Agent
+        {!forbidden && (
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+            <div className="relative w-full lg:max-w-sm">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or email"
+                maxLength={100}
+                aria-label="Search members"
+                className="h-9 w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-8 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <FilterDropdown
+                label="Role"
+                icon={<ShieldCheck className="w-3.5 h-3.5" />}
+                allLabel="All roles"
+                options={roles.map((role) => ({ value: role.id, label: role.name }))}
+                value={roleFilter}
+                onChange={setRoleFilter}
+              />
+              <FilterDropdown
+                label="Status"
+                icon={<CircleDot className="w-3.5 h-3.5" />}
+                allLabel="Any status"
+                options={[
+                  { value: 'active', label: 'Active', icon: <span className="w-2 h-2 rounded-full bg-emerald-400" /> },
+                  { value: 'inactive', label: 'Inactive', icon: <span className="w-2 h-2 rounded-full bg-amber-400" /> },
+                ]}
+                value={statusFilter}
+                onChange={(v) => setStatusFilter(v as UserStatus | '')}
+              />
+              {/* Phones have no column headers to click. */}
+              {hasFilters && (
+                <button
+                  onClick={clearFilters}
+                  className="h-9 px-2.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-rose-300 transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Clear all
+                </button>
+              )}
+            </div>
+
+            <div className="lg:ml-auto">
+              <FilterDropdown
+                label="Sort"
+                icon={currentSort.icon}
+                options={SORT_OPTIONS.map(({ value, label, icon }) => ({ value, label, icon }))}
+                value={sortOrder}
+                onChange={(value) => setSortOrder(value as SortOrder)}
+                align="right"
+              />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+            <div className="text-xs text-rose-200 leading-relaxed flex-1">{error}</div>
+            <button onClick={() => setError(null)} aria-label="Dismiss" className="text-rose-300 hover:text-rose-100 cursor-pointer">
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
       </div>
 
-      {/* Lead Routing (not built). Kept as a statement of intent, deliberately
-          inert: nothing in the product assigns a lead to an agent yet, and a
-          card that looks selectable would claim otherwise. */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex items-center gap-3 text-xs">
-        <GitBranch className="w-4 h-4 text-cyan-400 shrink-0" />
-        <p className="text-slate-400">
-          <span className="font-semibold text-slate-200">Automatic lead routing is coming soon.</span>{' '}
-          Until then every lead stays unassigned — round-robin, area and availability rules are planned.
-        </p>
+      {/* The list: the only part that scrolls */}
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="px-6 pb-4 max-w-7xl w-full mx-auto">
+          {forbidden ? (
+            <EmptyState icon={<ShieldCheck className="w-6 h-6 text-slate-600" />}>
+              Your role does not include viewing team members. Ask your organization owner if you need access.
+            </EmptyState>
+          ) : result === null && loading ? (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl divide-y divide-slate-800">
+              {Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3.5 animate-pulse">
+                  <div className="w-9 h-9 rounded-full bg-slate-800" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 w-40 rounded bg-slate-800" />
+                    <div className="h-2.5 w-56 rounded bg-slate-800/70" />
+                  </div>
+                  <div className="h-5 w-16 rounded-full bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          ) : members.length === 0 ? (
+            <EmptyState icon={<Users className="w-6 h-6 text-slate-600" />}>
+              {hasFilters ? (
+                <>
+                  No members match these filters.{' '}
+                  <button onClick={clearFilters} className="text-emerald-400 hover:text-emerald-300 font-semibold cursor-pointer">
+                    Clear filters
+                  </button>
+                </>
+              ) : (
+                'No agents yet. Add your first agent to get started.'
+              )}
+            </EmptyState>
+          ) : (
+            <div className={`transition-opacity ${loading ? 'opacity-60' : ''}`}>
+              {/* Table: tablets and up */}
+              <div className="hidden md:block bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="text-2xs uppercase text-slate-500 bg-slate-950/70 border-b border-slate-800">
+                    <tr className="text-left">
+                      <th className="px-4 py-3 font-semibold tracking-wider">Member</th>
+                      <th className="px-4 py-3 font-semibold tracking-wider">Role</th>
+                      <th className="px-4 py-3 font-semibold tracking-wider">Phone</th>
+                      <th className="px-4 py-3 font-semibold tracking-wider">Status</th>
+                      <th className="px-4 py-3 font-semibold tracking-wider hidden lg:table-cell">Last sign-in</th>
+                      {joinedHeader}
+                      <th className="px-4 py-3 w-24">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {members.map((member) => (
+                      <tr key={member.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-4 py-3 max-w-xs">{identity(member)}</td>
+                        <td className="px-4 py-3">{roleBadge(member)}</td>
+                        <td className="px-4 py-3 font-mono text-slate-300 whitespace-nowrap">{member.phone || '—'}</td>
+                        <td className="px-4 py-3">{statusBadge(member)}</td>
+                        <td className="px-4 py-3 text-slate-400 whitespace-nowrap hidden lg:table-cell">{formatDate(member.lastLoginAt)}</td>
+                        <td className="px-4 py-3 text-slate-400 whitespace-nowrap hidden md:table-cell">{formatDate(member.createdAt)}</td>
+                        <td className="px-4 py-3">{actions(member)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Cards: phones */}
+              <div className="md:hidden space-y-3">
+                {members.map((member) => (
+                  <div key={member.id} className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      {identity(member)}
+                      {statusBadge(member)}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400">
+                      {roleBadge(member)}
+                      <span className="inline-flex items-center gap-1.5 font-mono">
+                        <Phone className="w-3 h-3" />
+                        {member.phone || '—'}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <CalendarDays className="w-3 h-3" />
+                        Joined {formatDate(member.createdAt)}
+                      </span>
+                    </div>
+                    {actions(member) && <div className="pt-2 border-t border-slate-800">{actions(member)}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {error && (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3">
-          <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-rose-200 leading-relaxed">
-            <div className="font-semibold text-rose-100">Something went wrong</div>
-            {error}
+      {/* Pagination: always pinned to the bottom */}
+      {!forbidden && meta && (
+        <div className="shrink-0 border-t border-slate-800 bg-slate-900/95 backdrop-blur">
+          <div className="px-6 py-3 max-w-7xl w-full mx-auto">
+            <Pagination
+              meta={meta}
+              itemLabel={meta.total === 1 ? 'member' : 'members'}
+              disabled={loading}
+              onPageChange={setPage}
+              onPageSizeChange={changePageSize}
+              pageSizes={PAGE_SIZES}
+            />
           </div>
         </div>
       )}
 
-      {/* The owner's own switch. A one-person office is just an owner with this
-          on; a team owner who also sells turns it on too. */}
-      {isOwner && me && (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1 min-w-0">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-emerald-400" />
-              I also take leads
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              {me.takingLeads
-                ? 'You are on the team as an agent, with your own lead cap, working hours and calendar link. Routing treats you like any other agent.'
-                : me.hasProfile
-                  ? 'Paused — you will not get new leads. Leads already assigned to you stay yours.'
-                  : 'Turn this on if you sell too. You join the team as an agent, and routing treats you like everyone else.'}
-            </p>
-            {me.takingLeads && !me.calendarLinked && (
-              <p className="text-xs text-amber-300/90 leading-relaxed">
-                Your bookings are not attributed to you yet. Your Calendly or Cal.com email must
-                match {me.email}, then press <strong>Sync agents</strong> on Integrations.
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={me.takingLeads}
-            aria-label="I also take leads"
-            onClick={() => void handleTakingLeads(!me.takingLeads)}
-            disabled={switching}
-            className={`relative w-11 h-6 rounded-full border transition-colors shrink-0 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
-              me.takingLeads ? 'bg-emerald-600 border-emerald-500' : 'bg-slate-800 border-slate-700'
-            }`}
-          >
-            <span
-              className={`absolute top-[1px] left-[1px] w-5 h-5 rounded-full bg-on-accent shadow flex items-center justify-center transition-transform ${
-                me.takingLeads ? 'translate-x-5' : ''
-              }`}
-            >
-              {switching && <Loader2 className="w-3 h-3 animate-spin text-slate-500" />}
-            </span>
-          </button>
-        </div>
-      )}
-
-      {/* Roster */}
-      {agents === null ? (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-xs text-slate-400 flex items-center gap-2">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team…
-        </div>
-      ) : forbidden ? (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-3">
-          <ShieldCheck className="w-6 h-6 text-slate-600 mx-auto" />
-          <div className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-            Only the organization owner can see and manage the team roster. Ask your owner if you
-            need access.
-          </div>
-        </div>
-      ) : agents.length === 0 ? (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-3">
-          <Users className="w-6 h-6 text-slate-600 mx-auto" />
-          <div className="text-xs text-slate-400 leading-relaxed">
-            No agents yet. Add your first agent to get started.
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {agents.map((member) => {
-            const pending = pendingId === member.id;
-            const canSuspend =
-              isOwner && member.role !== 'owner' && member.id !== user?.id && member.status !== 'suspended';
-            // The reader's own card, as an owner who takes leads. Its chip is
-            // the taking-leads switch rather than the membership status: an
-            // owner can never be suspended, so "active" would say nothing.
-            const isSelfOwner = member.role === 'owner';
-
-            return (
-              <div
-                key={member.id}
-                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between"
-              >
-                <div className="space-y-4">
-                  {/* Identity */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 shadow-md flex items-center justify-center text-sm font-bold text-slate-300 font-mono shrink-0">
-                        {memberInitials(member)}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-sm font-bold text-white truncate">{memberName(member)}</h4>
-                        <span className="text-xs text-slate-400 capitalize">
-                          {member.role}
-                          {member.id === user?.id && <span className="text-slate-600"> · you</span>}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Deliberately the MEMBERSHIP status, not an availability
-                        state: nothing in the product tracks whether an agent is
-                        available, so a green "AVAILABLE" would be a claim the
-                        system cannot back. This one is real, and it is what the
-                        suspend action changes. */}
-                    {isSelfOwner ? (
-                      <span
-                        className={`text-2xs font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
-                          member.takingLeads ? STATUS_STYLES['active'] : NEUTRAL_CHIP
-                        }`}
-                        title="Whether routing may give you new leads"
-                      >
-                        {member.takingLeads ? 'Taking leads' : 'Paused'}
-                      </span>
-                    ) : (
-                      <span
-                        className={`text-2xs font-bold px-2 py-0.5 rounded-full uppercase font-mono border shrink-0 ${
-                          member.hasProfile ? (STATUS_STYLES[member.status] ?? NEUTRAL_CHIP) : NEUTRAL_CHIP
-                        }`}
-                        title={member.hasProfile ? 'Membership status' : 'No agent profile'}
-                      >
-                        {member.hasProfile ? member.status : 'No profile'}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Contact */}
-                  <div className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl space-y-2 text-xs">
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      {member.phone ? (
-                        <span className="font-mono">{member.phone}</span>
-                      ) : (
-                        <span className="text-slate-600">No phone</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-300 min-w-0">
-                      <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      <span className="truncate">{member.email}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      <span>{member.timezone}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-300 min-w-0">
-                      <Briefcase className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      {member.title ? (
-                        <span className="truncate">{member.title}</span>
-                      ) : (
-                        <span className="text-slate-600">No title</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Stats. Both are read from real tables; they are zero and
-                      blank because nothing writes those tables yet, not because
-                      the UI is filling space. */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 block text-2xs">Active Leads</span>
-                      <span className="font-bold text-white font-mono text-sm">
-                        {member.activeLeads}
-                        {/* The cap is a real stored column, so it is shown next
-                            to the real count. Nothing routes leads yet, which is
-                            why the left number is 0 — the limit is still the
-                            owner's setting rather than a guess. */}
-                        {member.maxActiveLeads !== null && (
-                          <span className="text-slate-500"> / {member.maxActiveLeads}</span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 block text-2xs">Member Since</span>
-                      <span className="font-bold text-white font-mono text-sm">
-                        {formatDate(member.memberSince)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Calendar + suspend */}
-                <div className="pt-3 border-t border-slate-800 flex items-center gap-2">
-                  {/* Opens the read-only calendar panel for members who have a
-                      profile. An owner has none, so there is nothing to show.
-                      Connecting is deliberately absent: the scheduling
-                      account is connected once for the whole office, on
-                      Integrations. */}
-                  <button
-                    onClick={() => member.hasProfile && setCalendarFor(member)}
-                    disabled={!member.hasProfile}
-                    title={
-                      member.hasProfile
-                        ? 'View working hours and upcoming appointments'
-                        : 'No agent profile'
-                    }
-                    className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                      member.hasProfile
-                        ? 'bg-slate-800/60 hover:bg-slate-800 text-slate-300 cursor-pointer'
-                        : 'bg-slate-800/60 text-slate-400 cursor-default'
-                    }`}
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>
-                      {member.calendarLinked ? 'On office calendar' : 'Not on calendar'}
-                    </span>
-                  </button>
-
-                  {isOwner && (
-                    <button
-                      onClick={() => setEditingId(member.id)}
-                      disabled={pending}
-                      title={isSelfOwner ? 'Edit your agent profile' : 'Edit this agent'}
-                      aria-label={`Edit ${memberName(member)}`}
-                      className="p-2 bg-slate-800 hover:bg-emerald-600/20 text-slate-400 hover:text-emerald-300 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  {isOwner && canSuspend && (
-                    <button
-                      onClick={() => void handleSetStatus(member, 'suspended')}
-                      disabled={pending}
-                      title="Suspend this agent"
-                      aria-label={`Suspend ${memberName(member)}`}
-                      className="p-2 bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-300 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-                    >
-                      {pending ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <UserMinus className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {isOwner && member.status === 'suspended' && (
-                  <div className="-mt-2 space-y-2">
-                    <p className="text-xs text-slate-500 text-center">
-                      Suspended — this member can no longer sign in.
-                    </p>
-                    <button
-                      onClick={() => void handleSetStatus(member, 'active')}
-                      disabled={pending}
-                      title="Reactivate this agent"
-                      aria-label={`Reactivate ${memberName(member)}`}
-                      className="w-full py-2 bg-slate-800 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {pending ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <UserPlus className="w-3.5 h-3.5" />
-                      )}
-                      <span>Reactivate</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <AddAgentModal isOpen={addOpen} onClose={() => setAddOpen(false)} onCreated={() => void load()} />
-
-      {calendarFor && (
-        <AgentCalendarPanel
-          userId={calendarFor.id}
-          memberName={memberName(calendarFor)}
-          onClose={() => setCalendarFor(null)}
-        />
-      )}
-
-      {/* Mounted only while editing, so the form always opens on fresh values. */}
-      {editing && (
-        <EditAgentModal
-          key={editing.id}
-          member={editing}
-          onClose={() => setEditingId(null)}
-          onSaved={() => void load()}
+      {form && orgId && (
+        <MemberFormModal
+          key={form === 'new' ? 'new' : form.id}
+          orgId={orgId}
+          roles={roles}
+          member={form === 'new' ? undefined : form}
+          currentUserId={user?.id}
+          onClose={() => setForm(null)}
+          onSaved={(saved) => {
+            void load();
+            // Editing yourself changes the name and role the sidebar shows.
+            if (saved.id === user?.id) void refreshSession();
+          }}
         />
       )}
     </div>
   );
 };
+
+const EmptyState: React.FC<{ icon: React.ReactNode; children: React.ReactNode }> = ({ icon, children }) => (
+  <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-10 text-center space-y-3">
+    <div className="flex justify-center">{icon}</div>
+    <div className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">{children}</div>
+  </div>
+);

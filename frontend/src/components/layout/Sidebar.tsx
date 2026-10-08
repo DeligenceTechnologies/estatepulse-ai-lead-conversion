@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -11,20 +11,19 @@ import {
   Sliders,
   BarChart3,
   Building2,
-  LogOut,
   Webhook,
   Clock
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
-import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
+import { ProfileMenu, SignOutButton } from '../auth/ProfileMenu';
 import { ThemeToggle } from './ThemeToggle';
 
 type NavItem = { id: AppView; label: string; icon: React.ReactNode; badge?: number };
 
 export const Sidebar: React.FC = () => {
   const { activeView, setActiveView, leads } = useApp();
-  const { user, role, organization, agentProfileId, logout } = useAuth();
-  const [profileOpen, setProfileOpen] = useState(false);
+  const { role, organization, agentProfileId } = useAuth();
   const isOwner = role === 'owner';
 
   // Grouped by the job the owner is doing: working leads, managing the team,
@@ -117,57 +116,9 @@ export const Sidebar: React.FC = () => {
 
       {/* Who is signed in, theme, and the way out. */}
       <div className="relative p-3 border-t border-slate-800 flex items-center gap-1">
-        {/* Read-only profile card, owner only for now. */}
-        {isOwner && profileOpen && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
-            <div className="absolute bottom-full left-3 right-3 mb-2 z-50 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl space-y-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-300 shrink-0">
-                  {initialsFor(user)}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-100 truncate">{displayName(user)}</div>
-                  <div className="text-xs text-emerald-400">{roleLabel(role)}</div>
-                </div>
-              </div>
-              <dl className="text-xs space-y-2">
-                <div>
-                  <dt className="text-slate-500 uppercase tracking-wider text-2xs">Email</dt>
-                  <dd className="text-slate-200 truncate">{user?.email}</dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500 uppercase tracking-wider text-2xs">Organization</dt>
-                  <dd className="text-slate-200 truncate">{organization?.name}</dd>
-                </div>
-              </dl>
-            </div>
-          </>
-        )}
-        <button
-          type="button"
-          disabled={!isOwner}
-          onClick={() => setProfileOpen(o => !o)}
-          aria-expanded={isOwner ? profileOpen : undefined}
-          className={`min-w-0 flex-1 flex items-center gap-2.5 text-left rounded-lg p-1.5 ${isOwner ? 'cursor-pointer hover:bg-slate-800/70' : 'cursor-default'}`}
-        >
-          <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
-            {initialsFor(user)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-slate-200 truncate leading-tight">{displayName(user)}</div>
-            <div className="text-xs text-slate-500 leading-tight">{roleLabel(role)}</div>
-          </div>
-        </button>
+        <ProfileMenu />
         <ThemeToggle />
-        <button
-          onClick={logout}
-          title="Sign out"
-          aria-label="Sign out"
-          className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
+        <SignOutButton />
       </div>
     </aside>
   );

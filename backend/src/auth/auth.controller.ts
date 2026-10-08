@@ -1,60 +1,119 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
-import { CurrentUser } from '../common/decorators/auth.decorators';
-import { SessionGuard, type SessionRequest } from '../common/guards/session.guard';
-import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Post, Req, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { CookieOptions, Request, Response } from 'express';
+import type { AuthEnv } from '@/common/utils/interface';
+import { REFRESH_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE_PATH } from './auth.constants';
 import { AuthService } from './auth.service';
-import { loginSchema, signupSchema, type LoginInput, type SignupInput } from './schemas';
-import type { AuthContext, AuthSessionDTO, MeDTO } from './types';
+import type { AuthContext, IssuedTokens, SessionMeta } from './auth.types';
+import { CurrentAuth } from './decorators/current-auth.decorator';
+import { Public } from './decorators/public.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { RegisterDto } from './dto/register.dto';
 
-@Controller('api/auth')
+@Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  private readonly cookieSecure: boolean;
 
-  @Post('signup')
-  @HttpCode(HttpStatus.CREATED)
-  signup(
-    @Body(new ZodValidationPipe(signupSchema, 'Invalid signup details')) body: SignupInput,
-  ): Promise<AuthSessionDTO> {
-    return this.auth.signup(body);
+  constructor(
+    private readonly authService: AuthService,
+    config: ConfigService<AuthEnv, true>,
+  ) {
+    this.cookieSecure = config.get('COOKIE_SECURE', { infer: true });
   }
 
+  @Public()
+  @Post('register')
+  async register(@Body() dto: RegisterDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { user, ...tokens } = await this.authService.register(dto, sessionMeta(req));
+    return { ...this.sendTokens(res, tokens), user };
+  }
+
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(
-    @Body(new ZodValidationPipe(loginSchema, 'Invalid login details')) body: LoginInput,
-  ): Promise<AuthSessionDTO> {
-    return this.auth.login(body);
+  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { user, ...tokens } = await this.authService.login(dto, sessionMeta(req));
+    return { ...this.sendTokens(res, tokens), user };
   }
 
-  /**
-   * "The user is at the keyboard." The only thing that moves last_seen_at, so
-   * the idle timeout counts real input rather than the dashboard's own
-   * background requests. Sent by the browser at most once a minute.
-   */
-  @Post('heartbeat')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(SessionGuard)
-  heartbeat(@Req() req: SessionRequest): Promise<void> {
-    return this.auth.heartbeat(req.sessionId);
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(@Body() dto: RefreshTokenDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const token = (req.cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined) ?? dto.refreshToken;
+    try {
+      return this.sendTokens(res, await this.authService.refreshToken(token));
+    } catch (error) {
+      if (!(error instanceof HttpException && error.getStatus() === HttpStatus.CONFLICT)) {
+        this.clearRefreshCookie(res);
+      }
+      throw error;
+    }
   }
 
-  /** Revokes this session server-side; the token stops working everywhere. */
   @Post('logout')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(SessionGuard)
-  logout(@Req() req: SessionRequest): Promise<void> {
-    return this.auth.revokeSession(req.sessionId);
+  @HttpCode(HttpStatus.OK)
+  async logout(@CurrentAuth() auth: AuthContext, @Res({ passthrough: true }) res: Response) {
+    await this.authService.logout(auth);
+    this.clearRefreshCookie(res);
+    return { success: true };
   }
 
-  /** Returns no token: /me never refreshes or reissues a session. */
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(@CurrentAuth() auth: AuthContext, @Res({ passthrough: true }) res: Response) {
+    await this.authService.logoutAll(auth);
+    this.clearRefreshCookie(res);
+    return { success: true };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentAuth() auth: AuthContext,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.changePassword(dto, auth);
+    this.clearRefreshCookie(res);
+    return { success: true };
+  }
+
   @Get('me')
-  @UseGuards(SessionGuard)
-  me(@CurrentUser() auth: AuthContext): MeDTO {
+  me(@CurrentAuth() auth: AuthContext) {
+    return this.authService.me(auth);
+  }
+
+  /** Sets the refresh cookie and returns what the client may keep in memory. */
+  private sendTokens(res: Response, tokens: IssuedTokens) {
+    res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
+      ...this.cookieOptions(),
+      // Without "keep me signed in" it is a browser-session cookie.
+      ...(tokens.keepSignedIn ? { expires: tokens.refreshTokenExpiresAt } : {}),
+    });
     return {
-      user: auth.user,
-      organization: auth.organization,
-      role: auth.role,
-      agentProfileId: auth.agentProfileId,
+      accessToken: tokens.accessToken,
+      accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+      refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
     };
   }
+
+  private clearRefreshCookie(res: Response) {
+    res.clearCookie(REFRESH_TOKEN_COOKIE, this.cookieOptions());
+  }
+
+  private cookieOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: this.cookieSecure ? 'none' : 'lax',
+      path: REFRESH_TOKEN_COOKIE_PATH,
+    };
+  }
+}
+
+function sessionMeta(req: Request): SessionMeta {
+  return { userAgent: req.get('user-agent'), ipAddress: req.ip };
 }

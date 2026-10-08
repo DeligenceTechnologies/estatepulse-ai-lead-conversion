@@ -13,6 +13,13 @@ export default defineConfig(() => {
         '/api': {
           target: 'http://localhost:4000',
           changeOrigin: true,
+          // The backend serves its routes at the root (/auth/login), the
+          // frontend calls them under /api.
+          rewrite: (path) => path.replace(/^\/api/, ''),
+          // The refresh cookie is scoped to the backend's /auth path; seen
+          // through the proxy that path is /api/auth, or the browser would
+          // never send it back to /api/auth/refresh.
+          cookiePathRewrite: { '/auth': '/api/auth' },
         },
       },
     },

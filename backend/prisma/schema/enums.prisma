@@ -1,0 +1,6 @@
+enum BaseStatus {
+  active
+  inactive
+
+  @@map("base_status")
+}

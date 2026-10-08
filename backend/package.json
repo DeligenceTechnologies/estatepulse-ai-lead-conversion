@@ -9,70 +9,47 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:auth": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/auth/auth.test.js",
-    "test:agents": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agents.test.js",
-    "test:agent-me": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/agents/agent-me.test.js",
-    "test:lead-assignment": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/lead-assignment.test.js",
-    "test:dashboard": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/leads/owner-dashboard.test.js",
-    "test:history": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/history/history.test.js",
-    "test:portal-leads": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/telnyx/portal-leads.test.js",
-    "db:pull": "prisma db pull",
-    "db:generate": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio",
-    "seed": "tsx prisma/seed.ts",
-    "test:calendar": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/calendar.test.js",
-    "test:in-call-booking": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/in-call-booking/in-call-booking.test.js"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
+    "@nestjs/jwt": "^12.0.2",
+    "@nestjs/mapped-types": "*",
     "@nestjs/platform-express": "^11.0.0",
-    "@nestjs/schedule": "^5.0.0",
     "@prisma/client": "^6.16.0",
-    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.0.0",
-    "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "libphonenumber-js": "^1.11.0",
+    "joi": "^18.2.9",
     "nodemailer": "^10.0.10",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1",
-    "uuid": "^11.0.0",
-    "zod": "^4.0.0"
+    "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
-    "@nestjs/testing": "^11.0.0",
     "@swc/core": "^1.16.2",
-    "@types/bcrypt": "^6.0.0",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
-    "@types/jsonwebtoken": "^9.0.10",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.2",
     "prisma": "^6.16.0",
-    "tsx": "^4.19.0",
     "typescript": "~5.8.2",
     "unplugin-swc": "^1.6.0",
     "vitest": "^3.0.0"
   },
-  "allowScripts": {
-    "@prisma/client@6.19.3": true,
-    "@prisma/engines@6.19.3": true,
-    "prisma@6.19.3": true,
-    "esbuild@0.28.2": true,
-    "bcrypt@6.0.0": true
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "@swc/core",
+      "esbuild",
+      "prisma"
+    ]
   }
 }

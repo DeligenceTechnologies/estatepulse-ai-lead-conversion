@@ -1,0 +1,13 @@
+model Organization {
+  id       String     @id @default(uuid(7)) @db.Uuid
+  name     String     @db.VarChar(255)
+  status   BaseStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users User[]
+  roles Role[]
+
+  @@map("organizations")
+}

@@ -1,4 +1,10 @@
-import { endSessionIfUnauthenticated, getToken } from '../lib/api';
+import {
+  decodeError,
+  endSessionIfUnauthenticated,
+  getFreshToken,
+  hasStoredSession,
+  refreshAccessToken,
+} from '../lib/api';
 
 /**
  * Typed client for the EstatePulse ingestion API.
@@ -37,50 +43,63 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    const token = getToken();
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        // Same session token the rest of the app uses. The bridge rejects the
-        // request without it, so an expired session fails here rather than
-        // silently reading another org's data.
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init?.headers ?? {}),
-      },
-    });
-  } catch {
-    throw new ApiError(0, 'NETWORK', 'Cannot reach the API. Is the backend running on port 4000?');
+  const send = async (token: string | null): Promise<Response> => {
+    try {
+      return await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          // Same session token the rest of the app uses. The bridge rejects the
+          // request without it, so an expired session fails here rather than
+          // silently reading another org's data.
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch {
+      throw new ApiError(0, 'NETWORK', 'Cannot reach the API. Is the backend running on port 4000?');
+    }
+  };
+
+  let res = await send(await getFreshToken());
+  let body = await readBody(res);
+
+  // Expired between the freshness check and the server: refresh once, replay.
+  if (res.status === 401 && hasStoredSession() && decodeError(401, body).code === 'TOKEN_EXPIRED') {
+    try {
+      res = await send(await refreshAccessToken());
+      body = await readBody(res);
+    } catch {
+      /* the refresh ended the session; fall through to the 401 below */
+    }
   }
 
   if (res.status === 204) return undefined as T;
 
-  const text = await res.text();
-  let body: unknown = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    // Non-JSON response (a proxy error page, typically).
-  }
-
   if (!res.ok) {
-    const err = (body as { error?: { code?: string; message?: string } } | null)?.error;
+    // A non-JSON body (a proxy error page) decodes to no code at all, which
+    // endSessionIfUnauthenticated treats as a rejected token on a 401.
+    const err = body === null ? null : decodeError(res.status, body);
 
     // A rejected session ends here exactly as it does in lib/api's apiFetch.
     // Without this the view showed "your session has expired" inside a shell
     // that still believed it was signed in, until the user reloaded by hand.
     endSessionIfUnauthenticated(res.status, err?.code);
 
-    throw new ApiError(
-      res.status,
-      err?.code ?? `HTTP_${res.status}`,
-      err?.message ?? friendlyMessage(res.status),
-    );
+    throw new ApiError(res.status, err?.code ?? `HTTP_${res.status}`, err?.message ?? friendlyMessage(res.status));
   }
 
   return body as T;
+}
+
+async function readBody(res: Response): Promise<unknown> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    // Non-JSON response (a proxy error page, typically).
+    return null;
+  }
 }
 
 function friendlyMessage(status: number): string {

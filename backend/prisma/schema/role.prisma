@@ -1,0 +1,17 @@
+model Role {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  orgId       String   @map("organization_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  permissions String[] @default([])
+  isSystem    Boolean  @default(false) @map("is_system")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@unique([orgId, name])
+  @@map("roles")
+}

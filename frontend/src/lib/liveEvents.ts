@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { endSessionIfUnauthenticated, getToken } from './api';
+import { endSessionIfUnauthenticated, getFreshToken } from './api';
 
 /**
  * The push side of the live screens: a stream that says "something changed",
@@ -67,7 +67,7 @@ export async function pump(
   onEvent: (e: LiveEvent) => void,
   onOpen: () => void,
 ): Promise<void> {
-  const token = getToken();
+  const token = await getFreshToken();
   if (!token) throw new Error('not signed in');
 
   const res = await fetch(`${BASE}/v1/events`, {

@@ -1,22 +1,36 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { messageFor } from '../../lib/api';
-import { AuthLayout, Field, FormError, SubmitButton } from './AuthLayout';
+import { consumeSessionEndReason, messageFor, type SessionEndReason } from '../../lib/api';
+import { AuthLayout, Checkbox, Field, FormError, FormNotice, PasswordField, SubmitButton } from './AuthLayout';
 
 interface FromState {
   from?: { pathname?: string };
 }
 
+const END_REASON_NOTICES: Record<SessionEndReason, string> = {
+  expired: 'Your session has expired. Please sign in again.',
+  idle: 'You were signed out after 30 minutes of inactivity.',
+  security: 'For your security you were signed out on all devices. Please sign in again.',
+  password_changed: 'Your password was changed. Sign in with your new password.',
+  signed_out_everywhere: 'You have been signed out on all devices.',
+};
+
 export const LoginPage: React.FC = () => {
-  const { status, login } = useAuth();
+  const { status, login, restoreError, retryRestore } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [keepSignIn, setKeepSignIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Read once: the reason belongs to this visit of the page, not to the next.
+  const [notice] = useState(() => {
+    const reason = consumeSessionEndReason();
+    return reason ? END_REASON_NOTICES[reason] : null;
+  });
 
   // Land back on whatever the guard interrupted.
   const target = (location.state as FromState | null)?.from?.pathname ?? '/';
@@ -28,7 +42,7 @@ export const LoginPage: React.FC = () => {
     setError(null);
     setBusy(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password, keepSignIn);
       navigate(target, { replace: true });
     } catch (err) {
       setError(messageFor(err));
@@ -50,6 +64,15 @@ export const LoginPage: React.FC = () => {
         </>
       }
     >
+      {restoreError && (
+        <div role="alert" className="mb-4 px-3 py-2.5 rounded-lg bg-amber-950/40 border border-amber-900/60 text-sm text-amber-200">
+          {restoreError}{' '}
+          <button type="button" onClick={retryRestore} className="underline font-medium cursor-pointer">
+            Retry
+          </button>
+        </div>
+      )}
+      {!error && <FormNotice message={notice} />}
       <FormError message={error} />
       <form onSubmit={onSubmit} className="space-y-4">
         <Field
@@ -60,14 +83,22 @@ export const LoginPage: React.FC = () => {
           autoComplete="email"
           onChange={setEmail}
           disabled={busy}
+          required
         />
-        <Field
+        <PasswordField
           label="Password"
           name="password"
-          type="password"
           value={password}
           autoComplete="current-password"
           onChange={setPassword}
+          disabled={busy}
+          required
+        />
+        <Checkbox
+          label="Keep me signed in"
+          hint="Stay signed in on this device for 30 days. Don't use on a shared computer."
+          checked={keepSignIn}
+          onChange={setKeepSignIn}
           disabled={busy}
         />
         <SubmitButton busy={busy}>Sign in</SubmitButton>

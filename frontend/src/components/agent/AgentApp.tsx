@@ -1,7 +1,8 @@
 import React from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Building2, CalendarClock, CalendarCheck, LayoutDashboard, LogOut, Users } from 'lucide-react';
-import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
+import { Building2, CalendarClock, CalendarCheck, LayoutDashboard, Users } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { ProfileMenu, SignOutButton } from '../auth/ProfileMenu';
 import { AppShell } from '../layout/AppShell';
 import { ThemeToggle } from '../layout/ThemeToggle';
 import { AgentAppointments } from './AgentAppointments';
@@ -37,7 +38,7 @@ const NAV_ITEMS: Array<{ id: AgentView; label: string; icon: React.ReactNode }> 
  * guarded by OwnerGuard and answers an agent 403 whatever the UI shows.
  */
 export const AgentApp: React.FC = () => {
-  const { user, organization, logout } = useAuth();
+  const { organization } = useAuth();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   // The URL is the active view, as in the owner shell (AppContext). Paths are
@@ -90,25 +91,10 @@ export const AgentApp: React.FC = () => {
           </nav>
   
           {/* Who is signed in, theme, and the way out. */}
-          <div className="p-3 border-t border-slate-800 flex items-center gap-1">
-            <div className="min-w-0 flex-1 flex items-center gap-2.5 p-1.5">
-              <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
-                {initialsFor(user)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-slate-200 truncate leading-tight">{displayName(user)}</div>
-                <div className="text-xs text-slate-500 leading-tight">Agent</div>
-              </div>
-            </div>
+          <div className="relative p-3 border-t border-slate-800 flex items-center gap-1">
+            <ProfileMenu />
             <ThemeToggle />
-            <button
-              onClick={logout}
-              title="Sign out"
-              aria-label="Sign out"
-              className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
-            >
-              <LogOut className="w-[18px] h-[18px]" />
-            </button>
+            <SignOutButton iconClassName="w-[18px] h-[18px]" />
           </div>
         </aside>
       }
