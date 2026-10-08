@@ -185,6 +185,34 @@ export class PortalLeadsController {
       where: { organization_id: orgId },
       orderBy: { created_at: 'desc' },
       take: 500,
+      // Exactly the columns mapLead reads. The row also carries extracted_intel,
+      // ai_summary, custom_fields, field_provenance, consent_text and more —
+      // none of them in this response, and on a full page the bulk of the bytes.
+      select: {
+        id: true,
+        organization_id: true,
+        takeover_user_id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        status: true,
+        dnc_status: true,
+        location: true,
+        min_budget: true,
+        max_budget: true,
+        bedrooms: true,
+        timeline: true,
+        financing_status: true,
+        score: true,
+        temperature: true,
+        consent_status: true,
+        automation_paused: true,
+        created_at: true,
+        updated_at: true,
+        last_contact_at: true,
+        motivation: true,
+      },
     });
     return { leads: rows.map(mapLead) };
   }

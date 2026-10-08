@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import bcrypt from 'bcrypt';
 import { AuthModule } from '../auth/auth.module';
 import { envSchema } from '../app.module';
 import { LeadStatus } from '../common/domain';
@@ -12,12 +13,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TelnyxModule } from './telnyx.module';
 
 /**
- * Integration suite for the two manual engine triggers on PortalLeadsController,
- * against the real database. Run with `npm run test:portal-leads`.
+ * Integration suite for PortalLeadsController — the legacy lead list and the
+ * two manual engine triggers — against the real database. Run with
+ * `npm run test:portal-leads`.
  *
- * Both take a lead id from the URL. The organization comes from the session,
- * and a lead id from another organization must be a 404 that changes nothing —
- * the same answer as a lead that does not exist.
+ * The triggers take a lead id from the URL. The organization comes from the
+ * session, and a lead id from another organization must be a 404 that changes
+ * nothing — the same answer as a lead that does not exist.
  */
 
 // Nothing here may start the background pollers against the shared database,
@@ -38,6 +40,7 @@ let base: string;
 const createdUserIds: string[] = [];
 const createdOrgIds: string[] = [];
 const createdLeadIds: string[] = [];
+const createdSourceIds: string[] = [];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function call(path: string, token?: string, init: { method?: string; body?: unknown } = {}): Promise<{ status: number; body: any; text: string }> {
@@ -123,6 +126,7 @@ before(async () => {
 after(async () => {
   try {
     await prisma.leads.deleteMany({ where: { id: { in: createdLeadIds } } });
+    await prisma.lead_sources.deleteMany({ where: { id: { in: createdSourceIds } } });
     await prisma.users.deleteMany({ where: { id: { in: createdUserIds } } });
     // Orgs with audit rows cannot be deleted (immutable audit log) — see agent-me.test.ts.
     const audited = new Set(
@@ -196,4 +200,240 @@ test('qualified: a lead that does not exist is the same 404', async () => {
     body: { temperature: 'warm' },
   });
   assert.equal(res.status, 404, res.text);
+});
+
+// --- the legacy list: GET /api/leads ------------------------------------------
+
+/** An agent member of `orgId` with a profile, signed in. */
+async function signedInAgent(orgId: string, tag: string) {
+  const user = await prisma.users.create({
+    data: { email: emailFor(tag), first_name: 'Agent', last_name: tag, password_hash: await bcrypt.hash(PASSWORD, 4) },
+    select: { id: true },
+  });
+  createdUserIds.push(user.id);
+  await prisma.organization_members.create({ data: { organization_id: orgId, user_id: user.id, role: 'agent', status: 'active' } });
+  const profile = await prisma.agent_profiles.create({
+    data: { organization_id: orgId, user_id: user.id, display_name: `Agent ${tag}` },
+    select: { id: true },
+  });
+  const login = await call('/api/auth/login', undefined, { method: 'POST', body: { email: emailFor(tag), password: PASSWORD } });
+  assert.equal(login.status, 200, login.text);
+  return { userId: user.id, profileId: profile.id, token: login.body.token as string };
+}
+
+async function leadSource(orgId: string, code: string, sourceType: string): Promise<string> {
+  const row = await prisma.lead_sources.create({
+    data: { organization_id: orgId, name: code, code: `${code}-${RUN}`, source_type: sourceType },
+    select: { id: true },
+  });
+  createdSourceIds.push(row.id);
+  return row.id;
+}
+
+async function lead(data: Parameters<PrismaService['leads']['create']>[0]['data']): Promise<string> {
+  const row = await prisma.leads.create({ data, select: { id: true } });
+  createdLeadIds.push(row.id);
+  return row.id;
+}
+
+test("list: every lead in the caller's organization, newest first, each legacy field exactly as sent", async () => {
+  const owner = await signupOwner('list-owner');
+  const agent = await signedInAgent(owner.orgId, 'list-agent');
+  const website = await leadSource(owner.orgId, 'website', 'website');
+  const zillow = await leadSource(owner.orgId, 'zillow', 'zillow');
+
+  // Every column the response reads, set; and some it does not read, too.
+  const full = await lead({
+    organization_id: owner.orgId,
+    lead_source_id: website,
+    first_name: 'Bea',
+    last_name: 'Buyer',
+    email: 'bea@example.invalid',
+    phone: '+15125550123',
+    status: 'qualified',
+    score: 42.5,
+    temperature: 'hot',
+    timeline: '1-3 months',
+    min_budget: 250000.5,
+    max_budget: 450000,
+    financing_status: 'Pre-approved',
+    location: 'Austin, TX — Zilker',
+    bedrooms: 3,
+    motivation: 'Relocating for work',
+    consent_status: 'granted',
+    takeover_user_id: agent.userId,
+    last_contact_at: new Date('2026-07-04T12:00:00.000Z'),
+    created_at: new Date('2026-07-04T00:00:00.000Z'),
+    updated_at: new Date('2026-07-04T00:05:00.000Z'),
+    ai_summary: 'Not part of this response',
+    extracted_intel: { budget: 450000 },
+    custom_fields: { hasAgent: false },
+    consent_text: 'I agree to be contacted',
+  });
+  await prisma.lead_assignments.create({
+    data: { organization_id: owner.orgId, lead_id: full, agent_id: agent.profileId, assignment_type: 'manual' },
+  });
+  // Nothing optional set; a legacy 'booked'.
+  const bare = await lead({
+    organization_id: owner.orgId,
+    lead_source_id: zillow,
+    status: 'booked',
+    created_at: new Date('2026-07-03T00:00:00.000Z'),
+    updated_at: new Date('2026-07-03T00:00:00.000Z'),
+  });
+  // Legacy 'lost' reads as dnc with the flag, not_interested without it.
+  const optedOut = await lead({
+    organization_id: owner.orgId,
+    first_name: 'Otto',
+    status: 'lost',
+    dnc_status: true,
+    created_at: new Date('2026-07-02T00:00:00.000Z'),
+    updated_at: new Date('2026-07-02T00:00:00.000Z'),
+  });
+  const gaveUp = await lead({
+    organization_id: owner.orgId,
+    first_name: 'Gail',
+    status: 'lost',
+    consent_status: 'revoked',
+    automation_paused: true,
+    created_at: new Date('2026-07-01T00:00:00.000Z'),
+    updated_at: new Date('2026-07-01T00:00:00.000Z'),
+  });
+
+  // The legacy constants every lead carries, whatever its source.
+  const fixed = { source: 'Website', leadType: 'buyer', propertyType: '', preapprovalStatus: false };
+  const expected = JSON.stringify({
+    leads: [
+      {
+        id: full,
+        organizationId: owner.orgId,
+        // The takeover user, not the current assignment.
+        assignedAgentId: agent.userId,
+        firstName: 'Bea',
+        lastName: 'Buyer',
+        email: 'bea@example.invalid',
+        phone: '+15125550123',
+        source: fixed.source,
+        status: 'qualified',
+        leadType: fixed.leadType,
+        preferredLocation: 'Austin, TX — Zilker',
+        budgetMin: 250000.5,
+        budgetMax: 450000,
+        propertyType: fixed.propertyType,
+        bedrooms: 3,
+        timeline: '1-3 months',
+        financingStatus: 'Pre-approved',
+        preapprovalStatus: fixed.preapprovalStatus,
+        score: 42.5,
+        temperature: 'hot',
+        consentStatus: 'granted',
+        dncStatus: false,
+        automationPaused: false,
+        createdAt: '2026-07-04T00:00:00.000Z',
+        updatedAt: '2026-07-04T00:05:00.000Z',
+        lastContactedAt: '2026-07-04T12:00:00.000Z',
+        notes: 'Relocating for work',
+      },
+      ...(
+        [
+          [bare, '', 'appointment_booked', 'pending', false, false, '2026-07-03T00:00:00.000Z'],
+          [optedOut, 'Otto', 'dnc', 'pending', true, false, '2026-07-02T00:00:00.000Z'],
+          [gaveUp, 'Gail', 'not_interested', 'revoked', false, true, '2026-07-01T00:00:00.000Z'],
+        ] as const
+      ).map(([id, firstName, status, consentStatus, dncStatus, automationPaused, at]) => ({
+        id,
+        organizationId: owner.orgId,
+        assignedAgentId: '',
+        firstName,
+        lastName: '',
+        email: '',
+        phone: '',
+        source: fixed.source,
+        status,
+        leadType: fixed.leadType,
+        preferredLocation: '',
+        budgetMin: 0,
+        budgetMax: 0,
+        propertyType: fixed.propertyType,
+        bedrooms: 0,
+        timeline: '',
+        financingStatus: '',
+        preapprovalStatus: fixed.preapprovalStatus,
+        score: 0,
+        temperature: 'cold',
+        consentStatus,
+        dncStatus,
+        automationPaused,
+        createdAt: at,
+        updatedAt: at,
+        // lastContactedAt and notes are absent, not null, when unset.
+      })),
+    ],
+  });
+
+  const res = await call('/api/leads', owner.token);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.text, expected);
+
+  // Any member of the organization gets the same list — this route has never
+  // narrowed by role.
+  const asAgent = await call('/api/leads', agent.token);
+  assert.equal(asAgent.status, 200, asAgent.text);
+  assert.equal(asAgent.text, expected);
+});
+
+test('list: an organization with no leads is an empty list', async () => {
+  const owner = await signupOwner('list-empty');
+  const res = await call('/api/leads', owner.token);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.text, '{"leads":[]}');
+});
+
+test('list: each organization sees only its own leads', async () => {
+  const [a, b] = await Promise.all([call('/api/leads', ownerA.token), call('/api/leads', ownerB.token)]);
+  assert.equal(a.status, 200, a.text);
+  assert.equal(b.status, 200, b.text);
+  const ids = (res: { body: { leads: Array<{ id: string }> } }) => res.body.leads.map((l) => l.id).sort();
+
+  assert.deepEqual(ids(a), [leadToEnroll, leadToQualify].sort());
+  assert.deepEqual(ids(b), [leadOtherOrg]);
+  assert.ok(a.body.leads.every((l: { organizationId: string }) => l.organizationId === ownerA.orgId));
+  assert.ok(b.body.leads.every((l: { organizationId: string }) => l.organizationId === ownerB.orgId));
+});
+
+test('list: the 500 newest, and no query parameter changes that', async () => {
+  const owner = await signupOwner('list-many');
+  const start = Date.parse('2026-08-01T00:00:00.000Z');
+  // Shuffled insert order, distinct creation times.
+  await prisma.leads.createMany({
+    data: Array.from({ length: 502 }, (_, i) => (i * 31) % 502).map((m) => ({
+      organization_id: owner.orgId,
+      status: LeadStatus.NEW,
+      first_name: `Lead${m}`,
+      created_at: new Date(start + m * 60e3),
+    })),
+  });
+  createdLeadIds.push(
+    ...(await prisma.leads.findMany({ where: { organization_id: owner.orgId }, select: { id: true } })).map((l) => l.id),
+  );
+
+  const res = await call('/api/leads', owner.token);
+  assert.equal(res.status, 200, res.text.slice(0, 200));
+  assert.deepEqual(
+    res.body.leads.map((l: { createdAt: string }) => l.createdAt),
+    Array.from({ length: 500 }, (_, i) => new Date(start + (501 - i) * 60e3).toISOString()),
+  );
+
+  for (const query of ['?limit=5', '?take=1000', `?organizationId=${ownerB.orgId}`]) {
+    const again = await call(`/api/leads${query}`, owner.token);
+    assert.equal(again.status, 200, again.text.slice(0, 200));
+    assert.equal(again.text, res.text, query);
+  }
+});
+
+test('list: no session, or a garbage one, is a 401', async () => {
+  const none = await call('/api/leads');
+  assert.equal(none.status, 401, none.text);
+  const garbage = await call('/api/leads', 'not-a-token');
+  assert.equal(garbage.status, 401, garbage.text);
 });
