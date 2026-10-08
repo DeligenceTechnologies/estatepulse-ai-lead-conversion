@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
-import { LeadAppointments, LeadBookMeeting } from '../leads/LeadBooking';
+import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import {
   getCall,
@@ -191,23 +191,28 @@ export const LeadDetailModal: React.FC = () => {
     }
   };
 
-  if (!selectedLeadId) return null;
-
   // findLead, not leads.find: a lead opened from the pipeline lives in Postgres,
   // not in the demo store.
   const lead = findLead(selectedLeadId);
-  if (!lead) return null;
-
-  const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
-  const count = (n: number | undefined) => (activity ? ` (${n})` : '');
 
   // A database lead carries its real assignment; only a demo-store lead is
   // resolved against the demo roster. Told apart by id, because the same
   // database lead can reach here through either of two loaders (see findLead),
   // and only a database row has a UUID — demo leads are `lead_<timestamp>`.
-  const isLive = UUID.test(lead.id);
+  const isLive = !!lead && UUID.test(lead.id);
   const liveAgent =
-    assigned ?? (lead.assignedAgentId && lead.assignedAgentName ? { id: lead.assignedAgentId, name: lead.assignedAgentName } : null);
+    assigned ?? (lead?.assignedAgentId && lead.assignedAgentName ? { id: lead.assignedAgentId, name: lead.assignedAgentName } : null);
+
+  // Read once per open (and again only when the assigned agent changes), and
+  // handed to both tabs that show it: each tab mounts its own panel, which
+  // would otherwise ask again on every switch between them.
+  const booking = useLeadBookingOptions(isLive ? lead.id : null, liveAgent?.id ?? null);
+
+  if (!selectedLeadId || !lead) return null;
+
+  const assignedAgent = agents.find(a => a.id === lead.assignedAgentId) || agents[0];
+  const count = (n: number | undefined) => (activity ? ` (${n})` : '');
+
   const agentLabel = isLive
     ? liveAgent?.name ?? 'Unassigned'
     : lead.assignedAgentId ? assignedAgent.name : 'Unassigned';
@@ -444,7 +449,7 @@ export const LeadDetailModal: React.FC = () => {
               )}
 
               {/* Booking: the assigned agent's own event types, pre-filled for this lead. */}
-              {isLive && <LeadBookMeeting leadId={lead.id} agentKey={liveAgent?.id ?? null} />}
+              {isLive && <LeadBookMeeting leadId={lead.id} agentKey={liveAgent?.id ?? null} booking={booking} />}
 
             </div>
           )}
@@ -505,7 +510,7 @@ export const LeadDetailModal: React.FC = () => {
               (LeadBooking), against the assigned agent's calendar. */}
           {activeTab === 'appointments' && (
             isLive ? (
-              <LeadAppointments leadId={lead.id} agentKey={liveAgent?.id ?? null} />
+              <LeadAppointments leadId={lead.id} agentKey={liveAgent?.id ?? null} booking={booking} />
             ) : (
               <EmptyTab icon={<Calendar className="w-6 h-6" />} text="No appointments booked with this lead." />
             )

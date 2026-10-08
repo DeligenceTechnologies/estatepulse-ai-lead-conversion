@@ -50,17 +50,19 @@ function blockerText(o: LeadBookingOptions): string {
   }
 }
 
-export const LeadBookMeeting: React.FC<{
-  leadId: string;
-  agentKey: string | null;
-}> = ({ leadId, agentKey }) => {
+/**
+ * The booking options for one lead: read when the lead or its assigned agent
+ * changes, and not at all while `leadId` is null.
+ */
+export function useLeadBookingOptions(leadId: string | null, agentKey: string | null) {
   const [options, setOptions] = useState<LeadBookingOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
     setOptions(null);
     setError(null);
+    if (!leadId) return;
+    let alive = true;
     getLeadBookingOptions(leadId)
       .then((o) => alive && setOptions(o))
       .catch((e) => alive && setError(messageFor(e)));
@@ -68,6 +70,25 @@ export const LeadBookMeeting: React.FC<{
       alive = false;
     };
   }, [leadId, agentKey]);
+
+  return { options, error };
+}
+
+export type LeadBookingState = ReturnType<typeof useLeadBookingOptions>;
+
+/**
+ * `booking` is options already being read by a parent that shows this panel in
+ * more than one place (the lead dossier's Overview and Appointments tabs), so
+ * switching between them does not ask again. Without it, the panel reads its
+ * own.
+ */
+export const LeadBookMeeting: React.FC<{
+  leadId: string;
+  agentKey: string | null;
+  booking?: LeadBookingState;
+}> = ({ leadId, agentKey, booking }) => {
+  const own = useLeadBookingOptions(booking ? null : leadId, agentKey);
+  const { options, error } = booking ?? own;
 
   return (
     <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl space-y-3">
@@ -135,7 +156,9 @@ const STATUS_STYLES: Record<string, string> = {
 export const LeadAppointments: React.FC<{
   leadId: string;
   agentKey: string | null;
-}> = ({ leadId, agentKey }) => {
+  /** Booking options the parent already reads — see LeadBookMeeting. */
+  booking?: LeadBookingState;
+}> = ({ leadId, agentKey, booking }) => {
   const [rows, setRows] = useState<Appointment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -153,7 +176,7 @@ export const LeadAppointments: React.FC<{
 
   return (
     <div className="space-y-4">
-      <LeadBookMeeting leadId={leadId} agentKey={agentKey} />
+      <LeadBookMeeting leadId={leadId} agentKey={agentKey} booking={booking} />
 
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
