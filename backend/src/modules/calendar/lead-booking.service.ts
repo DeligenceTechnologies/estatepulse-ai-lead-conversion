@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { AuthContext } from '../../auth/types';
 import { AppError } from '../../common/errors';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
@@ -36,7 +37,19 @@ export class LeadBookingService {
   ) {}
 
   async options(auth: AuthContext, leadId: string): Promise<LeadBookingOptionsDTO> {
-    const lead = await this.visibleLead(auth, leadId);
+    if (!UUID.test(leadId)) throw new AppError('NOT_FOUND', 'No such lead');
+
+    // The office calendar depends only on the organization, so it is read
+    // alongside the lead instead of after it. It is awaited only where it was
+    // always read — once the lead is visible and assigned — so NOT_FOUND and
+    // no_agent answer exactly as before, and a failure of this read still
+    // surfaces only on the path that uses it.
+    const connection = this.connections.syncableOrgRow(auth.organizationId);
+    connection.catch(() => undefined);
+
+    const found = await this.visibleLeadWithAgent(auth, leadId);
+    if (!found) throw new AppError('NOT_FOUND', 'No such lead');
+    const { lead, profile } = found;
     const empty = (blocker: LeadBookingOptionsDTO['blocker'], extra: Partial<LeadBookingOptionsDTO> = {}) => ({
       agent: null,
       provider: null,
@@ -45,18 +58,10 @@ export class LeadBookingService {
       ...extra,
     });
 
-    const assignment = await this.prisma.lead_assignments.findFirst({
-      where: { organization_id: auth.organizationId, lead_id: lead.id, is_current: true },
-      orderBy: { assigned_at: 'desc' },
-      select: {
-        agent_profiles: { select: { id: true, display_name: true, calendly_user_uri: true, cal_user_id: true } },
-      },
-    });
-    const profile = assignment?.agent_profiles;
     if (!profile) return empty('no_agent');
     const agent = { id: profile.id, name: profile.display_name };
 
-    const conn = await this.connections.syncableOrgRow(auth.organizationId);
+    const conn = await connection;
     if (!conn) return empty('no_calendar', { agent });
     const provider = this.providers.get(conn.provider).id as CalendarProviderId;
 
@@ -83,7 +88,7 @@ export class LeadBookingService {
   }
 
   async appointmentsFor(auth: AuthContext, leadId: string): Promise<AppointmentDTO[]> {
-    // visibleLead's check and the read in one statement — see forLead.
+    // The visibility check and the read in one statement — see forLead.
     const appointments = UUID.test(leadId)
       ? await this.appointments.forLead(
           auth.organizationId,
@@ -95,21 +100,66 @@ export class LeadBookingService {
     return appointments;
   }
 
-  /** AppointmentsService.forLead applies this same rule in SQL. */
-  private async visibleLead(auth: AuthContext, leadId: string) {
-    const lead = UUID.test(leadId)
-      ? await this.prisma.leads.findFirst({
-          where: {
-            id: leadId,
-            organization_id: auth.organizationId,
-            ...(auth.role === 'owner'
-              ? {}
-              : { lead_assignments: { some: { agent_id: auth.agentProfileId ?? '', is_current: true } } }),
-          },
-          select: { id: true, first_name: true, last_name: true, email: true },
-        })
-      : null;
-    if (!lead) throw new AppError('NOT_FOUND', 'No such lead');
-    return lead;
+  /**
+   * The lead, if the caller may see it, and the agent profile its current
+   * assignment points at — ONE statement where Prisma took three sequential
+   * round trips (the lead, the assignment, then its profile). No row means the
+   * caller cannot see the lead; a lead with no current assignment comes back
+   * with no profile.
+   *
+   * Visibility: an owner sees every lead in the organization, anyone else only
+   * a lead currently assigned to their own profile — the same rule as
+   * AppointmentsService.forLead; keep the two in step. The current assignment
+   * is the newest is_current row, as it always was. Both joins also carry the
+   * organization, which a valid row always matches.
+   */
+  private async visibleLeadWithAgent(auth: AuthContext, leadId: string) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        agent_id: string | null;
+        display_name: string | null;
+        calendly_user_uri: string | null;
+        cal_user_id: number | null;
+      }>
+    >`
+      select l.id, l.first_name, l.last_name, l.email,
+             ap.id as agent_id, ap.display_name, ap.calendly_user_uri, ap.cal_user_id
+        from leads l
+        left join lateral (
+          select la.agent_id
+            from lead_assignments la
+           where la.organization_id = l.organization_id and la.lead_id = l.id and la.is_current
+           order by la.assigned_at desc
+           limit 1
+        ) cur on true
+        left join agent_profiles ap on ap.id = cur.agent_id and ap.organization_id = l.organization_id
+       where l.id = ${leadId}::uuid and l.organization_id = ${auth.organizationId}::uuid
+             ${
+               auth.role === 'owner'
+                 ? Prisma.empty
+                 : Prisma.sql`and exists (
+                     select 1 from lead_assignments mine
+                      where mine.organization_id = l.organization_id and mine.lead_id = l.id
+                        and mine.agent_id = ${auth.agentProfileId ?? ''}::uuid and mine.is_current
+                   )`
+             }
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      lead: { id: row.id, first_name: row.first_name, last_name: row.last_name, email: row.email },
+      profile: row.agent_id
+        ? {
+            id: row.agent_id,
+            display_name: row.display_name!,
+            calendly_user_uri: row.calendly_user_uri,
+            cal_user_id: row.cal_user_id,
+          }
+        : null,
+    };
   }
 }

@@ -98,8 +98,8 @@ export class AppointmentsService {
    *
    * `assignedAgentId` null is an owner, who sees every lead in the
    * organization; otherwise only a lead currently assigned to that agent
-   * profile is visible. The same rule as LeadBookingService.visibleLead — keep
-   * the two in step.
+   * profile is visible. The same rule as LeadBookingService.visibleLeadWithAgent
+   * — keep the two in step.
    *
    * ONE statement: the visibility check, the appointments and their lead and
    * agent, where Prisma takes four sequential round trips (the lead, the

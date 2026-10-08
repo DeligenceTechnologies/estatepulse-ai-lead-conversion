@@ -30,7 +30,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
-    "test:calendar": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/calendar.test.js"
+    "test:booking-options": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/lead-booking-options.test.js",
+    "test:calendar":"tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/calendar.test.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

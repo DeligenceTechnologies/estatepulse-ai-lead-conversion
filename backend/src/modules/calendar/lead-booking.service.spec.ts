@@ -65,29 +65,33 @@ function setup(opts: {
   conn?: any;
   eventTypes?: NormalizedEventType[];
 } = {}) {
+  const lead = opts.lead === undefined ? { id: LEAD, first_name: 'Bea', last_name: 'Buyer', email: 'bea@example.com' } : opts.lead;
+  const profile =
+    opts.profile === undefined
+      ? { id: AGENT_PROFILE, display_name: 'Sunny Patel', calendly_user_uri: HOST, cal_user_id: null }
+      : opts.profile;
+  // The one row the lead-with-agent statement returns: none at all when the
+  // caller cannot see the lead, no agent columns when nobody is assigned.
   const prisma: any = {
-    leads: {
-      findFirst: vi.fn().mockResolvedValue(
-        opts.lead === undefined ? { id: LEAD, first_name: 'Bea', last_name: 'Buyer', email: 'bea@example.com' } : opts.lead,
-      ),
-    },
-    lead_assignments: {
-      findFirst: vi.fn().mockResolvedValue(
-        opts.profile === null
-          ? null
-          : {
-              agent_profiles: opts.profile ?? {
-                id: AGENT_PROFILE,
-                display_name: 'Sunny Patel',
-                calendly_user_uri: HOST,
-                cal_user_id: null,
-              },
+    $queryRaw: vi.fn().mockResolvedValue(
+      lead === null
+        ? []
+        : [
+            {
+              ...lead,
+              agent_id: profile?.id ?? null,
+              display_name: profile?.display_name ?? null,
+              calendly_user_uri: profile?.calendly_user_uri ?? null,
+              cal_user_id: profile?.cal_user_id ?? null,
             },
-      ),
-    },
+          ],
+    ),
   };
   const connections: any = {
-    syncableOrgRow: vi.fn().mockResolvedValue(opts.conn === undefined ? { id: 'c', provider: 'calendly' } : opts.conn),
+    syncableOrgRow:
+      opts.conn instanceof Error
+        ? vi.fn().mockRejectedValue(opts.conn)
+        : vi.fn().mockResolvedValue(opts.conn === undefined ? { id: 'c', provider: 'calendly' } : opts.conn),
   };
   const listEventTypes = vi.fn().mockResolvedValue(opts.eventTypes ?? [et({})]);
   const providers: any = { get: vi.fn().mockReturnValue({ id: 'calendly', listEventTypes }) };
@@ -135,27 +139,40 @@ describe('LeadBookingService.options', () => {
     expect((await setup({ eventTypes: [] }).svc.options(owner, LEAD)).blocker).toBe('no_event_types');
   });
 
+  // Tagged-template parameters: the lead id, the organization, then the
+  // visibility fragment — all bound values, never spliced into the SQL.
+  const params = (prisma: any) => prisma.$queryRaw.mock.calls[0].slice(1);
+
   it('scopes an agent to leads currently assigned to them', async () => {
     const { svc, prisma } = setup();
     await svc.options(agent, LEAD);
-    expect(prisma.leads.findFirst.mock.calls[0][0].where).toEqual({
-      id: LEAD,
-      organization_id: ORG,
-      lead_assignments: { some: { agent_id: AGENT_PROFILE, is_current: true } },
-    });
+    const [leadId, orgId, visibility] = params(prisma);
+    expect([leadId, orgId]).toEqual([LEAD, ORG]);
+    expect(visibility.sql).toContain('mine.is_current');
+    expect(visibility.values).toEqual([AGENT_PROFILE]);
   });
 
   it('gives an owner every lead in their organization, and only theirs', async () => {
     const { svc, prisma } = setup();
     await svc.options(owner, LEAD);
-    expect(prisma.leads.findFirst.mock.calls[0][0].where).toEqual({ id: LEAD, organization_id: ORG });
+    const [leadId, orgId, visibility] = params(prisma);
+    expect([leadId, orgId]).toEqual([LEAD, ORG]);
+    expect(visibility.sql).toBe('');
+    expect(visibility.values).toEqual([]);
   });
 
   it('is NOT_FOUND for a lead the caller cannot see, or a malformed id', async () => {
     await expect(setup({ lead: null }).svc.options(agent, LEAD)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const { svc, prisma } = setup();
     await expect(svc.options(owner, 'not-a-uuid')).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    expect(prisma.leads.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('a failing calendar read changes neither NOT_FOUND nor no_agent, and surfaces where it is needed', async () => {
+    const down = new Error('calendar read failed');
+    await expect(setup({ lead: null, conn: down }).svc.options(owner, LEAD)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await setup({ profile: null, conn: down }).svc.options(owner, LEAD)).blocker).toBe('no_agent');
+    await expect(setup({ conn: down }).svc.options(owner, LEAD)).rejects.toBe(down);
   });
 });
 
