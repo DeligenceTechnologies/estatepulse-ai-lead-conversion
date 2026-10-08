@@ -69,6 +69,85 @@ export class AppointmentsService {
     return rows.map((r) => this.toDto(r as AppointmentRow));
   }
 
+  /**
+   * The owner's appointment list (GET /api/appointments) in ONE statement: the
+   * same appointments as list() — this organization, starting between `from`
+   * and `to` (by default 30 days back to 90 ahead), optionally one status,
+   * agent or lead, by start time, at most MAX_ROWS — each with its lead and
+   * agent, where list() takes three sequential round trips (the appointments,
+   * then each relation). Rows sharing a start time have no defined order, as
+   * before. The lead and agent are joined within the organization too, which a
+   * valid row always matches.
+   *
+   * list() still serves the agent's own route; keep the two in step until that
+   * route moves here.
+   */
+  async listInRange(organizationId: string, q: AppointmentRangeQuery): Promise<AppointmentDTO[]> {
+    const day = 24 * 60 * 60 * 1000;
+    const from = q.from ?? new Date(Date.now() - DEFAULT_PAST_DAYS * day);
+    const to = q.to ?? new Date(Date.now() + DEFAULT_FUTURE_DAYS * day);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        lead_id: string;
+        agent_id: string;
+        provider: string;
+        external_event_id: string | null;
+        status: string;
+        start_at: Date;
+        end_at: Date;
+        meeting_url: string | null;
+        notes: string | null;
+        metadata: unknown;
+        created_at: Date;
+        lead_found: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        phone: string | null;
+        lead_status: string | null;
+        agent_name: string | null;
+      }>
+    >`
+      select a.id, a.lead_id, a.agent_id, a.provider, a.external_event_id, a.status, a.start_at, a.end_at,
+             a.meeting_url, a.notes, a.metadata, a.created_at,
+             l.id as lead_found, l.first_name, l.last_name, l.email, l.phone, l.status as lead_status,
+             ap.display_name as agent_name
+        from appointments a
+        left join leads l on l.id = a.lead_id and l.organization_id = a.organization_id
+        left join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = a.organization_id
+       where a.organization_id = ${organizationId}::uuid
+         and a.start_at >= ${from}::timestamptz and a.start_at <= ${to}::timestamptz
+         ${q.status ? Prisma.sql`and a.status = ${q.status}` : Prisma.empty}
+         ${q.agentId ? Prisma.sql`and a.agent_id = ${q.agentId}::uuid` : Prisma.empty}
+         ${q.leadId ? Prisma.sql`and a.lead_id = ${q.leadId}::uuid` : Prisma.empty}
+       order by a.start_at asc
+       limit ${MAX_ROWS}
+    `;
+
+    return rows.map((r) =>
+      this.toDto({
+        id: r.id,
+        lead_id: r.lead_id,
+        agent_id: r.agent_id,
+        provider: r.provider,
+        external_event_id: r.external_event_id,
+        status: r.status,
+        start_at: r.start_at,
+        end_at: r.end_at,
+        meeting_url: r.meeting_url,
+        notes: r.notes,
+        metadata: r.metadata,
+        created_at: r.created_at,
+        leads: r.lead_found
+          ? { first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, status: r.lead_status! }
+          : null,
+        agent_profiles: r.agent_name === null ? null : { display_name: r.agent_name },
+      }),
+    );
+  }
+
   /** Upcoming appointments for one agent — the owner's per-agent panel. */
   async upcomingForAgent(organizationId: string, agentId: string): Promise<AppointmentDTO[]> {
     const rows = await this.prisma.appointments.findMany({

@@ -57,7 +57,7 @@ export class OwnerCalendarController {
     @Query(new ZodValidationPipe(appointmentRangeSchema, 'Invalid appointment filter'))
     query: AppointmentRangeQuery,
   ): Promise<AppointmentDTO[]> {
-    return this.appointments.list(auth.organizationId, query);
+    return this.appointments.listInRange(auth.organizationId, query);
   }
 
   /**
