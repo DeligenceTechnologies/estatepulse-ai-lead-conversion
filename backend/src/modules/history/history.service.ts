@@ -223,26 +223,34 @@ export class HistoryService {
     };
 
     const org = auth.organizationId;
-    // The calls first; then their leads and current agents in one parallel
-    // round. A nested include loads each level as its own sequential query.
-    const calls = await this.prisma.voice_calls.findMany({
-      where: {
-        organization_id: org,
-        ...(filters.leadId ? { lead_id: filters.leadId } : {}),
-        ...(filters.from || filters.to
-          ? {
-              created_at: {
-                ...(filters.from ? { gte: new Date(filters.from) } : {}),
-                ...(filters.to ? { lte: new Date(filters.to) } : {}),
-              },
-            }
-          : {}),
-        ...(Object.keys(leadWhere).length ? { leads: leadWhere } : {}),
-      },
-      orderBy: { created_at: 'desc' },
-      take,
-    });
-    const rows = await this.withLeadsAndAgents(org, calls);
+    // One lead's calls and no other filter is the lead detail view's request:
+    // one statement, see callsForLead. Everything else keeps the general path.
+    const leadOnly = filters.leadId && !q && !filters.temperature && !filters.agentId && !filters.from && !filters.to;
+    const rows = leadOnly
+      ? await this.callsForLead(auth, filters.leadId!, take)
+      : await this.withLeadsAndAgents(
+          org,
+          // The calls first; then their leads and current agents in one
+          // parallel round. A nested include loads each level as its own
+          // sequential query.
+          await this.prisma.voice_calls.findMany({
+            where: {
+              organization_id: org,
+              ...(filters.leadId ? { lead_id: filters.leadId } : {}),
+              ...(filters.from || filters.to
+                ? {
+                    created_at: {
+                      ...(filters.from ? { gte: new Date(filters.from) } : {}),
+                      ...(filters.to ? { lte: new Date(filters.to) } : {}),
+                    },
+                  }
+                : {}),
+              ...(Object.keys(leadWhere).length ? { leads: leadWhere } : {}),
+            },
+            orderBy: { created_at: 'desc' },
+            take,
+          }),
+        );
 
     // Which call is the newest for its lead, so only that one may carry a
     // relationship-level outcome like APPOINTMENT_BOOKED.
@@ -271,6 +279,117 @@ export class HistoryService {
    * agent's id and name can never come from different assignments. Every table
    * in the join is pinned to the caller's organization.
    */
+  /**
+   * One lead's calls with that lead and its current agent, in ONE statement:
+   * the same rows the general path's call query and withLeadsAndAgents return
+   * together over two sequential round trips, in the same shape.
+   *
+   * Same scoping: the session's organization on the call, the lead and the
+   * assignment, and for an agent only a lead currently assigned to them —
+   * leadScope, in SQL; keep the two in step. Newest first, `take` at most.
+   *
+   * The transcript itself is not read: a list row only says whether there is
+   * one, so `transcript` here carries that answer, which is all toListRow reads
+   * of it (`!!r.transcript`). The text stays with getCall.
+   */
+  private async callsForLead(auth: AuthContext, leadId: string, take: number) {
+    const org = auth.organizationId;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        lead_id: string;
+        provider: string;
+        provider_call_id: string | null;
+        direction: string;
+        status: string;
+        handoff_requested: boolean;
+        dnc_detected: boolean;
+        duration_seconds: number | null;
+        recording_url: string | null;
+        has_transcript: boolean;
+        started_at: Date | null;
+        ended_at: Date | null;
+        created_at: Date;
+        lead_found: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        temperature: string | null;
+        lead_status: string | null;
+        agent_id: string | null;
+        agent_first_name: string | null;
+        agent_last_name: string | null;
+        agent_email: string | null;
+      }>
+    >`
+      select c.id, c.lead_id, c.provider, c.provider_call_id, c.direction, c.status,
+             c.handoff_requested, c.dnc_detected, c.duration_seconds, c.recording_url,
+             (c.transcript is not null and c.transcript <> '') as has_transcript,
+             c.started_at, c.ended_at, c.created_at,
+             l.id as lead_found, l.first_name, l.last_name, l.phone, l.temperature, l.status as lead_status,
+             agent.agent_id, agent.first_name as agent_first_name, agent.last_name as agent_last_name,
+             agent.email as agent_email
+        from voice_calls c
+        left join leads l on l.id = c.lead_id and l.organization_id = c.organization_id
+        left join lateral (
+          select a.agent_id, u.first_name, u.last_name, u.email
+            from lead_assignments a
+            join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = ${org}::uuid
+            join users u on u.id = ap.user_id
+           where a.organization_id = ${org}::uuid and a.is_current and a.lead_id = l.id
+           limit 1
+        ) agent on true
+       where c.organization_id = ${org}::uuid and c.lead_id = ${leadId}::uuid
+             ${
+               auth.role === 'owner'
+                 ? Prisma.empty
+                 : Prisma.sql`and exists (
+                     select 1 from lead_assignments mine
+                      where mine.organization_id = c.organization_id and mine.lead_id = c.lead_id
+                        and mine.agent_id = ${auth.agentProfileId ?? ''}::uuid and mine.is_current
+                   )`
+             }
+       order by c.created_at desc
+       limit ${take}
+    `;
+
+    return rows.map((r) => ({
+      id: r.id,
+      lead_id: r.lead_id,
+      provider: r.provider,
+      provider_call_id: r.provider_call_id,
+      direction: r.direction,
+      status: r.status,
+      handoff_requested: r.handoff_requested,
+      dnc_detected: r.dnc_detected,
+      duration_seconds: r.duration_seconds,
+      recording_url: r.recording_url,
+      transcript: r.has_transcript,
+      started_at: r.started_at,
+      ended_at: r.ended_at,
+      created_at: r.created_at,
+      leads: r.lead_found
+        ? {
+            first_name: r.first_name,
+            last_name: r.last_name,
+            phone: r.phone,
+            temperature: r.temperature,
+            status: r.lead_status!,
+            lead_assignments: r.agent_id
+              ? [
+                  {
+                    agent_id: r.agent_id,
+                    agent_profiles: {
+                      users: { first_name: r.agent_first_name, last_name: r.agent_last_name, email: r.agent_email! },
+                    },
+                  },
+                ]
+              : [],
+          }
+        : null,
+    }));
+  }
+
   private async withLeadsAndAgents<T extends { lead_id: string }>(org: string, calls: T[]) {
     const leadIds = [...new Set(calls.map((c) => c.lead_id))];
     const [leads, agents] = leadIds.length

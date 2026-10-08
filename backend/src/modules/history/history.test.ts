@@ -371,3 +371,100 @@ test('lead messages: a missing or malformed leadId is a 400, and no session a 40
   const anonymous = await call(`/api/v1/messages?leadId=${leadAlice}`);
   assert.equal(anonymous.status, 401, anonymous.text);
 });
+
+// --- one lead's calls: GET /api/v1/calls?leadId= (the lead detail view) ------
+
+/**
+ * A booked lead of alice's with calls of every kind: each status, a handoff, a
+ * DNC, and a transcript that is text, empty, blank or absent.
+ */
+async function leadWithCalls(): Promise<string> {
+  const lead = await prisma.leads.create({
+    data: { organization_id: ownerA.orgId, status: 'appointment_booked', first_name: 'Callie', last_name: 'Caller', temperature: 'hot', phone: '+15125550111' },
+    select: { id: true },
+  });
+  createdLeadIds.push(lead.id);
+  await prisma.lead_assignments.create({
+    data: { organization_id: ownerA.orgId, lead_id: lead.id, agent_id: alice.profileId, assignment_type: 'manual' },
+  });
+  const start = Date.parse('2026-09-01T12:00:00.000Z');
+  const kinds = [
+    { status: 'completed', transcript: 'AI: Hello\nLead: Hi, still looking.' },
+    { status: 'no_answer', transcript: null },
+    { status: 'failed', transcript: '' },
+    { status: 'in_progress', transcript: ' ' },
+    { status: 'completed', transcript: 'Transcript', handoff_requested: true },
+    { status: 'completed', transcript: null, dnc_detected: true },
+    { status: 'queued', transcript: null },
+    { status: 'completed', transcript: 'Newest', duration_seconds: 245, recording_url: 'https://rec.example.invalid/1.mp3' },
+  ];
+  await prisma.voice_calls.createMany({
+    data: kinds.map((kind, i) => ({
+      organization_id: ownerA.orgId,
+      lead_id: lead.id,
+      provider: 'telnyx',
+      provider_call_id: `call-${RUN}-${i}`,
+      direction: i % 2 ? 'inbound' : 'outbound',
+      started_at: new Date(start + i * 3600e3),
+      ended_at: i % 2 ? null : new Date(start + i * 3600e3 + 60e3),
+      created_at: new Date(start + i * 3600e3),
+      ...kind,
+    })),
+  });
+  return lead.id;
+}
+
+test("lead calls: the lead view's request answers exactly as the general list does for the same calls", async () => {
+  const leadId = await leadWithCalls();
+  for (const token of [ownerA.token, alice.token]) {
+    const leadView = await call(`/api/v1/calls?leadId=${leadId}&limit=200`, token);
+    // An extra filter that keeps every one of these calls takes the general path.
+    const general = await call(`/api/v1/calls?leadId=${leadId}&limit=200&from=2000-01-01T00:00:00.000Z`, token);
+    assert.equal(leadView.status, 200, leadView.text);
+    assert.equal(general.status, 200, general.text);
+    assert.equal(leadView.text, general.text);
+    assert.equal(leadView.body.length, 8);
+  }
+});
+
+test('lead calls: newest first; hasTranscript only where there is text; the booked outcome on the newest call only', async () => {
+  const leadId = await leadWithCalls();
+  const res = await call(`/api/v1/calls?leadId=${leadId}&limit=200`, ownerA.token);
+  assert.equal(res.status, 200, res.text);
+  const rows = res.body as Array<{ providerCallId: string; hasTranscript: boolean; outcome: string; agentName: string | null; leadName: string }>;
+
+  assert.deepEqual(
+    rows.map((r) => r.providerCallId),
+    [7, 6, 5, 4, 3, 2, 1, 0].map((i) => `call-${RUN}-${i}`),
+  );
+  assert.deepEqual(
+    rows.map((r) => r.hasTranscript),
+    [true, false, false, true, true, false, false, true],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.outcome),
+    ['APPOINTMENT_BOOKED', 'IN_PROGRESS', 'NOT_INTERESTED', 'HUMAN_HANDOFF', 'IN_PROGRESS', 'FAILED', 'NO_ANSWER', 'ANSWERED'],
+  );
+  assert.ok(rows.every((r) => r.leadName === 'Callie Caller' && r.agentName === 'Ag alice'));
+  // The transcript text itself is never part of a list row.
+  assert.ok(!res.text.includes('still looking'));
+});
+
+test('lead calls: ?limit= caps the page to the newest calls', async () => {
+  const leadId = await leadWithCalls();
+  const two = await call(`/api/v1/calls?leadId=${leadId}&limit=2`, ownerA.token);
+  assert.deepEqual(
+    (two.body as Array<{ providerCallId: string }>).map((r) => r.providerCallId),
+    [`call-${RUN}-7`, `call-${RUN}-6`],
+  );
+  const capped = await call(`/api/v1/calls?leadId=${leadId}&limit=500`, ownerA.token);
+  assert.equal(capped.body.length, 8);
+});
+
+test('lead calls: an unknown lead is an empty list, and no session a 401', async () => {
+  const unknown = await call('/api/v1/calls?leadId=00000000-0000-4000-8000-000000000000&limit=200', ownerA.token);
+  assert.equal(unknown.status, 200, unknown.text);
+  assert.deepEqual(unknown.body, []);
+  const anonymous = await call(`/api/v1/calls?leadId=${leadAlice}&limit=200`);
+  assert.equal(anonymous.status, 401, anonymous.text);
+});
