@@ -178,7 +178,10 @@ export class CalendarSyncService {
     // second HTTP call (it is on Calendly), and an unchanged booking does not
     // need one. Over a steady-state window this is 1 request instead of 41.
     const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    if (existing && existingMeta.externalUpdatedAt === booking.externalUpdatedAt) return;
+    // ...except a row still missing its join link: a conferencing link can be
+    // generated just after booking, after an in-call booking wrote the row.
+    const linkArrived = !existing?.meeting_url && !!booking.meetingUrl;
+    if (existing && existingMeta.externalUpdatedAt === booking.externalUpdatedAt && !linkArrived) return;
 
     // Before the attendee request, not after: a booking hosted by somebody who
     // is not on our roster can never become a row, so paying for a second call

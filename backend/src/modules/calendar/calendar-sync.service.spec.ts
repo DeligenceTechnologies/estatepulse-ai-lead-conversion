@@ -460,6 +460,20 @@ describe('CalendarSyncService.reconcile', () => {
     expect(appointmentBooked).toHaveBeenCalledTimes(1);
   });
 
+  it('fills in a join link that arrived after the row was written, even with an unchanged updated_at', async () => {
+    const events = [event({ location: { type: 'zoom_conference', join_url: null } })];
+    const { service, conn, appointments } = makeService([lead()], events, { [EVENT_URI]: [invitee()] });
+
+    await service.syncConnection(conn);
+    expect(appointments[0].meeting_url).toBeNull();
+
+    events[0] = event({ location: { type: 'zoom_conference', join_url: 'https://zoom.example/j/2' } });
+    const second = await service.syncConnection(conn);
+
+    expect(second).toMatchObject({ created: 0, updated: 1 });
+    expect(appointments[0].meeting_url).toBe('https://zoom.example/j/2');
+  });
+
   it('flips to cancelled when the event is canceled', async () => {
     const { service, conn, appointments } = makeService([lead()], [event()], {
       [EVENT_URI]: [invitee()],

@@ -51,6 +51,7 @@ const fakeCalendly = {
     calendlyCalls.createInvitee.push(body);
     return { uri: 'inv-1', event: EVENT_URI, cancel_url: 'https://c', reschedule_url: 'https://r' };
   },
+  getEventType: async () => ({ uri: 'https://api.calendly.com/event_types/rr', locations: [{ kind: 'zoom_conference' }] }),
   getScheduledEvent: async () => ({
     uri: EVENT_URI,
     name: 'Buyer consultation',
@@ -253,6 +254,8 @@ test('books, assigns the lead to Calendly’s host as round robin, and records t
   assert.equal(r.body.agentName, `Alice ${RUN}`);
   // No partial `tracking` object: Calendly rejects one unless all six fields are set.
   assert.equal((calendlyCalls.createInvitee[0] as any).tracking, undefined);
+  // The event type's video location is sent, or Calendly makes no join link.
+  assert.deepEqual((calendlyCalls.createInvitee[0] as any).location, { kind: 'zoom_conference' });
 
   const assignment = await prisma.lead_assignments.findFirstOrThrow({ where: { lead_id: leadId, is_current: true } });
   assert.equal(assignment.agent_id, aliceProfileId);
