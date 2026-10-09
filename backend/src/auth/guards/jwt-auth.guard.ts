@@ -53,7 +53,7 @@ export class JwtAuthGuard implements CanActivate {
           select: {
             status: true,
             organization: { select: { status: true } },
-            role: { select: { id: true, isSystem: true, permissions: true } },
+            roles: { select: { role: { select: { id: true, isSystem: true, permissions: true } } } },
           },
         },
       },
@@ -88,8 +88,8 @@ export class JwtAuthGuard implements CanActivate {
       userId: payload.sub,
       organizationId: payload.orgId,
       sessionId: payload.sid,
-      roleId: session.user.role.id,
-      permissions: effectivePermissions(session.user.role),
+      roleIds: session.user.roles.map(({ role }) => role.id),
+      permissions: effectivePermissions(session.user.roles.map(({ role }) => role)),
     };
     return true;
   }

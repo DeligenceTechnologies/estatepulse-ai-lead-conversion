@@ -14,7 +14,7 @@ interface Props {
  * The owner's read-only view of one agent's calendar.
  *
  * Read-only on purpose. Scheduling belongs to the ORGANIZATION — one account,
- * Calendly or Cal.com, connected once on Integrations — so there is nothing
+ * Calendly or Cal.com, connected once in Settings — so there is nothing
  * per-agent to connect here. What is per-agent is whether they are on that
  * team, which is what decides whether their bookings can be attributed to them
  * at all.
@@ -100,7 +100,7 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                   <p className="text-xs text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 leading-relaxed">
                     This agent is not on the office’s scheduling team, so bookings cannot be
                     attributed to them. Invite them in Calendly or Cal.com using their email, then
-                    press <span className="text-slate-200">Sync agents</span> on Integrations.
+                    press <span className="text-slate-200">Sync agents</span> in Settings → Calendly.
                   </p>
                 )}
               </section>

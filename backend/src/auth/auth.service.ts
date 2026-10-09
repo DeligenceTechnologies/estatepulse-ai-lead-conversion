@@ -24,23 +24,31 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto, meta: SessionMeta) {
-    const { organizationName, password, ...owner } = dto;
+    const { organizationName, organizationType, password, ...owner } = dto;
     const passwordHash = await hashPassword(password);
 
     let user: User;
     try {
       user = await this.prisma.$transaction(async (tx) => {
         const organization = await tx.organization.create({
-          data: { name: organizationName },
+          // Settings start at their defaults (Asia/Kolkata, Mon-Fri 09:00-18:00).
+          data: { name: organizationName, settings: { create: {} } },
         });
         const ownerRole = await tx.role.create({
           data: { ...DEFAULT_ROLES.OWNER, orgId: organization.id },
         });
-        await tx.role.create({
+        const agentRole = await tx.role.create({
           data: { ...DEFAULT_ROLES.AGENT, orgId: organization.id },
         });
+        const roleIds =
+          organizationType === 'individual' ? [ownerRole.id, agentRole.id] : [ownerRole.id];
         return tx.user.create({
-          data: { ...owner, orgId: organization.id, roleId: ownerRole.id, password: passwordHash },
+          data: {
+            ...owner,
+            orgId: organization.id,
+            password: passwordHash,
+            roles: { create: roleIds.map((roleId) => ({ roleId })) },
+          },
         });
       });
     } catch (error) {
@@ -166,10 +174,11 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: auth.userId },
       omit: OMIT_PASSWORD,
-      include: { organization: true, role: true },
+      include: { organization: true, roles: { include: { role: true }, orderBy: { createdAt: 'asc' } } },
     });
     if (!user) throw new NotFoundException('User not found');
-    return { ...user, permissions: effectivePermissions(user.role) };
+    const roles = user.roles.map(({ role }) => role);
+    return { ...user, roles, permissions: effectivePermissions(roles) };
   }
 
   async changePassword(dto: ChangePasswordDto, auth: AuthContext) {

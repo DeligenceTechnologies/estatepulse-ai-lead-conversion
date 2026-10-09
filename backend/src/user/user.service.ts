@@ -12,9 +12,26 @@ import type { AuthContext } from '@/auth/auth.types';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { welcomeEmail, type WelcomeEmailInput } from './templates/welcome-email';
+import { toWorkingHoursJson } from '@/common/utils/working-hours';
 
 const OMIT_PASSWORD = { password: true } as const;
-const WITH_ROLE = { role: { select: { id: true, name: true, isSystem: true } } } as const;
+const WITH_ROLES = {
+  roles: {
+    select: { role: { select: { id: true, name: true, isSystem: true } } },
+    orderBy: { createdAt: 'asc' },
+  },
+} as const;
+
+/** `roles: [{ role }]` from Prisma becomes `roles: [role]` in every response. */
+type RoleSummary = { id: string; name: string; isSystem: boolean };
+function flattenRoles<U extends { roles: { role: RoleSummary }[] }>(
+  user: U,
+): Omit<U, 'roles'> & { roles: RoleSummary[] } {
+  return { ...user, roles: user.roles.map(({ role }) => role) };
+}
+
+/** Holding the system role makes a user an owner. */
+const OWNER_FILTER = { roles: { some: { role: { isSystem: true } } } } satisfies Prisma.UserWhereInput;
 
 export interface CredentialsEmailResult {
   sent: boolean;
@@ -45,16 +62,24 @@ export class UserService {
     if (!organization) {
       throw new NotFoundException('Organization not found');
     }
-    await this.findRoleInOrg(dto.roleId, dto.orgId);
+    const { roleIds, workingHours, ...fields } = dto;
+    await this.findRolesInOrg(roleIds, dto.orgId);
 
     const password = generatePassword();
     let user;
     try {
-      user = await this.prisma.user.create({
-        data: { ...dto, password: await hashPassword(password) },
-        omit: OMIT_PASSWORD,
-        include: WITH_ROLE,
-      });
+      user = flattenRoles(
+        await this.prisma.user.create({
+          data: {
+            ...fields,
+            ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
+            password: await hashPassword(password),
+            roles: { create: roleIds.map((roleId) => ({ roleId })) },
+          },
+          omit: OMIT_PASSWORD,
+          include: WITH_ROLES,
+        }),
+      );
     } catch (error) {
       rethrowPrismaError(error, 'User');
     }
@@ -62,7 +87,7 @@ export class UserService {
     const credentialsEmail = await this.sendCredentials({
       firstName: user.firstName,
       organizationName: organization.name,
-      roleName: user.role.name,
+      roleName: user.roles.map((role) => role.name).join(', '),
       email: user.email,
       password,
     });
@@ -89,46 +114,56 @@ export class UserService {
       searchFields: ['firstName', 'lastName', 'email'],
       filters: {
         status: { type: 'enum', values: Object.values(BaseStatus) },
-        roleId: { type: 'uuid', multiple: true },
+        // Members holding any of the given roles.
+        roleId: { type: 'uuid', multiple: true, field: 'roles.some.roleId' },
       },
       sortableFields: ['createdAt'] as const,
       defaultSort: [{ createdAt: 'desc' }],
-      findMany: (args) => this.prisma.user.findMany({ ...args, omit: OMIT_PASSWORD, include: WITH_ROLE }),
+      findMany: async (args) =>
+        (await this.prisma.user.findMany({ ...args, omit: OMIT_PASSWORD, include: WITH_ROLES })).map(flattenRoles),
       count: (args) => this.prisma.user.count(args),
     });
   }
 
   async findOne(id: string) {
     try {
-      return await this.prisma.user.findUniqueOrThrow({ where: { id }, omit: OMIT_PASSWORD, include: WITH_ROLE });
+      return flattenRoles(
+        await this.prisma.user.findUniqueOrThrow({ where: { id }, omit: OMIT_PASSWORD, include: WITH_ROLES }),
+      );
     } catch (error) {
       rethrowPrismaError(error, 'User');
     }
   }
 
-  async update(id: string, { password, ...dto }: UpdateUserDto) {
+  async update(id: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto) {
     const current = await this.prisma.user.findUnique({
       where: { id },
-      select: { orgId: true, status: true, role: { select: { isSystem: true } } },
+      select: { orgId: true, status: true, roles: { select: { role: { select: { isSystem: true } } } } },
     });
     if (!current) throw new NotFoundException('User not found');
 
-    const newRole = dto.roleId ? await this.findRoleInOrg(dto.roleId, current.orgId) : undefined;
-    const losesOwner = newRole ? !newRole.isSystem : false;
-    if (current.role.isSystem && current.status === 'active' && losesOwner) {
+    const newRoles = roleIds ? await this.findRolesInOrg(roleIds, current.orgId) : undefined;
+    const isOwner = current.roles.some(({ role }) => role.isSystem);
+    const losesOwner = newRoles ? !newRoles.some((role) => role.isSystem) : false;
+    if (isOwner && current.status === 'active' && losesOwner) {
       await this.assertAnotherOwner(id, current.orgId);
     }
 
     try {
-      return await this.prisma.user.update({
-        where: { id },
-        data: {
-          ...dto,
-          ...(password !== undefined ? { password: await hashPassword(password) } : {}),
-        },
-        omit: OMIT_PASSWORD,
-        include: WITH_ROLE,
-      });
+      return flattenRoles(
+        await this.prisma.user.update({
+          where: { id },
+          data: {
+            ...dto,
+            ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
+            ...(password !== undefined ? { password: await hashPassword(password) } : {}),
+            // The given list replaces the user's roles entirely.
+            ...(roleIds ? { roles: { deleteMany: {}, create: roleIds.map((roleId) => ({ roleId })) } } : {}),
+          },
+          omit: OMIT_PASSWORD,
+          include: WITH_ROLES,
+        }),
+      );
     } catch (error) {
       rethrowPrismaError(error, 'User');
     }
@@ -137,9 +172,9 @@ export class UserService {
   async remove(id: string) {
     const current = await this.prisma.user.findUnique({
       where: { id },
-      select: { orgId: true, status: true, role: { select: { isSystem: true } } },
+      select: { orgId: true, status: true, roles: { select: { role: { select: { isSystem: true } } } } },
     });
-    if (current?.role.isSystem && current.status === 'active') {
+    if (current?.roles.some(({ role }) => role.isSystem) && current.status === 'active') {
       await this.assertAnotherOwner(id, current.orgId);
     }
 
@@ -150,18 +185,20 @@ export class UserService {
     }
   }
 
-  private async findRoleInOrg(roleId: string, orgId: string) {
-    const role = await this.prisma.role.findFirst({
-      where: { id: roleId, orgId },
+  private async findRolesInOrg(roleIds: string[], orgId: string) {
+    const roles = await this.prisma.role.findMany({
+      where: { id: { in: roleIds }, orgId },
       select: { id: true, isSystem: true },
     });
-    if (!role) throw new BadRequestException('Role does not belong to this organization');
-    return role;
+    if (roles.length !== new Set(roleIds).size) {
+      throw new BadRequestException('Every role must belong to this organization');
+    }
+    return roles;
   }
 
   private async assertAnotherOwner(userId: string, orgId: string) {
     const otherOwners = await this.prisma.user.count({
-      where: { orgId, id: { not: userId }, status: 'active', role: { isSystem: true } },
+      where: { orgId, id: { not: userId }, status: 'active', ...OWNER_FILTER },
     });
     if (otherOwners === 0) {
       throw new ConflictException('An organization must keep at least one active owner');

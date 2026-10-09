@@ -1,8 +1,10 @@
 import { apiFetch } from '../lib/api';
+import type { WorkingDay } from './workingHours';
 
 /**
  * Team members (users) and roles, against the backend's /user and /roles
- * modules. An "agent" is simply a user whose role is not the system Owner role.
+ * modules. A user may hold several roles and gets every permission of each; an
+ * "agent" is simply a user who does not hold the system Owner role.
  *
  * Every call is permission-checked server-side (user.read, user.create, ...);
  * the UI hides controls the caller lacks as a courtesy only.
@@ -25,12 +27,23 @@ export interface TeamMember {
   lastName: string;
   email: string;
   phone: string;
-  roleId: string;
   status: UserStatus;
+  /** IANA time zone, e.g. "Asia/Kolkata" (the default). */
+  timezone: string;
+  /** How many leads routing may hand them at once; 0 = none (server default 25). */
+  maxActiveLeads: number;
+  /** Seven days, wall-clock in `timezone` (server default Mon-Fri 09:00-18:00). */
+  workingHours: WorkingDay[];
+  /**
+   * Leads currently assigned to them. Not sent by the server until lead
+   * assignment is built on this backend; the UI shows "—" while absent.
+   */
+  activeLeads?: number;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
-  role: RoleSummary;
+  /** Every role the member holds, in the order they were given. */
+  roles: RoleSummary[];
 }
 
 export interface Role extends RoleSummary {
@@ -104,7 +117,14 @@ export interface NewMemberInput {
   lastName: string;
   email: string;
   phone: string;
-  roleId: string;
+  /** IANA time zone; the server defaults to Asia/Kolkata when omitted. */
+  timezone?: string;
+  /** 0-1000; the server defaults to 25 when omitted. */
+  maxActiveLeads?: number;
+  /** All seven days; the server defaults to Mon-Fri 09:00-18:00 when omitted. */
+  workingHours?: WorkingDay[];
+  /** At least one; the member gets every permission of each. */
+  roleIds: string[];
 }
 
 /** Whether the welcome email with the sign-in details reached the new member. */
@@ -138,3 +158,31 @@ export const deleteMember = (id: string): Promise<TeamMember> =>
 /** Every role of the organization, for pickers and filters (Owner first). */
 export const listRoles = async (): Promise<Role[]> =>
   (await apiFetch<Paginated<Role>>('/roles?limit=100', { auth: true })).data;
+
+/** One module of GET /roles/permissions, e.g. "Users" with its four permissions. */
+export interface PermissionGroup {
+  module: string;
+  label: string;
+  permissions: { key: string; label: string }[];
+}
+
+/** The catalog the role editor offers, grouped by module. */
+export const listPermissionGroups = (): Promise<PermissionGroup[]> =>
+  apiFetch<PermissionGroup[]>('/roles/permissions', { auth: true });
+
+export interface RoleInput {
+  name: string;
+  description?: string;
+  permissions: string[];
+}
+
+export const createRole = (input: RoleInput): Promise<Role> =>
+  apiFetch<Role>('/roles', { method: 'POST', body: input, auth: true });
+
+/** Only the keys sent are changed. The Owner role is refused server-side. */
+export const updateRole = (id: string, input: Partial<RoleInput>): Promise<Role> =>
+  apiFetch<Role>(`/roles/${id}`, { method: 'PATCH', body: input, auth: true });
+
+/** Refused while any user still has the role. */
+export const deleteRole = (id: string): Promise<Role> =>
+  apiFetch<Role>(`/roles/${id}`, { method: 'DELETE', auth: true });

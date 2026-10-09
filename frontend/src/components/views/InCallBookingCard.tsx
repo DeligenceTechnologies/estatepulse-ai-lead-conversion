@@ -47,9 +47,9 @@ export const InCallBookingCard: React.FC = () => {
   const blocker = !status
     ? null
     : !status.calendly.connected
-      ? 'Connect Calendly on Integrations first.'
+      ? 'Connect Calendly in Settings → Calendly first.'
       : !status.calendly.scopesOk
-        ? 'Calendly has not granted booking permission yet: add availability:read and scheduled_events:write to your Calendly OAuth app, set CALENDLY_BOOKING_SCOPES=1 in the backend .env, restart, then reconnect Calendly on Integrations.'
+        ? 'Calendly has not granted booking permission yet: add availability:read and scheduled_events:write to your Calendly OAuth app, set CALENDLY_BOOKING_SCOPES=1 in the backend .env, restart, then reconnect Calendly in Settings → Calendly.'
         : !status.telnyx.connected || !status.telnyx.hasAssistant
           ? 'Connect Telnyx and create your AI assistant first.'
           : status.eventTypes.length === 0
@@ -125,7 +125,7 @@ export const InCallBookingCard: React.FC = () => {
             <p className="text-[11px] text-amber-300 flex items-start gap-1.5 leading-relaxed">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               Not linked to an agent: {status.unlinkedMembers.join(', ')}. A meeting Calendly gives them is booked, but
-              cannot be assigned here — press Sync agents on Integrations.
+              cannot be assigned here — press Sync agents in Settings → Calendly.
             </p>
           )}
 

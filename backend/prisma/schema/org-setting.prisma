@@ -1,0 +1,21 @@
+/// Per-organization configuration, one row per organization, kept apart from
+/// `organizations` so settings can grow (calling, calendar, ...) without
+/// touching the core record. Created with the organization; read lazily
+/// (upserted) for organizations that predate it.
+model OrganizationSetting {
+  id    String @id @default(uuid(7)) @db.Uuid
+  orgId String @unique @map("organization_id") @db.Uuid
+
+  /// IANA zone the business hours below are read in.
+  timezone     String @default("Asia/Kolkata") @db.VarChar(100)
+  /// Business hours: `{ dayOfWeek: 0..6 (0 = Sunday), isAvailable, startTime: "HH:MM", endTime: "HH:MM" }` per day.
+  /// Defaults to Monday-Friday 09:00-18:00, weekends off. See common/utils/working-hours.ts.
+  workingHours Json   @default("[{\"dayOfWeek\":0,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":1,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":2,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":3,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":4,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":5,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":6,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"}]") @map("working_hours")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("org_settings")
+}

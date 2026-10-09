@@ -308,7 +308,7 @@ const EmptyState: React.FC<{ onGoToAgents: () => void }> = ({ onGoToAgents }) =>
     <div className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto space-y-2">
       <p className="text-slate-300 font-semibold">No appointments yet.</p>
       <p>
-        Appointments appear here once the office calendar is connected on Integrations, your
+        Appointments appear here once the office calendar is connected in Settings → Calendly, your
         agents are invited onto it, and someone books with them.
       </p>
       <p className="text-slate-500">

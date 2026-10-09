@@ -20,9 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
-import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
-import { TelnyxCard } from './TelnyxCard';
 
 /**
  * Integrations & Webhooks: every connection the account has, one card each.
@@ -33,9 +31,8 @@ import { TelnyxCard } from './TelnyxCard';
  * lives on Lead Sources, the screen people actually watch. Showing it in both
  * places made a page you visit twice a year look like a dashboard.
  *
- * Telnyx comes first because it is the one connection the product cannot run
- * without — no Telnyx account, no calls — and it owns its own status, so it is
- * self-loading. The two lead-source cards read the same endpoint as each other
+ * Telnyx and the calendar (Calendly / Cal.com) are organization settings and
+ * live on the Settings screen, one tab each. The two lead-source cards read the same endpoint as each other
  * and differ only in how the webhook got onto the form: API means we installed
  * it with a key and can repair it, MANUAL means the customer pasted our URL in
  * themselves and only they can.
@@ -306,15 +303,7 @@ export const ConnectionCards: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Telnyx — the outbound side: the account the AI agent calls from. */}
-        <TelnyxCard />
-
-        {/* Scheduling — Calendly and Cal.com, of which exactly one can be live.
-            Renders both cards from ONE status request: two self-loading cards
-            would disagree with each other for as long as the slower one took,
-            on a screen whose whole job is saying what is connected. */}
-        <SchedulingCards />
-
+        {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings. */}
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard
           icon={

@@ -66,7 +66,7 @@ export class RoleService {
     const role = await this.findEditable(id);
     if (role._count.users > 0) {
       throw new ConflictException(
-        `This role is assigned to ${role._count.users} user(s). Assign them another role first.`,
+        `This role is assigned to ${role._count.users} user(s). Remove it from them first.`,
       );
     }
     try {

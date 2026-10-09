@@ -28,11 +28,19 @@ interface AuthContextType {
   status: AuthStatus;
   user: AuthUser | null;
   organization: AuthOrganization | null;
-  /** Which shell to show: the system (Owner) role gets the owner app. */
+  /**
+   * Which shell is showing. A user who holds the Owner role and another role
+   * may switch between the two; everyone else has exactly one.
+   */
   role: Role | null;
-  /** The role as named by the organization, e.g. "Owner", "Agent", "Team Lead". */
+  /** The shells this user may open: 'owner' with the Owner role, 'agent' with any other. */
+  profiles: Role[];
+  /** Opens the other shell on its dashboard. Only for a profile in `profiles`. */
+  switchProfile: (profile: Role) => void;
+  /** The roles as named by the organization, e.g. "Owner" or "Agent, Team Lead". */
   roleName: string | null;
-  roleDetails: AuthRole | null;
+  /** Every role the user holds; their permissions are the union of these. */
+  roles: AuthRole[];
   /** Effective permission keys, e.g. "user.create". */
   permissions: string[];
   /** UI courtesy only — the server enforces every permission itself. */
@@ -218,15 +226,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const permissions = me?.permissions ?? [];
 
+  const profiles: Role[] = me
+    ? [
+        ...(me.roles.some((r) => r.isSystem) ? (['owner'] as const) : []),
+        ...(me.roles.some((r) => !r.isSystem) ? (['agent'] as const) : []),
+      ]
+    : [];
+
+  // The last profile this user chose on this browser. A view preference only:
+  // permissions come from the server whichever shell is showing.
+  const [chosenProfile, setChosenProfile] = useState<Role | null>(null);
+  useEffect(() => {
+    setChosenProfile(me ? readProfile(me.id) : null);
+  }, [me?.id]);
+
+  const role: Role | null =
+    chosenProfile && profiles.includes(chosenProfile) ? chosenProfile : (profiles[0] ?? null);
+
+  const switchProfile: AuthContextType['switchProfile'] = (profile) => {
+    if (!me || !profiles.includes(profile) || profile === role) return;
+    setChosenProfile(profile);
+    writeProfile(me.id, profile);
+    // Both shells start from their own dashboard; a path from one may not exist in the other.
+    navigate('/dashboard');
+  };
+
   return (
     <AuthContext.Provider
       value={{
         status,
         user: me,
         organization: me?.organization ?? null,
-        role: me ? (me.role.isSystem ? 'owner' : 'agent') : null,
-        roleName: me?.role.name ?? null,
-        roleDetails: me?.role ?? null,
+        role,
+        profiles,
+        switchProfile,
+        roleName: me ? me.roles.map((r) => r.name).join(', ') : null,
+        roles: me?.roles ?? [],
         permissions,
         can: (permission) => permissions.includes(permission),
         agentProfileId: null,
@@ -245,6 +280,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </AuthContext.Provider>
   );
 };
+
+const profileKey = (userId: string): string => `ep_profile:${userId}`;
+
+function readProfile(userId: string): Role | null {
+  try {
+    const value = localStorage.getItem(profileKey(userId));
+    return value === 'owner' || value === 'agent' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeProfile(userId: string, profile: Role): void {
+  try {
+    localStorage.setItem(profileKey(userId), profile);
+  } catch {
+    /* the choice just will not be remembered */
+  }
+}
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);

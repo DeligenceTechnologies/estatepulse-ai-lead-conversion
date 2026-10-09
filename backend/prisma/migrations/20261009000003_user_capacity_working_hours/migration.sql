@@ -1,0 +1,3 @@
+-- AlterTable: existing users get the defaults (25 leads; Monday-Friday 09:00-18:00, weekends off).
+ALTER TABLE "users" ADD COLUMN "max_active_leads" INTEGER NOT NULL DEFAULT 25;
+ALTER TABLE "users" ADD COLUMN "working_hours" JSONB NOT NULL DEFAULT '[{"dayOfWeek":0,"isAvailable":false,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":1,"isAvailable":true,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":2,"isAvailable":true,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":3,"isAvailable":true,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":4,"isAvailable":true,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":5,"isAvailable":true,"startTime":"09:00","endTime":"18:00"},{"dayOfWeek":6,"isAvailable":false,"startTime":"09:00","endTime":"18:00"}]'::jsonb;

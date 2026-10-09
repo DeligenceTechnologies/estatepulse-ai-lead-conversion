@@ -69,6 +69,8 @@ export const DEFAULT_ROLES = {
   },
 } as const;
 
-export function effectivePermissions(role: { isSystem: boolean; permissions: string[] }): string[] {
-  return role.isSystem ? [...ALL_PERMISSIONS] : role.permissions;
+/** A user holding several roles gets every permission of each; the system role grants all. */
+export function effectivePermissions(roles: readonly { isSystem: boolean; permissions: string[] }[]): string[] {
+  if (roles.some((role) => role.isSystem)) return [...ALL_PERMISSIONS];
+  return [...new Set(roles.flatMap((role) => role.permissions))];
 }

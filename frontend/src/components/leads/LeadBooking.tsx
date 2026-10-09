@@ -40,7 +40,7 @@ function blockerText(o: LeadBookingOptions): string {
     case "no_agent":
       return "Assign an agent first — meetings are booked with the lead’s assigned agent.";
     case "no_calendar":
-      return "No scheduling account is connected. Connect Calendly or Cal.com on Integrations.";
+      return "No scheduling account is connected. Connect Calendly or Cal.com in Settings → Calendly.";
     case "agent_not_linked":
       return `${agent} is not linked to a ${provider} team member. On Integrations, open ${provider} and press Sync agents — their ${provider} email must match their EstatePulse email.`;
     case "no_event_types":

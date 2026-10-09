@@ -44,6 +44,11 @@ const APP_VIEWS = [
   // An owner who also takes leads: their own working hours and calendar
   // status, the same screen an agent sees. Live API, like lead_sources.
   'my_availability',
+  // Live API: the organization's roles and what each may do.
+  'roles',
+  // Live API: org_settings (timezone, business hours) plus the Telnyx and
+  // calendar connections, one tab each.
+  'settings',
 ] as const;
 
 export type AppView = (typeof APP_VIEWS)[number];

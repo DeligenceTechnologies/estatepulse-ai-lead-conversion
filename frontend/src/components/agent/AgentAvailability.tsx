@@ -44,7 +44,7 @@ const PROVIDER_LABEL: Record<string, string> = {
  * scheduling account, and the working hours the office routes leads by.
  *
  * There is nothing to connect here. Scheduling belongs to the ORGANIZATION —
- * the owner connects one account on Integrations, Calendly or Cal.com, and
+ * the owner connects one account in Settings, Calendly or Cal.com, and
  * invites the agents onto that team — so this screen only reports whether the
  * office is connected and whether this agent is on it.
  *
@@ -188,13 +188,13 @@ export const AgentAvailability: React.FC = () => {
         {!status.organizationConnected ? (
           <p className="text-xs text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 leading-relaxed">
             {isOwner
-              ? 'No scheduling account is connected yet. Connect Calendly or Cal.com on Integrations, then press Sync agents — your bookings appear here once you are matched.'
-              : 'Your office has not connected a scheduling account yet. Once the owner connects Calendly or Cal.com on Integrations and invites you, your bookings appear here.'}
+              ? 'No scheduling account is connected yet. Connect Calendly or Cal.com in Settings → Calendly, then press Sync agents — your bookings appear here once you are matched.'
+              : 'Your office has not connected a scheduling account yet. Once the owner connects Calendly or Cal.com in Settings and invites you, your bookings appear here.'}
           </p>
         ) : !status.schedulingUserId ? (
           <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 leading-relaxed">
             {isOwner
-              ? `You are not matched to a ${providerLabel} member yet, so bookings cannot be attributed to you. Make sure your ${providerLabel} email matches your agent profile email, then press Sync agents on Integrations.`
+              ? `You are not matched to a ${providerLabel} member yet, so bookings cannot be attributed to you. Make sure your ${providerLabel} email matches your agent profile email, then press Sync agents in Settings → Calendly.`
               : `You are not on your office's ${providerLabel} yet, so bookings cannot be attributed to you. Ask your owner to invite you in ${providerLabel} using this account's email address.`}
           </p>
         ) : (

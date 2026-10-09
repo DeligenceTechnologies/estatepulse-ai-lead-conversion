@@ -10,7 +10,7 @@ model Role {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  users        User[]
+  users        UserRole[]
 
   @@unique([orgId, name])
   @@map("roles")

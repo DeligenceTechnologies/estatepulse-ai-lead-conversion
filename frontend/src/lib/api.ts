@@ -68,10 +68,16 @@ export interface AuthUser {
   firstName: string | null;
   lastName: string | null;
   phone?: string | null;
-  roleId?: string;
   status?: string;
+  timezone?: string;
   lastLoginAt?: string | null;
 }
+
+/**
+ * Asked at sign-up only to pick the owner's starting roles; not stored.
+ * individual: one person working alone; team: an office with agents.
+ */
+export type OrganizationType = 'individual' | 'team';
 
 export interface AuthOrganization {
   id: string;
@@ -90,8 +96,9 @@ export interface AuthRole {
 /** GET /auth/me */
 export interface MeResponse extends AuthUser {
   organization: AuthOrganization;
-  role: AuthRole;
-  /** Effective permissions: every permission for the system role. */
+  /** Every role the user holds. */
+  roles: AuthRole[];
+  /** Effective permissions: the union of every role's; all of them with the system role. */
   permissions: string[];
 }
 
@@ -108,6 +115,8 @@ export interface AuthSessionResponse extends AuthTokens {
 
 export interface RegisterInput {
   organizationName: string;
+  /** individual: the owner also gets the Agent role; team: Owner only. */
+  organizationType: OrganizationType;
   firstName: string;
   lastName: string;
   email: string;

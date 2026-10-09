@@ -6,19 +6,16 @@ import {
   CircleDot,
   CalendarArrowDown,
   CalendarArrowUp,
-  CalendarDays,
-  Loader2,
-  Pencil,
-  Phone,
+  LayoutGrid,
+  List,
   Plus,
   Search,
   ShieldCheck,
-  Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { ApiError, messageFor } from '../../lib/api';
-import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
+import { displayName, useAuth } from '../../context/AuthContext';
 import {
   deleteMember,
   listMembers,
@@ -31,27 +28,28 @@ import {
 import { FilterDropdown } from '../common/FilterDropdown';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { MemberFormModal } from '../modals/MemberFormModal';
+import { MemberDrawer } from '../team/MemberDrawer';
+import { getOrgSettings, type OrgSettings } from '../../utils/orgSettingsApi';
+import { MemberActions, MemberCard, MemberRow } from '../team/MemberParts';
 
 const PAGE_SIZES = PAGE_SIZE_OPTIONS;
 const PAGE_SIZE_KEY = 'ep_agents_page_size';
 const SEARCH_DEBOUNCE_MS = 300;
+const noop = (): void => {};
+const VIEW_KEY = 'ep_team_view';
+/** Local times and "working now" are recomputed this often. */
+const CLOCK_TICK_MS = 60_000;
+
+type ViewMode = 'list' | 'grid';
 
 /** The list sorts by join date only. */
 type SortOrder = 'asc' | 'desc';
 
 /** Spelled out in words, not just an arrow: which end of the timeline comes first. */
-const SORT_OPTIONS: { value: SortOrder; label: string; short: string; icon: React.ReactNode }[] = [
-  { value: 'desc', label: 'Newest first', short: 'Newest', icon: <CalendarArrowDown className="w-3.5 h-3.5 text-slate-400" /> },
-  { value: 'asc', label: 'Oldest first', short: 'Oldest', icon: <CalendarArrowUp className="w-3.5 h-3.5 text-slate-400" /> },
+const SORT_OPTIONS: { value: SortOrder; label: string; icon: React.ReactNode }[] = [
+  { value: 'desc', label: 'Newest first', icon: <CalendarArrowDown className="w-3.5 h-3.5 text-slate-400" /> },
+  { value: 'asc', label: 'Oldest first', icon: <CalendarArrowUp className="w-3.5 h-3.5 text-slate-400" /> },
 ];
-
-const STATUS_STYLES: Record<UserStatus, string> = {
-  active: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  inactive: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-};
-
-const formatDate = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
 /** The value, `delay` ms after it last changed — so search does not fire per keystroke. */
 function useDebounced<T>(value: T, delay: number): T {
@@ -61,6 +59,24 @@ function useDebounced<T>(value: T, delay: number): T {
     return () => clearTimeout(timer);
   }, [value, delay]);
   return debounced;
+}
+
+function readView(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+/** The current time, refreshed every `ms` — for clocks that must stay roughly live. */
+function useNow(ms: number): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), ms);
+    return () => clearInterval(timer);
+  }, [ms]);
+  return now;
 }
 
 /** The remembered rows-per-page, or the smallest size. */
@@ -74,7 +90,11 @@ function readPageSize(): number {
 }
 
 /**
- * The organization's team: every user, agents and owners alike. Search,
+ * The organization's team: every user, agents and owners alike, as a grid of
+ * cards or a list (remembered per browser). Each shows only name, roles,
+ * status, mobile and member since, with View / Edit / Delete last; clicking a
+ * member opens MemberDrawer with everything else (lead load, working hours,
+ * timezone, sign-in history). Search,
  * filters, sorting and pagination all happen server-side. The list scrolls
  * between a fixed header and a fixed pagination bar.
  *
@@ -91,6 +111,8 @@ export const AgentsView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<UserStatus | ''>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [pageSize, setPageSize] = useState(readPageSize);
+  const [view, setView] = useState<ViewMode>(readView);
+  const now = useNow(CLOCK_TICK_MS);
   const [page, setPage] = useState(1);
 
   const [result, setResult] = useState<Paginated<TeamMember> | null>(null);
@@ -102,6 +124,9 @@ export const AgentsView: React.FC = () => {
   /** null = closed; 'new' = adding; a member = editing them. */
   const [form, setForm] = useState<TeamMember | 'new' | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** The member whose details panel is open. */
+  const [openId, setOpenId] = useState<string | null>(null);
+  const closeDetails = useCallback(() => setOpenId(null), []);
 
   // Any change to what is being asked for starts again from page one.
   useEffect(() => setPage(1), [debouncedSearch, roleFilter, statusFilter, sortOrder, pageSize]);
@@ -147,6 +172,25 @@ export const AgentsView: React.FC = () => {
     void load();
   }, [load]);
 
+  const changeView = (next: ViewMode): void => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      /* the choice just will not be remembered */
+    }
+  };
+
+  // A new member starts on the organization's timezone and business hours.
+  const [orgDefaults, setOrgDefaults] = useState<OrgSettings | null>(null);
+  const canReadOrg = can('organization.read');
+  useEffect(() => {
+    if (!canReadOrg) return;
+    getOrgSettings()
+      .then(setOrgDefaults)
+      .catch(() => setOrgDefaults(null));
+  }, [canReadOrg]);
+
   // Roles feed the filter and the add/edit form. Without role.read the list
   // still works; only the role picker is empty.
   useEffect(() => {
@@ -182,6 +226,7 @@ export const AgentsView: React.FC = () => {
     setError(null);
     try {
       await deleteMember(member.id);
+      setOpenId(null);
       await load();
     } catch (e) {
       setError(messageFor(e));
@@ -196,97 +241,45 @@ export const AgentsView: React.FC = () => {
   const hasFilters = Boolean(search || roleFilter || statusFilter);
   const members = result?.data ?? [];
   const meta = result?.meta;
+  // Read from the loaded page, so an edit shows in the open panel as soon as the list reloads.
+  const openMember = members.find((m) => m.id === openId) ?? null;
 
 
-  const actions = (member: TeamMember): React.ReactNode => {
-    const isSelf = member.id === user?.id;
-    const deleting = deletingId === member.id;
-    if (!canUpdate && !(canDelete && !isSelf)) return null;
-    return (
-      <div className="flex items-center justify-end gap-1">
-        {canUpdate && (
-          <button
-            onClick={() => setForm(member)}
-            disabled={deleting || roles.length === 0}
-            title="Edit"
-            aria-label={`Edit ${displayName(member)}`}
-            className="p-2 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-600/15 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-        )}
-        {canDelete && !isSelf && (
-          <button
-            onClick={() => void handleDelete(member)}
-            disabled={deleting}
-            title="Delete"
-            aria-label={`Delete ${displayName(member)}`}
-            className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-600/15 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  const identity = (member: TeamMember): React.ReactNode => (
-    <div className="flex items-center gap-3 min-w-0">
-      <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
-        {initialsFor(member)}
-      </div>
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-slate-100 truncate">
-          {displayName(member)}
-          {member.id === user?.id && <span className="ml-1.5 text-2xs font-medium text-slate-500">(you)</span>}
-        </div>
-        <div className="text-xs text-slate-500 truncate">{member.email}</div>
-      </div>
-    </div>
-  );
-
-  const roleBadge = (member: TeamMember): React.ReactNode => (
-    <span
-      className={`inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full border ${
-        member.role.isSystem
-          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-          : 'bg-slate-800 text-slate-300 border-slate-700'
-      }`}
-    >
-      {member.role.isSystem && <ShieldCheck className="w-3 h-3" />}
-      {member.role.name}
-    </span>
-  );
-
-  const statusBadge = (member: TeamMember): React.ReactNode => (
-    <span className={`inline-flex items-center gap-1.5 text-2xs font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLES[member.status]}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current" />
-      {member.status}
-    </span>
+  /** Edit and Delete at the end of each row and card; the panel opens on everything else. */
+  const rowActions = (member: TeamMember): React.ReactNode => (
+    <MemberActions
+      name={displayName(member)}
+      canEdit={canUpdate && roles.length > 0}
+      canDelete={canDelete && member.id !== user?.id}
+      deleting={deletingId === member.id}
+      onView={() => setOpenId(member.id)}
+      onEdit={() => setForm(member)}
+      onDelete={() => void handleDelete(member)}
+    />
   );
 
   const currentSort = SORT_OPTIONS.find((o) => o.value === sortOrder) ?? SORT_OPTIONS[0];
 
   /**
-   * The Joined column header says in words how the list is ordered ("Newest ↓")
-   * and flips it on click — the list's only sort.
+   * The Member since header carries a plain arrow (↓ newest first, ↑ oldest
+   * first) that flips the list's only sort; the tooltip says it in words.
    */
   const joinedHeader = (
     <th
-      className="px-4 py-3 font-semibold hidden md:table-cell"
+      className="px-4 py-3 font-semibold"
       aria-sort={sortOrder === 'asc' ? 'ascending' : 'descending'}
     >
-      <div className="flex items-center gap-2">
-        <span className="uppercase tracking-wider">Joined</span>
+      <div className="flex items-center gap-1">
+        <span className="uppercase tracking-wider whitespace-nowrap">Member since</span>
         <button
           onClick={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
           title={`Sorted ${currentSort.label.toLowerCase()} — click for ${
             sortOrder === 'desc' ? 'oldest' : 'newest'
           } first`}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-2xs font-semibold normal-case tracking-normal hover:bg-emerald-500/20 cursor-pointer transition-colors"
+          aria-label={`Sorted ${currentSort.label.toLowerCase()}`}
+          className="p-0.5 rounded text-slate-400 hover:text-emerald-300 cursor-pointer transition-colors"
         >
-          {currentSort.short}
-          {sortOrder === 'desc' ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />}
+          {sortOrder === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
         </button>
       </div>
     </th>
@@ -297,9 +290,16 @@ export const AgentsView: React.FC = () => {
       {/* Header + toolbar: fixed above the scrolling list */}
       <div className="shrink-0 px-6 pt-6 pb-4 space-y-4 max-w-7xl w-full mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">Agents</h2>
-            <p className="text-xs text-slate-400">Everyone in your organization, their role and contact details.</p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
+              <Users className="w-5 h-5 text-on-accent" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Team Members</h2>
+              <p className="text-xs text-slate-400">
+                Roles, lead capacity, working hours and timezones for everyone in your organization.
+              </p>
+            </div>
           </div>
           {canCreate && (
             <button
@@ -309,7 +309,7 @@ export const AgentsView: React.FC = () => {
               className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
-              Add Agent
+              Add Member
             </button>
           )}
         </div>
@@ -370,7 +370,35 @@ export const AgentsView: React.FC = () => {
               )}
             </div>
 
-            <div className="lg:ml-auto">
+            <div className="lg:ml-auto flex items-center gap-2">
+              <div
+                role="radiogroup"
+                aria-label="Layout"
+                className="hidden md:flex items-center h-9 p-0.5 bg-slate-900 border border-slate-800 rounded-lg"
+              >
+                {(
+                  [
+                    { mode: 'grid', label: 'Grid', icon: LayoutGrid },
+                    { mode: 'list', label: 'List', icon: List },
+                  ] as const
+                ).map(({ mode, label, icon: Icon }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={view === mode}
+                    onClick={() => changeView(mode)}
+                    className={`h-full px-2.5 rounded-md flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                      view === mode
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
               <FilterDropdown
                 label="Sort"
                 icon={currentSort.icon}
@@ -401,6 +429,26 @@ export const AgentsView: React.FC = () => {
             <EmptyState icon={<ShieldCheck className="w-6 h-6 text-slate-600" />}>
               Your role does not include viewing team members. Ask your organization owner if you need access.
             </EmptyState>
+          ) : result === null && loading && view === 'grid' ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-4 animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-slate-800" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 w-32 rounded bg-slate-800" />
+                      <div className="h-2.5 w-20 rounded bg-slate-800/70" />
+                    </div>
+                  </div>
+                  <div className="h-14 rounded-lg bg-slate-800/60" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="h-14 rounded-lg bg-slate-800/60" />
+                    <div className="h-14 rounded-lg bg-slate-800/60" />
+                  </div>
+                  <div className="h-6 w-48 rounded bg-slate-800/60" />
+                </div>
+              ))}
+            </div>
           ) : result === null && loading ? (
             <div className="bg-slate-900/80 border border-slate-800 rounded-xl divide-y divide-slate-800">
               {Array.from({ length: 5 }, (_, i) => (
@@ -424,64 +472,52 @@ export const AgentsView: React.FC = () => {
                   </button>
                 </>
               ) : (
-                'No agents yet. Add your first agent to get started.'
+                'No team members yet. Add your first member to get started.'
               )}
             </EmptyState>
           ) : (
             <div className={`transition-opacity ${loading ? 'opacity-60' : ''}`}>
-              {/* Table: tablets and up */}
-              <div className="hidden md:block bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="text-2xs uppercase text-slate-500 bg-slate-950/70 border-b border-slate-800">
-                    <tr className="text-left">
-                      <th className="px-4 py-3 font-semibold tracking-wider">Member</th>
-                      <th className="px-4 py-3 font-semibold tracking-wider">Role</th>
-                      <th className="px-4 py-3 font-semibold tracking-wider">Phone</th>
-                      <th className="px-4 py-3 font-semibold tracking-wider">Status</th>
-                      <th className="px-4 py-3 font-semibold tracking-wider hidden lg:table-cell">Last sign-in</th>
-                      {joinedHeader}
-                      <th className="px-4 py-3 w-24">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80">
-                    {members.map((member) => (
-                      <tr key={member.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="px-4 py-3 max-w-xs">{identity(member)}</td>
-                        <td className="px-4 py-3">{roleBadge(member)}</td>
-                        <td className="px-4 py-3 font-mono text-slate-300 whitespace-nowrap">{member.phone || '—'}</td>
-                        <td className="px-4 py-3">{statusBadge(member)}</td>
-                        <td className="px-4 py-3 text-slate-400 whitespace-nowrap hidden lg:table-cell">{formatDate(member.lastLoginAt)}</td>
-                        <td className="px-4 py-3 text-slate-400 whitespace-nowrap hidden md:table-cell">{formatDate(member.createdAt)}</td>
-                        <td className="px-4 py-3">{actions(member)}</td>
+              {/* List: tablets and up, when chosen. Phones always get cards. */}
+              {view === 'list' && (
+                <div className="hidden md:block bg-slate-900/80 border border-slate-800 rounded-xl overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-xs min-w-[760px]">
+                    <thead className="text-2xs uppercase text-slate-500 bg-slate-950/70 border-b border-slate-800">
+                      <tr className="text-left">
+                        <th className="px-4 py-3 font-semibold tracking-wider">Member</th>
+                        <th className="px-4 py-3 font-semibold tracking-wider">Roles</th>
+                        <th className="px-4 py-3 font-semibold tracking-wider">Status</th>
+                        <th className="px-4 py-3 font-semibold tracking-wider whitespace-nowrap">Mobile number</th>
+                        {joinedHeader}
+                        <th className="px-4 py-3 font-semibold tracking-wider text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80">
+                      {members.map((member) => (
+                        <MemberRow
+                          key={member.id}
+                          member={member}
+                          isSelf={member.id === user?.id}
+                          onOpen={() => setOpenId(member.id)}
+                          actions={rowActions(member)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-              {/* Cards: phones */}
-              <div className="md:hidden space-y-3">
+              {/* Grid: always on phones; on larger screens when chosen */}
+              <div
+                className={`grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 ${view === 'list' ? 'md:hidden' : ''}`}
+              >
                 {members.map((member) => (
-                  <div key={member.id} className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      {identity(member)}
-                      {statusBadge(member)}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400">
-                      {roleBadge(member)}
-                      <span className="inline-flex items-center gap-1.5 font-mono">
-                        <Phone className="w-3 h-3" />
-                        {member.phone || '—'}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <CalendarDays className="w-3 h-3" />
-                        Joined {formatDate(member.createdAt)}
-                      </span>
-                    </div>
-                    {actions(member) && <div className="pt-2 border-t border-slate-800">{actions(member)}</div>}
-                  </div>
+                  <MemberCard
+                    key={member.id}
+                    member={member}
+                    isSelf={member.id === user?.id}
+                    onOpen={() => setOpenId(member.id)}
+                    actions={rowActions(member)}
+                  />
                 ))}
               </div>
             </div>
@@ -505,12 +541,28 @@ export const AgentsView: React.FC = () => {
         </div>
       )}
 
+      {openMember && (
+        <MemberDrawer
+          member={openMember}
+          isSelf={openMember.id === user?.id}
+          now={now}
+          canEdit={canUpdate && roles.length > 0}
+          canDelete={canDelete && openMember.id !== user?.id}
+          deleting={deletingId === openMember.id}
+          onEdit={() => setForm(openMember)}
+          onDelete={() => void handleDelete(openMember)}
+          // While the edit form is open on top, Escape belongs to the form.
+          onClose={form ? noop : closeDetails}
+        />
+      )}
+
       {form && orgId && (
         <MemberFormModal
           key={form === 'new' ? 'new' : form.id}
           orgId={orgId}
           roles={roles}
           member={form === 'new' ? undefined : form}
+          defaults={orgDefaults ?? undefined}
           currentUserId={user?.id}
           onClose={() => setForm(null)}
           onSaved={(saved) => {
@@ -530,3 +582,4 @@ const EmptyState: React.FC<{ icon: React.ReactNode; children: React.ReactNode }>
     <div className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">{children}</div>
   </div>
 );
+

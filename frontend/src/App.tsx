@@ -4,8 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import { AppProvider, useApp } from './context/AppContext';
-import { Sidebar } from './components/layout/Sidebar';
+import { AppProvider, useApp, type AppView } from './context/AppContext';
+import { useOwnerNav } from './components/layout/Sidebar';
 import { AppShell } from './components/layout/AppShell';
 
 // Views. Only the sections under active development are imported; the rest
@@ -21,6 +21,8 @@ import { AppointmentsView } from './components/views/AppointmentsView';
 import { CallsView } from './components/views/CallsView';
 import { ConversationsView } from './components/views/ConversationsView';
 import { FollowUpsView } from './components/views/FollowUpsView';
+import { RolesView } from './components/views/RolesView';
+import { SettingsView } from './components/views/SettingsView';
 import { AgentAvailability } from './components/agent/AgentAvailability';
 
 // Modals
@@ -31,14 +33,15 @@ import { NewLeadModal } from './components/modals/NewLeadModal';
 import { WebhookSimulatorModal } from './components/modals/WebhookSimulatorModal';
 
 const AppContent: React.FC = () => {
-  const { activeView } = useApp();
+  const { activeView, setActiveView } = useApp();
+  const navGroups = useOwnerNav();
 
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
   const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
 
   return (
     <>
-      <AppShell sidebar={<Sidebar />}>
+      <AppShell groups={navGroups} activeId={activeView} onNavigate={(id) => setActiveView(id as AppView)}>
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
         {activeView === 'conversations' && <ConversationsView />}
@@ -46,12 +49,14 @@ const AppContent: React.FC = () => {
         {activeView === 'appointments' && <AppointmentsView />}
         {activeView === 'followups' && <FollowUpsView />}
         {activeView === 'agents' && <AgentsView />}
+        {activeView === 'roles' && <RolesView />}
         {activeView === 'my_availability' && <AgentAvailability />}
         {activeView === 'integrations' && (
           <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
         )}
         {activeView === 'lead_sources' && <LeadSourcesView />}
         {activeView === 'ai_settings' && <AISettingsView />}
+        {activeView === 'settings' && <SettingsView />}
         {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
       </AppShell>
 

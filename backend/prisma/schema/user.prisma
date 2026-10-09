@@ -1,13 +1,15 @@
 model User {
-  id        String     @id @default(uuid(7)) @db.Uuid
-  orgId     String     @map("organization_id") @db.Uuid
-  firstName String    @map("first_name") @db.VarChar(100)
-  lastName  String    @map("last_name") @db.VarChar(100)
-  email     String     @unique @db.VarChar(255)
-  phone     String    @db.VarChar(50)
-  roleId    String     @map("role_id") @db.Uuid
-  password  String     @map("password")
-  status    BaseStatus @default(active)
+  id             String     @id @default(uuid(7)) @db.Uuid
+  orgId          String     @map("organization_id") @db.Uuid
+  firstName      String     @map("first_name") @db.VarChar(100)
+  lastName       String     @map("last_name") @db.VarChar(100)
+  email          String     @unique @db.VarChar(255)
+  phone          String     @db.VarChar(50)
+  password       String     @map("password")
+  status         BaseStatus @default(active)
+  timezone       String     @default("Asia/Kolkata") @db.VarChar(100)
+  maxActiveLeads Int        @default(25) @map("max_active_leads")
+  workingHours   Json       @default("[{\"dayOfWeek\":0,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":1,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":2,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":3,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":4,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":5,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":6,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"}]") @map("working_hours")
 
   passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(6)
   lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(6)
@@ -16,12 +18,24 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  role         Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  roles        UserRole[]
   sessions     UserSession[]
 
   @@index([orgId])
-  @@index([roleId])
   @@map("users")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
 }
 
 model UserSession {

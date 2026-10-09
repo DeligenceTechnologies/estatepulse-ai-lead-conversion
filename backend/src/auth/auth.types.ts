@@ -16,7 +16,7 @@ export interface AuthContext {
   userId: string;
   organizationId: string;
   sessionId: string;
-  roleId: string;
+  roleIds: string[];
   permissions: string[];
 }
 
