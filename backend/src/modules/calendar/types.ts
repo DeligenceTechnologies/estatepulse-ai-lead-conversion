@@ -109,6 +109,8 @@ export interface CalendlyEventType {
   pooling_type: string | null;
   type?: string;
   profile?: { type?: string; name?: string; owner?: string } | null;
+  /** Where the meeting happens. Null/empty when the event type sets no location. */
+  locations?: { kind: string; location?: string | null }[] | null;
 }
 
 export interface CalendlyInvitee {
@@ -447,6 +449,12 @@ export interface CalendlyCreateInviteeBody {
     timezone: string;
     text_reminder_number?: string;
   };
+  /**
+   * Required when the event type has a location, and must be omitted when it
+   * has none. A conferencing kind (e.g. `zoom_conference`) is what makes
+   * Calendly generate a join link.
+   */
+  location?: { kind: string; location?: string };
   tracking?: Record<string, string>;
 }
 

@@ -50,12 +50,31 @@ function blockerText(o: LeadBookingOptions): string {
   }
 }
 
+/** A meeting that is still ahead — the one to show instead of booking another. */
+const upcoming = (rows: Appointment[] | null | undefined): Appointment | null =>
+  (rows ?? [])
+    .filter(
+      (a) =>
+        a.status === "scheduled" && new Date(a.endTime).getTime() >= Date.now(),
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+    )[0] ?? null;
+
+/**
+ * `appointments`: pass the rows when the caller has already loaded them (the
+ * Appointments tab); omitted, this loads them itself.
+ */
 export const LeadBookMeeting: React.FC<{
   leadId: string;
   agentKey: string | null;
-}> = ({ leadId, agentKey }) => {
+  appointments?: Appointment[] | null;
+}> = ({ leadId, agentKey, appointments }) => {
   const [options, setOptions] = useState<LeadBookingOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ownRows, setOwnRows] = useState<Appointment[] | null>(null);
+  const given = appointments !== undefined;
 
   useEffect(() => {
     let alive = true;
@@ -68,6 +87,53 @@ export const LeadBookMeeting: React.FC<{
       alive = false;
     };
   }, [leadId, agentKey]);
+
+  useEffect(() => {
+    if (given) return;
+    let alive = true;
+    setOwnRows(null);
+    // Best effort: if this fails, booking is still offered as before.
+    getLeadAppointments(leadId)
+      .then((r) => alive && setOwnRows(r))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [leadId, given]);
+
+  const booked = upcoming(given ? appointments : ownRows);
+
+  if (booked) {
+    return (
+      <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl space-y-3">
+        <div>
+          <h4 className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5" />
+            Meeting booked
+          </h4>
+          <p className="text-xs text-slate-400">
+            {booked.appointmentType ?? "Meeting"} with {booked.agentName} on{" "}
+            {new Date(booked.startTime).toLocaleString([], {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+            . Reschedule or cancel it from the Appointments tab.
+          </p>
+        </div>
+        {isWebLink(booked.meetingUrl) && (
+          <a
+            href={booked.meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-fit px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1.5"
+          >
+            <span>Join meeting</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-gradient-to-r from-emerald-950/40 via-teal-950/40 to-slate-950 border border-emerald-500/30 p-4 rounded-xl space-y-3">
@@ -153,7 +219,7 @@ export const LeadAppointments: React.FC<{
 
   return (
     <div className="space-y-4">
-      <LeadBookMeeting leadId={leadId} agentKey={agentKey} />
+      <LeadBookMeeting leadId={leadId} agentKey={agentKey} appointments={rows} />
 
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
