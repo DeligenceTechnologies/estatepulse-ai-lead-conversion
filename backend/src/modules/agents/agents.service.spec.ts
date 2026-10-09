@@ -159,37 +159,6 @@ function build(
       },
     },
     organization_members: {
-      findMany: async ({ where }: { where: Record<string, unknown> }) => {
-        wheres.push({ op: 'organization_members.findMany', where });
-        return db.organization_members
-          .filter((m) => m.organization_id === where['organization_id'])
-          // The service asks for role desc, created_at asc; reproducing it here
-          // is what lets the ordering assertion below mean anything.
-          .sort((a, b) => b.role.localeCompare(a.role) || a.created_at.getTime() - b.created_at.getTime())
-          .map((m) => ({
-            role: m.role,
-            status: m.status,
-            joined_at: m.joined_at,
-            created_at: m.created_at,
-            users: publicUser(userOf(m.user_id), where['organization_id'] as string),
-          }));
-      },
-      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-        wheres.push({ op: 'organization_members.findFirst', where });
-        const m = db.organization_members.find(
-          (r) => r.organization_id === where['organization_id'] && r.user_id === where['user_id'],
-        );
-        return m
-          ? {
-              id: m.id,
-              role: m.role,
-              status: m.status,
-              joined_at: m.joined_at,
-              created_at: m.created_at,
-              users: publicUser(userOf(m.user_id), where['organization_id'] as string),
-            }
-          : null;
-      },
       update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         wheres.push({ op: 'organization_members.update', where });
         const m = db.organization_members.find((r) => r.id === where['id'])!;
@@ -277,9 +246,55 @@ function build(
         return data;
       },
     },
-    // The lower(email) pre-check. Tagged-template call, so the email is
-    // values[0] — parameterised, never interpolated into the SQL text.
-    $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+    // Tagged-template calls, so every value arrives parameterised in `values`,
+    // never interpolated into the SQL text.
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      // The roster statement: members of one organization — narrowed to one
+      // user by the optional `and m.user_id` fragment — each joined to their
+      // user and LEFT joined to their profile in that same organization,
+      // ordered role desc, created_at asc, id asc — answered as Postgres would.
+      if (strings.join('?').includes('from organization_members m')) {
+        const organizationId = values[0] as string;
+        const userId = (values[1] as Prisma.Sql).values[0] as string | undefined;
+        wheres.push({
+          op: 'roster.$queryRaw',
+          where: { organization_id: organizationId, ...(userId === undefined ? {} : { user_id: userId }) },
+        });
+        return db.organization_members
+          .filter((m) => m.organization_id === organizationId && (userId === undefined || m.user_id === userId))
+          .sort(
+            (a, b) =>
+              b.role.localeCompare(a.role) ||
+              a.created_at.getTime() - b.created_at.getTime() ||
+              a.id.localeCompare(b.id),
+          )
+          .map((m) => {
+            const u = userOf(m.user_id);
+            const p = db.agent_profiles.find((r) => r.user_id === m.user_id && r.organization_id === organizationId);
+            return {
+              id: m.id,
+              role: m.role,
+              status: m.status,
+              joined_at: m.joined_at,
+              created_at: m.created_at,
+              user_id: u.id,
+              email: u.email,
+              first_name: u.first_name,
+              last_name: u.last_name,
+              phone: u.phone,
+              profile_id: p?.id ?? null,
+              title: p ? p.title : null,
+              timezone: p ? p.timezone : null,
+              max_active_leads: p ? p.max_active_leads : null,
+              routing_enabled: p ? (p.routing_enabled ?? true) : null,
+              calendly_user_uri: p?.calendly_user_uri ?? null,
+              cal_user_id: p?.cal_user_id ?? null,
+              // Nothing assigns leads here, so the count is 0 — as in publicUser.
+              active_leads: 0,
+            };
+          });
+      }
+      // The lower(email) pre-check: the email is values[0].
       const email = String(values[0]);
       return db.users.filter((u) => u.email.toLowerCase() === email.toLowerCase()).map((u) => ({ id: u.id }));
     },
@@ -360,7 +375,7 @@ describe('AgentsService.list', () => {
 
     // Every read the call made is scoped to ORG_B — the roster by
     // organization_id, the timezone lookup by the organization's own id.
-    const roster = wheres.find((w) => w.op === 'organization_members.findMany')!;
+    const roster = wheres.find((w) => w.op === 'roster.$queryRaw')!;
     expect(roster.where['organization_id']).toBe(ORG_B);
     expect(wheres.find((w) => w.op === 'organizations.findUnique')!.where['id']).toBe(ORG_B);
   });
@@ -682,7 +697,7 @@ describe('AgentsService.setStatus', () => {
 
     await service.setStatus(ORG_A, OWNER_A, AGENT_A, 'suspended');
 
-    const lookup = wheres.find((w) => w.op === 'organization_members.findFirst')!;
+    const lookup = wheres.find((w) => w.op === 'roster.$queryRaw')!;
     expect(lookup.where['organization_id']).toBe(ORG_A);
     expect(lookup.where['user_id']).toBe(AGENT_A);
   });
@@ -895,8 +910,11 @@ describe('AgentsService.updateProfile', () => {
 
     await service.updateProfile(ORG_A, OWNER_A, agentId, { title: 'Buyer Agent' });
 
-    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
-      expect(read.where['organization_id']).toBe(ORG_A);
+    const reads = wheres.filter((w) => w.op === 'roster.$queryRaw');
+    // The read before the write and the re-read after it.
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(read.where).toEqual({ organization_id: ORG_A, user_id: agentId });
     }
   });
 
@@ -1269,8 +1287,11 @@ describe('AgentsService.setTakingLeads', () => {
 
     expect(db.agent_profiles).toHaveLength(1);
     expect(db.agent_profiles[0]).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
-    for (const read of wheres.filter((w) => w.op === 'organization_members.findFirst')) {
-      expect(read.where).toMatchObject({ organization_id: ORG_B, user_id: OWNER_B });
+    const reads = wheres.filter((w) => w.op === 'roster.$queryRaw');
+    // The read before the write and the re-read after it.
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(read.where).toEqual({ organization_id: ORG_B, user_id: OWNER_B });
     }
   });
 

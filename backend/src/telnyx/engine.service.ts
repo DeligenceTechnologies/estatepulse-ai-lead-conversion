@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import {
+  FollowUpReason,
   IN_STRATEGY_STATUSES,
   INACTIVE_STATUSES,
   LeadStatus,
@@ -188,7 +189,7 @@ export class EngineService implements OnModuleDestroy {
   /**
    * Pick a lead's strategy back up after a restart dropped its timers.
    *
-   * Only for a lead still IN the strategy (claimed, status new|contacted, not
+   * Only for a lead still IN the strategy (claimed, status new|contacting, not
    * paused or DNC) and not already running here. Steps already on record are
    * not repeated — re-running them would call or text the lead twice.
    *
@@ -312,7 +313,7 @@ export class EngineService implements OnModuleDestroy {
         .replace(/\{\{brokerage\}\}/g, brokerage);
       try {
         const r: any = await this.sms.sendSms(e.orgId, lead.phone ?? '', text);
-        // -> message 'sent', lead 'contacted'
+        // -> message 'sent', lead 'contacting'
         await this.activity.recordSms(e.orgId, e.leadId, text, true, r?.id);
         this.logger.log(`SMS sent to lead ${e.leadId}`);
       } catch (err) {
@@ -375,7 +376,7 @@ export class EngineService implements OnModuleDestroy {
       const why = `Strategy complete after ${e.total} step(s) — ${lead.ai_summary || 'lead not converted'}`;
       await this.activity.exitStrategy(e.leadId, why.slice(0, 2000));
       this.logger.log(`lead ${e.leadId} exited strategy (all ${e.total} steps done, not converted)`);
-      await this.enrolOnNegativePath(e.orgId, e.leadId);
+      await this.enrolOnFollowUp(e.orgId, e.leadId);
     }
     this.stop(e);
   }
@@ -385,7 +386,7 @@ export class EngineService implements OnModuleDestroy {
    *
    * The strategy's schedule lives in `setTimeout`, so a restart drops every
    * pending step. The lead is left holding the engine's claim — `first_contact_at`
-   * set, status still new|contacted — and nothing ever comes back for it: the
+   * set, status still new|contacting — and nothing ever comes back for it: the
    * watcher only picks up leads with `first_contact_at` NULL, and finalize()
    * only runs for an enrolment this process owns. Before this, a deploy in the
    * middle of a strategy stranded those leads permanently: never finished,
@@ -414,75 +415,41 @@ export class EngineService implements OnModuleDestroy {
     const why = `Strategy interrupted — ${lead.ai_summary || 'recovered after a restart'}`;
     await this.activity.exitStrategy(leadId, why.slice(0, 2000));
     this.logger.log(`recovered stranded lead ${leadId} — exited strategy`);
-    await this.enrolOnNegativePath(orgId, leadId);
+    await this.enrolOnFollowUp(orgId, leadId);
     return true;
   }
 
   /**
-   * The lead worked through every step and never qualified. Hand it to whatever
-   * sequence the office pointed at that outcome.
+   * The lead is parked in follow_up: hand it to whatever sequence the office
+   * pointed at its follow-up reason ('follow_up_<reason>').
    *
-   * This is the path that used to end here. `exitStrategy` above parks the lead
-   * in 'nurture' and nothing more, so before this existed a lead who never
-   * picked up was marked for follow-up and then never followed up — the leads
-   * most in need of a drip were the only ones guaranteed not to get one.
+   * Reads the reason from the row rather than taking it as an argument, so the
+   * strategy exit (which works it out from the calls and replies on record) and
+   * a status set by the AI call or by hand all enrol by the same rule. A lead
+   * not in follow_up — it reached an outcome first — is left alone.
    *
    * Deliberately mirrors qualified(): enrolment must never throw, because the
-   * exit itself is already recorded and a lead in nurture without an enrolment
-   * can be added by hand, while losing the exit cannot be undone.
+   * status change itself is already recorded and a parked lead without an
+   * enrolment can be added by hand, while losing the status cannot be undone.
    */
-  private async enrolOnNegativePath(orgId: string, leadId: string): Promise<void> {
+  private async enrolOnFollowUp(orgId: string, leadId: string): Promise<void> {
     try {
-      const outcomes = await this.negativeOutcomes(orgId, leadId);
-      // Most specific first. Several are true at once — someone who never
-      // picked up also never replied — so the office's narrowest configured
-      // answer wins and 'strategy_completed' stays the catch-all.
-      for (const trigger of FollowupService.TRIGGER_PRIORITY) {
-        if (!outcomes.has(trigger)) continue;
-        const code = await this.followup.sequenceForTrigger(orgId, trigger);
-        if (!code) continue;
-        await this.followup.enroll(orgId, leadId, code);
-        this.logger.log(`lead ${leadId} exited on "${trigger}" — enrolled in ${code}`);
+      const lead = await this.prisma.leads.findFirst({
+        where: { id: leadId, organization_id: orgId },
+        select: { status: true, follow_up_reason: true },
+      });
+      if (!lead || lead.status !== LeadStatus.FOLLOW_UP || !lead.follow_up_reason) return;
+      const trigger = `follow_up_${lead.follow_up_reason}`;
+      const code = await this.followup.sequenceForTrigger(orgId, trigger);
+      if (!code) {
+        this.logger.log(`lead ${leadId} in follow-up (${lead.follow_up_reason}) — no sequence claims it`);
         return;
       }
-      this.logger.log(`lead ${leadId} exited strategy — no sequence claims any of its outcomes`);
+      await this.followup.enroll(orgId, leadId, code);
+      this.logger.log(`lead ${leadId} in follow-up (${lead.follow_up_reason}) — enrolled in ${code}`);
     } catch (err) {
-      this.logger.error(`negative-path enrol ${leadId}: ${(err as Error).message}`);
+      this.logger.error(`follow-up enrol ${leadId}: ${(err as Error).message}`);
     }
-  }
-
-  /**
-   * Which of the negative conditions this lead actually satisfies, read from
-   * what was really recorded rather than from what the engine believes it did.
-   *
-   * In-memory attempt counters would be wrong after a restart, and a lead can
-   * be worked by more than one process. The calls and messages on record are
-   * the only account that survives both.
-   */
-  private async negativeOutcomes(orgId: string, leadId: string): Promise<Set<string>> {
-    const [calls, lead] = await Promise.all([
-      this.prisma.voice_calls.findMany({
-        where: { organization_id: orgId, lead_id: leadId },
-        select: { status: true },
-      }),
-      this.prisma.leads.findUnique({
-        where: { id: leadId },
-        select: { first_response_at: true },
-      }),
-    ]);
-
-    const out = new Set<string>(['strategy_completed']);
-    // 'in_progress' counts as answered: the call connected and the assistant
-    // talked to somebody, whatever the webhook managed to record afterwards.
-    const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
-    const attempted = calls.length > 0;
-
-    if (attempted && calls.every((c) => c.status === 'failed')) out.add('call_failed');
-    else if (attempted && !answered) out.add('no_answer');
-    if (answered) out.add('answered_not_qualified');
-    if (!lead?.first_response_at) out.add('no_reply');
-
-    return out;
   }
 
   private stop(e: Enrollment): void {
@@ -502,12 +469,11 @@ export class EngineService implements OnModuleDestroy {
    *
    * Two decisions, deliberately separate:
    *
-   *  - **Status** follows temperature alone. Hot stays `qualified` and waits
-   *    for routing to give it an agent; warm and cold go to `nurture`. This is
-   *    not conditional on a sequence existing — a warm lead is in nurture
-   *    whether or not anybody has configured a drip for it, and tying the two
-   *    together made an office with no warm sequence silently mark warm leads
-   *    `qualified` and queue them for an agent.
+   *  - **Status** follows temperature alone. Hot is `interested` and waits
+   *    for routing to give it an agent; warm and cold go to `follow_up`
+   *    (not_ready). This is not conditional on a sequence existing — tying the
+   *    two together made an office with no warm sequence silently mark warm
+   *    leads as hot and queue them for an agent.
    *  - **Enrolment** follows whatever sequence claims that temperature, which
    *    is now a per-sequence setting an office edits rather than a constant.
    *    Nothing claiming it means nobody is added automatically, which is a
@@ -516,15 +482,37 @@ export class EngineService implements OnModuleDestroy {
    * Warm and cold deliberately get no agent either way: an agent's queue stops
    * being a to-do list the moment every lead is on it.
    */
-  async qualified(orgId: string, leadId: string, temperature: string, summary?: string): Promise<void> {
+  async qualified(
+    orgId: string,
+    leadId: string,
+    temperature: string,
+    summary?: string,
+    opts: { callbackRequested?: boolean } = {},
+  ): Promise<void> {
     const isHot = temperature === 'hot';
+
+    // Warm and cold are not_ready, unless the caller asked to be called back —
+    // said in the call (callbackRequested) or already recorded by the in-call
+    // outcome tool, which the post-call score must not overwrite.
+    let reason: FollowUpReason = FollowUpReason.NOT_READY;
+    if (!isHot) {
+      const cur = await this.prisma.leads.findFirst({
+        where: { id: leadId, organization_id: orgId },
+        select: { status: true, follow_up_reason: true },
+      });
+      const askedBefore =
+        cur?.status === LeadStatus.FOLLOW_UP && cur.follow_up_reason === FollowUpReason.CALLBACK_REQUESTED;
+      if (opts.callbackRequested || askedBefore) reason = FollowUpReason.CALLBACK_REQUESTED;
+    }
 
     // Scoped by organization in the write itself, so a lead id from another
     // tenant is not found — the same 404 as one that does not exist.
     const updated = await this.prisma.leads.updateMany({
       where: { id: leadId, organization_id: orgId },
       data: {
-        status: isHot ? LeadStatus.QUALIFIED : LeadStatus.NURTURE,
+        ...(isHot
+          ? { status: LeadStatus.INTERESTED }
+          : { status: LeadStatus.FOLLOW_UP, follow_up_reason: reason }),
         temperature,
         ...(summary ? { ai_summary: summary } : {}),
       },
@@ -534,13 +522,19 @@ export class EngineService implements OnModuleDestroy {
     if (e) this.stop(e);
 
     // Enrolment must not fail the webhook: the qualification itself is already
-    // recorded, and a lead sitting in nurture without an enrolment can be added
+    // recorded, and a parked lead without an enrolment can be added
     // by hand. Losing the temperature because a seed query timed out cannot.
+    //
+    // A parked lead goes to the sequence claiming its follow-up reason first —
+    // "call me back" is more specific than "cold" — and to the temperature's
+    // sequence only when no sequence claims the reason.
     try {
-      const code = await this.followup.sequenceForTemperature(orgId, temperature);
+      const code =
+        (!isHot ? await this.followup.sequenceForTrigger(orgId, `follow_up_${reason}`) : undefined) ??
+        (await this.followup.sequenceForTemperature(orgId, temperature));
       if (!code) {
         this.logger.log(
-          `lead ${leadId} qualified as ${temperature} — strategy stopped, no sequence claims that temperature`,
+          `lead ${leadId} qualified as ${temperature}${isHot ? '' : ` (${reason})`} — strategy stopped, no sequence claims it`,
         );
         return;
       }
@@ -594,10 +588,19 @@ export class EngineService implements OnModuleDestroy {
    *
    * Any outcome or parked status ends the strategy, exactly as qualified() and
    * appointmentBooked() do — a lead somebody has just marked not interested
-   * must not get the next scheduled text. 'dnc' also sets the do-not-contact
-   * flag, because that flag, not the status, is what every send path reads.
+   * must not get the next scheduled text. `optOut` (not_interested only) also
+   * sets the do-not-contact flag, because that flag, not the status, is what
+   * every send path reads. follow_up always carries a reason: `followUpReason`,
+   * or 'other' when none is given.
    */
-  async setStatus(orgId: string, leadId: string, status: LeadStatus, reason?: string): Promise<void> {
+  async setStatus(
+    orgId: string,
+    leadId: string,
+    status: LeadStatus,
+    reason?: string,
+    opts: { followUpReason?: FollowUpReason; optOut?: boolean } = {},
+  ): Promise<void> {
+    const optOut = !!opts.optOut && status === LeadStatus.NOT_INTERESTED;
     const lead = await this.prisma.leads.findFirst({
       where: { id: leadId, organization_id: orgId },
       select: { id: true },
@@ -609,10 +612,11 @@ export class EngineService implements OnModuleDestroy {
       data: {
         status,
         ...(reason ? { ai_summary: reason.slice(0, 2000) } : {}),
-        ...(status === LeadStatus.DNC
-          ? { dnc_status: true, automation_paused: true, consent_status: 'revoked' }
+        ...(status === LeadStatus.FOLLOW_UP
+          ? { follow_up_reason: opts.followUpReason ?? FollowUpReason.OTHER }
           : {}),
-        ...([LeadStatus.NOT_INTERESTED, LeadStatus.DNC, LeadStatus.INVALID, LeadStatus.CLOSED] as string[]).includes(
+        ...(optOut ? { dnc_status: true, automation_paused: true, consent_status: 'revoked' } : {}),
+        ...([LeadStatus.NOT_INTERESTED, LeadStatus.INVALID, LeadStatus.CLOSED] as string[]).includes(
           status,
         ) && reason
           ? { lost_reason: reason.slice(0, 255) }
@@ -624,6 +628,8 @@ export class EngineService implements OnModuleDestroy {
       const e = this.active.get(leadId);
       if (e) this.stop(e);
     }
-    this.logger.log(`lead ${leadId} -> ${status}${reason ? ` (${reason})` : ''}`);
+    if (status === LeadStatus.FOLLOW_UP) await this.enrolOnFollowUp(orgId, leadId);
+    const detail = status === LeadStatus.FOLLOW_UP ? `/${opts.followUpReason ?? FollowUpReason.OTHER}` : optOut ? '/dnc' : '';
+    this.logger.log(`lead ${leadId} -> ${status}${detail}${reason ? ` (${reason})` : ''}`);
   }
 }

@@ -26,27 +26,27 @@ export type EnrollTrigger =
   | 'qualified_hot'
   | 'qualified_warm'
   | 'qualified_cold'
-  | 'call_failed'
-  | 'no_answer'
-  | 'answered_not_qualified'
-  | 'no_reply'
-  | 'strategy_completed';
+  | 'follow_up_no_answer'
+  | 'follow_up_not_ready'
+  | 'follow_up_callback_requested'
+  | 'follow_up_needs_time'
+  | 'follow_up_other';
 
 /**
  * The tick boxes, in the order a person thinks about them: what the call
- * concluded first, then the ways it can come to nothing.
+ * concluded first, then why the lead was parked in follow-up.
  *
  * Grouped so the editor can show the two halves under their own headings —
- * qualification is something the lead did, everything else is something that
- * failed to happen.
+ * qualification is something the lead did; a follow-up reason is why nothing
+ * has come of it yet.
  */
 export const ENROLL_TRIGGERS: Array<{
   value: EnrollTrigger;
-  group: 'qualified' | 'negative';
+  group: 'qualified' | 'follow_up';
   label: string;
   hint: string;
   /** Shown as a pill on the card. Only the temperatures carry one — the
-   *  negative conditions have no established colour and inventing one would
+   *  follow-up reasons have no established colour and inventing one would
    *  imply a severity ranking that does not exist. */
   badge?: { text: string; className: string };
 }> = [
@@ -59,16 +59,16 @@ export const ENROLL_TRIGGERS: Array<{
   { value: 'qualified_cold', group: 'qualified', label: 'Qualified as cold',
     hint: 'Spoke to them, no real intent right now.',
     badge: { text: 'COLD', className: 'bg-sky-500/15 text-sky-400 border-sky-500/30' } },
-  { value: 'call_failed', group: 'negative', label: 'Every call failed to connect',
-    hint: 'The number never even rang — usually a bad number.' },
-  { value: 'no_answer', group: 'negative', label: 'Nobody ever answered',
-    hint: 'It rang every time and nobody picked up.' },
-  { value: 'answered_not_qualified', group: 'negative', label: 'Answered, but never qualified',
-    hint: 'They picked up, but the call never reached a conclusion.' },
-  { value: 'no_reply', group: 'negative', label: 'Never replied to anything',
-    hint: 'No answered call and no reply to any text.' },
-  { value: 'strategy_completed', group: 'negative', label: 'Finished the strategy without qualifying',
-    hint: 'The catch-all: every step ran and nothing came of it.' },
+  { value: 'follow_up_no_answer', group: 'follow_up', label: 'No answer',
+    hint: 'The strategy ran out and they never picked up or replied.' },
+  { value: 'follow_up_not_ready', group: 'follow_up', label: 'Not ready',
+    hint: 'They spoke to us, but aren’t ready to move yet.' },
+  { value: 'follow_up_callback_requested', group: 'follow_up', label: 'Callback requested',
+    hint: 'They asked us to call them back later.' },
+  { value: 'follow_up_needs_time', group: 'follow_up', label: 'Needs time',
+    hint: 'They want more time before deciding.' },
+  { value: 'follow_up_other', group: 'follow_up', label: 'Other',
+    hint: 'Moved to follow-up for any other reason.' },
 ];
 
 export interface SequenceStep {

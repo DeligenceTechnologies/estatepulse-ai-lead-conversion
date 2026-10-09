@@ -105,7 +105,7 @@ export class AgentCalendarController {
     // agentId is forced to the caller's own profile, never taken from the
     // query, so the filter cannot be turned into a way to read a colleague's
     // calendar.
-    return this.appointments.list(auth.organizationId, {
+    return this.appointments.listInRange(auth.organizationId, {
       ...query,
       agentId: this.agentProfileId(auth),
     });

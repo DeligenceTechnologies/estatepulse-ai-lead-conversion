@@ -17,9 +17,8 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '..
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
-import { messageFor } from '../../lib/api';
-import { Lead, LeadStatus, LeadTemperature } from '../../types';
-import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
+import { Lead, LeadTemperature } from '../../types';
+import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
 
 /**
  * Lead pipeline — live rows only.
@@ -112,7 +111,8 @@ const toLead = (l: LiveLead): Lead => ({
   // nothing branches on this value; it is displayed and nothing more.
   source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
-  status: normalizeStatus(l.status, l.dncStatus),
+  status: normalizeStatus(l.status),
+  followUpReason: l.followUpReason,
   leadType: 'buyer',
   preferredLocation: l.location ?? '',
   budgetMin: l.minBudget ?? 0,
@@ -134,6 +134,9 @@ const toLead = (l: LiveLead): Lead => ({
 
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
 const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
+
+/** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
+const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
 
 interface LeadsViewProps {
   onOpenNewLead: () => void;
@@ -167,16 +170,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     return { leads, stats };
   }, []);
 
-  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(load);
-
   // The push path. The backend knows the moment a submission becomes a lead, so
-  // this screen is told rather than asked to guess. The poll above stays as the
-  // fallback and, finding nothing to report, backs off to its ceiling — the two
-  // together cost far less than the old 5-second interval did alone.
-  const { connected } = useLiveEvents(
-    useCallback((e) => {
-      if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
-    }, [invalidate]),
+  // this screen is told rather than asked to guess. Subscribed before the query
+  // because the query's cadence depends on whether the stream is up. The handler
+  // only runs after render, by when `invalidate` below exists, and useLiveEvents
+  // reads it through a ref, so an inline handler costs no reconnect.
+  const { connected } = useLiveEvents((e) => {
+    if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
+  });
+
+  // Stream up: it reports every change as it happens, so the poll is only a
+  // safety net — once a minute, and an event or a return to the tab refetches
+  // without dropping back to 5-second polling. Stream down: the default
+  // 5-second poll backing off to a minute, the reliability fallback as before.
+  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(
+    load,
+    connected ? STREAM_UP_CADENCE : undefined,
   );
 
   // This tab's own assignments refetch at once, stream or no stream.
@@ -188,22 +197,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
-
-  const [savingStatus, setSavingStatus] = useState<string | null>(null);
-  const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null);
-
-  const changeStatus = async (id: string, status: LeadStatus): Promise<void> => {
-    setSavingStatus(id);
-    setStatusError(null);
-    try {
-      await leadsApi.setStatus(id, status);
-      invalidate();
-    } catch (e) {
-      setStatusError({ id, message: messageFor(e) });
-    } finally {
-      setSavingStatus(null);
-    }
-  };
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -492,8 +485,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        {/* One contact line: only what the lead actually has. */}
-                        <div className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                        {/* Only what the lead actually has. Wraps so the table fits without horizontal scroll. */}
+                        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 min-w-0">
                           {lead.phone && (
                             <span className="flex items-center gap-1 shrink-0">
                               {lead.phone}
@@ -505,7 +498,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               )}
                             </span>
                           )}
-                          {lead.phone && lead.email && <span className="text-slate-600">·</span>}
                           {lead.email && (
                             <span className="flex items-center gap-1 min-w-0">
                               <span className="truncate max-w-[200px]">{lead.email}</span>
@@ -574,34 +566,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       )}
                     </td>
 
-                    {/* Status — hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      {isOwner ? (
-                        // Owner-only: the API refuses anyone else. The only way
-                        // into 'closed', and the correction path for automation.
-                        <select
-                          value={normalizeStatus(lead.status, lead.dncStatus)}
-                          disabled={savingStatus === lead.id}
-                          onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
-                          title={lead.statusReason || 'Change status'}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase cursor-pointer focus:outline-none disabled:opacity-50 ${statusTone(lead.status)}`}
-                        >
-                          {LEAD_STATUSES.map((s) => (
-                            <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
-                              {STATUS_LABELS[s]}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span
-                          title={lead.statusReason || undefined}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                        >
-                          {statusLabel(lead.status)}
-                        </span>
-                      )}
-                      {statusError?.id === lead.id && (
-                        <p className="text-2xs text-rose-400 mt-1">{statusError.message}</p>
+                    {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
+                    <td className="px-4 py-3.5">
+                      <span
+                        title={lead.statusReason || undefined}
+                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                      >
+                        {statusLabel(lead.status)}
+                      </span>
+                      {followUpReasonLabel(lead.status, lead.followUpReason) && (
+                        <p className="text-2xs text-slate-400 mt-1">
+                          {followUpReasonLabel(lead.status, lead.followUpReason)}
+                        </p>
                       )}
                     </td>
 

@@ -50,4 +50,14 @@ export class HistoryController {
   listMessages(@Req() req: SessionRequest, @Param('id') id: string) {
     return this.history.listMessages(req.auth, id);
   }
+
+  /**
+   * One lead's SMS messages across all its threads (the lead detail view), in
+   * one request rather than the thread list and then one request per thread.
+   * leadId is required: this reads a lead's history, never a whole mailbox.
+   */
+  @Get('messages')
+  listLeadMessages(@Req() req: SessionRequest, @Query('leadId', ParseUUIDPipe) leadId: string) {
+    return this.history.listLeadMessages(req.auth, leadId);
+  }
 }

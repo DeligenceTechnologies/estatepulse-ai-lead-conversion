@@ -12,7 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CLOSED_STATUSES = [LeadStatus.APPOINTMENT_BOOKED, LEGACY_BOOKED, ...INACTIVE_STATUSES];
 
 interface SummaryRow {
-  by_status: { status: string; dnc_status: boolean; n: number }[];
+  by_status: { status: string; n: number }[];
   temp_hot: number;
   temp_warm: number;
   temp_cold: number;
@@ -73,9 +73,8 @@ export class OwnerDashboardController {
          where created_at >= ${since30} and first_contact_at is not null
       )
       select
-        -- Grouped by dnc_status too, so a legacy 'lost' opt-out folds into 'dnc'.
-        (select coalesce(json_agg(json_build_object('status', status, 'dnc_status', dnc_status, 'n', n)), '[]'::json)
-           from (select status, dnc_status, count(*)::int as n from l group by status, dnc_status) s) as by_status,
+        (select coalesce(json_agg(json_build_object('status', status, 'n', n)), '[]'::json)
+           from (select status, count(*)::int as n from l group by status) s) as by_status,
         count(*) filter (where temperature = 'hot'   and status <> all(${closed}::text[]))::int as temp_hot,
         count(*) filter (where temperature = 'warm'  and status <> all(${closed}::text[]))::int as temp_warm,
         count(*) filter (where temperature = 'cold'  and status <> all(${closed}::text[]))::int as temp_cold,
@@ -110,7 +109,7 @@ export class OwnerDashboardController {
     `;
 
     const byStatus = normalizeStatusCounts(
-      row.by_status.map((g) => ({ status: g.status, dnc_status: g.dnc_status, _count: { _all: g.n } })),
+      row.by_status.map((g) => ({ status: g.status, _count: { _all: g.n } })),
     );
 
     const calls = row.calls_by_status ?? {};

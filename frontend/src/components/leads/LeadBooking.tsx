@@ -63,23 +63,18 @@ const upcoming = (rows: Appointment[] | null | undefined): Appointment | null =>
     )[0] ?? null;
 
 /**
- * `appointments`: pass the rows when the caller has already loaded them (the
- * Appointments tab); omitted, this loads them itself.
+ * The booking options for one lead: read when the lead or its assigned agent
+ * changes, and not at all while `leadId` is null.
  */
-export const LeadBookMeeting: React.FC<{
-  leadId: string;
-  agentKey: string | null;
-  appointments?: Appointment[] | null;
-}> = ({ leadId, agentKey, appointments }) => {
+export function useLeadBookingOptions(leadId: string | null, agentKey: string | null) {
   const [options, setOptions] = useState<LeadBookingOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ownRows, setOwnRows] = useState<Appointment[] | null>(null);
-  const given = appointments !== undefined;
 
   useEffect(() => {
-    let alive = true;
     setOptions(null);
     setError(null);
+    if (!leadId) return;
+    let alive = true;
     getLeadBookingOptions(leadId)
       .then((o) => alive && setOptions(o))
       .catch((e) => alive && setError(messageFor(e)));
@@ -87,6 +82,31 @@ export const LeadBookMeeting: React.FC<{
       alive = false;
     };
   }, [leadId, agentKey]);
+
+  return { options, error };
+}
+
+export type LeadBookingState = ReturnType<typeof useLeadBookingOptions>;
+
+/**
+ * `booking` is options already being read by a parent that shows this panel in
+ * more than one place (the lead dossier's Overview and Appointments tabs), so
+ * switching between them does not ask again. Without it, the panel reads its
+ * own.
+ *
+ * `appointments`: pass the rows when the caller has already loaded them (the
+ * Appointments tab); omitted, this loads them itself.
+ */
+export const LeadBookMeeting: React.FC<{
+  leadId: string;
+  agentKey: string | null;
+  booking?: LeadBookingState;
+  appointments?: Appointment[] | null;
+}> = ({ leadId, agentKey, booking, appointments }) => {
+  const own = useLeadBookingOptions(booking ? null : leadId, agentKey);
+  const { options, error } = booking ?? own;
+  const [ownRows, setOwnRows] = useState<Appointment[] | null>(null);
+  const given = appointments !== undefined;
 
   useEffect(() => {
     if (given) return;
@@ -201,7 +221,9 @@ const STATUS_STYLES: Record<string, string> = {
 export const LeadAppointments: React.FC<{
   leadId: string;
   agentKey: string | null;
-}> = ({ leadId, agentKey }) => {
+  /** Booking options the parent already reads — see LeadBookMeeting. */
+  booking?: LeadBookingState;
+}> = ({ leadId, agentKey, booking }) => {
   const [rows, setRows] = useState<Appointment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -219,7 +241,12 @@ export const LeadAppointments: React.FC<{
 
   return (
     <div className="space-y-4">
-      <LeadBookMeeting leadId={leadId} agentKey={agentKey} appointments={rows} />
+      <LeadBookMeeting
+        leadId={leadId}
+        agentKey={agentKey}
+        booking={booking}
+        appointments={rows}
+      />
 
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">

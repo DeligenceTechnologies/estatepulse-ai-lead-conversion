@@ -15,8 +15,12 @@ import {
 } from '@nestjs/common';
 import { OrgId } from '../common/decorators/auth.decorators';
 import {
+  FOLLOW_UP_REASONS,
+  FollowUpReason,
   LEAD_STATUSES,
   LeadStatus,
+  isFollowUpReason,
+  normalizeFollowUpReason,
   OUTCOME_STATUSES,
   normalizeLeadStatus,
 } from '../common/domain';
@@ -34,29 +38,45 @@ import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** Outcomes the AI call may report through POST /api/leads/:id/outcome. */
-const AI_OUTCOMES = [
-  LeadStatus.APPOINTMENT_REQUESTED,
-  LeadStatus.NOT_INTERESTED,
-  LeadStatus.DNC,
-  LeadStatus.FOLLOW_UP,
-] as const;
+/**
+ * Outcomes the AI call may report through POST /api/leads/:id/outcome. 'dnc'
+ * is not a status: it is not_interested plus the do-not-contact flag, and stays
+ * accepted so assistant tools configured before lead_status_v3 keep working.
+ */
+const AI_OUTCOMES = [LeadStatus.APPOINTMENT_REQUESTED, LeadStatus.NOT_INTERESTED, 'dnc', LeadStatus.FOLLOW_UP] as const;
 
 /** The journey's one-line result for a status that settles it. */
 const OUTCOME_LABELS: Partial<Record<string, string>> = {
-  [LeadStatus.QUALIFIED]: 'Qualified',
+  [LeadStatus.INTERESTED]: 'Interested',
   [LeadStatus.APPOINTMENT_REQUESTED]: 'Appointment requested',
   [LeadStatus.APPOINTMENT_BOOKED]: 'Appointment booked',
   [LeadStatus.FOLLOW_UP]: 'Exited strategy — follow-up needed',
-  [LeadStatus.NURTURE]: 'Exited strategy — in nurture',
   [LeadStatus.NOT_INTERESTED]: 'Not interested',
-  [LeadStatus.DNC]: 'Do not contact',
   [LeadStatus.INVALID]: 'Invalid number',
   [LeadStatus.CLOSED]: 'Closed',
 };
 
+/**
+ * Where the lead came from, as the pipeline badges it (LeadsView's sourceLabel
+ * on the frontend): the provider for a form we connected through its API, the
+ * transport for a URL the customer pasted, 'manual' when there is no source.
+ */
+function sourceLabel(s: { source_type: string; provider: string; connection_method: string } | undefined) {
+  if (!s) return 'manual';
+  return s.connection_method.toUpperCase() === 'API' && s.provider ? s.provider.toLowerCase() : s.source_type;
+}
+
+/** A follow-up reason from a request body: absent is fine, anything else must be valid. */
+function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (!isFollowUpReason(v)) {
+    throw new AppError('VALIDATION_ERROR', `followUpReason must be one of ${FOLLOW_UP_REASONS.join('|')}`);
+  }
+  return v;
+}
+
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
-function mapLead(r: any) {
+function mapLead(r: any, source: string) {
   return {
     id: r.id,
     organizationId: r.organization_id,
@@ -65,8 +85,9 @@ function mapLead(r: any) {
     lastName: r.last_name ?? '',
     email: r.email ?? '',
     phone: r.phone ?? '',
-    source: 'Website',
-    status: normalizeLeadStatus(r.status, !!r.dnc_status),
+    source,
+    status: normalizeLeadStatus(r.status),
+    followUpReason: normalizeFollowUpReason(r.status, r.follow_up_reason),
     leadType: 'buyer',
     preferredLocation: r.location ?? '',
     budgetMin: r.min_budget != null ? Number(r.min_budget) : 0,
@@ -181,12 +202,51 @@ export class PortalLeadsController {
 
   @Get()
   async list(@OrgId() orgId: string) {
-    const rows = await this.prisma.leads.findMany({
+    // The org's sources, read alongside the leads rather than as a relation
+    // (a second round trip after it). Only this org's sources are in the map,
+    // so a lead can never be labelled with another organization's source.
+    const sourcesP = this.prisma.lead_sources.findMany({
+      where: { organization_id: orgId },
+      select: { id: true, source_type: true, provider: true, connection_method: true },
+    });
+    const rowsP = this.prisma.leads.findMany({
       where: { organization_id: orgId },
       orderBy: { created_at: 'desc' },
       take: 500,
+      // Exactly the columns mapLead reads. The row also carries extracted_intel,
+      // ai_summary, custom_fields, field_provenance, consent_text and more —
+      // none of them in this response, and on a full page the bulk of the bytes.
+      select: {
+        id: true,
+        organization_id: true,
+        lead_source_id: true,
+        takeover_user_id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        status: true,
+        follow_up_reason: true,
+        dnc_status: true,
+        location: true,
+        min_budget: true,
+        max_budget: true,
+        bedrooms: true,
+        timeline: true,
+        financing_status: true,
+        score: true,
+        temperature: true,
+        consent_status: true,
+        automation_paused: true,
+        created_at: true,
+        updated_at: true,
+        last_contact_at: true,
+        motivation: true,
+      },
     });
-    return { leads: rows.map(mapLead) };
+    const [sources, rows] = await Promise.all([sourcesP, rowsP]);
+    const byId = new Map(sources.map((s) => [s.id, s]));
+    return { leads: rows.map((r) => mapLead(r, sourceLabel(byId.get(r.lead_source_id ?? '')))) };
   }
 
   /** Where is this lead in the journey: which strategy step, with what real outcome? */
@@ -288,10 +348,10 @@ export class PortalLeadsController {
     if (nextIndex >= 0) stepsOut[nextIndex]!.state = 'current';
     const fired = calls.length + msgs.length;
 
-    const status = normalizeLeadStatus(lead.status, !!lead.dnc_status);
+    const status = normalizeLeadStatus(lead.status);
     let phase: 'not_started' | 'strategy' | 'exited' | 'done';
     if (OUTCOME_STATUSES.includes(status)) phase = 'done';
-    else if (status === LeadStatus.NURTURE || status === LeadStatus.FOLLOW_UP) phase = 'exited';
+    else if (status === LeadStatus.FOLLOW_UP) phase = 'exited';
     else if (lead.first_contact_at) phase = 'strategy';
     else phase = 'not_started';
 
@@ -300,7 +360,6 @@ export class PortalLeadsController {
     const smsSent = msgs.some((m) => m.delivery_status === 'sent');
     let outcome: string;
     if (OUTCOME_LABELS[status]) outcome = OUTCOME_LABELS[status]!;
-    else if (status === LeadStatus.ENGAGED) outcome = 'Engaged — in conversation';
     else if (answered) outcome = 'Call answered';
     else if (smsSent) outcome = 'SMS sent';
     else if (fired > 0) outcome = 'Attempted — no success yet';
@@ -322,7 +381,8 @@ export class PortalLeadsController {
   /**
    * Move a lead to any status by hand — the only way into 'closed', and the
    * correction path for everything automation decided. Owner-only: this can
-   * take a lead out of the pipeline (or mark it do-not-contact) for good.
+   * take a lead out of the pipeline for good. follow_up takes an optional
+   * followUpReason (default 'other').
    */
   @Patch(':id/status')
   @UseGuards(OwnerGuard)
@@ -332,8 +392,11 @@ export class PortalLeadsController {
     if (!(LEAD_STATUSES as readonly string[]).includes(status)) {
       throw new AppError('VALIDATION_ERROR', `status must be one of ${LEAD_STATUSES.join('|')}`);
     }
+    const followUpReason = followUpReasonFrom(body?.followUpReason);
     try {
-      await this.engine.setStatus(orgId, id, status as LeadStatus, typeof reason === 'string' ? reason : undefined);
+      await this.engine.setStatus(orgId, id, status as LeadStatus, typeof reason === 'string' ? reason : undefined, {
+        followUpReason,
+      });
     } catch (e) {
       throw new AppError('NOT_FOUND', (e as Error).message);
     }
@@ -343,7 +406,9 @@ export class PortalLeadsController {
   /**
    * The AI call reports an outcome that is not a temperature: the lead asked
    * for an appointment, is not interested, asked not to be called, or wants a
-   * call back. Same caller and auth as /qualified.
+   * call back. Same caller and auth as /qualified. follow_up takes an optional
+   * followUpReason and defaults to callback_requested — the reason the call
+   * reports it.
    */
   @Post(':id/outcome')
   @HttpCode(HttpStatus.OK)
@@ -352,8 +417,14 @@ export class PortalLeadsController {
     if (!(AI_OUTCOMES as readonly string[]).includes(outcome)) {
       throw new AppError('VALIDATION_ERROR', `outcome must be one of ${AI_OUTCOMES.join('|')}`);
     }
+    const optOut = outcome === 'dnc';
+    const status = optOut ? LeadStatus.NOT_INTERESTED : (outcome as LeadStatus);
+    const followUpReason = followUpReasonFrom(body?.followUpReason) ?? FollowUpReason.CALLBACK_REQUESTED;
     try {
-      await this.engine.setStatus(orgId, id, outcome as LeadStatus, typeof summary === 'string' ? summary : undefined);
+      await this.engine.setStatus(orgId, id, status, typeof summary === 'string' ? summary : undefined, {
+        followUpReason,
+        optOut,
+      });
     } catch (e) {
       throw new AppError('NOT_FOUND', (e as Error).message);
     }

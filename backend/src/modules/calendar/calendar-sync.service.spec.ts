@@ -311,7 +311,7 @@ function lead(over: Partial<LeadRow> = {}): LeadRow {
     organization_id: ORG,
     normalized_email: 'buyer@example.com',
     normalized_phone: null,
-    status: 'contacted',
+    status: 'contacting',
     updated_at: new Date('2026-09-01T00:00:00Z'),
     ...over,
   };

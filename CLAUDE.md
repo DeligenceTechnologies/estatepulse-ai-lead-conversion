@@ -427,7 +427,7 @@ A request for a human during the AI call is treated as hot and routed to an agen
 ## 14. Important naming/behavior rule
 
 Do not confuse:
-- Lead status: New, Contacted, Qualified, Booked, Lost, Nurture
+- Lead status: New, Contacting, Follow-up, Interested, Appointment requested, Appointment booked, Not interested, Closed, Invalid (follow-up carries a reason: No answer, Not ready, Callback requested, Needs time, Other)
 - Lead temperature: Hot, Warm, Cold
 
 Temperature describes lead intent.
