@@ -9,9 +9,9 @@ import { LeadScoringService } from './lead-scoring.service';
 /**
  * Telnyx Call Control webhook. Unauthenticated — Telnyx posts here — and drives
  * lead/call outcome updates:
- *   call.answered -> in_progress + lead 'contacted' + record + attach the AI
- *   call.hangup   -> completed (if answered) or no_answer; lead 'engaged' after a
- *                    real conversation, 'invalid' on a bad-number hangup cause
+ *   call.answered -> in_progress + record + attach the AI
+ *   call.hangup   -> completed (if answered) or no_answer; lead 'invalid' on a
+ *                    bad-number hangup cause
  *   call.recording.saved                 -> the audio URL
  *   call.recording.transcription.saved   -> what was said (+ transcript scoring fallback)
  *   call.conversation_insights.generated -> lead score + temperature

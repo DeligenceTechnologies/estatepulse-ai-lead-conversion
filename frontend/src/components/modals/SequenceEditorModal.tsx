@@ -78,8 +78,8 @@ const GROUPS = [
     dot: 'bg-emerald-400',
   },
   {
-    key: 'negative' as const,
-    title: 'The strategy ran out without a result',
+    key: 'follow_up' as const,
+    title: 'The lead moved to Follow-up because',
     dot: 'bg-slate-500',
   },
 ];

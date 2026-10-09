@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  ChevronDown,
   ChevronRight,
   Flame,
   Plus,
@@ -18,9 +17,8 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '..
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
-import { messageFor } from '../../lib/api';
-import { Lead, LeadStatus, LeadTemperature } from '../../types';
-import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
+import { Lead, LeadTemperature } from '../../types';
+import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
 
 /**
  * Lead pipeline — live rows only.
@@ -113,7 +111,8 @@ const toLead = (l: LiveLead): Lead => ({
   // nothing branches on this value; it is displayed and nothing more.
   source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
-  status: normalizeStatus(l.status, l.dncStatus),
+  status: normalizeStatus(l.status),
+  followUpReason: l.followUpReason,
   leadType: 'buyer',
   preferredLocation: l.location ?? '',
   budgetMin: l.minBudget ?? 0,
@@ -198,22 +197,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
-
-  const [savingStatus, setSavingStatus] = useState<string | null>(null);
-  const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null);
-
-  const changeStatus = async (id: string, status: LeadStatus): Promise<void> => {
-    setSavingStatus(id);
-    setStatusError(null);
-    try {
-      await leadsApi.setStatus(id, status);
-      invalidate();
-    } catch (e) {
-      setStatusError({ id, message: messageFor(e) });
-    } finally {
-      setSavingStatus(null);
-    }
-  };
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -583,44 +566,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       )}
                     </td>
 
-                    {/* Status — hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      {isOwner ? (
-                        // Owner-only: the API refuses anyone else. The only way
-                        // into 'closed', and the correction path for automation.
-                        // A select's label can't wrap, so a long status would widen
-                        // the column and push Actions off-screen: the badge shows
-                        // (and wraps) the label, the real select sits invisibly on top.
-                        <div className={`relative inline-flex rounded-md has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-emerald-400 ${savingStatus === lead.id ? 'opacity-50' : ''}`}>
-                          <span className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase inline-flex items-center gap-1 ${statusTone(lead.status)}`}>
-                            {STATUS_LABELS[normalizeStatus(lead.status, lead.dncStatus)]}
-                            <ChevronDown className="w-3 h-3 shrink-0" />
-                          </span>
-                          <select
-                            value={normalizeStatus(lead.status, lead.dncStatus)}
-                            disabled={savingStatus === lead.id}
-                            onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
-                            title={lead.statusReason || 'Change status'}
-                            aria-label="Lead status"
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default"
-                          >
-                            {LEAD_STATUSES.map((s) => (
-                              <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
-                                {STATUS_LABELS[s]}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : (
-                        <span
-                          title={lead.statusReason || undefined}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                        >
-                          {statusLabel(lead.status)}
-                        </span>
-                      )}
-                      {statusError?.id === lead.id && (
-                        <p className="text-2xs text-rose-400 mt-1">{statusError.message}</p>
+                    {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
+                    <td className="px-4 py-3.5">
+                      <span
+                        title={lead.statusReason || undefined}
+                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                      >
+                        {statusLabel(lead.status)}
+                      </span>
+                      {followUpReasonLabel(lead.status, lead.followUpReason) && (
+                        <p className="text-2xs text-slate-400 mt-1">
+                          {followUpReasonLabel(lead.status, lead.followUpReason)}
+                        </p>
                       )}
                     </td>
 

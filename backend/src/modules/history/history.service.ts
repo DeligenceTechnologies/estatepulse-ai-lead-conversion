@@ -199,8 +199,8 @@ export class HistoryService {
     // Legacy 'booked' still reads as booked (normalizeLeadStatus).
     const status = normalizeLeadStatus(leadStatus);
     if (status === 'appointment_booked') return 'APPOINTMENT_BOOKED';
-    if (status === 'qualified' || status === 'appointment_requested') return 'QUALIFIED';
-    if (status === 'dnc' || status === 'not_interested') return 'NOT_INTERESTED';
+    if (status === 'interested' || status === 'appointment_requested') return 'QUALIFIED';
+    if (status === 'not_interested') return 'NOT_INTERESTED';
     return base;
   }
 

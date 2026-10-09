@@ -62,7 +62,7 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
    *
    * A restart drops every pending `setTimeout`, and the claim on
    * `first_contact_at` means the enrolment query above will never look at them
-   * again. Without this sweep they sit at 'contacted' forever — no more steps,
+   * again. Without this sweep they sit at 'contacting' forever — no more steps,
    * no exit into nurture, and no way to add them to a sequence by hand, since
    * the enrolment guard reads the same "still in the strategy" signature.
    *

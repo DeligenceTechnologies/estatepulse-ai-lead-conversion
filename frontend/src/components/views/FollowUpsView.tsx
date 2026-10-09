@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -59,15 +59,24 @@ const STATUS_STYLES: Record<string, string> = {
   stopped: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
 };
 
-const relative = (iso: string | null): string => {
+/**
+ * `now` is passed in, from a clock the view ticks, rather than read here: the
+ * enrolment rows do not change while a step waits, so a countdown that only
+ * recomputed when they did would sit at its first value until the step fired.
+ */
+const relative = (iso: string | null, now: number): string => {
   if (!iso) return '—';
-  const ms = new Date(iso).getTime() - Date.now();
-  const mins = Math.round(ms / 60_000);
+  const ms = new Date(iso).getTime() - now;
+  // Rounded up, so a step 30 seconds away reads "in 1 min", never "due now".
+  const mins = Math.ceil(ms / 60_000);
   if (Math.abs(mins) < 60) return mins <= 0 ? 'due now' : `in ${mins} min`;
   const hours = Math.round(mins / 60);
   if (Math.abs(hours) < 48) return hours <= 0 ? 'overdue' : `in ${hours}h`;
   return `in ${Math.round(hours / 24)} days`;
 };
+
+/** How often the "Next action" countdown recomputes. */
+const COUNTDOWN_TICK_MS = 15_000;
 
 export const FollowUpsView: React.FC = () => {
   const { setSelectedLeadId } = useApp();
@@ -77,6 +86,12 @@ export const FollowUpsView: React.FC = () => {
   const [editing, setEditing] = useState<Sequence | null | undefined>(undefined);
   const [enrolling, setEnrolling] = useState<Sequence | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Drives the "Next action" countdown. See relative().
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
+    return () => clearInterval(t);
+  }, []);
 
   const fetchSequences = useCallback(() => listSequences(), []);
   const fetchEnrollments = useCallback(() => listEnrollments(), []);
@@ -409,7 +424,7 @@ export const FollowUpsView: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-slate-400">
-                      <span title={e.nextActionAt ?? ''}>{relative(e.nextActionAt)}</span>
+                      <span title={e.nextActionAt ?? ''}>{relative(e.nextActionAt, now)}</span>
                     </td>
                     <td className="px-3 py-2.5">
                       <span

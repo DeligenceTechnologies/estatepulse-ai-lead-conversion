@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { AUTO_FROM, LeadStatus } from '../common/domain';
+import { FollowUpReason, LeadStatus, REPLY_FROM } from '../common/domain';
 import { normalizePhone } from '../ingest/parse';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 
@@ -195,12 +195,9 @@ export class InboundSmsService {
         data: {
           dnc_status: true,
           automation_paused: true,
-          // 'dnc' is a legal status since lead_status_v2. Before that the
-          // constraint rejected it, and because it travelled in the SAME
-          // statement as dnc_status the whole write was lost — so if this ever
-          // runs against a database without that migration, opt-outs fail
-          // silently. Every gate still reads dnc_status, not the status.
-          status: LeadStatus.DNC,
+          // An opt-out is not_interested plus dnc_status; every gate reads the
+          // flag, not the status.
+          status: LeadStatus.NOT_INTERESTED,
           lost_reason: 'Opted out by SMS',
           consent_status: 'revoked',
           first_response_at: new Date(),
@@ -225,11 +222,12 @@ export class InboundSmsService {
    */
   private async onOptIn(orgId: string, leadId: string): Promise<void> {
     try {
-      // Out of 'dnc' and into 'follow_up': they are reachable again, and a
-      // person — not the drip — decides what happens next.
+      // An opted-out lead goes to 'follow_up': they are reachable again, and a
+      // person — not the drip — decides what happens next. Only while the flag
+      // is still set, so a lead somebody marked not interested by hand stays.
       await this.prisma.leads.updateMany({
-        where: { id: leadId, status: { in: [LeadStatus.DNC, 'lost'] } },
-        data: { status: LeadStatus.FOLLOW_UP },
+        where: { id: leadId, dnc_status: true, status: { in: [LeadStatus.NOT_INTERESTED, 'dnc', 'lost'] } },
+        data: { status: LeadStatus.FOLLOW_UP, follow_up_reason: FollowUpReason.OTHER },
       });
       await this.prisma.leads.update({
         where: { id: leadId },
@@ -267,10 +265,10 @@ export class InboundSmsService {
           ...(isFirst ? { first_response_at: new Date() } : {}),
         },
       });
-      // They answered: engaged, from any status that has not reached an outcome.
+      // They answered: back in conversation, from new or parked.
       await this.prisma.leads.updateMany({
-        where: { id: leadId, status: { in: AUTO_FROM[LeadStatus.ENGAGED] ?? [] } },
-        data: { status: LeadStatus.ENGAGED },
+        where: { id: leadId, status: { in: REPLY_FROM } },
+        data: { status: LeadStatus.CONTACTING },
       });
       await this.pauseEnrollments(orgId, leadId);
     } catch (e) {

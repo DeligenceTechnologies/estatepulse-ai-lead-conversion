@@ -61,7 +61,17 @@ describe('LeadScoringService', () => {
     expect(callWrite.data.ai_summary).toBe('Ready to buy in Austin.');
 
     expect(prisma.leads.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: expect.objectContaining({ score: 80 }) });
-    expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.stringContaining('HOT — 80'));
+    expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.stringContaining('HOT — 80'), {
+      callbackRequested: false,
+    });
+  });
+
+  it('passes a callback request on to the hand-off', async () => {
+    const { svc, engine } = setup();
+    const cold = { ...hotFacts, timeline: 'unknown' as const, budget_identified: false, location_identified: false,
+      pre_approved: false, appointment_requested: false, callback_requested: true };
+    await svc.onInsightsGenerated('v3:ccid', insightPayload(cold), unsigned);
+    expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'cold', expect.any(String), { callbackRequested: true });
   });
 
   it("fills the lead's budget, location, bedrooms and financing from the call", async () => {
@@ -116,7 +126,7 @@ describe('LeadScoringService', () => {
   });
 
   it.each(['appointment_booked', 'appointment_requested', 'not_interested', 'dnc', 'invalid', 'closed', 'booked', 'lost'])(
-    'never walks a %s lead back to qualified or nurture',
+    'never walks a %s lead back to interested or follow-up',
     async (status) => {
       const { svc, engine } = setup({ leadStatus: status });
       await svc.onInsightsGenerated('v3:ccid', insightPayload(hotFacts), unsigned);
@@ -124,8 +134,8 @@ describe('LeadScoringService', () => {
     },
   );
 
-  it('re-scores a lead that is only qualified', async () => {
-    const { svc, engine } = setup({ leadStatus: 'qualified' });
+  it.each(['interested', 'qualified'])('re-scores a lead that is only %s', async (leadStatus) => {
+    const { svc, engine } = setup({ leadStatus });
     await svc.onInsightsGenerated('v3:ccid', insightPayload(hotFacts), unsigned);
     expect(engine.qualified).toHaveBeenCalled();
   });
@@ -148,7 +158,7 @@ describe('LeadScoringService', () => {
     const { svc, prisma, engine } = setup();
     prisma.organizations.findUnique.mockResolvedValue({ lead_hot_threshold: 95, lead_warm_threshold: 60 });
     await svc.onInsightsGenerated('v3:ccid', insightPayload(hotFacts), unsigned); // 80
-    expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'warm', expect.any(String));
+    expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'warm', expect.any(String), { callbackRequested: false });
   });
 
   it('classifies a past call from its transcript, scoped to the caller’s organization', async () => {
@@ -177,7 +187,7 @@ describe('LeadScoringService', () => {
         expect(insights.extractFromTranscript).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1000);
         expect(insights.extractFromTranscript).toHaveBeenCalledTimes(1);
-        expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.any(String));
+        expect(engine.qualified).toHaveBeenCalledWith(ORG, LEAD, 'hot', expect.any(String), { callbackRequested: false });
       } finally {
         vi.useRealTimers();
       }

@@ -26,6 +26,7 @@ interface LeadRow {
   organization_id: string;
   normalized_phone: string | null;
   status: string;
+  follow_up_reason?: string | null;
   lost_reason: string | null;
   dnc_status: boolean;
   automation_paused: boolean;
@@ -61,7 +62,7 @@ function makeDb(opts: { integrations?: { organization_id: string; status: string
       id: LEAD_A,
       organization_id: ORG_A,
       normalized_phone: LEAD_NUMBER,
-      status: 'contacted',
+      status: 'contacting',
       lost_reason: null,
       dnc_status: false,
       automation_paused: false,
@@ -195,24 +196,20 @@ const inbound = (text: string, over: Record<string, unknown> = {}) => ({
 });
 
 /**
- * Verbatim from leads_status_check (migration 20261006000001_lead_status_v2),
- * without the two legacy values nothing should write any more. A value outside
+ * Verbatim from leads_status_check (migration 20261008000001_lead_status_v3),
+ * without the retired values nothing should write any more. A value outside
  * this list is a failed write.
  */
 const LEAD_STATUSES = [
   'new',
   'contacting',
-  'contacted',
-  'engaged',
-  'qualified',
+  'follow_up',
+  'interested',
   'appointment_requested',
   'appointment_booked',
-  'follow_up',
-  'nurture',
   'not_interested',
-  'dnc',
-  'invalid',
   'closed',
+  'invalid',
 ];
 
 describe('InboundSmsService', () => {
@@ -223,7 +220,7 @@ describe('InboundSmsService', () => {
     const lead = db.leads[0];
     expect(lead.dnc_status).toBe(true);
     expect(lead.automation_paused).toBe(true);
-    expect(lead.status).toBe('dnc');
+    expect(lead.status).toBe('not_interested');
     expect(lead.lost_reason).toBe('Opted out by SMS');
     expect(lead.consent_status).toBe('revoked');
 
@@ -256,8 +253,8 @@ describe('InboundSmsService', () => {
     await db.svc.onMessageReceived(inbound('Can I stop by the open house on Sunday?'));
 
     expect(db.leads[0].dnc_status).toBe(false);
-    // A reply is engagement.
-    expect(db.leads[0].status).toBe('engaged');
+    // A reply puts the lead back in conversation.
+    expect(db.leads[0].status).toBe('contacting');
     expect(db.enrollments[0].status).toBe('paused');
   });
 
@@ -299,6 +296,9 @@ describe('InboundSmsService', () => {
 
     expect(db.leads[0].dnc_status).toBe(false);
     expect(db.leads[0].consent_status).toBe('granted');
+    // Reachable again, parked for a person to decide what comes next.
+    expect(db.leads[0].status).toBe('follow_up');
+    expect(db.leads[0].follow_up_reason).toBe('other');
     // Re-consent to hearing from us is not a request to re-enter a 21-day drip.
     expect(db.enrollments[0].status).toBe('stopped');
     expect(db.leads[0].automation_paused).toBe(true);
