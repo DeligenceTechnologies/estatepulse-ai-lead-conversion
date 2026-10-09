@@ -175,7 +175,7 @@ test('qualified: a lead in the caller\'s organization is qualified', async () =>
   assert.deepEqual(res.body, { ok: true });
 
   const lead = await leadState(leadToQualify);
-  assert.equal(lead.status, LeadStatus.QUALIFIED);
+  assert.equal(lead.status, LeadStatus.INTERESTED);
   assert.equal(lead.temperature, 'hot');
   assert.equal(lead.ai_summary, 'Wants to buy this month');
 });

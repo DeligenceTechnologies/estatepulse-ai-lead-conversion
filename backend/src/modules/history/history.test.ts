@@ -91,7 +91,7 @@ async function createAgent(ownerToken: string, orgId: string, tag: string) {
 /** A lead with one call, one SMS thread (one message) and one appointment. */
 async function leadWithActivity(orgId: string, name: string, agentProfileId: string | null) {
   const lead = await prisma.leads.create({
-    data: { organization_id: orgId, status: 'contacted', first_name: name },
+    data: { organization_id: orgId, status: 'contacting', first_name: name },
     select: { id: true },
   });
   createdLeadIds.push(lead.id);

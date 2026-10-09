@@ -94,7 +94,7 @@ async function signup(tag: string): Promise<{ token: string; orgId: string }> {
 /** A lead on a call in the given state, as the voice webhook would have left it. */
 async function leadOnCall(org: string, status: string, email: string | null = 'buyer@example.com') {
   const lead = await prisma.leads.create({
-    data: { organization_id: org, status: 'engaged', first_name: 'Bea', last_name: RUN, email, normalized_email: email },
+    data: { organization_id: org, status: 'contacting', first_name: 'Bea', last_name: RUN, email, normalized_email: email },
     select: { id: true },
   });
   createdLeadIds.push(lead.id);

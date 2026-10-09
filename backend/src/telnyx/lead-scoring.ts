@@ -38,6 +38,8 @@ export const extractionSchema = z.object({
   not_interested: z.boolean(),
   invalid_lead: z.boolean(),
   human_requested: z.boolean(),
+  // Optional so a result from an Insight defined before it existed still parses.
+  callback_requested: maybe(z.boolean()),
   summary: z.string().max(2000),
   // The details themselves, written onto the lead (leadDetailsFrom).
   budget_min: maybe(z.number().nonnegative().max(1_000_000_000)),
@@ -67,6 +69,7 @@ export const EXTRACTION_JSON_SCHEMA = {
     'not_interested',
     'invalid_lead',
     'human_requested',
+    'callback_requested',
     'summary',
     'budget_min',
     'budget_max',
@@ -100,6 +103,10 @@ export const EXTRACTION_JSON_SCHEMA = {
       description: 'Wrong number, spam, a test, or the person never enquired about buying a home.',
     },
     human_requested: { type: 'boolean', description: 'The caller asked to speak with a real person or agent.' },
+    callback_requested: {
+      type: 'boolean',
+      description: 'The caller asked to be called back at another time instead of talking now.',
+    },
     summary: { type: 'string', description: 'Two or three sentences on who the caller is and what they want.' },
     budget_min: {
       type: ['number', 'null'],

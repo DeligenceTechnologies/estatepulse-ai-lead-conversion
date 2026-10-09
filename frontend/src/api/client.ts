@@ -1,4 +1,5 @@
 import { endSessionIfUnauthenticated, getToken } from '../lib/api';
+import type { FollowUpReason } from '../types';
 
 /**
  * Typed client for the EstatePulse ingestion API.
@@ -224,6 +225,8 @@ export interface LiveLead {
   status: string;
   /** Why the lead is in this status (e.g. "Call failed: …", "No answer …"); shown on hover. */
   statusReason: string | null;
+  /** Set only when status is follow_up. */
+  followUpReason: FollowUpReason | null;
   temperature: string | null;
   score: number;
   location: string | null;
@@ -426,11 +429,11 @@ export const leadsApi = {
     return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
   },
   stats: () => request<LeadStats>('/v1/leads/stats'),
-  /** Owner-only. Any of the 13 statuses; ends the strategy for an outcome. */
-  setStatus: (leadId: string, status: string, reason?: string) =>
+  /** Owner-only. Any of the 9 statuses; ends the strategy for an outcome. follow_up takes a reason. */
+  setStatus: (leadId: string, status: string, reason?: string, followUpReason?: FollowUpReason) =>
     request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, ...(reason ? { reason } : {}) }),
+      body: JSON.stringify({ status, ...(reason ? { reason } : {}), ...(followUpReason ? { followUpReason } : {}) }),
     }),
   /** Owner-only. Assigning to someone else is a reassignment; the same agent is a no-op. */
   assign: (leadId: string, agentId: string) =>

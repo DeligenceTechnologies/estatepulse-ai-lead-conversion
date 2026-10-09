@@ -382,7 +382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           `WF-04: Sent introductory SMS & queued outbound voice call (Response time: 14s).`,
           'AI (Alex)'
         );
-        setLeads(current => current.map(l => l.id === newLead.id ? { ...l, status: 'contacted', lastContactedAt: 'Just now' } : l));
+        setLeads(current => current.map(l => l.id === newLead.id ? { ...l, status: 'contacting', lastContactedAt: 'Just now' } : l));
       }, 1200);
     }
 
@@ -462,7 +462,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           aiReply = "Fantastic! Would 10:00 AM or 2:30 PM tomorrow work best for a 15-minute introductory consult with our team lead?";
         } else if (lower.includes('stop') || lower.includes('unsubscribe') || lower.includes('dnc')) {
           aiReply = "You have been unsubscribed and added to our Do-Not-Contact list. No further automated messages will be sent.";
-          updateLead(leadId, { dncStatus: true, automationPaused: true, status: 'dnc' });
+          updateLead(leadId, { dncStatus: true, automationPaused: true, status: 'not_interested' });
           addAuditLog('DNC / STOP Request Processed', 'system', leadId, 'Lead requested STOP. Automated messaging permanently disabled.', 'System (n8n)');
         }
 
@@ -563,7 +563,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const takeOverConversation = (leadId: string) => {
     toggleAutomation(leadId);
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'engaged' } : l));
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'contacting' } : l));
     addAuditLog(
       'Human Agent Takeover',
       'lead',
@@ -582,7 +582,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (l.id === leadId) {
         const updated: Lead = {
           ...l,
-          status: 'qualified',
+          status: 'interested',
           score: 89,
           temperature: 'hot',
           timeline: '1-3 months',

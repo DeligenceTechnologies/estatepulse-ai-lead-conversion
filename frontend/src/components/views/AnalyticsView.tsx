@@ -87,7 +87,7 @@ export const AnalyticsView: React.FC = () => {
           if (s.name.includes('Google')) return l.source === 'google';
           return false;
         });
-        const qualCount = sourceLeads.filter(l => l.status === 'qualified' || l.status === 'appointment_booked').length;
+        const qualCount = sourceLeads.filter(l => l.status === 'interested' || l.status === 'appointment_booked').length;
         const qualPct = sourceLeads.length > 0 ? Math.round((qualCount / sourceLeads.length) * 100) : 71;
 
         return {

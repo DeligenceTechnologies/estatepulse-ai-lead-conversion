@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
-import { AUTO_FROM, IN_STRATEGY_STATUSES, LeadStatus } from '../common/domain';
+import { AUTO_FROM, FOLLOW_UP_STATUSES, FollowUpReason, IN_STRATEGY_STATUSES, LeadStatus } from '../common/domain';
 import { AssistantService } from './assistant.service';
 import { CredStoreService } from './cred-store.service';
 import { LeadInsightsService } from './lead-insights.service';
@@ -12,15 +12,19 @@ import { LeadInsightsService } from './lead-insights.service';
  *  - SMS   -> messages.delivery_status  (sent | failed)
  *  - calls -> voice_calls.status        (ringing -> in_progress -> completed | no_answer | failed)
  *
- * The lead's pipeline status moves to 'contacted' only when we actually reach
- * them (SMS accepted, or a call answered) — outcomes like "no answer" live on
- * the call record.
+ * The lead's pipeline status moves to 'contacting' once outreach starts —
+ * outcomes like "no answer" live on the call record.
  */
 @Injectable()
 export class ActivityService {
   private readonly logger = new Logger(ActivityService.name);
   /** Signed recording links, by `${orgId}:${callControlId}`. See freshRecordingUrl. */
   private readonly recordingLinks = new Map<string, { url: string; until: number }>();
+  /**
+   * Everything the AI attach needs, loaded while the phone rings, by
+   * call_control_id. See prepareAttach.
+   */
+  private readonly prepared = new Map<string, Promise<AttachPlan | null>>();
 
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
@@ -63,7 +67,7 @@ export class ActivityService {
   }
 
   private async markContacted(leadId: string, response = false): Promise<void> {
-    await this.advance(leadId, LeadStatus.CONTACTED);
+    await this.advance(leadId, LeadStatus.CONTACTING);
     await this.prisma.leads
       .update({
         where: { id: leadId },
@@ -114,6 +118,8 @@ export class ActivityService {
   }
 
   async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {
+    // First, before any write: the ringing seconds are what pay for the attach.
+    if (providerCallId) this.prepareAttach(providerCallId, orgId, leadId);
     try {
       await this.prisma.voice_calls.create({
         data: {
@@ -129,34 +135,42 @@ export class ActivityService {
     } catch (e) {
       this.logger.error(`startCall: ${(e as Error).message}`);
     }
-    // Dialled is 'contacting'; it becomes 'contacted' only when the call is
-    // answered (onCallAnswered).
     await this.markContacting(leadId);
   }
 
   /** The call could not be placed at all (provider error). Does NOT exit the strategy. */
   /**
-   * Park a lead the strategy could not convert, with a human reason, so it
-   * reads as attempted rather than untouched. The reason surfaces in the UI on
-   * hover (leads.ai_summary -> statusReason).
+   * Park a lead the strategy could not convert in 'follow_up', with a human
+   * reason, so it reads as attempted rather than untouched. The reason surfaces
+   * in the UI on hover (leads.ai_summary -> statusReason).
    *
-   *  - reached (contacted / engaged) -> 'follow_up': a person spoke or replied,
-   *    and somebody should pick the thread back up.
-   *  - never reached (new / contacting) -> 'nurture': a drip's job.
+   * The follow-up reason comes from what was really recorded:
+   *  - reached (a call answered, or a reply) -> not_ready: a person spoke and
+   *    did not convert;
+   *  - never reached -> no_answer.
    *
    * Only in-strategy statuses move: a lead that already reached an outcome has
    * a further status that this must never walk back.
    */
   private async moveToFollowup(leadId: string, reason: string): Promise<void> {
-    const data = { ai_summary: reason.slice(0, 2000), last_contact_at: new Date() };
     try {
-      await this.prisma.leads.updateMany({
-        where: { id: leadId, status: { in: [LeadStatus.CONTACTED, LeadStatus.ENGAGED] } },
-        data: { ...data, status: LeadStatus.FOLLOW_UP },
+      const lead = await this.prisma.leads.findUnique({
+        where: { id: leadId },
+        select: { organization_id: true, first_response_at: true },
       });
+      if (!lead) return;
+      const answered = await this.prisma.voice_calls.count({
+        where: { organization_id: lead.organization_id, lead_id: leadId, status: { in: ['completed', 'in_progress'] } },
+      });
+      const reached = answered > 0 || !!lead.first_response_at;
       await this.prisma.leads.updateMany({
         where: { id: leadId, status: { in: IN_STRATEGY_STATUSES } },
-        data: { ...data, status: LeadStatus.NURTURE },
+        data: {
+          ai_summary: reason.slice(0, 2000),
+          last_contact_at: new Date(),
+          status: LeadStatus.FOLLOW_UP,
+          follow_up_reason: reached ? FollowUpReason.NOT_READY : FollowUpReason.NO_ANSWER,
+        },
       });
     } catch (e) {
       this.logger.error(`moveToFollowup: ${(e as Error).message}`);
@@ -216,41 +230,107 @@ export class ActivityService {
     });
   }
 
-  /** Call answered — mark in progress, move the lead to contacted, record, attach the AI. */
+  /**
+   * Load what the AI attach needs while the call is still ringing.
+   *
+   * The database is a long way from this process (a round trip is around a
+   * second), and the attach used to make about nine of them one after another
+   * once the lead had already picked up — ten seconds and more of silence, long
+   * enough that people hung up before the assistant said a word. Ringing takes
+   * that long anyway, so the work moves there and the answer only has to talk
+   * to Telnyx.
+   *
+   * Held in memory by call_control_id and dropped after PREPARED_TTL_MS; a call
+   * this process did not dial (a restart, say) falls back to loading at answer.
+   */
+  private prepareAttach(ccid: string, orgId: string, leadId: string): Promise<AttachPlan | null> {
+    const plan = (async (): Promise<AttachPlan | null> => {
+      const c = await this.creds.getCreds(orgId);
+      if (!c?.apiKey) return null;
+      const [org, variables] = await Promise.all([
+        this.unscoped.organizations.findUnique({ where: { id: orgId }, select: { call_recording_enabled: true } }),
+        c.assistantId ? this.callVariables(orgId, leadId) : Promise.resolve({}),
+        // The assistant reads its tools when it starts, so the hangup tool must
+        // be in place before the attach. Only the first call per assistant per
+        // process pays for it.
+        c.assistantId ? this.assistants.ensureHangupTool(orgId) : Promise.resolve(),
+      ]);
+      // Make sure Telnyx will score this conversation when it ends. Never
+      // blocks the call, and never throws.
+      if (c.assistantId) void this.insights.ensureProvisioned(orgId);
+      return {
+        orgId,
+        apiKey: c.apiKey,
+        assistantId: c.assistantId || null,
+        record: !!org?.call_recording_enabled,
+        variables,
+      };
+    })().catch((e) => {
+      this.logger.error(`prepare attach ${ccid}: ${(e as Error).message}`);
+      return null;
+    });
+    this.prepared.set(ccid, plan);
+    const t = setTimeout(() => this.prepared.delete(ccid), PREPARED_TTL_MS);
+    if (t.unref) t.unref();
+    return plan;
+  }
+
+  /**
+   * Call answered — attach the AI first, bookkeeping alongside.
+   *
+   * Nothing the lead can hear waits on the database: the plan was loaded while
+   * it rang (prepareAttach), and marking the call in progress runs in parallel
+   * with the attach rather than ahead of it.
+   */
   async onCallAnswered(ccid: string): Promise<void> {
-    const call = await this.callByProvider(ccid);
-    if (!call || !call.lead_id) return;
-    await this.prisma.voice_calls.update({ where: { id: call.id }, data: { status: 'in_progress' } });
-    await this.markContacted(call.lead_id, true);
+    const bookkeeping = (async () => {
+      const call = await this.callByProvider(ccid);
+      if (!call?.lead_id) return null;
+      await this.prisma.voice_calls.update({ where: { id: call.id }, data: { status: 'in_progress' } });
+      await this.markContacted(call.lead_id, true);
+      return call;
+    })().catch((e) => {
+      this.logger.error(`onCallAnswered bookkeeping ${ccid}: ${(e as Error).message}`);
+      return null;
+    });
 
-    const c = await this.creds.getCreds(call.organization_id);
-    if (!c?.apiKey) return;
+    let plan = this.prepared.get(ccid);
+    if (!plan) {
+      // Not dialled by this process: find out who it is the slow way.
+      this.logger.warn(`call ${ccid} answered with nothing prepared — loading now`);
+      const call = await bookkeeping;
+      if (!call?.lead_id) return;
+      plan = this.prepareAttach(ccid, call.organization_id, call.lead_id);
+    }
+    const p = await plan;
+    if (p) await this.attach(ccid, p);
+    await bookkeeping;
+  }
 
-    // Recording starts BEFORE the assistant does, deliberately: the assistant's
-    // opening line is the recording announcement, and an announcement that is
-    // not itself on the recording proves nothing if consent is ever disputed.
-    await this.startRecording(call.organization_id, ccid, c.apiKey);
-
-    // Attach the org's AI assistant so the answered call actually talks.
-    if (c.assistantId) {
-      // Make sure Telnyx will score this conversation when it ends. Once per
-      // assistant per process, never blocks the call, and never throws.
-      void this.insights.ensureProvisioned(call.organization_id);
-      // Awaited, unlike the insight: the assistant reads its tools when it
-      // starts, so the hangup tool must be in place before the attach below.
-      // Only the first call per assistant per process pays for it.
-      await this.assistants.ensureHangupTool(call.organization_id);
-      await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
+  /**
+   * Recording starts BEFORE the assistant does, deliberately: the assistant's
+   * opening line is the recording announcement, and an announcement that is
+   * not itself on the recording proves nothing if consent is ever disputed.
+   */
+  private async attach(ccid: string, p: AttachPlan): Promise<void> {
+    if (p.record) await this.startRecording(ccid, p.apiKey);
+    if (!p.assistantId) return;
+    try {
+      const res = await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/ai_assistant_start`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${p.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          assistant: { id: c.assistantId },
+          assistant: { id: p.assistantId },
           // What the assistant is allowed to know about who it just reached.
           // Without these the prompt can only ever speak in generalities, and
           // every {{firstName}} in it renders as the literal braces.
-          dynamic_variables: await this.callVariables(call.organization_id, call.lead_id),
+          dynamic_variables: p.variables,
         }),
-      }).catch(() => undefined);
+      });
+      // Logged, because a failed attach is a call where nobody ever speaks.
+      if (!res.ok) this.logger.error(`ai_assistant_start ${ccid}: ${res.status} ${await res.text()}`);
+    } catch (e) {
+      this.logger.error(`ai_assistant_start ${ccid}: ${(e as Error).message}`);
     }
   }
 
@@ -305,18 +385,12 @@ export class ActivityService {
   /**
    * Ask Telnyx to record the answered call, and to transcribe it when it ends.
    *
-   * Gated on the office's own setting because recording consent is
-   * state-specific. Failure is logged and swallowed: a call that cannot be
-   * recorded is still a call worth having, so this must never abort the
-   * assistant attach that follows it.
+   * Only when the office's own setting allows it (AttachPlan.record), because
+   * recording consent is state-specific. Failure is logged and swallowed: a call
+   * that cannot be recorded is still a call worth having, so this must never
+   * abort the assistant attach that follows it.
    */
-  private async startRecording(orgId: string, ccid: string, apiKey: string): Promise<void> {
-    const org = await this.unscoped.organizations.findUnique({
-      where: { id: orgId },
-      select: { call_recording_enabled: true },
-    });
-    if (!org?.call_recording_enabled) return;
-
+  private async startRecording(ccid: string, apiKey: string): Promise<void> {
     try {
       const res = await fetch(`https://api.telnyx.com/v2/calls/${ccid}/actions/record_start`, {
         method: 'POST',
@@ -445,9 +519,6 @@ ${text}` : text;
    * The payload adds two lead-level outcomes:
    *  - a hangup cause that means the number itself is bad -> 'invalid', and
    *    automation stops, since every further attempt would fail the same way;
-   *  - an answered call with a real conversation (ENGAGED_TALK_SECS of talk
-   *    time) -> 'engaged'. Talk time is Telnyx's start_time..end_time, which
-   *    starts at answer, not at dial.
    */
   async onCallHangup(ccid: string, payload: any = {}): Promise<void> {
     const call = await this.callByProvider(ccid);
@@ -469,10 +540,6 @@ ${text}` : text;
     }
 
     if (answered) {
-      const start = Date.parse(payload?.start_time ?? '');
-      const end = Date.parse(payload?.end_time ?? '');
-      const talk = Number.isFinite(start) && Number.isFinite(end) ? (end - start) / 1000 : 0;
-      if (talk >= ENGAGED_TALK_SECS) await this.advance(call.lead_id, LeadStatus.ENGAGED);
       return;
     }
 
@@ -492,18 +559,28 @@ ${text}` : text;
   async markInvalid(leadId: string, reason: string): Promise<void> {
     await this.prisma.leads
       .updateMany({
-        where: { id: leadId, status: { in: [...IN_STRATEGY_STATUSES, LeadStatus.FOLLOW_UP, LeadStatus.NURTURE] } },
+        where: { id: leadId, status: { in: [...IN_STRATEGY_STATUSES, ...FOLLOW_UP_STATUSES] } },
         data: { status: LeadStatus.INVALID, lost_reason: reason.slice(0, 255), ai_summary: reason },
       })
       .catch((e) => this.logger.error(`markInvalid: ${(e as Error).message}`));
   }
 }
 
+/** What attaching the AI to an answered call needs, loaded while it rings. */
+interface AttachPlan {
+  orgId: string;
+  apiKey: string;
+  assistantId: string | null;
+  /** The office allows recording (organizations.call_recording_enabled). */
+  record: boolean;
+  variables: Record<string, string>;
+}
+
+/** Longer than any call rings; a plan nobody answered is dropped after it. */
+const PREPARED_TTL_MS = 5 * 60 * 1000;
+
 /** Telnyx signs recording links for ten minutes; reuse one for five. */
 const RECORDING_LINK_REUSE_MS = 5 * 60 * 1000;
-
-/** Seconds of answered talk time that count as a real conversation. */
-const ENGAGED_TALK_SECS = 30;
 
 /**
  * Telnyx hangup causes that describe the number, not the moment. Busy, no

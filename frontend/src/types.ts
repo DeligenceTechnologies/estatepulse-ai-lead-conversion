@@ -12,21 +12,20 @@
 
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
 
-/** The 13 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
+/** The 9 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
 export type LeadStatus =
   | 'new'
   | 'contacting'
-  | 'contacted'
-  | 'engaged'
-  | 'qualified'
+  | 'follow_up'
+  | 'interested'
   | 'appointment_requested'
   | 'appointment_booked'
-  | 'follow_up'
-  | 'nurture'
   | 'not_interested'
-  | 'dnc'
-  | 'invalid'
-  | 'closed';
+  | 'closed'
+  | 'invalid';
+
+/** Why a follow_up lead is parked (leads.follow_up_reason). Only set for follow_up. */
+export type FollowUpReason = 'no_answer' | 'not_ready' | 'callback_requested' | 'needs_time' | 'other';
 
 export type LeadSource = 
   | 'website'
@@ -98,6 +97,7 @@ export interface Lead {
   source: LeadSource;
   sourceId?: string;
   status: LeadStatus;
+  followUpReason?: FollowUpReason | null;
   leadType: 'buyer' | 'seller';
   preferredLocation: string;
   budgetMin: number;
