@@ -29,19 +29,19 @@ export const autoEnrollSchema = z.enum(['hot', 'warm', 'cold']).nullable();
  * condition the office can never switch on.
  *
  * The three `qualified_*` values replace the old `auto_enroll_temperature`
- * column one for one. The rest are the paths that previously led nowhere: a
- * lead who never picked up used to run every strategy step, get parked in
- * 'nurture', and then be forgotten.
+ * column one for one. The `follow_up_*` values are the follow-up reasons
+ * (FollowUpReason, common/domain): a lead parked in follow_up for that reason
+ * is enrolled.
  */
 export const enrollTriggerSchema = z.enum([
   'qualified_hot',
   'qualified_warm',
   'qualified_cold',
-  'call_failed',
-  'no_answer',
-  'answered_not_qualified',
-  'no_reply',
-  'strategy_completed',
+  'follow_up_no_answer',
+  'follow_up_not_ready',
+  'follow_up_callback_requested',
+  'follow_up_needs_time',
+  'follow_up_other',
 ]);
 
 /**

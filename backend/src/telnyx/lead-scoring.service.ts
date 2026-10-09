@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { LeadStatus, OUTCOME_STATUSES } from '../common/domain';
+import { LeadStatus, OUTCOME_STATUSES, normalizeLeadStatus } from '../common/domain';
 import { AppError } from '../common/errors';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { CredStoreService } from './cred-store.service';
@@ -41,10 +41,10 @@ export const TRANSCRIPT_FALLBACK_MS = 90_000;
 /**
  * A lead in one of these has an outcome a call score must never walk back —
  * an appointment, an opt-out, an invalid number, a closed deal (legacy
- * spellings included). Every outcome except `qualified`, which a later call
- * may legitimately re-score.
+ * spellings included). Every outcome except `interested` (legacy `qualified`),
+ * which a later call may legitimately re-score.
  */
-const SETTLED_STATUSES = OUTCOME_STATUSES.filter((s) => s !== LeadStatus.QUALIFIED);
+const SETTLED_STATUSES = OUTCOME_STATUSES.filter((s) => normalizeLeadStatus(s) !== LeadStatus.INTERESTED);
 
 export interface SignedDelivery {
   signature: string | undefined;
@@ -56,7 +56,7 @@ export interface SignedDelivery {
  * Turns what Telnyx extracted from a call into a score, a temperature and the
  * hand-off that follows. The arithmetic is lead-scoring.ts; the hand-off is
  * EngineService.qualified(), the same one the in-call tool has always used —
- * hot waits for an agent, warm and cold go to nurture.
+ * hot waits for an agent, warm and cold go to follow-up.
  */
 @Injectable()
 export class LeadScoringService {
@@ -229,7 +229,9 @@ export class LeadScoringService {
       // Record what the call showed, but do not reopen a settled or do-not-contact lead.
       await this.prisma.leads.update({ where: { id: call.lead_id }, data: { temperature: result.temperature } });
     } else {
-      await this.engine.qualified(orgId, call.lead_id, result.temperature, leadReason(qualification));
+      await this.engine.qualified(orgId, call.lead_id, result.temperature, leadReason(qualification), {
+        callbackRequested: !!extraction.callback_requested,
+      });
     }
 
     this.logger.log(`lead ${call.lead_id} scored ${result.score} → ${result.temperature} (${source})`);

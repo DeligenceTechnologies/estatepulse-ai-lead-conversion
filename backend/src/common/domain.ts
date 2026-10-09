@@ -149,70 +149,107 @@ export type ConsentStatus = (typeof ConsentStatus)[keyof typeof ConsentStatus];
 
 /**
  * leads.status — matches the SPA's LeadStatus union in src/types.ts and the
- * leads_status_check constraint (migration 20261006000001_lead_status_v2).
+ * leads_status_check constraint (migration 20261008000001_lead_status_v3).
  *
  * Lifecycle, left to right:
- *   new -> contacting -> contacted -> engaged -> qualified
- *       -> appointment_requested -> appointment_booked
- * Parked: follow_up (we reached them, no outcome yet), nurture (warm/cold or
- * never reached — a drip owns them).
- * Out: not_interested, dnc, invalid, closed.
+ *   new -> contacting -> interested -> appointment_requested -> appointment_booked
+ * Parked: follow_up, always with a FollowUpReason.
+ * Out: not_interested, invalid, closed.
+ *
+ * Opting out is not a status: it is not_interested plus dnc_status, and every
+ * send path reads the flag.
  */
 export const LeadStatus = {
   NEW: 'new',
   CONTACTING: 'contacting',
-  CONTACTED: 'contacted',
-  ENGAGED: 'engaged',
-  QUALIFIED: 'qualified',
+  FOLLOW_UP: 'follow_up',
+  INTERESTED: 'interested',
   APPOINTMENT_REQUESTED: 'appointment_requested',
   APPOINTMENT_BOOKED: 'appointment_booked',
-  FOLLOW_UP: 'follow_up',
-  NURTURE: 'nurture',
   NOT_INTERESTED: 'not_interested',
-  DNC: 'dnc',
-  INVALID: 'invalid',
   CLOSED: 'closed',
+  INVALID: 'invalid',
 } as const;
 export type LeadStatus = (typeof LeadStatus)[keyof typeof LeadStatus];
 
 export const LEAD_STATUSES: readonly LeadStatus[] = Object.values(LeadStatus);
 
+/** leads.follow_up_reason — meaningful only while status is follow_up. */
+export const FollowUpReason = {
+  NO_ANSWER: 'no_answer',
+  NOT_READY: 'not_ready',
+  CALLBACK_REQUESTED: 'callback_requested',
+  NEEDS_TIME: 'needs_time',
+  OTHER: 'other',
+} as const;
+export type FollowUpReason = (typeof FollowUpReason)[keyof typeof FollowUpReason];
+
+export const FOLLOW_UP_REASONS: readonly FollowUpReason[] = Object.values(FollowUpReason);
+
+export function isFollowUpReason(v: unknown): v is FollowUpReason {
+  return (FOLLOW_UP_REASONS as readonly unknown[]).includes(v);
+}
+
 /**
- * The pre-v2 values. The constraint still accepts them so that a process
- * running older code against the same database keeps working; nothing in this
- * codebase writes them any more, and every read goes through
- * normalizeLeadStatus so they never reach the UI.
+ * Retired values. The constraint still accepts them so that a process running
+ * older code against the same database keeps working; nothing in this codebase
+ * writes them any more, and every read goes through normalizeLeadStatus so they
+ * never reach the UI. prisma/followups/lead_status_v2_cleanup.sql rewrites them.
  */
 export const LEGACY_BOOKED = 'booked';
 export const LEGACY_LOST = 'lost';
+export const LEGACY_CONTACTED = 'contacted';
+export const LEGACY_ENGAGED = 'engaged';
+export const LEGACY_QUALIFIED = 'qualified';
+export const LEGACY_NURTURE = 'nurture';
+export const LEGACY_DNC = 'dnc';
+
+const LEGACY_MAP: Record<string, LeadStatus> = {
+  [LEGACY_BOOKED]: LeadStatus.APPOINTMENT_BOOKED,
+  [LEGACY_LOST]: LeadStatus.NOT_INTERESTED,
+  [LEGACY_CONTACTED]: LeadStatus.CONTACTING,
+  [LEGACY_ENGAGED]: LeadStatus.CONTACTING,
+  [LEGACY_QUALIFIED]: LeadStatus.INTERESTED,
+  [LEGACY_NURTURE]: LeadStatus.FOLLOW_UP,
+  [LEGACY_DNC]: LeadStatus.NOT_INTERESTED,
+};
 
 /** A legacy or current status, as the current vocabulary. */
-export function normalizeLeadStatus(status: string | null | undefined, dnc = false): LeadStatus {
-  if (status === LEGACY_BOOKED) return LeadStatus.APPOINTMENT_BOOKED;
-  // 'lost' carried both opt-outs (with dnc_status) and exhausted nurture.
-  if (status === LEGACY_LOST) return dnc ? LeadStatus.DNC : LeadStatus.NOT_INTERESTED;
-  return (LEAD_STATUSES as readonly string[]).includes(status ?? '')
-    ? (status as LeadStatus)
-    : LeadStatus.NEW;
+export function normalizeLeadStatus(status: string | null | undefined): LeadStatus {
+  const s = status ?? '';
+  if (LEGACY_MAP[s]) return LEGACY_MAP[s];
+  return (LEAD_STATUSES as readonly string[]).includes(s) ? (s as LeadStatus) : LeadStatus.NEW;
+}
+
+/**
+ * The follow-up reason to show for a row: none unless the lead is in
+ * follow_up, so a stale value left by a later status change never surfaces.
+ * A legacy 'nurture' row has no reason stored and reads as not ready.
+ */
+export function normalizeFollowUpReason(
+  status: string | null | undefined,
+  reason: string | null | undefined,
+): FollowUpReason | null {
+  if (normalizeLeadStatus(status) !== LeadStatus.FOLLOW_UP) return null;
+  if (isFollowUpReason(reason)) return reason;
+  return status === LEGACY_NURTURE ? FollowUpReason.NOT_READY : FollowUpReason.OTHER;
 }
 
 /** The stored values a status filter must match, legacy spellings included. */
 export function statusFilterValues(status: string): string[] {
-  if (status === LeadStatus.APPOINTMENT_BOOKED) return [status, LEGACY_BOOKED];
-  if (status === LeadStatus.NOT_INTERESTED) return [status, LEGACY_LOST];
-  return [status];
+  const legacy = Object.entries(LEGACY_MAP)
+    .filter(([, to]) => to === status)
+    .map(([from]) => from);
+  return [status, ...legacy];
 }
 
-/**
- * Group-by counts with legacy values folded into their current name. Group by
- * ['status', 'dnc_status'] so a legacy 'lost' opt-out lands under 'dnc'.
- */
+/** Group-by counts with legacy values folded into their current name. */
 export function normalizeStatusCounts(
-  rows: { status: string; dnc_status?: boolean; _count: { _all: number } }[],
+  rows: { status: string; _count: { _all: number } }[],
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const g of rows) {
-    const s = normalizeLeadStatus(g.status, !!g.dnc_status);
+    const s = normalizeLeadStatus(g.status);
     out[s] = (out[s] ?? 0) + g._count._all;
   }
   return out;
@@ -222,53 +259,42 @@ export function normalizeStatusCounts(
  * The strategy engine is still working the lead. A lead leaves these the moment
  * the strategy ends, by any route.
  */
-export const IN_STRATEGY_STATUSES: string[] = [
-  LeadStatus.NEW,
-  LeadStatus.CONTACTING,
-  LeadStatus.CONTACTED,
-  LeadStatus.ENGAGED,
-];
+export const IN_STRATEGY_STATUSES: string[] = statusFilterValues(LeadStatus.NEW).concat(
+  statusFilterValues(LeadStatus.CONTACTING),
+);
+
+/** Parked: the strategy ended without an outcome. */
+export const FOLLOW_UP_STATUSES: string[] = statusFilterValues(LeadStatus.FOLLOW_UP);
 
 /**
  * A result was reached: automation (strategy steps, drip steps) stops for good.
  * Includes the legacy spellings so a row written by older code still stops.
  */
 export const OUTCOME_STATUSES: string[] = [
-  LeadStatus.QUALIFIED,
+  LeadStatus.INTERESTED,
   LeadStatus.APPOINTMENT_REQUESTED,
   LeadStatus.APPOINTMENT_BOOKED,
   LeadStatus.NOT_INTERESTED,
-  LeadStatus.DNC,
   LeadStatus.INVALID,
   LeadStatus.CLOSED,
-  LEGACY_BOOKED,
-  LEGACY_LOST,
-];
+].flatMap(statusFilterValues);
 
 /** Out of the pipeline entirely — not a lead anybody is working. */
 export const INACTIVE_STATUSES: string[] = [
   LeadStatus.NOT_INTERESTED,
-  LeadStatus.DNC,
   LeadStatus.INVALID,
   LeadStatus.CLOSED,
-  LEGACY_LOST,
-];
+].flatMap(statusFilterValues);
 
 /**
  * Where a lead may be moved FROM to reach `target` automatically.
  *
- * The outreach ladder only moves forward, so a late webhook (call.answered
- * arriving after the AI already qualified the lead) can never walk a lead back.
- * Parked leads (follow_up, nurture) re-enter at engaged when they reply.
+ * The outreach ladder only moves forward, so a late webhook can never walk a
+ * lead back — and a drip text to a parked lead never un-parks it.
  */
 export const AUTO_FROM: Partial<Record<LeadStatus, string[]>> = {
-  [LeadStatus.CONTACTING]: [LeadStatus.NEW],
-  [LeadStatus.CONTACTED]: [LeadStatus.NEW, LeadStatus.CONTACTING],
-  [LeadStatus.ENGAGED]: [
-    LeadStatus.NEW,
-    LeadStatus.CONTACTING,
-    LeadStatus.CONTACTED,
-    LeadStatus.FOLLOW_UP,
-    LeadStatus.NURTURE,
-  ],
+  [LeadStatus.CONTACTING]: statusFilterValues(LeadStatus.NEW),
 };
+
+/** A reply puts a new or parked lead back in conversation. */
+export const REPLY_FROM: string[] = [...statusFilterValues(LeadStatus.NEW), ...FOLLOW_UP_STATUSES];

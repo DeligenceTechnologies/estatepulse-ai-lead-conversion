@@ -105,12 +105,12 @@ before(async () => {
 
   const t = Date.now();
   // Contacted after 10s, 30s and 50s (below) -> median 30s, all within 60s.
-  await makeLead({ temperature: 'hot', created_at: new Date(t - 10_000), first_contact_at: new Date(t), status: 'contacted' });
-  await makeLead({ temperature: 'cold', created_at: new Date(t - 30_000), first_contact_at: new Date(t), status: 'nurture' });
+  await makeLead({ temperature: 'hot', created_at: new Date(t - 10_000), first_contact_at: new Date(t), status: 'contacting' });
+  await makeLead({ temperature: 'cold', created_at: new Date(t - 30_000), first_contact_at: new Date(t), status: 'follow_up' });
   // Never contacted, unrated.
   await makeLead({ needs_review: true });
   // Hot but held by the agent: not "hot unassigned".
-  const held = await makeLead({ temperature: 'hot', status: 'qualified', created_at: new Date(t - 50_000), first_contact_at: new Date(t) });
+  const held = await makeLead({ temperature: 'hot', status: 'interested', created_at: new Date(t - 50_000), first_contact_at: new Date(t) });
   await prisma.lead_assignments.create({
     data: { organization_id: ownerA.orgId, lead_id: held, agent_id: agentProfileId, assignment_type: 'manual' },
   });
@@ -155,7 +155,7 @@ test('owner sees real counts for their own organization', async () => {
 
   assert.equal(d.leads.total, 5);
   assert.equal(d.leads.last7Days, 5);
-  assert.deepEqual(d.leads.byStatus, { new: 1, contacted: 1, nurture: 1, qualified: 1, not_interested: 1 });
+  assert.deepEqual(d.leads.byStatus, { new: 1, contacting: 1, follow_up: 1, interested: 1, not_interested: 1 });
   assert.deepEqual(d.leads.byTemperature, { hot: 2, warm: 0, cold: 1, unrated: 1 });
 
   assert.equal(d.attention.hotUnassigned, 1);

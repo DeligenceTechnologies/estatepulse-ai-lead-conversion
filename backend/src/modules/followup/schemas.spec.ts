@@ -91,18 +91,18 @@ describe('createSequenceSchema', () => {
     'qualified_hot',
     'qualified_warm',
     'qualified_cold',
-    'call_failed',
-    'no_answer',
-    'answered_not_qualified',
-    'no_reply',
-    'strategy_completed',
+    'follow_up_no_answer',
+    'follow_up_not_ready',
+    'follow_up_callback_requested',
+    'follow_up_needs_time',
+    'follow_up_other',
   ])('accepts auto-enrol on %s', (t) => {
     expect(createSequenceSchema.safeParse(base({ enrollTriggers: [t] })).success).toBe(true);
   });
 
   it('accepts several conditions at once', () => {
-    const r = createSequenceSchema.safeParse(base({ enrollTriggers: ['no_answer', 'no_reply'] }));
-    expect(r.success && r.data.enrollTriggers).toEqual(['no_answer', 'no_reply']);
+    const r = createSequenceSchema.safeParse(base({ enrollTriggers: ['follow_up_no_answer', 'follow_up_not_ready'] }));
+    expect(r.success && r.data.enrollTriggers).toEqual(['follow_up_no_answer', 'follow_up_not_ready']);
   });
 
   it('rejects a condition the CHECK constraint would refuse', () => {
@@ -112,8 +112,8 @@ describe('createSequenceSchema', () => {
   });
 
   it('de-duplicates rather than tripping the unique index on itself', () => {
-    const r = createSequenceSchema.safeParse(base({ enrollTriggers: ['no_answer', 'no_answer'] }));
-    expect(r.success && r.data.enrollTriggers).toEqual(['no_answer']);
+    const r = createSequenceSchema.safeParse(base({ enrollTriggers: ['follow_up_no_answer', 'follow_up_no_answer'] }));
+    expect(r.success && r.data.enrollTriggers).toEqual(['follow_up_no_answer']);
   });
 
   it('defaults to no conditions — a new sequence never silently swallows leads', () => {

@@ -434,6 +434,8 @@ model leads {
   normalized_email         String?                @db.VarChar(255)
   normalized_phone         String?                @db.VarChar(50)
   status                   String                 @default("new") @db.VarChar(30)
+  /// Why a follow_up lead is parked; meaningful only while status = 'follow_up'.
+  follow_up_reason         String?                @db.VarChar(30)
   score                    Decimal?               @db.Decimal(5, 2)
   temperature              String?                @db.VarChar(10)
   buying_intent            String?                @db.VarChar(100)

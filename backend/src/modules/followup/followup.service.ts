@@ -12,7 +12,13 @@ import type {
   ReplaceStepsInput,
   UpdateSequenceInput,
 } from './schemas';
-import { IN_STRATEGY_STATUSES, LeadStatus, normalizeLeadStatus, statusFilterValues } from '../../common/domain';
+import {
+  FollowUpReason,
+  IN_STRATEGY_STATUSES,
+  LeadStatus,
+  normalizeLeadStatus,
+  statusFilterValues,
+} from '../../common/domain';
 
 /**
  * How each condition is named to a person. Used in conflict messages, so the
@@ -23,11 +29,11 @@ export const TRIGGER_LABELS: Record<string, string> = {
   qualified_hot: 'Qualified as hot',
   qualified_warm: 'Qualified as warm',
   qualified_cold: 'Qualified as cold',
-  call_failed: 'Every call failed to connect',
-  no_answer: 'Nobody ever answered',
-  answered_not_qualified: 'Answered, but never qualified',
-  no_reply: 'Never replied to anything',
-  strategy_completed: 'Finished the strategy without qualifying',
+  follow_up_no_answer: 'Follow-up: No answer',
+  follow_up_not_ready: 'Follow-up: Not ready',
+  follow_up_callback_requested: 'Follow-up: Callback requested',
+  follow_up_needs_time: 'Follow-up: Needs time',
+  follow_up_other: 'Follow-up: Other',
 };
 
 /** One lead that could not be added, and why — so a bulk add can explain itself. */
@@ -50,8 +56,8 @@ const MAX_ENROLL_PER_CALL = 500;
 /**
  * Statuses a lead still holds while the strategy engine is working it
  * (IN_STRATEGY_STATUSES, common/domain). It leaves them the moment the strategy
- * ends, by any route — exitStrategy() moves it to 'follow_up' or 'nurture',
- * qualified() to 'qualified' or 'nurture'.
+ * ends, by any route — exitStrategy() moves it to 'follow_up', qualified() to
+ * 'interested' or 'follow_up'.
  */
 
 /**
@@ -75,7 +81,7 @@ function isInStrategy(lead: {
 }): boolean {
   // A paused lead is NOT in the strategy: fireStep re-reads this flag and stops
   // the moment it is set, which is what an inbound reply does. Such a lead sits
-  // at 'contacted' with first_contact_at set forever, so without this clause the
+  // at 'contacting' with first_contact_at set forever, so without this clause the
   // guard would bar the exact leads a person has stepped in to handle by hand.
   if (lead.automation_paused) return false;
   return lead.first_contact_at !== null && IN_STRATEGY_STATUSES.includes(lead.status);
@@ -157,23 +163,6 @@ export class FollowupService {
     const seq = row?.followup_sequences;
     return seq && seq.status === 'active' ? seq.code : undefined;
   }
-
-  /**
-   * The first claimed condition that matches, most specific first.
-   *
-   * Order matters because several are true at once for the same lead: someone
-   * who never picked up also never replied, and every lead reaching the end of
-   * the strategy satisfies `strategy_completed`. Checking in order of how much
-   * each one tells you means the office's most specific configured answer wins,
-   * and `strategy_completed` behaves as the catch-all it reads as.
-   */
-  static readonly TRIGGER_PRIORITY = [
-    'call_failed',
-    'no_answer',
-    'answered_not_qualified',
-    'no_reply',
-    'strategy_completed',
-  ] as const;
 
   /**
    * Enrol a lead, scheduling step 1.
@@ -762,10 +751,9 @@ export class FollowupService {
       }
     }
 
-    // A lead in a nurture sequence should read as 'nurture' in the pipeline
-    // rather than still looking untouched. Only statuses that have not moved
-    // past engagement are rewritten: a qualified, booked or follow-up lead
-    // keeps its own.
+    // A lead in a sequence should read as 'follow_up' in the pipeline rather
+    // than still looking untouched. Only in-strategy statuses are rewritten: an
+    // interested, booked or follow-up lead keeps its own.
     if (enrolled > 0) {
       await this.prisma.leads.updateMany({
         where: {
@@ -773,7 +761,7 @@ export class FollowupService {
           id: { in: matchedRows.map((l) => l.id) },
           status: { in: IN_STRATEGY_STATUSES },
         },
-        data: { status: LeadStatus.NURTURE },
+        data: { status: LeadStatus.FOLLOW_UP, follow_up_reason: FollowUpReason.NEEDS_TIME },
       });
     }
 
