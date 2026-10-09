@@ -20,60 +20,23 @@ const toRole = (value: string): Role => (ROLES.includes(value as Role) ? (value 
 const DEFAULT_TIMEZONE = 'America/Chicago';
 
 /**
- * The one shape the roster is read in, shared by list() and suspend() so both
- * answer with identical data. Columns are named individually and never spread:
- * password_hash lives on users, and a `select: true` here would ship it.
+ * The one shape the roster is read in, so every roster answer carries identical
+ * data — see rosterRows(), the only place it is read. Columns are named
+ * individually and never spread: password_hash lives on users, and a `u.*`
+ * would ship it.
  *
- * The two counts come back as part of this single query rather than as follow-up
- * round trips. Both tables are real and both are empty today — nothing assigns
- * leads and nothing connects calendars yet — so the honest answer is 0/false and
- * it starts being right on its own the day those features land.
+ * agent_profiles is the member's profile in THIS organization only: a user
+ * could in principle hold one in another tenant, and that one must not be read.
+ * Its id is there so an edit can address the row it just read by primary key.
+ *
+ * calendly_user_uri / cal_user_id are NOT a count of calendar_connections. The
+ * calendar belongs to the organization now, so the rows that still carry an
+ * agent_id are the RETIRED per-agent connections — counting them would report
+ * "calendar connected" for anyone who ever connected one, forever. What is true
+ * per agent is whether they are on the office's scheduling team, and that is
+ * one of these two columns, picked by the provider the office is on — see
+ * toMemberDTO.
  */
-const memberSelect = (organizationId: string) =>
-  ({
-    role: true,
-    status: true,
-    joined_at: true,
-    created_at: true,
-    users: {
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        phone: true,
-        // A list relation scoped to this organization: a user could in principle
-        // hold a profile in another tenant, and that one must not be read here.
-        agent_profiles: {
-          where: { organization_id: organizationId },
-          select: {
-            // The profile's own id, so an edit can address the row it just read
-            // by primary key instead of re-finding it.
-            id: true,
-            title: true,
-            timezone: true,
-            max_active_leads: true,
-            routing_enabled: true,
-            // NOT a count of calendar_connections. The calendar belongs to the
-            // organization now, so the rows that still carry an agent_id are
-            // the RETIRED per-agent connections — counting them would report
-            // "calendar connected" for anyone who ever connected one, forever.
-            // What is true per agent is whether they are on the office's
-            // scheduling team, and that is one of these two columns, picked by
-            // the provider the office is on — see toMemberDTO.
-            calendly_user_uri: true,
-            cal_user_id: true,
-            _count: {
-              select: {
-                lead_assignments: { where: { is_current: true } },
-              },
-            },
-          },
-        },
-      },
-    },
-  }) satisfies Prisma.organization_membersSelect;
-
 type MemberRow = {
   role: string;
   status: string;
@@ -173,16 +136,93 @@ export class AgentsService {
    */
   async list(organizationId: string): Promise<OrganizationMemberDTO[]> {
     // Fetched once for the whole page, alongside the members.
-    const [ctx, members] = await Promise.all([
-      this.rosterContext(organizationId),
-      this.prisma.organization_members.findMany({
-        where: { organization_id: organizationId },
-        orderBy: [{ role: 'desc' }, { created_at: 'asc' }, { id: 'asc' }],
-        select: memberSelect(organizationId),
-      }),
-    ]);
+    const [ctx, members] = await Promise.all([this.rosterContext(organizationId), this.rosterRows(organizationId)]);
 
     return members.map((m) => toMemberDTO(m, ctx));
+  }
+
+  /**
+   * The roster's rows for a whole organization — or, given a userId, for that
+   * one member of it — in ONE statement.
+   *
+   * Through Prisma the nested users and agent_profiles relations are each a
+   * further sequential query — about 145 ms apiece from a distant region — on
+   * the roster every owner screen loads, and twice on every agent edit or
+   * taking-leads switch. The rows come back in MemberRow's shape for
+   * toMemberDTO, plus the membership's own id for setStatus to update by.
+   *
+   * No duplicate members: organization_members and agent_profiles are both
+   * unique on (organization_id, user_id), so each member joins at most one
+   * profile — and only the one in this organization — and a userId matches at
+   * most one row. The assignment count is scoped to the organization as well as
+   * the profile.
+   */
+  private async rosterRows(organizationId: string, userId?: string): Promise<Array<MemberRow & { id: string }>> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        role: string;
+        status: string;
+        joined_at: Date | null;
+        created_at: Date;
+        user_id: string;
+        email: string;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        profile_id: string | null;
+        title: string | null;
+        timezone: string | null;
+        max_active_leads: number | null;
+        routing_enabled: boolean | null;
+        calendly_user_uri: string | null;
+        cal_user_id: number | null;
+        active_leads: number;
+      }>
+    >`
+      select m.id, m.role, m.status, m.joined_at, m.created_at,
+             u.id as user_id, u.email, u.first_name, u.last_name, u.phone,
+             ap.id as profile_id, ap.title, ap.timezone, ap.max_active_leads, ap.routing_enabled,
+             ap.calendly_user_uri, ap.cal_user_id,
+             (select count(*) from lead_assignments la
+               where la.agent_id = ap.id and la.organization_id = ap.organization_id and la.is_current
+             )::int as active_leads
+        from organization_members m
+        join users u on u.id = m.user_id
+        left join agent_profiles ap on ap.user_id = m.user_id and ap.organization_id = m.organization_id
+       where m.organization_id = ${organizationId}::uuid
+             ${userId === undefined ? Prisma.empty : Prisma.sql`and m.user_id = ${userId}::uuid`}
+       order by m.role desc, m.created_at asc, m.id asc
+    `;
+
+    return rows.map((r) => ({
+      id: r.id,
+      role: r.role,
+      status: r.status,
+      joined_at: r.joined_at,
+      created_at: r.created_at,
+      users: {
+        id: r.user_id,
+        email: r.email,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        phone: r.phone,
+        agent_profiles: r.profile_id
+          ? [
+              {
+                id: r.profile_id,
+                title: r.title,
+                timezone: r.timezone!,
+                max_active_leads: r.max_active_leads!,
+                routing_enabled: r.routing_enabled!,
+                calendly_user_uri: r.calendly_user_uri,
+                cal_user_id: r.cal_user_id,
+                _count: { lead_assignments: r.active_leads },
+              },
+            ]
+          : [],
+      },
+    }));
   }
 
   /**
@@ -424,14 +464,10 @@ export class AgentsService {
     input: UpdateAgentInput,
   ): Promise<OrganizationMemberDTO> {
     // The same two reads, the same shape and the same scoping as setStatus
-    // below — see the comment there for why this is findFirst rather than a
-    // composite findUnique.
-    const [ctx, member] = await Promise.all([
+    // below.
+    const [ctx, [member]] = await Promise.all([
       this.rosterContext(organizationId),
-      this.prisma.organization_members.findFirst({
-        where: { organization_id: organizationId, user_id: targetUserId },
-        select: { id: true, ...memberSelect(organizationId) },
-      }),
+      this.rosterRows(organizationId, targetUserId),
     ]);
 
     // A member of another organization and a user id that does not exist are
@@ -570,10 +606,7 @@ export class AgentsService {
     // Re-read rather than patching the row already in hand: the write touched
     // two tables and may have created a third row, and a hand-assembled answer
     // is exactly where a response drifts from what was actually stored.
-    const updated = await this.prisma.organization_members.findFirst({
-      where: { organization_id: organizationId, user_id: targetUserId },
-      select: memberSelect(organizationId),
-    });
+    const [updated] = await this.rosterRows(organizationId, targetUserId);
 
     return toMemberDTO(updated ?? member, ctx);
   }
@@ -595,18 +628,12 @@ export class AgentsService {
     targetUserId: string,
     status: typeof ACTIVE | typeof SUSPENDED,
   ): Promise<OrganizationMemberDTO> {
-    // findFirst, not findUnique on the composite key: the tenancy guard only
-    // recognises `organization_id` (or a globally-unique key) at the top level of
-    // `where`, and a nested organization_id_user_id selector reads to it as an
-    // unscoped query. This spelling is both scoped and guard-visible.
-    const [ctx, member] = await Promise.all([
+    // Scoped by the session's organization in the statement itself, and the
+    // same rows list() reads, so the response the roster gets back from a
+    // suspend is identical to the one a reload would produce.
+    const [ctx, [member]] = await Promise.all([
       this.rosterContext(organizationId),
-      this.prisma.organization_members.findFirst({
-        where: { organization_id: organizationId, user_id: targetUserId },
-        // The same shape list() reads, so the response the roster gets back from
-        // a suspend is identical to the one a reload would produce.
-        select: { id: true, ...memberSelect(organizationId) },
-      }),
+      this.rosterRows(organizationId, targetUserId),
     ]);
 
     // A member of another organization and a user id that does not exist are
@@ -686,11 +713,7 @@ export class AgentsService {
     callerUserId: string,
     enabled: boolean,
   ): Promise<OrganizationMemberDTO> {
-    const readSelf = () =>
-      this.prisma.organization_members.findFirst({
-        where: { organization_id: organizationId, user_id: callerUserId },
-        select: memberSelect(organizationId),
-      });
+    const readSelf = async () => (await this.rosterRows(organizationId, callerUserId))[0];
 
     const [ctx, member] = await Promise.all([this.rosterContext(organizationId), readSelf()]);
 

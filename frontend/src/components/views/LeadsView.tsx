@@ -135,6 +135,9 @@ const toLead = (l: LiveLead): Lead => ({
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
 const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 
+/** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
+const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
+
 interface LeadsViewProps {
   onOpenNewLead: () => void;
 }
@@ -167,16 +170,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     return { leads, stats };
   }, []);
 
-  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(load);
-
   // The push path. The backend knows the moment a submission becomes a lead, so
-  // this screen is told rather than asked to guess. The poll above stays as the
-  // fallback and, finding nothing to report, backs off to its ceiling — the two
-  // together cost far less than the old 5-second interval did alone.
-  const { connected } = useLiveEvents(
-    useCallback((e) => {
-      if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
-    }, [invalidate]),
+  // this screen is told rather than asked to guess. Subscribed before the query
+  // because the query's cadence depends on whether the stream is up. The handler
+  // only runs after render, by when `invalidate` below exists, and useLiveEvents
+  // reads it through a ref, so an inline handler costs no reconnect.
+  const { connected } = useLiveEvents((e) => {
+    if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
+  });
+
+  // Stream up: it reports every change as it happens, so the poll is only a
+  // safety net — once a minute, and an event or a return to the tab refetches
+  // without dropping back to 5-second polling. Stream down: the default
+  // 5-second poll backing off to a minute, the reliability fallback as before.
+  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(
+    load,
+    connected ? STREAM_UP_CADENCE : undefined,
   );
 
   // This tab's own assignments refetch at once, stream or no stream.
@@ -476,8 +485,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        {/* One contact line: only what the lead actually has. */}
-                        <div className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                        {/* Only what the lead actually has. Wraps so the table fits without horizontal scroll. */}
+                        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 min-w-0">
                           {lead.phone && (
                             <span className="flex items-center gap-1 shrink-0">
                               {lead.phone}
@@ -489,7 +498,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               )}
                             </span>
                           )}
-                          {lead.phone && lead.email && <span className="text-slate-600">·</span>}
                           {lead.email && (
                             <span className="flex items-center gap-1 min-w-0">
                               <span className="truncate max-w-[200px]">{lead.email}</span>

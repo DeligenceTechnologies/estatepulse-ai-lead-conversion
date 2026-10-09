@@ -173,8 +173,16 @@ export const ConnectionCards: React.FC = () => {
   const [connect, setConnect] = useState<ConnectKind | null>(null);
 
   const load = useCallback(async () => {
+    // Both are asked for at once: neither needs the other's answer, and asking
+    // for the accounts only after the sources had arrived kept this screen
+    // waiting through two round trips in a row. The answers are still applied
+    // in the same order. The catch only keeps an early failure from being
+    // reported as unhandled while the sources are pending — it is handled below.
+    const sourcesRequest = api.listLeadSources();
+    const connectionsRequest = providersApi.connections();
+    connectionsRequest.catch(() => undefined);
     try {
-      setSources(await api.listLeadSources());
+      setSources(await sourcesRequest);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -183,7 +191,7 @@ export const ConnectionCards: React.FC = () => {
     // An account with no form connected yet is still a connection, and the card
     // has to say so or "Connect Tally" reads as "your key didn't save".
     try {
-      setConnections(await providersApi.connections());
+      setConnections(await connectionsRequest);
     } catch {
       setConnections([]);
     }
