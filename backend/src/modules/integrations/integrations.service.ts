@@ -121,8 +121,13 @@ export class IntegrationsService {
       where: { organization_id: organizationId, revoked_at: null, ...(provider ? { provider } : {}) },
       orderBy: { created_at: 'desc' },
     });
+    // provider_credentials also holds OAuth grants this service does not manage
+    // (the Google account behind Sheets import). Listing one here would offer it
+    // to the Tally connect flow as if it were a form key.
     return Promise.all(
-      rows.map(async (r) => this.toSummary(r, await this.countSources(organizationId, r.id))),
+      rows
+        .filter((r) => this.registry.has(r.provider))
+        .map(async (r) => this.toSummary(r, await this.countSources(organizationId, r.id))),
     );
   }
 
@@ -256,7 +261,11 @@ export class IntegrationsService {
     const row = await this.prisma.provider_credentials.findFirst({
       where: { id, organization_id: organizationId },
     });
-    if (!row) throw new NotFoundException({ error: { code: 'CREDENTIAL_NOT_FOUND', message: 'No such connection.' } });
+    // Same rule as list(): a credential no form-provider adapter owns (Google's
+    // OAuth grant) is not this service's to verify, decrypt or revoke.
+    if (!row || !this.registry.has(row.provider)) {
+      throw new NotFoundException({ error: { code: 'CREDENTIAL_NOT_FOUND', message: 'No such connection.' } });
+    }
     return row;
   }
 

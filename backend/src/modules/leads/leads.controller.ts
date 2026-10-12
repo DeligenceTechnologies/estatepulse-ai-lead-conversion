@@ -7,6 +7,7 @@ import {
   normalizeStatusCounts,
   statusFilterValues,
 } from '../../common/domain';
+import { OUTSIDE_IMPORT_REVIEW } from '../google-sheets/sheet-rows';
 
 /**
  * Read-only. There is deliberately no POST or PATCH here. (Manual assignment,
@@ -38,6 +39,8 @@ export class LeadsController {
     const rows = await this.prisma.leads.findMany({
       where: {
         organization_id: req.tenant.organizationId,
+        // Sheet imports appear here once approved; until then, Import Review.
+        ...OUTSIDE_IMPORT_REVIEW,
         ...(status ? { status: { in: statusFilterValues(status) } } : {}),
         ...(sourceId ? { lead_source_id: sourceId } : {}),
       },
@@ -203,7 +206,7 @@ export class LeadsController {
   async stats(@Req() req: TenantRequest) {
     const grouped = await this.prisma.leads.groupBy({
       by: ['status'],
-      where: { organization_id: req.tenant.organizationId },
+      where: { organization_id: req.tenant.organizationId, ...OUTSIDE_IMPORT_REVIEW },
       _count: { _all: true },
     });
     const byStatus = normalizeStatusCounts(grouped);

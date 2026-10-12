@@ -409,14 +409,36 @@ model lead_sources {
   /// Non-null => mappings built from the form schema that no real delivery has
   /// confirmed yet.
   prebuilt_at                 DateTime?                    @db.Timestamptz(6)
+  /// Google Sheets sync (connection_method 'SYNC') — see migration
+  /// 20261012000001_google_sheets_import. When the next sync is due; NULL =
+  /// not scheduled.
+  sync_next_at                DateTime?                    @db.Timestamptz(6)
+  /// Lease: which worker holds this source, since when. It must still hold it
+  /// to record a result.
+  sync_locked_at              DateTime?                    @db.Timestamptz(6)
+  sync_locked_by              String?                      @db.VarChar(100)
+  /// Drive file version at the last COMPLETE read.
+  sync_remote_version         String?                      @db.VarChar(64)
+  /// Consecutive failed runs; drives backoff. lead_sources_sync_failures_check: >= 0.
+  sync_failures               Int                          @default(0)
+  /// Row identity: field_key of the owner's unique-ID column, or NULL with the
+  /// fallback identity acknowledged below. Sync refuses to run with neither.
+  sync_row_key_field          String?                      @db.VarChar(255)
+  sync_fallback_ack_at        DateTime?                    @db.Timestamptz(6)
+  sync_fallback_ack_by        String?                      @db.Uuid
   lead_source_field_mappings  lead_source_field_mappings[]
   lead_source_fields          lead_source_fields[]
   organizations               organizations                @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   provider_credentials        provider_credentials?        @relation(fields: [provider_credential_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   lead_submissions            lead_submissions[]
   leads                       leads[]
+  sheet_import_rows           sheet_import_rows[]
   webhook_events              webhook_events[]
 
+  /// NOTE: two PARTIAL indexes live only in 20261012000001_google_sheets_import:
+  /// lead_sources_sync_file_unique (one live SYNC source per organization,
+  /// provider and spreadsheet tab) and idx_lead_sources_sync_due (the
+  /// scheduler's scan). Prisma cannot express either.
   @@unique([organization_id, code], map: "lead_sources_code_unique")
   @@index([organization_id], map: "idx_lead_sources_organization")
 }
@@ -487,6 +509,7 @@ model leads {
   organizations            organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                    users?                 @relation(fields: [takeover_user_id], references: [id], onUpdate: NoAction)
   sequence_enrollments     sequence_enrollments[]
+  sheet_import_rows        sheet_import_rows[]
   voice_calls              voice_calls[]
 
   @@index([organization_id, created_at(sort: Desc)], map: "idx_leads_created_at")
@@ -584,6 +607,7 @@ model organizations {
   sequence_enroll_triggers sequence_enroll_triggers[]
   sequence_enrollments     sequence_enrollments[]
   sequence_steps           sequence_steps[]
+  sheet_import_rows        sheet_import_rows[]
   voice_calls              voice_calls[]
   webhook_events           webhook_events[]
   webhook_subscriptions    webhook_subscriptions[]
@@ -666,6 +690,7 @@ model users {
   organization_members organization_members[]
   user_sessions        user_sessions[]
   sequence_enrollments sequence_enrollments[]
+  sheet_import_rows    sheet_import_rows[]
 }
 
 /// One row per sign-in; the JWT's `jti` is this id. See migration
@@ -1018,4 +1043,55 @@ model sequence_enroll_triggers {
   /// (organization_id, trigger) WHERE active — is a PARTIAL unique index and
   /// cannot be expressed here. It lives in the migration and is the real
   /// guarantee that two active sequences never claim the same condition.
+}
+
+/// One Google Sheets row we have seen, keyed by a stable identity (`row_key`)
+/// and never by `row_number`, which shifts whenever someone sorts or inserts.
+/// See migration 20261012000001_google_sheets_import.
+///
+/// Holds the import review state: the lead itself stays at status 'new' and
+/// automation_paused until the owner approves it. Rows the sheet supplies but we
+/// refuse (no contact details, duplicate key) are not stored here — they are in
+/// the run summary.
+///
+/// CHECK constraints (in the migration only): review_state is
+/// pending|approved|rejected; reviewed_at is set exactly when review_state is
+/// not pending; changed_after_review_at and changed_values are set together;
+/// row_number >= 1. Also there: idx_sheet_import_rows_pending, a PARTIAL index
+/// on (organization_id, created_at DESC, id) WHERE review_state = 'pending'.
+///
+/// lead_source_id is NO ACTION on purpose: losing these rows would make the next
+/// sync re-import every row as a new lead. lead_id is SET NULL: deleting a lead
+/// must not let the next sync bring it straight back.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sheet_import_rows {
+  id                      String        @id @db.Uuid
+  organization_id         String        @db.Uuid
+  lead_source_id          String        @db.Uuid
+  /// sha256 hex of the identity: the unique-ID value, or the fallback hash.
+  row_key                 String        @db.VarChar(64)
+  lead_id                 String?       @db.Uuid
+  /// sha256 hex of the row's mapped values.
+  content_hash            String        @db.VarChar(64)
+  /// Where the row was last seen. Display only.
+  row_number              Int
+  /// pending | approved | rejected
+  review_state            String        @default("pending") @db.VarChar(20)
+  reviewed_by             String?       @db.Uuid
+  reviewed_at             DateTime?     @db.Timestamptz(6)
+  /// The sheet changed a reviewed row. The lead is NOT overwritten; the new
+  /// mapped values wait in changed_values until the owner resolves the flag.
+  changed_after_review_at DateTime?     @db.Timestamptz(6)
+  changed_values          Json?
+  /// Set only after a COMPLETE read no longer finds the row.
+  missing_since           DateTime?     @db.Timestamptz(6)
+  created_at              DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime      @default(now()) @db.Timestamptz(6)
+  organizations           organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lead_sources            lead_sources  @relation(fields: [lead_source_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  leads                   leads?        @relation(fields: [lead_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  users                   users?        @relation(fields: [reviewed_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([lead_source_id, row_key], map: "sheet_import_rows_source_row_unique")
+  @@index([lead_id], map: "idx_sheet_import_rows_lead")
 }

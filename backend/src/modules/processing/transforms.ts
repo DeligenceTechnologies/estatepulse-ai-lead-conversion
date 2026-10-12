@@ -131,12 +131,11 @@ export function applyTransform(
     case 'email': {
       const e = scalarText.trim().toLowerCase();
       if (!e) return { value: null };
-      if (!isValidEmail(e)) {
-        // Kept, like an unparseable phone: a lead who fat-fingered their address
-        // is still a lead. It just never counts as a repeat contact — see
-        // createLead and LeadsController.countLeadsPerContact.
-        return { value: e, warning: `"${e}" does not look like a valid email` };
-      }
+      // Kept even when invalid, like an unparseable phone: a lead who
+      // fat-fingered their address is still a lead. It just never counts as a
+      // repeat contact — see createLead and LeadsController.countLeadsPerContact.
+      // No warning here: validateCanonicalValues, which every pipeline runs
+      // after the transforms, raises it — raising it here too said it twice.
       return { value: e };
     }
 
