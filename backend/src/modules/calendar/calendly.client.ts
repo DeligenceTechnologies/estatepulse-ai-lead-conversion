@@ -606,6 +606,11 @@ export class CalendlyClientService implements OnModuleInit {
     return ((await res.json()) as CalendlyEnvelope<CalendlyCreatedInvitee>).resource;
   }
 
+  /** One event type, for its configured `locations`. */
+  async getEventType(conn: ConnectionRef, eventTypeUri: string): Promise<CalendlyEventType> {
+    return (await this.authedGet<CalendlyEnvelope<CalendlyEventType>>(conn, eventTypeUri)).resource;
+  }
+
   /** One scheduled event, for the host Calendly assigned (`event_memberships`). */
   async getScheduledEvent(conn: ConnectionRef, eventUri: string): Promise<CalendlyScheduledEvent> {
     return (await this.authedGet<CalendlyEnvelope<CalendlyScheduledEvent>>(conn, eventUri)).resource;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../common/errors';
-import { InCallBookingService } from './in-call-booking.service';
+import { InCallBookingService, inviteeLocation } from './in-call-booking.service';
 import type { ToolContext } from './tool-auth.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -41,7 +41,9 @@ const EVENT = {
   event_memberships: [{ user: HOST, user_name: 'Sunny Patel' }],
 };
 
-function setup(opts: { lead?: any; times?: any[]; createInvitee?: any; agent?: any; assignFails?: Error } = {}) {
+function setup(
+  opts: { lead?: any; times?: any[]; createInvitee?: any; agent?: any; assignFails?: Error; eventType?: any } = {},
+) {
   const prisma: any = {
     organizations: { findUnique: vi.fn().mockResolvedValue({ timezone: CHI }) },
     leads: {
@@ -71,6 +73,7 @@ function setup(opts: { lead?: any; times?: any[]; createInvitee?: any; agent?: a
       opts.createInvitee ??
       vi.fn().mockResolvedValue({ uri: 'inv-1', event: EVENT.uri, cancel_url: 'c', reschedule_url: 'r' }),
     getScheduledEvent: vi.fn().mockResolvedValue(EVENT),
+    getEventType: opts.eventType ?? vi.fn().mockResolvedValue({ uri: EVENT_TYPE, locations: null }),
   };
   const assignments: any = {
     assign: opts.assignFails ? vi.fn().mockRejectedValue(opts.assignFails) : vi.fn().mockResolvedValue({ changed: true }),
@@ -137,6 +140,24 @@ describe('book', () => {
       assignmentType: 'round_robin',
     }));
     expect(r).toMatchObject({ ok: true, booked: true, agentName: 'Sunny Patel', spoken: 'Thursday, October 8 at 3:00 PM' });
+  });
+
+  it('books with the event type’s video location, so Calendly creates a join link', async () => {
+    const eventType = vi.fn().mockResolvedValue({ uri: EVENT_TYPE, locations: [{ kind: 'zoom_conference' }] });
+    const { svc, calendly, prisma } = setup({ eventType });
+    await svc.book(ctx, { start_time: '2026-10-08T20:00:00.000Z' });
+
+    expect(eventType).toHaveBeenCalledWith(expect.anything(), EVENT_TYPE);
+    expect(calendly.createInvitee.mock.calls[0][1].location).toEqual({ kind: 'zoom_conference' });
+    expect(prisma.appointments.upsert.mock.calls[0][0].create.meeting_url).toBe('https://zoom.example/j/1');
+  });
+
+  it('still books, without a location, when the event type cannot be read', async () => {
+    const { svc, calendly } = setup({ eventType: vi.fn().mockRejectedValue(new Error('timeout')) });
+    const r = await svc.book(ctx, { start_time: '2026-10-08T20:00:00.000Z' });
+
+    expect(calendly.createInvitee.mock.calls[0][1].location).toBeUndefined();
+    expect(r).toMatchObject({ ok: true, booked: true });
   });
 
   it('asks for an email when the lead has none, and saves a confirmed one', async () => {
@@ -219,5 +240,32 @@ describe('book', () => {
 
   it('rejects a start time that is not a time', async () => {
     expect(await setup().svc.book(ctx, { start_time: 'thursday-ish' })).toMatchObject({ reason: 'bad_start_time' });
+  });
+});
+
+describe('inviteeLocation', () => {
+  it('is omitted when the event type sets no location', () => {
+    expect(inviteeLocation(null)).toBeUndefined();
+    expect(inviteeLocation([])).toBeUndefined();
+  });
+
+  it('prefers a video conference, which is what produces a join link', () => {
+    expect(inviteeLocation([{ kind: 'physical', location: '1 Main St' }, { kind: 'google_conference' }])).toEqual({
+      kind: 'google_conference',
+    });
+  });
+
+  it('names the place only when there are several of that kind', () => {
+    expect(inviteeLocation([{ kind: 'physical', location: '1 Main St' }])).toEqual({ kind: 'physical' });
+    expect(
+      inviteeLocation([
+        { kind: 'physical', location: '1 Main St' },
+        { kind: 'physical', location: '2 High St' },
+      ]),
+    ).toEqual({ kind: 'physical', location: '1 Main St' });
+  });
+
+  it('never picks a kind that needs the caller to answer', () => {
+    expect(inviteeLocation([{ kind: 'ask_invitee' }, { kind: 'outbound_call' }])).toBeUndefined();
   });
 });

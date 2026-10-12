@@ -121,3 +121,11 @@ export const listConversations = (limit?: number, leadId?: string): Promise<Conv
 
 export const listMessages = (conversationId: string): Promise<MessageRow[]> =>
   apiFetch<MessageRow[]>(`/v1/conversations/${conversationId}/messages`, { auth: true });
+
+/**
+ * Every SMS message of one lead, across all its threads, in one request — the
+ * same messages as listConversations(200, leadId) followed by listMessages for
+ * each SMS thread, without the per-thread round trips.
+ */
+export const listLeadMessages = (leadId: string): Promise<MessageRow[]> =>
+  apiFetch<MessageRow[]>(`/v1/messages${query({ leadId })}`, { auth: true });

@@ -71,7 +71,7 @@ function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
  * sourceLabel): a connected integration names its provider ("tally", "google
  * sheets"), a pasted webhook URL its transport, and no source at all is manual.
  */
-function sourceLabel(s: { source_type: string | null; provider: string | null; connection_method: string | null } | null): string {
+function sourceLabel(s: { source_type: string | null; provider: string | null; connection_method: string | null } | undefined): string {
   if (!s) return 'manual';
   const method = (s.connection_method ?? '').toUpperCase();
   if ((method === 'API' || method === 'SYNC') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
@@ -79,7 +79,7 @@ function sourceLabel(s: { source_type: string | null; provider: string | null; c
 }
 
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
-function mapLead(r: any) {
+function mapLead(r: any, source: string) {
   return {
     id: r.id,
     organizationId: r.organization_id,
@@ -88,7 +88,7 @@ function mapLead(r: any) {
     lastName: r.last_name ?? '',
     email: r.email ?? '',
     phone: r.phone ?? '',
-    source: sourceLabel(r.lead_sources ?? null),
+    source,
     status: normalizeLeadStatus(r.status),
     followUpReason: normalizeFollowUpReason(r.status, r.follow_up_reason),
     leadType: 'buyer',
@@ -205,14 +205,52 @@ export class PortalLeadsController {
 
   @Get()
   async list(@OrgId() orgId: string) {
-    const rows = await this.prisma.leads.findMany({
+    // The org's sources, read alongside the leads rather than as a relation
+    // (a second round trip after it). Only this org's sources are in the map,
+    // so a lead can never be labelled with another organization's source.
+    const sourcesP = this.prisma.lead_sources.findMany({
+      where: { organization_id: orgId },
+      select: { id: true, source_type: true, provider: true, connection_method: true },
+    });
+    const rowsP = this.prisma.leads.findMany({
       // Same rule as GET /api/v1/leads: unapproved sheet imports stay in Import Review.
       where: { organization_id: orgId, ...OUTSIDE_IMPORT_REVIEW },
       orderBy: { created_at: 'desc' },
       take: 500,
-      include: { lead_sources: { select: { source_type: true, provider: true, connection_method: true } } },
+      // Exactly the columns mapLead reads. The row also carries extracted_intel,
+      // ai_summary, custom_fields, field_provenance, consent_text and more —
+      // none of them in this response, and on a full page the bulk of the bytes.
+      select: {
+        id: true,
+        organization_id: true,
+        lead_source_id: true,
+        takeover_user_id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        status: true,
+        follow_up_reason: true,
+        dnc_status: true,
+        location: true,
+        min_budget: true,
+        max_budget: true,
+        bedrooms: true,
+        timeline: true,
+        financing_status: true,
+        score: true,
+        temperature: true,
+        consent_status: true,
+        automation_paused: true,
+        created_at: true,
+        updated_at: true,
+        last_contact_at: true,
+        motivation: true,
+      },
     });
-    return { leads: rows.map(mapLead) };
+    const [sources, rows] = await Promise.all([sourcesP, rowsP]);
+    const byId = new Map(sources.map((s) => [s.id, s]));
+    return { leads: rows.map((r) => mapLead(r, sourceLabel(byId.get(r.lead_source_id ?? '')))) };
   }
 
   /** Where is this lead in the journey: which strategy step, with what real outcome? */

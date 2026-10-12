@@ -640,12 +640,13 @@ export class FollowupService {
   /**
    * Add leads to a sequence, by hand or in bulk.
    *
-   * Inserted one at a time rather than with createMany, deliberately: the
-   * partial unique index is what stops a lead being enrolled twice, and
-   * createMany fails the WHOLE batch on the first lead who is already in a
-   * sequence — which in a bulk add is the common case, not the exception. One
-   * insert each means the rest still go in and the user is told who was left
-   * out and why.
+   * One INSERT for every eligible lead, skipping duplicates. The partial unique
+   * index is what stops a lead being enrolled twice, and in a bulk add a lead
+   * already in a sequence is the common case, not the exception: ON CONFLICT DO
+   * NOTHING leaves those out and inserts the rest, and the rows that come back
+   * say which went in — every other eligible lead is reported already_enrolled,
+   * exactly as the per-lead unique-violation used to be. One statement rather
+   * than one per lead, which at 500 leads was over a minute of round trips.
    */
   async enrollLeads(
     orgId: string,
@@ -653,39 +654,44 @@ export class FollowupService {
     input: EnrollInput,
     userId: string | null,
   ): Promise<EnrollResult> {
-    const sequence = await this.ownedSequence(orgId, sequenceId);
+    // Independent reads, together. The checks below still run in the same
+    // order, so the same input fails with the same error.
+    const [sequence, first] = await Promise.all([
+      this.ownedSequence(orgId, sequenceId),
+      this.prisma.sequence_steps.findFirst({
+        where: { organization_id: orgId, sequence_id: sequenceId },
+        orderBy: { step_order: 'asc' },
+      }),
+    ]);
     if (sequence.status !== 'active') {
       throw new AppError(
         'VALIDATION_ERROR',
         'That sequence is not active, so nothing can be added to it.',
       );
     }
-
-    const first = await this.prisma.sequence_steps.findFirst({
-      where: { organization_id: orgId, sequence_id: sequenceId },
-      orderBy: { step_order: 'asc' },
-    });
     if (!first) throw new AppError('VALIDATION_ERROR', 'That sequence has no steps yet.');
 
     const where: Prisma.leadsWhereInput = input.filter
       ? this.leadWhere(orgId, input.filter)
       : { organization_id: orgId, id: { in: input.leadIds ?? [] } };
 
-    const matchedRows = await this.prisma.leads.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: MAX_ENROLL_PER_CALL,
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        dnc_status: true,
-        status: true,
-        first_contact_at: true,
-        automation_paused: true,
-      },
-    });
-    const matched = await this.prisma.leads.count({ where });
+    const [matchedRows, matched] = await Promise.all([
+      this.prisma.leads.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: MAX_ENROLL_PER_CALL,
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          dnc_status: true,
+          status: true,
+          first_contact_at: true,
+          automation_paused: true,
+        },
+      }),
+      this.prisma.leads.count({ where }),
+    ]);
 
     const nameOf = (l: { first_name: string | null; last_name: string | null }) =>
       [l.first_name, l.last_name].filter(Boolean).join(' ').trim() || 'Unknown lead';
@@ -726,28 +732,29 @@ export class FollowupService {
     const due = nextAllowedAt(tz, quiet, new Date(Date.now() + first.delay_minutes * 60_000));
     const enrolledBy = input.filter ? 'bulk' : 'manual';
 
-    let enrolled = 0;
+    const inserted =
+      eligible.length > 0
+        ? await this.prisma.sequence_enrollments.createManyAndReturn({
+            data: eligible.map((lead) => ({
+              organization_id: orgId,
+              lead_id: lead.id,
+              sequence_id: sequenceId,
+              current_step: first.step_order,
+              status: 'active',
+              next_action_at: due,
+              enrolled_by: enrolledBy,
+              enrolled_by_user_id: userId,
+            })),
+            skipDuplicates: true,
+            select: { lead_id: true },
+          })
+        : [];
+    const insertedIds = new Set(inserted.map((r) => r.lead_id));
+    const enrolled = insertedIds.size;
+    // In the order they were tried, as the per-lead loop reported them.
     for (const lead of eligible) {
-      try {
-        await this.prisma.sequence_enrollments.create({
-          data: {
-            organization_id: orgId,
-            lead_id: lead.id,
-            sequence_id: sequenceId,
-            current_step: first.step_order,
-            status: 'active',
-            next_action_at: due,
-            enrolled_by: enrolledBy,
-            enrolled_by_user_id: userId,
-          },
-        });
-        enrolled++;
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-          skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'already_enrolled' });
-          continue;
-        }
-        throw e;
+      if (!insertedIds.has(lead.id)) {
+        skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'already_enrolled' });
       }
     }
 
@@ -796,25 +803,67 @@ export class FollowupService {
     return one;
   }
 
-  /** The Follow-ups screen: every sequence with its steps and how many leads are in it. */
+  /**
+   * The Follow-ups screen: every sequence with its steps and how many leads are
+   * in it.
+   *
+   * ONE statement: Prisma loaded the sequences, then their steps, then their
+   * triggers, then the enrolment counts — four sequential round trips. Steps
+   * come back in step order and triggers in trigger order, as before; every
+   * part is scoped to the session's organization.
+   */
   async listSequences(orgId: string) {
-    const rows = await this.prisma.followup_sequences.findMany({
-      where: { organization_id: orgId },
-      orderBy: { created_at: 'asc' },
-      include: {
-        sequence_steps: { orderBy: { step_order: 'asc' } },
-        sequence_enroll_triggers: { orderBy: { trigger: 'asc' }, select: { trigger: true } },
-      },
-    });
-
-    const counts = await this.prisma.sequence_enrollments.groupBy({
-      by: ['sequence_id', 'status'],
-      where: { organization_id: orgId },
-      _count: { _all: true },
-    });
-
-    const byStatus = (id: string, status: string) =>
-      counts.find((c) => c.sequence_id === id && c.status === status)?._count._all ?? 0;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        description: string | null;
+        status: string;
+        created_at: Date;
+        enroll_triggers: string[];
+        steps: Array<{
+          step_order: number;
+          action_type: string;
+          delay_minutes: number;
+          message_template: string | null;
+          voice_prompt: string | null;
+          max_attempts: number;
+        }>;
+        active_count: number;
+        paused_count: number;
+        completed_count: number;
+        stopped_count: number;
+      }>
+    >`
+      select s.id, s.code, s.name, s.description, s.status, s.created_at,
+             coalesce((
+               select json_agg(t.trigger order by t.trigger)
+                 from sequence_enroll_triggers t
+                where t.organization_id = s.organization_id and t.sequence_id = s.id
+             ), '[]'::json) as enroll_triggers,
+             coalesce((
+               select json_agg(json_build_object(
+                        'step_order', st.step_order, 'action_type', st.action_type,
+                        'delay_minutes', st.delay_minutes, 'message_template', st.message_template,
+                        'voice_prompt', st.voice_prompt, 'max_attempts', st.max_attempts
+                      ) order by st.step_order)
+                 from sequence_steps st
+                where st.organization_id = s.organization_id and st.sequence_id = s.id
+             ), '[]'::json) as steps,
+             counts.active_count, counts.paused_count, counts.completed_count, counts.stopped_count
+        from followup_sequences s
+        cross join lateral (
+          select count(*) filter (where e.status = 'active')::int as active_count,
+                 count(*) filter (where e.status = 'paused')::int as paused_count,
+                 count(*) filter (where e.status = 'completed')::int as completed_count,
+                 count(*) filter (where e.status = 'stopped')::int as stopped_count
+            from sequence_enrollments e
+           where e.organization_id = s.organization_id and e.sequence_id = s.id
+        ) counts
+       where s.organization_id = ${orgId}::uuid
+       order by s.created_at asc
+    `;
 
     return rows.map((s) => ({
       id: s.id,
@@ -824,13 +873,13 @@ export class FollowupService {
       status: s.status,
       // Every condition the office ticked, in force or not: an inactive
       // sequence must show its configuration rather than an empty checklist.
-      enrollTriggers: s.sequence_enroll_triggers.map((t) => t.trigger),
-      activeCount: byStatus(s.id, 'active'),
-      pausedCount: byStatus(s.id, 'paused'),
-      completedCount: byStatus(s.id, 'completed'),
-      stoppedCount: byStatus(s.id, 'stopped'),
+      enrollTriggers: s.enroll_triggers,
+      activeCount: s.active_count,
+      pausedCount: s.paused_count,
+      completedCount: s.completed_count,
+      stoppedCount: s.stopped_count,
       createdAt: s.created_at.toISOString(),
-      steps: s.sequence_steps.map((st) => ({
+      steps: s.steps.map((st) => ({
         stepOrder: st.step_order,
         actionType: st.action_type,
         delayMinutes: st.delay_minutes,
@@ -844,15 +893,21 @@ export class FollowupService {
   /** The enrolments themselves, so the screen can answer "who is in this, and what next". */
   async listEnrollments(orgId: string, limitRaw?: string) {
     const take = Math.min(Number(limitRaw ?? 100) || 100, 200);
-    const rows = await this.prisma.sequence_enrollments.findMany({
-      where: { organization_id: orgId },
-      orderBy: [{ status: 'asc' }, { next_action_at: 'asc' }],
-      take,
-      include: {
-        leads: { select: { id: true, first_name: true, last_name: true, phone: true, temperature: true } },
-        followup_sequences: { select: { code: true, name: true } },
-      },
-    });
+    // A whole, positive page size — every request the screen makes — is one
+    // statement: see enrollmentPage. A negative or fractional ?limit= keeps
+    // Prisma's own reading of `take`.
+    const rows =
+      Number.isInteger(take) && take > 0
+        ? await this.enrollmentPage(orgId, take)
+        : await this.prisma.sequence_enrollments.findMany({
+            where: { organization_id: orgId },
+            orderBy: [{ status: 'asc' }, { next_action_at: 'asc' }],
+            take,
+            include: {
+              leads: { select: { id: true, first_name: true, last_name: true, phone: true, temperature: true } },
+              followup_sequences: { select: { code: true, name: true } },
+            },
+          });
 
     return rows.map((e) => ({
       id: e.id,
@@ -870,6 +925,73 @@ export class FollowupService {
       stoppedReason: e.stopped_reason,
       lastError: e.last_error,
       enrolledBy: e.enrolled_by,
+    }));
+  }
+
+  /**
+   * One page of enrolments with each one's lead and sequence, in ONE statement
+   * where Prisma took three sequential round trips (the page, then the leads,
+   * then the sequences) — in the same shape, so listEnrollments maps it as it
+   * always has.
+   *
+   * The page is the same query: this organization, status then next action
+   * ascending (no next action last), `take` rows. Rows tied on both keys have
+   * no defined order, as before. The lead and sequence are joined within the
+   * organization too, which a valid row always matches.
+   */
+  private async enrollmentPage(orgId: string, take: number) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        lead_id: string;
+        current_step: number;
+        status: string;
+        next_action_at: Date | null;
+        enrolled_at: Date;
+        stopped_reason: string | null;
+        last_error: string | null;
+        enrolled_by: string;
+        lead_found: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        temperature: string | null;
+        sequence_found: string | null;
+        sequence_code: string | null;
+        sequence_name: string | null;
+      }>
+    >`
+      select e.id, e.lead_id, e.current_step, e.status, e.next_action_at, e.enrolled_at,
+             e.stopped_reason, e.last_error, e.enrolled_by,
+             l.id as lead_found, l.first_name, l.last_name, l.phone, l.temperature,
+             s.id as sequence_found, s.code as sequence_code, s.name as sequence_name
+        from (
+          select id, organization_id, lead_id, sequence_id, current_step, status, next_action_at,
+                 enrolled_at, stopped_reason, last_error, enrolled_by
+            from sequence_enrollments
+           where organization_id = ${orgId}::uuid
+           order by status asc, next_action_at asc
+           limit ${take}
+        ) e
+        left join leads l on l.id = e.lead_id and l.organization_id = e.organization_id
+        left join followup_sequences s on s.id = e.sequence_id and s.organization_id = e.organization_id
+       order by e.status asc, e.next_action_at asc
+    `;
+
+    return rows.map((r) => ({
+      id: r.id,
+      lead_id: r.lead_id,
+      current_step: r.current_step,
+      status: r.status,
+      next_action_at: r.next_action_at,
+      enrolled_at: r.enrolled_at,
+      stopped_reason: r.stopped_reason,
+      last_error: r.last_error,
+      enrolled_by: r.enrolled_by,
+      leads: r.lead_found
+        ? { first_name: r.first_name, last_name: r.last_name, phone: r.phone, temperature: r.temperature }
+        : null,
+      followup_sequences: r.sequence_found ? { code: r.sequence_code!, name: r.sequence_name! } : null,
     }));
   }
 }

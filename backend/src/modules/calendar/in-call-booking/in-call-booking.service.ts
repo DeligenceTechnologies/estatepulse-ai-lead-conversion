@@ -7,7 +7,7 @@ import { LeadAssignmentService } from '../../leads/lead-assignment.service';
 import { isValidEmail } from '../../processing/transforms';
 import { CalendarConnectionsService } from '../calendar-connections.service';
 import { CalendlyClientService } from '../calendly.client';
-import type { CalendlyScheduledEvent } from '../types';
+import type { CalendlyCreateInviteeBody, CalendlyEventType, CalendlyScheduledEvent } from '../types';
 import { localDate, parseTime, pickSlots, resolveDay, searchWindow, spoken, zonedToUtc } from './booking-time';
 import type { ToolContext } from './tool-auth.service';
 
@@ -33,6 +33,29 @@ export type AvailabilityResult =
 export type BookingResult =
   | { ok: true; booked: true; agentName: string | null; spoken: string; say: string }
   | { ok: false; reason: string; say: string; slots?: Slot[] };
+
+/** Location kinds Calendly fills in itself — no answer needed from the caller. */
+const SELF_SERVED_KINDS = new Set(['physical', 'custom', 'inbound_call']);
+
+/**
+ * The `location` to book with, from the event type's own settings.
+ *
+ * Calendly requires one whenever the event type has a location, and only a
+ * conferencing kind (Zoom, Google Meet, Teams...) produces a join link, so that
+ * is preferred. Kinds that need the caller's input (ask_invitee, outbound_call)
+ * are not chosen. No locations: omitted, as Calendly requires.
+ */
+export function inviteeLocation(
+  locations: CalendlyEventType['locations'],
+): CalendlyCreateInviteeBody['location'] | undefined {
+  const list = locations ?? [];
+  const pick = list.find((l) => l.kind.endsWith('_conference')) ?? list.find((l) => SELF_SERVED_KINDS.has(l.kind));
+  if (!pick) return undefined;
+  // With several physical/custom places Calendly needs to be told which one.
+  return pick.location && list.filter((l) => l.kind === pick.kind).length > 1
+    ? { kind: pick.kind, location: pick.location }
+    : { kind: pick.kind };
+}
 
 /**
  * Booking a meeting during a live AI call (Calendly round robin).
@@ -123,6 +146,14 @@ export class InCallBookingService {
     }
     const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim() || input.name?.trim() || 'Home buyer';
 
+    // Read fresh each booking: the office can change the location in Calendly
+    // at any time. If this read fails, book as before and let Calendly decide.
+    const eventType = await this.calendly.getEventType(conn, ctx.config.eventTypeUri).catch((e) => {
+      this.logger.warn(`reading event type ${ctx.config.eventTypeUri}: ${(e as Error).message}`);
+      return null;
+    });
+    const location = inviteeLocation(eventType?.locations);
+
     let eventUri: string;
     let inviteeUri: string;
     let cancelUrl: string | null;
@@ -132,6 +163,7 @@ export class InCallBookingService {
         event_type: ctx.config.eventTypeUri,
         start_time: start.toISOString(),
         invitee: { name, email, timezone: tz },
+        ...(location ? { location } : {}),
         // No `tracking`: Calendly's Scheduling API rejects a tracking object
         // unless all six of its fields are present. It is not needed here —
         // this booking is recorded against the lead right below, and the sync

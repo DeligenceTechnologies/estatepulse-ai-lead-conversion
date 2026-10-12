@@ -105,34 +105,70 @@ const BarRow: React.FC<{ label: string; value: number; max: number; suffix?: str
 );
 
 /**
- * The owner's office at a glance. Every number is read from the office's real
- * records via GET /api/dashboard and GET /api/agents; zero is a real answer.
+ * The dashboard's two reads, independent of each other.
+ *
+ * GET /api/dashboard feeds everything except Agent Load; GET /api/agents feeds
+ * only Agent Load. Each lands in state the moment it arrives, so the main
+ * dashboard no longer waits on the roster — the slower of the two at page load,
+ * where they share the connection pool — and a failed roster no longer blanks
+ * it. `error` is the dashboard's, `membersError` the roster's. `loading` stays
+ * true until both have settled, so Refresh spins exactly as long as before.
  */
-export const DashboardView: React.FC = () => {
-  const { user, organization } = useAuth();
-  const navigate = useNavigate();
+export function useDashboardData() {
   const [data, setData] = useState<OwnerDashboard | null>(null);
   const [members, setMembers] = useState<OrganizationMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [d, m] = await Promise.all([getOwnerDashboard(), listMembers()]);
-      setData(d);
-      setMembers(m);
-      setError(null);
-    } catch (e) {
-      setError(messageFor(e));
-    } finally {
-      setLoading(false);
-    }
+    await Promise.allSettled([
+      getOwnerDashboard().then(
+        (d) => {
+          setData(d);
+          setError(null);
+        },
+        (e) => setError(messageFor(e)),
+      ),
+      listMembers().then(
+        (m) => {
+          setMembers(m);
+          setMembersError(null);
+        },
+        (e) => setMembersError(messageFor(e)),
+      ),
+    ]);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  return { data, members, error, membersError, loading, load };
+}
+
+/**
+ * The owner's office at a glance. Every number is read from the office's real
+ * records via GET /api/dashboard and GET /api/agents; zero is a real answer.
+ */
+export const DashboardView: React.FC = () => {
+  const state = useDashboardData();
+  return <DashboardContent {...state} />;
+};
+
+/** The view for a given state of the two reads; rendered on its own in tests. */
+export const DashboardContent: React.FC<ReturnType<typeof useDashboardData>> = ({
+  data,
+  members,
+  error,
+  membersError,
+  loading,
+  load,
+}) => {
+  const { user, organization } = useAuth();
+  const navigate = useNavigate();
 
   const spinner = <span aria-label="Loading" className="block h-7 w-14 rounded-md bg-slate-800 animate-pulse" />;
   const agents = (members ?? []).filter((m) => m.hasProfile && m.status !== 'suspended');
@@ -301,7 +337,19 @@ export const DashboardView: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Panel title="Agent Load" icon={<UserCheck className="w-4 h-4" />} aside="Current leads / cap">
-              {agents.length === 0 ? (
+              {membersError && (
+                <p className="text-xs text-rose-300 leading-relaxed">Could not load agents: {membersError}</p>
+              )}
+              {/* Not loaded yet is not "no agents": placeholders until the roster answers. */}
+              {members === null ? (
+                !membersError && (
+                  <div aria-label="Loading agents" className="space-y-3 animate-pulse">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="h-7 rounded-md bg-slate-800" />
+                    ))}
+                  </div>
+                )
+              ) : agents.length === 0 ? (
                 <Empty>No active agents yet. Add one from Agent Team &amp; Routing.</Empty>
               ) : (
                 <div className="space-y-3">

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { SecretBox, ingestTokenAad, signingSecretAad } from '../../common/crypto';
 import { IngestStatus, MappingStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
@@ -132,40 +133,69 @@ export class LeadSourcesService {
     };
   }
 
+  /**
+   * The organization's webhook sources, newest first, each with how many
+   * deliveries it has received and how many leads it produced.
+   *
+   * ONE statement: the sources were read first and the two counts after — a
+   * second round trip, polled on every refresh of the screen. Only the columns
+   * toSummary and decryptToken read are selected; the signing secrets are not.
+   * The counts are per source within this organization, as the grouped counts
+   * were.
+   */
   async list(organizationId: string, includeArchived = false) {
-    const rows = await this.prisma.lead_sources.findMany({
-      where: {
-        organization_id: organizationId,
-        source_type: 'webhook',
-        // Disconnected sources are archived, not deleted (lead_submissions has
-        // ON DELETE RESTRICT). Without this they would keep appearing as live.
-        ...(includeArchived ? {} : { archived_at: null }),
-      },
-      orderBy: { created_at: 'desc' },
-    });
-
-    const [deliveries, leads] = await Promise.all([
-      this.prisma.webhook_events.groupBy({
-        by: ['lead_source_id'],
-        where: { organization_id: organizationId },
-        _count: { _all: true },
-      }),
-      // Deliveries and leads are no longer the same number — a delivery with no
-      // usable phone or email is stored without producing a lead — so the list
-      // reports both rather than letting one stand in for the other.
-      this.prisma.leads.groupBy({
-        by: ['lead_source_id'],
-        where: { organization_id: organizationId },
-        _count: { _all: true },
-      }),
-    ]);
-    const deliveriesBySource = new Map(deliveries.map((c) => [c.lead_source_id, c._count._all]));
-    const leadsBySource = new Map(leads.map((c) => [c.lead_source_id, c._count._all]));
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        organization_id: string;
+        name: string;
+        code: string;
+        is_active: boolean;
+        require_signature: boolean;
+        ingest_status: string | null;
+        mapping_status: string | null;
+        signing_secret_last4: string | null;
+        signing_secret_set_at: Date | null;
+        external_form_name: string | null;
+        last_event_at: Date | null;
+        created_at: Date;
+        provider: string;
+        connection_method: string;
+        external_form_id: string | null;
+        remote_state: string | null;
+        remote_synced_at: Date | null;
+        remote_error_message: string | null;
+        ingest_token_enc: string | null;
+        delivery_count: number;
+        lead_count: number;
+      }>
+    >`
+      select ls.id, ls.organization_id, ls.name, ls.code, ls.is_active, ls.require_signature,
+             ls.ingest_status, ls.mapping_status, ls.signing_secret_last4, ls.signing_secret_set_at,
+             ls.external_form_name, ls.last_event_at, ls.created_at, ls.provider, ls.connection_method,
+             ls.external_form_id, ls.remote_state, ls.remote_synced_at, ls.remote_error_message,
+             ls.ingest_token_enc,
+             (select count(*) from webhook_events w
+               where w.organization_id = ls.organization_id and w.lead_source_id = ls.id)::int as delivery_count,
+             -- Deliveries and leads are no longer the same number — a delivery
+             -- with no usable phone or email is stored without producing a lead
+             -- — so the list reports both rather than letting one stand in for
+             -- the other.
+             (select count(*) from leads l
+               where l.organization_id = ls.organization_id and l.lead_source_id = ls.id)::int as lead_count
+        from lead_sources ls
+       where ls.organization_id = ${organizationId}::uuid
+         and ls.source_type = 'webhook'
+         -- Disconnected sources are archived, not deleted (lead_submissions has
+         -- ON DELETE RESTRICT). Without this they would keep appearing as live.
+         ${includeArchived ? Prisma.empty : Prisma.sql`and ls.archived_at is null`}
+       order by ls.created_at desc
+    `;
 
     return rows.map((r) => ({
       ...this.toSummary(r, this.decryptToken(r)),
-      deliveryCount: deliveriesBySource.get(r.id) ?? 0,
-      leadCount: leadsBySource.get(r.id) ?? 0,
+      deliveryCount: r.delivery_count,
+      leadCount: r.lead_count,
     }));
   }
 
@@ -236,6 +266,24 @@ export class LeadSourcesService {
       where: { organization_id: organizationId, lead_source_id: id },
       orderBy: { received_at: 'desc' },
       take: Math.min(limit, 100),
+      // Only what the answer below reads. The row also carries raw_body — the
+      // exact request bytes, about the size of the payload again — plus headers
+      // and warnings, none of which are shown; on up to 100 rows that is
+      // roughly doubling what crosses the wire for nothing.
+      select: {
+        id: true,
+        received_at: true,
+        external_event_id: true,
+        signature_state: true,
+        used_previous_secret: true,
+        queue_state: true,
+        outcome: true,
+        outcome_reason: true,
+        error_message: true,
+        content_length: true,
+        payload: true,
+        mapping_trace: true,
+      },
     });
 
     return rows.map((r) => {
