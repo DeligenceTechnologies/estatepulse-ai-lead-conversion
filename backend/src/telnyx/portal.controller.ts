@@ -33,6 +33,7 @@ import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { AssistantService } from './assistant.service';
 import { EngineService } from './engine.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
+import { OUTSIDE_IMPORT_REVIEW } from '../modules/google-sheets/sheet-rows';
 
 
 
@@ -65,6 +66,18 @@ function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
   return v;
 }
 
+/**
+ * Where a lead came from, by the rule the Leads table uses (LeadsView
+ * sourceLabel): a connected integration names its provider ("tally", "google
+ * sheets"), a pasted webhook URL its transport, and no source at all is manual.
+ */
+function sourceLabel(s: { source_type: string | null; provider: string | null; connection_method: string | null } | null): string {
+  if (!s) return 'manual';
+  const method = (s.connection_method ?? '').toUpperCase();
+  if ((method === 'API' || method === 'SYNC') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
+  return s.source_type ?? 'webhook';
+}
+
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
 function mapLead(r: any) {
   return {
@@ -75,7 +88,7 @@ function mapLead(r: any) {
     lastName: r.last_name ?? '',
     email: r.email ?? '',
     phone: r.phone ?? '',
-    source: 'Website',
+    source: sourceLabel(r.lead_sources ?? null),
     status: normalizeLeadStatus(r.status),
     followUpReason: normalizeFollowUpReason(r.status, r.follow_up_reason),
     leadType: 'buyer',
@@ -193,9 +206,11 @@ export class PortalLeadsController {
   @Get()
   async list(@OrgId() orgId: string) {
     const rows = await this.prisma.leads.findMany({
-      where: { organization_id: orgId },
+      // Same rule as GET /api/v1/leads: unapproved sheet imports stay in Import Review.
+      where: { organization_id: orgId, ...OUTSIDE_IMPORT_REVIEW },
       orderBy: { created_at: 'desc' },
       take: 500,
+      include: { lead_sources: { select: { source_type: true, provider: true, connection_method: true } } },
     });
     return { leads: rows.map(mapLead) };
   }
