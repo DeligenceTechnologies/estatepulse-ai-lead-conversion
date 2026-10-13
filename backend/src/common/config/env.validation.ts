@@ -65,4 +65,7 @@ export const envValidationSchema = Joi.object({
     // Must match the redirect URI registered on the Calendly OAuth app and reach
     // GET /org-settings/calendar/calendly/callback on this server.
     CALENDLY_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Public https address of this API, e.g. https://api.example.com. When set, Calendly and Cal.com
+    // push booking changes to POST /calendar-webhooks/:connectionId; without it availability is polled only.
+    CALENDAR_WEBHOOK_BASE_URL: Joi.string().uri({ scheme: ['https'] }).empty('').optional(),
 });

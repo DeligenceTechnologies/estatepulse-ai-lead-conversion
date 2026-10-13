@@ -22,3 +22,7 @@ export const getOrgSettings = (): Promise<OrgSettings> => apiFetch<OrgSettings>(
 /** Only the keys sent are changed. */
 export const updateOrgSettings = (input: OrgSettingsUpdate): Promise<OrgSettings> =>
   apiFetch<OrgSettings>('/org-settings', { method: 'PATCH', body: input, auth: true });
+
+/** Owner only: adds or removes the Agent role on the signed-in owner, so leads can be assigned to them. */
+export const setLeadAssignment = (assignToMe: boolean): Promise<{ assignToMe: boolean }> =>
+  apiFetch<{ assignToMe: boolean }>('/org-settings/lead-assignment', { method: 'PUT', body: { assignToMe }, auth: true });

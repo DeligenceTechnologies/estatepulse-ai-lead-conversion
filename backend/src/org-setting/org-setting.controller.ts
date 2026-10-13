@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Put } from '@nestjs/common';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import type { AuthContext } from '@/auth/auth.types';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { LeadAssignmentDto } from './dto/lead-assignment.dto';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 import { OrgSettingService } from './org-setting.service';
 
@@ -20,5 +21,11 @@ export class OrgSettingController {
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   update(@CurrentAuth() auth: AuthContext, @Body() dto: UpdateOrgSettingDto) {
     return this.orgSettingService.update(auth.organizationId, dto);
+  }
+
+  @Put('lead-assignment')
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  setLeadAssignment(@CurrentAuth() auth: AuthContext, @Body() dto: LeadAssignmentDto) {
+    return this.orgSettingService.setLeadAssignment(auth.organizationId, auth.userId, dto.assignToMe);
   }
 }

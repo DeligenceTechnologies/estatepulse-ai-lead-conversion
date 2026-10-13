@@ -13,6 +13,7 @@ import type { CalendarProvider, CalendarWorkspaceType, Prisma } from '@prisma/cl
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import type { WorkingDayDto } from '@/common/utils/working-hours';
+import { isTimeZone } from '@/common/utils/zoned-time';
 import { DEFAULT_ROLES } from '@/role/permissions';
 import { UserService } from '@/user/user.service';
 import {
@@ -53,6 +54,7 @@ const SUMMARY_FIELDS = {
 
 const USAGE_FIELDS = {
   id: true,
+  orgId: true,
   provider: true,
   status: true,
   workspaceType: true,
@@ -61,10 +63,11 @@ const USAGE_FIELDS = {
   credentials: true,
   tokenExpiresAt: true,
   lastError: true,
+  webhookId: true,
 } as const satisfies Prisma.CalendarConnectionSelect;
 
 type ConnectionSummary = Prisma.CalendarConnectionGetPayload<{ select: typeof SUMMARY_FIELDS }>;
-type UsableConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof USAGE_FIELDS }>;
+export type UsableConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof USAGE_FIELDS }>;
 
 interface NewConnection {
   provider: CalendarProvider;
@@ -78,11 +81,6 @@ interface NewConnection {
   workspaceRole: WorkspaceRole;
   credentials: CalendlyCredentials | CalCredentials;
   tokenExpiresAt: Date | null;
-}
-
-export interface CalendarMemberView extends SchedulingMember {
-  userId: string | null;
-  userName: string | null;
 }
 
 class CredentialsChanged extends Error {}
@@ -263,35 +261,15 @@ export class CalendarService implements OnModuleInit {
   async disconnect(orgId: string): Promise<void> {
     const connection = await this.prisma.calendarConnection.findFirst({
       where: { orgId, isActive: true },
-      select: { id: true, provider: true, credentials: true },
+      select: USAGE_FIELDS,
     });
     if (!connection) return;
 
+    await this.removeWebhook(connection);
     await this.prisma.calendarConnection.deleteMany({ where: { id: connection.id } });
     if (connection.provider === 'calendly') {
       await this.revokeCalendly(this.unseal<CalendlyCredentials>(connection.credentials)?.refreshToken);
     }
-  }
-
-  async members(orgId: string): Promise<CalendarMemberView[]> {
-    const members = await this.fetchMembers(orgId);
-    const emails = members.map((member) => member.email).filter(Boolean);
-    const users = await this.prisma.user.findMany({
-      where: { orgId, email: { in: emails, mode: 'insensitive' } },
-      select: { id: true, email: true, firstName: true, lastName: true },
-    });
-    const byEmail = new Map(users.map((user) => [user.email.toLowerCase(), user]));
-
-    return members
-      .map((member) => {
-        const user = member.email ? byEmail.get(member.email.toLowerCase()) : undefined;
-        return {
-          ...member,
-          userId: user?.id ?? null,
-          userName: user ? `${user.firstName} ${user.lastName}`.trim() : null,
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async addMemberAsAgent(orgId: string, externalId: string) {
@@ -340,7 +318,8 @@ export class CalendarService implements OnModuleInit {
 
     return {
       user: { id: created.id, name: `${created.firstName} ${created.lastName}`.trim(), email: created.email },
-      credentialsEmail: created.credentialsEmail,
+      // TODO => production me uncomment
+      // credentialsEmail: created.credentialsEmail,
     };
   }
 
@@ -352,12 +331,14 @@ export class CalendarService implements OnModuleInit {
     });
   }
 
-  private fetchMembers(orgId: string): Promise<SchedulingMember[]> {
-    return this.useActive(orgId, (connection, secret) => {
-      if (connection.provider === 'calendly') return this.calendly.members(secret, connection.workspaceId);
-      if (connection.workspaceType === 'personal') return this.cal.personalMember(secret).then((member) => [member]);
-      return this.cal.members(secret, connection.workspaceId);
-    });
+  fetchMembers(orgId: string): Promise<SchedulingMember[]> {
+    return this.useActive(orgId, (connection, secret) => this.membersFor(connection, secret));
+  }
+
+  membersFor(connection: UsableConnection, secret: string): Promise<SchedulingMember[]> {
+    if (connection.provider === 'calendly') return this.calendly.members(secret, connection.workspaceId);
+    if (connection.workspaceType === 'personal') return this.cal.personalMember(secret).then((member) => [member]);
+    return this.cal.members(secret, connection.workspaceId);
   }
 
   private unavailableReason(provider: CalendarProvider): string | null {
@@ -394,7 +375,8 @@ export class CalendarService implements OnModuleInit {
 
   private async save(orgId: string, userId: string, connection: NewConnection): Promise<void> {
     const where = { orgId_provider: { orgId, provider: connection.provider } };
-    const previous = await this.prisma.calendarConnection.findUnique({ where, select: { credentials: true } });
+    const previous = await this.prisma.calendarConnection.findUnique({ where, select: USAGE_FIELDS });
+    if (previous) await this.removeWebhook(previous);
     const user = await this.prisma.user.findFirst({ where: { id: userId, orgId }, select: { id: true } });
     const data = {
       ...connection,
@@ -404,6 +386,11 @@ export class CalendarService implements OnModuleInit {
       lastError: null,
       connectedById: user?.id ?? null,
       connectedAt: new Date(),
+      syncedAt: null,
+      syncError: null,
+      webhookId: null,
+      webhookSecret: null,
+      webhookAttemptAt: null,
     };
 
     await this.prisma.$transaction(async (tx) => {
@@ -412,7 +399,8 @@ export class CalendarService implements OnModuleInit {
         where: { orgId, isActive: true, provider: { not: connection.provider } },
         data: { isActive: false },
       });
-      await tx.calendarConnection.upsert({ where, create: { orgId, ...data }, update: data });
+      const saved = await tx.calendarConnection.upsert({ where, create: { orgId, ...data }, update: data, select: { id: true } });
+      await tx.calendarMember.deleteMany({ where: { connectionId: saved.id } });
     });
 
     if (previous && connection.provider === 'calendly') {
@@ -420,7 +408,7 @@ export class CalendarService implements OnModuleInit {
     }
   }
 
-  private async useActive<T>(orgId: string, run: (connection: UsableConnection, secret: string) => Promise<T>): Promise<T> {
+  async useActive<T>(orgId: string, run: (connection: UsableConnection, secret: string) => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const connection = await this.prisma.calendarConnection.findFirst({
         where: { orgId, isActive: true },
@@ -518,6 +506,17 @@ export class CalendarService implements OnModuleInit {
     }
   }
 
+  private async removeWebhook(connection: UsableConnection): Promise<void> {
+    if (!connection.webhookId || connection.status !== 'active') return;
+    try {
+      const secret = await this.secretFor(connection);
+      if (connection.provider === 'calendly') await this.calendly.deleteWebhook(secret, connection.webhookId);
+      else await this.cal.deleteWebhook(secret, connection.webhookId);
+    } catch (error) {
+      this.logger.warn(`${PROVIDER_LABEL[connection.provider]} webhook removal failed: ${(error as Error).message}`);
+    }
+  }
+
   private async revokeCalendly(token: string | undefined): Promise<void> {
     if (!token || !this.calendly.configured) return;
     try {
@@ -554,16 +553,6 @@ function splitName(name: string, email: string): { firstName: string; lastName: 
     return { firstName: email.split('@')[0].slice(0, 100), lastName: '' };
   }
   return { firstName: parts[0].slice(0, 100), lastName: parts.slice(1).join(' ').slice(0, 100) };
-}
-
-function isTimeZone(zone: string | null): zone is string {
-  if (!zone) return false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: zone });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function toView(connection: ConnectionSummary) {

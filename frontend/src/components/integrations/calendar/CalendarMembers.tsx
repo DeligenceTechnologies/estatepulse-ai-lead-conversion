@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, Loader2, UserPlus } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import { addCalendarMemberAsAgent, type CalendarMember } from '../../../utils/calendarApi';
@@ -33,8 +33,13 @@ export const CalendarMembers: React.FC<{
     try {
       const { user, credentialsEmail } = await addCalendarMemberAsAgent(member.externalId);
       setNotice(
-        credentialsEmail.sent
-          ? { tone: 'success', text: `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.` }
+        !credentialsEmail || credentialsEmail.sent
+          ? {
+              tone: 'success',
+              text: credentialsEmail
+                ? `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.`
+                : `${user.name} is now an agent.`,
+            }
           : {
               tone: 'warning',
               text: `${user.name} is now an agent, but the sign-in email was not sent${
@@ -85,15 +90,10 @@ export const CalendarMembers: React.FC<{
                 onClick={() => void add(member)}
                 disabled={adding !== null}
                 aria-busy={adding === member.externalId || undefined}
-                title={`Create an EstatePulse agent for ${member.email}`}
-                className="h-7 px-2.5 rounded-lg text-2xs font-semibold text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 inline-flex items-center gap-1.5 shrink-0 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={`Add ${member.email} to your EstatePulse team as an agent`}
+                className="h-7 px-2.5 rounded-lg text-2xs font-semibold text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 inline-flex items-center shrink-0 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {adding === member.externalId ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <UserPlus className="w-3 h-3" />
-                )}
-                {adding === member.externalId ? 'Adding…' : 'Add as agent'}
+                {adding === member.externalId ? 'Adding…' : 'Add to team'}
               </button>
             ) : (
               <span className="hidden sm:inline text-2xs font-semibold px-2 py-0.5 rounded-full border bg-slate-800 text-slate-400 border-slate-700 shrink-0">
@@ -120,7 +120,7 @@ export const CalendarMembers: React.FC<{
       {unlinked > 0 && (
         <p className="text-2xs text-slate-500">
           {unlinked} {providerLabel} member{unlinked === 1 ? ' is' : 's are'} not on EstatePulse yet.
-          {canAdd && ' “Add as agent” creates their account with the name, email and timezone from the calendar.'}
+          {canAdd && ' “Add to team” creates their agent account with the name, email and timezone from the calendar.'}
         </p>
       )}
     </div>

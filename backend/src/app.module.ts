@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import {ServiceProviderModule} from "@/common/provider/service.provider";
 import {AppConfigModule} from "@/common/config/config.module";
 import { OrganizationModule } from './organization/organization.module';
@@ -12,6 +13,7 @@ import { CalendarModule } from './calendar/calendar.module';
   imports: [
     AppConfigModule,
     ServiceProviderModule,
+    ScheduleModule.forRoot(),
     AuthModule,
     OrganizationModule,
     UserModule,

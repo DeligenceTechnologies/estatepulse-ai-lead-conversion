@@ -84,15 +84,15 @@ export class UserService {
       rethrowPrismaError(error, 'User');
     }
 
-    const credentialsEmail = await this.sendCredentials({
-      firstName: user.firstName,
-      organizationName: organization.name,
-      roleName: user.roles.map((role) => role.name).join(', '),
-      email: user.email,
-      password,
-    });
+    // const credentialsEmail = await this.sendCredentials({
+    //   firstName: user.firstName,
+    //   organizationName: organization.name,
+    //   roleName: user.roles.map((role) => role.name).join(', '),
+    //   email: user.email,
+    //   password,
+    // });
 
-    return { ...user, credentialsEmail };
+    return { ...user };
   }
 
   private async sendCredentials(input: Omit<WelcomeEmailInput, 'loginUrl'>): Promise<CredentialsEmailResult> {

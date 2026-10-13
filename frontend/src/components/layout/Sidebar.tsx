@@ -4,6 +4,7 @@ import {
   MessageSquare,
   PhoneCall,
   CalendarCheck,
+  CalendarClock,
   Repeat,
   UserCheck,
   Plug,
@@ -56,6 +57,9 @@ export function useOwnerNav(): NavGroup[] {
         // only agents — hence "Team Members". The view id stays `agents` so
         // existing /agents links keep working.
         ...(can('user.read') ? [{ id: 'agents' as const, label: 'Team Members', icon: UserCheck }] : []),
+        ...(can('organization.read')
+          ? [{ id: 'team_availability' as const, label: 'Team Availability', icon: CalendarClock }]
+          : []),
         // Only for an owner who takes leads: an agent profile is what the screen
         // reads and writes, and an owner without one has no hours to set.
         ...(isOwner && agentProfileId

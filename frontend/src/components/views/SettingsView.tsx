@@ -14,11 +14,18 @@ import {
   Save,
   Settings2,
   ShieldAlert,
+  UserCheck,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
-import { getOrgSettings, updateOrgSettings, type OrgSettings, type OrgSettingsUpdate } from '../../utils/orgSettingsApi';
+import {
+  getOrgSettings,
+  setLeadAssignment,
+  updateOrgSettings,
+  type OrgSettings,
+  type OrgSettingsUpdate,
+} from '../../utils/orgSettingsApi';
 import {
   DEFAULT_WORKING_HOURS,
   isWorkingNow,
@@ -87,14 +94,81 @@ const Card: React.FC<{
   </section>
 );
 
+const AGENT_ROLE = 'agent';
+
+const LeadAssignmentCard: React.FC = () => {
+  const { roles, refreshSession } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enabled = roles.some((role) => !role.isSystem && role.name.toLowerCase() === AGENT_ROLE);
+
+  const toggle = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setLeadAssignment(!enabled);
+      await refreshSession();
+    } catch (e) {
+      setError(messageFor(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card
+      icon={<UserCheck className="w-4 h-4" />}
+      title="Lead assignment"
+      description="Leads are assigned to members with the Agent role."
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-slate-200">Assign leads to me</div>
+          <p className="text-2xs text-slate-500 mt-0.5">
+            {enabled ? 'You hold the Agent role and can receive leads.' : 'Turn on to add the Agent role to your account.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Assign leads to me"
+          aria-busy={busy || undefined}
+          onClick={() => void toggle()}
+          disabled={busy}
+          className={`relative w-10 h-[22px] rounded-full shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
+            enabled ? 'bg-emerald-600' : 'bg-slate-700'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+              enabled ? 'translate-x-[18px]' : ''
+            }`}
+          >
+            {busy && <Loader2 className="w-3 h-3 text-slate-500 animate-spin" />}
+          </span>
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-2xs text-rose-300 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
+    </Card>
+  );
+};
+
 /**
  * General: the organization's timezone and business hours, saved to
  * `org_settings`. Edits collect in a draft; a bar at the bottom saves or
  * discards them together.
  */
 const GeneralSettings: React.FC = () => {
-  const { can } = useAuth();
+  const { can, roles } = useAuth();
   const canEdit = can('organization.update');
+  const isOwner = roles.some((role) => role.isSystem);
 
   const [saved, setSaved] = useState<OrgSettings | null>(null);
   const [timezone, setTimezone] = useState('');
@@ -205,6 +279,8 @@ const GeneralSettings: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      {isOwner && <LeadAssignmentCard />}
+
       {!canEdit && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center gap-2 text-xs text-amber-200">
           <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />

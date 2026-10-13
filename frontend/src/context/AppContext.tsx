@@ -46,6 +46,8 @@ const APP_VIEWS = [
   'my_availability',
   // Live API: the organization's roles and what each may do.
   'roles',
+  // Live API: every calendar member's free and busy time from the connected Calendly or Cal.com.
+  'team_availability',
   // Live API: org_settings (timezone, business hours) plus the Telnyx and
   // calendar connections, one tab each.
   'settings',

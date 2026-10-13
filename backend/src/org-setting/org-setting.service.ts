@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
+import { DEFAULT_ROLES } from '@/role/permissions';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 
 const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, updatedAt: true } as const;
@@ -36,5 +37,31 @@ export class OrgSettingService {
     } catch (error) {
       rethrowPrismaError(error, 'Organization settings');
     }
+  }
+
+  async setLeadAssignment(orgId: string, userId: string, assignToMe: boolean) {
+    const [owner, agentRole] = await Promise.all([
+      this.prisma.user.findFirst({
+        where: { id: userId, orgId, roles: { some: { role: { isSystem: true } } } },
+        select: { id: true },
+      }),
+      this.prisma.role.findFirst({
+        where: { orgId, isSystem: false, name: { equals: DEFAULT_ROLES.AGENT.name, mode: 'insensitive' } },
+        select: { id: true },
+      }),
+    ]);
+    if (!owner) {
+      throw new ForbiddenException('Only an owner can take leads from this setting');
+    }
+    if (!agentRole) {
+      throw new ConflictException('This organization has no "Agent" role. Create it under Roles, then try again.');
+    }
+
+    if (assignToMe) {
+      await this.prisma.userRole.createMany({ data: [{ userId, roleId: agentRole.id }], skipDuplicates: true });
+    } else {
+      await this.prisma.userRole.deleteMany({ where: { userId, roleId: agentRole.id } });
+    }
+    return { assignToMe };
   }
 }

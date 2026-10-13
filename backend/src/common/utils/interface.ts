@@ -32,4 +32,5 @@ export interface IntegrationEnv {
   CALENDLY_CLIENT_ID?: string;
   CALENDLY_CLIENT_SECRET?: string;
   CALENDLY_REDIRECT_URI?: string;
+  CALENDAR_WEBHOOK_BASE_URL?: string;
 }

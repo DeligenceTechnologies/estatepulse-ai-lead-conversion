@@ -7,7 +7,7 @@ import { DAY_SHORT, isWorkingNow } from '../../utils/workingHours';
 /**
  * The pieces a team member is drawn with on the Team Members screen. The card
  * (grid) and the row (list) show only the essentials — who, role, status,
- * mobile, member since — and open MemberDrawer, which holds everything else.
+ * mobile, last login, member since — and open MemberDrawer, which holds everything else.
  */
 
 const AVATAR_GRADIENTS = [
@@ -169,6 +169,20 @@ export const Identity: React.FC<{ member: TeamMember; isSelf: boolean }> = ({ me
   </div>
 );
 
+export const LoginStatus: React.FC<{ member: TeamMember }> = ({ member }) => (
+  <span className="text-xs text-slate-300 whitespace-nowrap">
+    {member.lastLoginAt
+      ? new Date(member.lastLoginAt).toLocaleString(undefined, {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : '—'}
+  </span>
+);
+
 /** Opens on click, Enter or Space — the card and the row are buttons to the member's details. */
 const openProps = (onOpen: () => void, name: string) => ({
   role: 'button' as const,
@@ -276,12 +290,16 @@ export const MemberCard: React.FC<{
         <div className="text-2xs font-semibold uppercase tracking-wider text-slate-500">Member since</div>
         <div className="text-slate-200">{formatDate(member.createdAt)}</div>
       </div>
+      <div className="min-w-0 col-span-2">
+        <div className="text-2xs font-semibold uppercase tracking-wider text-slate-500">Last login</div>
+        <LoginStatus member={member} />
+      </div>
     </div>
     <div className="mt-auto pt-3 border-t border-slate-800">{actions}</div>
   </article>
 );
 
-/** The list view's row: Member, Role, Status, Mobile, Member since, Actions. */
+/** The list view's row: Member, Role, Status, Mobile, Last login, Member since, Actions. */
 export const MemberRow: React.FC<{
   member: TeamMember;
   isSelf: boolean;
@@ -302,6 +320,9 @@ export const MemberRow: React.FC<{
       <StatusBadge status={member.status} />
     </td>
     <td className="px-4 py-3 font-mono text-xs text-slate-300 whitespace-nowrap">{member.phone || '—'}</td>
+    <td className="px-4 py-3">
+      <LoginStatus member={member} />
+    </td>
     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-300">{formatDate(member.createdAt)}</td>
     <td className="px-4 py-3">{actions}</td>
   </tr>

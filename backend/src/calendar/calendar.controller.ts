@@ -5,10 +5,12 @@ import { Public } from '@/auth/decorators/public.decorator';
 import type { AuthContext } from '@/auth/auth.types';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { CalendarAvailabilityService } from './availability/calendar-availability.service';
 import { CalendarService } from './calendar.service';
 import { renderCalendlyCallbackPage, type CalendlyCallbackResult } from './calendly-callback.page';
 import { ActivateCalendarDto } from './dto/activate-calendar.dto';
 import { AddCalendarMemberDto } from './dto/add-member.dto';
+import { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { CalApiKeyDto, CalConnectDto } from './dto/cal-connect.dto';
 import { CalendlyClient } from './providers/calendly.client';
 
@@ -18,6 +20,7 @@ export class CalendarController {
 
   constructor(
     private readonly calendarService: CalendarService,
+    private readonly availabilityService: CalendarAvailabilityService,
     private readonly calendly: CalendlyClient,
   ) {}
 
@@ -30,7 +33,20 @@ export class CalendarController {
   @Get('members')
   @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
   members(@CurrentAuth() auth: AuthContext) {
-    return this.calendarService.members(auth.organizationId);
+    return this.availabilityService.members(auth.organizationId);
+  }
+
+  @Get('availability')
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
+  availability(@CurrentAuth() auth: AuthContext, @Query() query: AvailabilityQueryDto) {
+    return this.availabilityService.report(auth.organizationId, query);
+  }
+
+  @Post('availability/sync')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
+  syncAvailability(@CurrentAuth() auth: AuthContext) {
+    return this.availabilityService.syncNow(auth.organizationId);
   }
 
   @Post('members/add-agent')

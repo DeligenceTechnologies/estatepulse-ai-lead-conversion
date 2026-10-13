@@ -12,6 +12,10 @@ const API_BASE = 'https://api.cal.com/v2';
 const BOOKING_BASE = 'https://cal.com';
 const PROVIDER = 'Cal.com';
 const EVENT_TYPES_API_VERSION = '2024-06-14';
+const SLOTS_API_VERSION = '2024-09-04';
+const BOOKINGS_API_VERSION = '2024-08-13';
+const BOOKINGS_PAGE_SIZE = 100;
+const WEBHOOK_TRIGGERS = ['BOOKING_CREATED', 'BOOKING_RESCHEDULED', 'BOOKING_CANCELLED', 'BOOKING_REQUESTED', 'BOOKING_REJECTED'];
 const PAGE_SIZE = 250;
 const MAX_PAGES = 10;
 
@@ -57,6 +61,24 @@ interface CalEventType {
   hosts?: { name?: string | null }[];
 }
 
+interface CalBooking {
+  start: string;
+  end: string;
+  status: string;
+  hosts?: { id: number }[];
+}
+
+export interface CalBookingWindow {
+  start: number;
+  end: number;
+  hostIds: string[];
+}
+
+export interface CalBookableEventType {
+  id: number;
+  lengthInMinutes: number;
+}
+
 @Injectable()
 export class CalClient {
   async me(apiKey: string): Promise<CalAccount> {
@@ -79,6 +101,7 @@ export class CalClient {
       role: 'owner',
       schedulingUrl: account.username ? `${BOOKING_BASE}/${account.username}` : null,
       timezone: account.timezone,
+      username: account.username,
     };
   }
 
@@ -104,6 +127,7 @@ export class CalClient {
         role: toRole(membership.role),
         schedulingUrl: membership.user.username ? `${BOOKING_BASE}/${membership.user.username}` : null,
         timezone: null,
+        username: membership.user.username,
       }));
   }
 
@@ -113,11 +137,76 @@ export class CalClient {
   }
 
   async personalEventTypes(apiKey: string, username: string | null): Promise<SchedulingEventType[]> {
-    const query = username ? `?${new URLSearchParams({ username })}` : '';
-    const eventTypes = await this.get<CalEventType[]>(apiKey, `/event-types${query}`, {
-      'cal-api-version': EVENT_TYPES_API_VERSION,
+    return toEventTypes(await this.userEventTypes(apiKey, username), username ? `${BOOKING_BASE}/${username}` : null);
+  }
+
+  async shortestEventType(apiKey: string, username: string): Promise<CalBookableEventType | null> {
+    const visible = (await this.userEventTypes(apiKey, username)).filter((eventType) => !eventType.hidden);
+    if (!visible.length) return null;
+    const { id, lengthInMinutes } = visible.reduce((a, b) => (b.lengthInMinutes < a.lengthInMinutes ? b : a));
+    return { id, lengthInMinutes };
+  }
+
+  async slots(apiKey: string, eventTypeId: number, start: Date, end: Date): Promise<{ start: number; end: number }[]> {
+    const query = new URLSearchParams({
+      eventTypeId: String(eventTypeId),
+      start: start.toISOString(),
+      end: end.toISOString(),
+      format: 'range',
     });
-    return toEventTypes(eventTypes, username ? `${BOOKING_BASE}/${username}` : null);
+    const byDate = await this.get<Record<string, { start: string; end: string }[]>>(apiKey, `/slots?${query}`, {
+      'cal-api-version': SLOTS_API_VERSION,
+    });
+    return Object.values(byDate ?? {})
+      .flat()
+      .map((slot) => ({ start: Date.parse(slot.start), end: Date.parse(slot.end) }));
+  }
+
+  async bookings(apiKey: string, start: Date, end: Date, teamId: string | null): Promise<CalBookingWindow[]> {
+    const bookings: CalBooking[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const query = new URLSearchParams({
+        status: 'upcoming,unconfirmed',
+        afterStart: start.toISOString(),
+        beforeEnd: end.toISOString(),
+        take: String(BOOKINGS_PAGE_SIZE),
+        skip: String(page * BOOKINGS_PAGE_SIZE),
+      });
+      if (teamId) query.set('teamId', teamId);
+      const batch = await this.get<CalBooking[]>(apiKey, `/bookings?${query}`, {
+        'cal-api-version': BOOKINGS_API_VERSION,
+      });
+      bookings.push(...batch);
+      if (batch.length < BOOKINGS_PAGE_SIZE) break;
+    }
+    return bookings
+      .filter((booking) => booking.status === 'accepted' || booking.status === 'pending')
+      .map((booking) => ({
+        start: Date.parse(booking.start),
+        end: Date.parse(booking.end),
+        hostIds: (booking.hosts ?? []).map((host) => String(host.id)),
+      }));
+  }
+
+  async createWebhook(apiKey: string, url: string, secret: string): Promise<string> {
+    const body = await requestJson<Envelope<{ id: string | number }>>(PROVIDER, `${API_BASE}/webhooks`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: true, subscriberUrl: url, triggers: WEBHOOK_TRIGGERS, secret }),
+    });
+    return String(body.data.id);
+  }
+
+  async deleteWebhook(apiKey: string, webhookId: string): Promise<void> {
+    await requestJson(PROVIDER, `${API_BASE}/webhooks/${encodeURIComponent(webhookId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  }
+
+  private userEventTypes(apiKey: string, username: string | null): Promise<CalEventType[]> {
+    const query = username ? `?${new URLSearchParams({ username })}` : '';
+    return this.get<CalEventType[]>(apiKey, `/event-types${query}`, { 'cal-api-version': EVENT_TYPES_API_VERSION });
   }
 
   private async get<T>(apiKey: string, path: string, headers: Record<string, string> = {}): Promise<T> {

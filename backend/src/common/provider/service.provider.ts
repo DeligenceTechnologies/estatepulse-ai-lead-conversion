@@ -3,6 +3,7 @@ import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 
 import { MailService } from '@/common/service/mail.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
+import { UserService } from '@/user/user.service';
 import {
   PrismaService,
   TENANT_PRISMA,
@@ -14,6 +15,7 @@ const SERVICES: Provider[] = [
   PrismaService,
   MailService,
   SecretBoxService,
+  UserService,
 ];
 
 const TENANT_PRISMA_PROVIDER: Provider = {

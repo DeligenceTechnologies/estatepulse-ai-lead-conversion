@@ -171,11 +171,82 @@ export const listCalendarMembers = (): Promise<CalendarMember[]> =>
 
 export interface AddedAgent {
   user: { id: string; name: string; email: string };
-  credentialsEmail: { sent: boolean; to: string; reason?: string };
+  credentialsEmail?: { sent: boolean; to: string; reason?: string };
 }
 
 export const addCalendarMemberAsAgent = (externalId: string): Promise<AddedAgent> =>
   apiFetch<AddedAgent>(`${ORG_CALENDAR}/members/add-agent`, { method: 'POST', body: { externalId }, auth: true });
+
+export type BusySource = 'booking' | 'hold' | 'calendar';
+
+export type AvailabilityStatus = 'ok' | 'limited' | 'unavailable';
+
+export interface TimeRange {
+  start: string;
+  end: string;
+}
+
+export interface MemberAvailability {
+  externalId: string;
+  name: string;
+  email: string;
+  timezone: string | null;
+  userId: string | null;
+  userName: string | null;
+  hours: TimeRange[] | null;
+  free: TimeRange[];
+  busy: (TimeRange & { source: BusySource })[];
+  status: AvailabilityStatus;
+  message: string | null;
+  summary: {
+    freeMinutes: number;
+    busyMinutes: number;
+    freeNow: boolean;
+    busyNow: boolean;
+    nextFreeAt: string | null;
+  };
+}
+
+export interface AvailabilityDay {
+  date: string;
+  start: string;
+  end: string;
+}
+
+export interface AvailabilityReport {
+  provider: CalendarProviderId;
+  timezone: string;
+  generatedAt: string;
+  days: AvailabilityDay[];
+  range: { minDate: string; maxDate: string };
+  members: MemberAvailability[];
+  totalMembers: number;
+  sync: AvailabilitySync;
+}
+
+export interface AvailabilitySync {
+  syncedAt: string | null;
+  syncing: boolean;
+  error: string | null;
+}
+
+export interface AvailabilityQuery {
+  date?: string;
+  days?: 1 | 7;
+  timezone?: string;
+}
+
+export const getCalendarAvailability = (query: AvailabilityQuery = {}): Promise<AvailabilityReport> => {
+  const params = new URLSearchParams();
+  if (query.date) params.set('date', query.date);
+  if (query.days) params.set('days', String(query.days));
+  if (query.timezone) params.set('timezone', query.timezone);
+  const search = params.toString();
+  return apiFetch<AvailabilityReport>(`${ORG_CALENDAR}/availability${search ? `?${search}` : ''}`, { auth: true });
+};
+
+export const syncCalendarAvailability = (): Promise<{ outcome: 'synced' | 'busy' | 'skipped'; sync: AvailabilitySync }> =>
+  apiFetch(`${ORG_CALENDAR}/availability/sync`, { method: 'POST', auth: true });
 
 export const listCalendarEventTypes = (): Promise<CalendarEventType[]> =>
   apiFetch<CalendarEventType[]>(`${ORG_CALENDAR}/event-types`, { auth: true });

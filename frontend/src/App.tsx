@@ -23,6 +23,7 @@ import { ConversationsView } from './components/views/ConversationsView';
 import { FollowUpsView } from './components/views/FollowUpsView';
 import { RolesView } from './components/views/RolesView';
 import { SettingsView } from './components/views/SettingsView';
+import { TeamAvailabilityView } from './components/views/TeamAvailabilityView';
 import { AgentAvailability } from './components/agent/AgentAvailability';
 
 // Modals
@@ -50,6 +51,7 @@ const AppContent: React.FC = () => {
         {activeView === 'followups' && <FollowUpsView />}
         {activeView === 'agents' && <AgentsView />}
         {activeView === 'roles' && <RolesView />}
+        {activeView === 'team_availability' && <TeamAvailabilityView />}
         {activeView === 'my_availability' && <AgentAvailability />}
         {activeView === 'integrations' && (
           <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />

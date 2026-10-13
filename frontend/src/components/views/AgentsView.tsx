@@ -480,13 +480,14 @@ export const AgentsView: React.FC = () => {
               {/* List: tablets and up, when chosen. Phones always get cards. */}
               {view === 'list' && (
                 <div className="hidden md:block bg-slate-900/80 border border-slate-800 rounded-xl overflow-x-auto custom-scrollbar">
-                  <table className="w-full text-xs min-w-[760px]">
+                  <table className="w-full text-xs min-w-[880px]">
                     <thead className="text-2xs uppercase text-slate-500 bg-slate-950/70 border-b border-slate-800">
                       <tr className="text-left">
                         <th className="px-4 py-3 font-semibold tracking-wider">Member</th>
                         <th className="px-4 py-3 font-semibold tracking-wider">Roles</th>
                         <th className="px-4 py-3 font-semibold tracking-wider">Status</th>
                         <th className="px-4 py-3 font-semibold tracking-wider whitespace-nowrap">Mobile number</th>
+                        <th className="px-4 py-3 font-semibold tracking-wider whitespace-nowrap">Last login</th>
                         {joinedHeader}
                         <th className="px-4 py-3 font-semibold tracking-wider text-right">Actions</th>
                       </tr>

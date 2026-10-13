@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import type { BusySource } from '../calendar.types';
 import type {
   PoolingType,
   ProviderAccount,
@@ -30,6 +31,7 @@ interface CalendlyUser {
   email: string;
   scheduling_url: string | null;
   timezone: string | null;
+  slug: string | null;
 }
 
 interface CalendlyMembership {
@@ -45,6 +47,48 @@ interface CalendlyEventType {
   pooling_type: string | null;
   profile: { name: string | null } | null;
 }
+
+interface CalendlyAvailabilitySchedule {
+  default: boolean;
+  timezone: string;
+  rules: {
+    type: 'wday' | 'date';
+    wday?: string;
+    date?: string;
+    intervals: { from: string; to: string }[];
+  }[];
+}
+
+interface CalendlyBusyTime {
+  type: string;
+  start_time: string;
+  end_time: string;
+  buffered_start_time?: string | null;
+  buffered_end_time?: string | null;
+}
+
+export interface ScheduleInterval {
+  from: string;
+  to: string;
+}
+
+export interface CalendlySchedule {
+  timezone: string;
+  weekly: Record<string, ScheduleInterval[]>;
+  dates: Record<string, ScheduleInterval[]>;
+}
+
+const WEBHOOK_EVENTS = ['invitee.created', 'invitee.canceled'];
+
+export interface CalendlyBusy {
+  start: number;
+  end: number;
+  blockedStart: number;
+  blockedEnd: number;
+  source: BusySource;
+}
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 interface Page<T> {
   collection: T[];
@@ -139,6 +183,7 @@ export class CalendlyClient {
       role: toRole(role),
       schedulingUrl: user.scheduling_url,
       timezone: user.timezone,
+      username: user.slug,
     }));
   }
 
@@ -155,6 +200,64 @@ export class CalendlyClient {
       poolingType: toPooling(eventType.pooling_type),
       hostName: eventType.profile?.name ?? null,
     }));
+  }
+
+  async defaultSchedule(accessToken: string, userUri: string): Promise<CalendlySchedule | null> {
+    const { collection } = await this.get<{ collection: CalendlyAvailabilitySchedule[] }>(
+      accessToken,
+      `${API_BASE}/user_availability_schedules?${new URLSearchParams({ user: userUri })}`,
+    );
+    const schedule = collection.find((candidate) => candidate.default) ?? collection[0];
+    if (!schedule) return null;
+
+    const weekly: Record<string, ScheduleInterval[]> = {};
+    const dates: Record<string, ScheduleInterval[]> = {};
+    for (const rule of schedule.rules) {
+      const intervals = rule.intervals.map(({ from, to }) => ({ from, to }));
+      if (rule.type === 'date' && rule.date) dates[rule.date] = intervals;
+      if (rule.type === 'wday' && rule.wday && WEEKDAYS.includes(rule.wday)) {
+        weekly[String(WEEKDAYS.indexOf(rule.wday))] = intervals;
+      }
+    }
+    return { timezone: schedule.timezone, weekly, dates };
+  }
+
+  async busyTimes(accessToken: string, userUri: string, start: Date, end: Date): Promise<CalendlyBusy[]> {
+    const query = new URLSearchParams({ user: userUri, start_time: start.toISOString(), end_time: end.toISOString() });
+    const { collection } = await this.get<{ collection: CalendlyBusyTime[] }>(
+      accessToken,
+      `${API_BASE}/user_busy_times?${query}`,
+    );
+    return collection.map((busy) => {
+      const startMs = Date.parse(busy.start_time);
+      const endMs = Date.parse(busy.end_time);
+      return {
+        start: startMs,
+        end: endMs,
+        blockedStart: busy.buffered_start_time ? Date.parse(busy.buffered_start_time) : startMs,
+        blockedEnd: busy.buffered_end_time ? Date.parse(busy.buffered_end_time) : endMs,
+        source: busy.type === 'external' ? 'calendar' : busy.type === 'reserved' ? 'hold' : 'booking',
+      };
+    });
+  }
+
+  async createWebhook(accessToken: string, organizationUri: string, url: string, signingKey: string): Promise<string> {
+    const { resource } = await requestJson<{ resource: { uri: string } }>(PROVIDER, `${API_BASE}/webhook_subscriptions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        events: WEBHOOK_EVENTS,
+        organization: organizationUri,
+        scope: 'organization',
+        signing_key: signingKey,
+      }),
+    });
+    return resource.uri;
+  }
+
+  async deleteWebhook(accessToken: string, webhookUri: string): Promise<void> {
+    await requestJson(PROVIDER, webhookUri, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
   }
 
   private async token(grant: Record<string, string>): Promise<CalendlyGrant> {

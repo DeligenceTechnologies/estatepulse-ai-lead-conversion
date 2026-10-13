@@ -20,6 +20,23 @@ enum CalendarWorkspaceType {
   @@map("calendar_workspace_type")
 }
 
+enum CalendarBlockKind {
+  free
+  booking
+  calendar
+  hold
+
+  @@map("calendar_block_kind")
+}
+
+enum CalendarMemberSyncStatus {
+  ok
+  limited
+  unavailable
+
+  @@map("calendar_member_sync_status")
+}
+
 model CalendarConnection {
   id       String                   @id @default(uuid(7)) @db.Uuid
   orgId    String                   @map("organization_id") @db.Uuid
@@ -42,12 +59,73 @@ model CalendarConnection {
   connectedById  String?   @map("connected_by_id") @db.Uuid
   connectedAt    DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
 
+  syncedAt         DateTime? @map("synced_at") @db.Timestamptz(6)
+  syncError        String?   @map("sync_error") @db.VarChar(500)
+  syncLeaseUntil   DateTime? @map("sync_lease_until") @db.Timestamptz(6)
+  webhookId        String?   @map("webhook_id") @db.VarChar(500)
+  webhookSecret    String?   @map("webhook_secret")
+  webhookAttemptAt DateTime? @map("webhook_attempt_at") @db.Timestamptz(6)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  connectedBy  User?        @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+  organization Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connectedBy  User?               @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+  members      CalendarMember[]
+  blocks       CalendarTimeBlock[]
 
   @@unique([orgId, provider])
+  @@index([isActive, status, syncedAt])
   @@map("calendar_connections")
+}
+
+model CalendarMember {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  orgId         String  @map("organization_id") @db.Uuid
+  connectionId  String  @map("connection_id") @db.Uuid
+  externalId    String  @map("external_id") @db.VarChar(255)
+  name          String  @db.VarChar(255)
+  email         String  @db.VarChar(255)
+  role          String  @db.VarChar(20)
+  timezone      String? @db.VarChar(100)
+  username      String? @db.VarChar(255)
+  schedulingUrl String? @map("scheduling_url") @db.VarChar(500)
+
+  schedule         Json?
+  scheduleSyncedAt DateTime?                @map("schedule_synced_at") @db.Timestamptz(6)
+  syncStatus       CalendarMemberSyncStatus @default(ok) @map("sync_status")
+  syncMessage      String?                  @map("sync_message") @db.VarChar(500)
+  syncedAt         DateTime?                @map("synced_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  connection CalendarConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  blocks     CalendarTimeBlock[]
+
+  @@unique([connectionId, externalId])
+  @@index([orgId])
+  @@map("calendar_members")
+}
+
+model CalendarTimeBlock {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  orgId           String            @map("organization_id") @db.Uuid
+  connectionId    String            @map("connection_id") @db.Uuid
+  memberId        String            @map("member_id") @db.Uuid
+  kind            CalendarBlockKind
+  startsAt        DateTime          @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime          @map("ends_at") @db.Timestamptz(6)
+  blockedStartsAt DateTime          @map("blocked_starts_at") @db.Timestamptz(6)
+  blockedEndsAt   DateTime          @map("blocked_ends_at") @db.Timestamptz(6)
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  member     CalendarMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, startsAt, endsAt])
+  @@index([memberId, endsAt])
+  @@index([endsAt])
+  @@index([orgId])
+  @@map("calendar_time_blocks")
 }

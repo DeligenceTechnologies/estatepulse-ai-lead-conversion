@@ -26,6 +26,9 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.0.0
         version: 11.2.7(@nestjs/common@11.2.7(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7)
+      '@nestjs/schedule':
+        specifier: ^6.1.3
+        version: 6.1.3(@nestjs/common@11.2.7(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7)
       '@prisma/client':
         specifier: ^6.16.0
         version: 6.19.3(prisma@6.19.3(typescript@5.8.3))(typescript@5.8.3)
@@ -557,6 +560,12 @@ packages:
       '@nestjs/common': ^11.0.0
       '@nestjs/core': ^11.0.0
 
+  '@nestjs/schedule@6.1.3':
+    resolution: {integrity: sha512-RflMFOpR16Dwd1jAUbeB4mfGTCh65fvEdL4mSjQPJChpkRGRjIXjb+6YQcK2faQrVT60c9DmLmoVR7/ONCtuYQ==}
+    peerDependencies:
+      '@nestjs/common': ^10.0.0 || ^11.0.0
+      '@nestjs/core': ^10.0.0 || ^11.0.0
+
   '@nestjs/schematics@11.1.0':
     resolution: {integrity: sha512-lVxGZ46tcdItFMoXr6vyKWlnOsm1SZm/GUqAEDvy2RL4Q4O+3bkziAhrO7Y8JLssFUUvNFEGqAizI52WAxhjDw==}
     peerDependencies:
@@ -886,6 +895,9 @@ packages:
 
   '@types/jsonwebtoken@9.0.10':
     resolution: {integrity: sha512-asx5hIG9Qmf/1oStypjanR7iKTv0gXQ1Ov/jfrX6kS/EO0OFni8orbmGCn0672NHR3kXHwpAwR+B368ZGN/2rA==}
+
+  '@types/luxon@3.7.6':
+    resolution: {integrity: sha512-6KSjliQAXK8ZLgFQO4B7iE4Rpf/B3rItzCFuXezBY/XIAGxOdLd7vRNK9/StRPwiS/yJsVbB7HKpW46B8tcEuQ==}
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -1265,6 +1277,10 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  cron@4.4.0:
+    resolution: {integrity: sha512-fkdfq+b+AHI4cKdhZlppHveI/mgz2qpiYxcm+t5E5TsxX7QrLS1VE0+7GENEk9z0EeGPcpSciGv6ez24duWhwQ==}
+    engines: {node: '>=18.x'}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -1671,6 +1687,10 @@ packages:
   lru-cache@11.5.3:
     resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
     engines: {node: 20 || >=22}
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   magic-string@0.30.17:
     resolution: {integrity: sha512-sNPKHvyjVf7gyjwS4xGTaW/mCnF8wnjtifKBEhxfZ7E/S8tQ0rssrwGNn6q8JH/ohItJfSQp9mBtQYuTlH5QnA==}
@@ -2802,6 +2822,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@nestjs/schedule@6.1.3(@nestjs/common@11.2.7(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7)':
+    dependencies:
+      '@nestjs/common': 11.2.7(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.2.7)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      cron: 4.4.0
+
   '@nestjs/schematics@11.1.0(chokidar@4.0.3)(typescript@5.9.3)':
     dependencies:
       '@angular-devkit/core': 19.2.24(chokidar@4.0.3)
@@ -3055,6 +3081,8 @@ snapshots:
     dependencies:
       '@types/ms': 2.1.0
       '@types/node': 22.20.5
+
+  '@types/luxon@3.7.6': {}
 
   '@types/ms@2.1.0': {}
 
@@ -3467,6 +3495,11 @@ snapshots:
       path-type: 4.0.0
     optionalDependencies:
       typescript: 5.9.3
+
+  cron@4.4.0:
+    dependencies:
+      '@types/luxon': 3.7.6
+      luxon: 3.7.2
 
   debug@4.4.3:
     dependencies:
@@ -3889,6 +3922,8 @@ snapshots:
   loupe@3.2.1: {}
 
   lru-cache@11.5.3: {}
+
+  luxon@3.7.2: {}
 
   magic-string@0.30.17:
     dependencies:
