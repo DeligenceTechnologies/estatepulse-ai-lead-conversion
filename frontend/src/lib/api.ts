@@ -258,6 +258,42 @@ export async function apiFetch<T>(
 }
 
 /**
+ * A multipart upload on the session, with upload progress — which fetch cannot
+ * report, so this one call uses XMLHttpRequest. Same envelope, same session
+ * handling as apiFetch. `onProgress` gets the fraction sent so far, 0 to 1.
+ */
+export function apiUpload<T>(path: string, body: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/api${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onerror = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onabort = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* fall through to the generic error below */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as T);
+        return;
+      }
+      const envelope = (payload as { error?: { code?: string; message?: string; details?: ErrorDetail[] } } | null)?.error;
+      const code = (envelope?.code ?? 'INTERNAL') as ErrorCode;
+      endSessionIfUnauthenticated(xhr.status, code);
+      reject(new ApiError(code, envelope?.message ?? MESSAGES[code] ?? MESSAGES.INTERNAL, xhr.status, envelope?.details));
+    };
+    xhr.send(body);
+  });
+}
+
+/**
  * No form asks for a timezone - the device already knows it. An environment
  * without ICU data returns '' here, and JSON.stringify drops the undefined key,
  * so the request simply omits it and the backend fallback stands.

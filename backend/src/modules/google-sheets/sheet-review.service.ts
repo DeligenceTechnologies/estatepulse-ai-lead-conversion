@@ -5,7 +5,7 @@ import { newId } from '../../common/ids';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import type { SessionIdentity } from './google-connections.service';
 import { leadValuesRow, type ChangedValues } from './sheet-import.service';
-import { IMPORT_REVIEW_REASON } from './sheet-rows';
+import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
 import type { ChangesQuery } from './schemas';
 
 export const REJECTED_REASON = 'Rejected at import review';
@@ -57,8 +57,8 @@ export class SheetReviewService {
       // The import's reason is spent; any other review reason stays visible.
       await tx.$executeRaw`
         UPDATE leads
-           SET review_reasons = array_remove(review_reasons, ${IMPORT_REVIEW_REASON}),
-               needs_review = cardinality(array_remove(review_reasons, ${IMPORT_REVIEW_REASON})) > 0,
+           SET review_reasons = array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON}),
+               needs_review = cardinality(array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON})) > 0,
                updated_at = now()
          WHERE organization_id = ${org}::uuid AND id = ANY(${leadIds}::uuid[])`;
 
@@ -122,7 +122,7 @@ export class SheetReviewService {
              SET status = ${LeadStatus.CLOSED},
                  lost_reason = ${REJECTED_REASON},
                  automation_paused = true,
-                 review_reasons = array_remove(review_reasons, ${IMPORT_REVIEW_REASON}),
+                 review_reasons = array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON}),
                  needs_review = false,
                  updated_at = now()
            WHERE organization_id = ${org}::uuid AND id = ANY(${leadIds}::uuid[])`;

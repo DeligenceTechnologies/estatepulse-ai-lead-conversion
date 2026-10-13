@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
 import { useLiveEvents } from '../../lib/liveEvents';
+import { importHistory, type ImportBatch } from '../../utils/fileImportApi';
 import {
   approveRows,
+  isSheetsDisabled,
   listSheetSources,
   rejectRows,
   resolveChanges,
@@ -10,14 +12,17 @@ import {
   sheetChanges,
   syncSheetSource,
   type ChangeItem,
+  type ImportKind,
   type ReviewItem,
   type SheetSource,
 } from '../../utils/googleSheetsApi';
 import { FIELD_LABEL, approveMessage, formatValue, rejectMessage } from '../../utils/sheetMapping';
+import { FileImportModal } from '../imports/FileImportModal';
+import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
 import { errorText } from '../sheets/SheetModal';
 
-/** The review reason every import starts with; shown as the screen itself, not as a badge. */
-const IMPORT_REASON = 'Imported from Google Sheets — awaiting owner approval';
+/** The review reasons every import starts with; shown as the screen itself, not as badges. */
+const IMPORT_REASONS = ['Imported from Google Sheets — awaiting owner approval', 'Imported from a file — awaiting owner approval'];
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
@@ -27,6 +32,19 @@ type Notice = { tone: 'ok' | 'error'; text: string } | null;
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
 const btn =
   'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5';
+const toolBtn =
+  'px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default';
+
+/**
+ * The source filter is ONE select: everything, one kind of import, or one
+ * particular sheet or file. Encoded in its value so the select stays native.
+ */
+const KIND_PREFIX = 'kind:';
+function parseFilter(value: string): { source: 'all' | ImportKind; sourceId?: string } {
+  if (!value) return { source: 'all' };
+  if (value.startsWith(KIND_PREFIX)) return { source: value.slice(KIND_PREFIX.length) as ImportKind };
+  return { source: 'all', sourceId: value };
+}
 
 function budget(min: number | null, max: number | null): string {
   if (min === null && max === null) return '—';
@@ -41,18 +59,31 @@ async function inBatches<T>(ids: string[], fn: (batch: string[]) => Promise<T>):
   return out;
 }
 
+/** A feature switched off on this server answers 404 to its list; that is "none", not an error. */
+const unlessOff = (e: unknown): null => {
+  if (isSheetsDisabled(e)) return null;
+  throw e;
+};
+
 /**
- * Leads imported from Google Sheets, waiting for the owner. Nothing here
- * contacts anyone: approving makes a lead eligible for the outreach strategy,
- * which picks it up on its own schedule and re-checks its own rules.
+ * Leads imported from Google Sheets or uploaded files, waiting for the owner.
+ * One queue for both; every row says where it came from. Nothing here contacts
+ * anyone: approving makes a lead eligible for the outreach strategy, which
+ * picks it up on its own schedule and re-checks its own rules.
  *
- * No background polling: the list reloads when a sheet imports something (the
- * live stream's lead.created), after every decision, and after "Sync now".
+ * Each import has its own server switch (GOOGLE_SHEETS_ENABLED,
+ * FILE_IMPORT_ENABLED); the screen shows the controls of the ones that are on.
+ *
+ * No background polling: the list reloads when an import adds leads (the live
+ * stream's lead.created), after every decision, after an upload, and after
+ * "Sync now".
  */
 export const ImportReviewView: React.FC = () => {
   const [tab, setTab] = useState<Tab>('pending');
   const [sources, setSources] = useState<SheetSource[]>([]);
-  const [sourceId, setSourceId] = useState('');
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [features, setFeatures] = useState({ sheets: true, files: true });
+  const [filter, setFilter] = useState('');
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -63,26 +94,30 @@ export const ImportReviewView: React.FC = () => {
   const [busy, setBusy] = useState<null | 'more' | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [upload, setUpload] = useState(false);
+  const [history, setHistory] = useState(false);
 
-  const changeSource = tab === 'changes' ? sourceId || (sources.length === 1 ? sources[0].id : '') : sourceId;
+  const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
+  // "Changed in the sheet" is about one sheet: the chosen one, or the only one.
+  const sheetIds = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
+  const changeSource = tab === 'changes' ? (sourceId && sheetIds.has(sourceId) ? sourceId : sources.length === 1 ? sources[0].id : '') : '';
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await listSheetSources();
+      const [sheets, hist] = await Promise.all([listSheetSources().catch(unlessOff), importHistory().catch(unlessOff)]);
+      setFeatures({ sheets: sheets !== null, files: hist !== null });
+      const list = sheets ?? [];
       setSources(list);
+      setBatches((hist ?? []).filter((b) => b.kind === 'file_upload'));
       if (tab !== 'changes') {
-        const page = await reviewQueue({
-          state: tab,
-          sourceId: sourceId || undefined,
-          limit: 50,
-        });
+        const page = await reviewQueue({ state: tab, source, sourceId, limit: 50 });
         setItems(page.items);
         setCursor(page.nextCursor);
         setTotals((t) => ({ ...t, [tab]: page.total }));
         setSelected((s) => new Set([...s].filter((id) => page.items.some((i) => i.rowId === id))));
       } else {
-        const src = sourceId || (list.length === 1 ? list[0].id : '');
+        const src = sourceId && list.some((s) => s.id === sourceId) ? sourceId : list.length === 1 ? list[0].id : '';
         const found = src ? await sheetChanges(src) : [];
         setChanges(found);
         setSelected((s) => new Set([...s].filter((id) => found.some((c) => c.rowId === id))));
@@ -93,7 +128,7 @@ export const ImportReviewView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, sourceId]);
+  }, [tab, source, sourceId]);
 
   useEffect(() => {
     void load();
@@ -102,9 +137,9 @@ export const ImportReviewView: React.FC = () => {
   useLiveEvents(
     useCallback(
       (e) => {
-        if (e.type === 'lead.created' && sources.some((s) => s.id === e.leadSourceId)) void load();
+        if (e.type === 'lead.created' && (sources.some((s) => s.id === e.leadSourceId) || batches.some((b) => b.id === e.leadSourceId))) void load();
       },
-      [sources, load],
+      [sources, batches, load],
     ),
   );
 
@@ -121,12 +156,7 @@ export const ImportReviewView: React.FC = () => {
     if (!cursor) return;
     setBusy('more');
     try {
-      const page = await reviewQueue({
-        state: tab === 'rejected' ? 'rejected' : 'pending',
-        sourceId: sourceId || undefined,
-        cursor,
-        limit: 50,
-      });
+      const page = await reviewQueue({ state: tab === 'rejected' ? 'rejected' : 'pending', source, sourceId, cursor, limit: 50 });
       setItems((xs) => [...xs, ...page.items]);
       setCursor(page.nextCursor);
     } catch (e) {
@@ -136,8 +166,14 @@ export const ImportReviewView: React.FC = () => {
     }
   };
 
-  // Only a switched-on sheet can sync (the API refuses a paused one).
-  const syncTargets = useMemo(() => sources.filter((s) => s.status === 'ACTIVE' && (!sourceId || s.id === sourceId)), [sources, sourceId]);
+  // Only a switched-on sheet can sync (the API refuses a paused one); a file never does.
+  const syncTargets = useMemo(
+    () =>
+      source === 'file_upload' || (sourceId && !sheetIds.has(sourceId))
+        ? []
+        : sources.filter((s) => s.status === 'ACTIVE' && (!sourceId || s.id === sourceId)),
+    [sources, source, sourceId, sheetIds],
+  );
   const [syncing, setSyncing] = useState(false);
   const alive = useRef(true);
   // Set on every mount: StrictMode mounts twice in development, and the first
@@ -277,39 +313,79 @@ export const ImportReviewView: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Import Review</h2>
           <p className="text-xs text-slate-400">
-            Leads from your Google Sheets wait here. Nobody is called or texted until you approve them.
+            Leads from your{' '}
+            {features.sheets && features.files ? 'Google Sheets and uploaded files' : features.files ? 'uploaded files' : 'Google Sheets'} wait
+            here. Nobody is called or texted until you approve them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
-            value={tab === 'changes' ? changeSource : sourceId}
+            value={tab === 'changes' ? changeSource : filter}
             onChange={(e) => {
-              setSourceId(e.target.value);
+              setFilter(e.target.value);
               setSelected(new Set());
             }}
             className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 max-w-[16rem]"
+            aria-label="Which imports to show"
           >
-            <option value="">{tab === 'changes' ? 'Choose a sheet…' : 'All sheets'}</option>
-            {sources.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
+            {tab === 'changes' ? (
+              <option value="">Choose a sheet…</option>
+            ) : (
+              <>
+                <option value="">All sources</option>
+                {features.sheets && <option value={`${KIND_PREFIX}google_sheets`}>All Google Sheets</option>}
+                {features.files && <option value={`${KIND_PREFIX}file_upload`}>All file uploads</option>}
+              </>
+            )}
+            {sources.length > 0 && (
+              <optgroup label="Google Sheets">
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {tab !== 'changes' && batches.length > 0 && (
+              <optgroup label="File uploads">
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} · {new Date(b.completedAt ?? b.createdAt).toLocaleDateString()}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
-          <button
-            type="button"
-            onClick={() => void sync()}
-            disabled={syncing || syncTargets.length === 0}
-            title={
-              syncTargets.length === 0
-                ? 'No sheet here is switched on. Switch one on in Integrations to sync it.'
-                : `Read ${sourceId ? 'this sheet' : 'every switched-on sheet'} from Google now`
-            }
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
-          >
-            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
-            {syncing ? 'Syncing…' : 'Sync now'}
-          </button>
+          {features.files && (
+            <button type="button" onClick={() => setUpload(true)} className={toolBtn} title="Import leads from a CSV or Excel file">
+              <FileUp className="w-3.5 h-3.5" />
+              Upload a file
+            </button>
+          )}
+          {features.files && (
+            <button type="button" onClick={() => setHistory(true)} className={toolBtn} title="Every import so far, and where its rows stand">
+              <History className="w-3.5 h-3.5" />
+              History
+            </button>
+          )}
+          {features.sheets && (
+            <button
+              type="button"
+              onClick={() => void sync()}
+              disabled={syncing || syncTargets.length === 0}
+              title={
+                syncTargets.length === 0
+                  ? source === 'file_upload' || (sourceId && !sheetIds.has(sourceId))
+                    ? 'An uploaded file is imported once; there is nothing to sync.'
+                    : 'No sheet here is switched on. Switch one on in Integrations to sync it.'
+                  : `Read ${sourceId ? 'this sheet' : 'every switched-on sheet'} from Google now`
+              }
+              className={toolBtn}
+            >
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -318,7 +394,8 @@ export const ImportReviewView: React.FC = () => {
           {(
             [
               ['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`],
-              ['changes', 'Changed in the sheet'],
+              // Only a sheet changes after review; an uploaded file is read once.
+              ...(features.sheets ? ([['changes', 'Changed in the sheet']] as const) : []),
               ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
             ] as const
           ).map(([id, label]) => (
@@ -334,6 +411,11 @@ export const ImportReviewView: React.FC = () => {
           <div className="flex-1" />
           {tab === 'pending' ? (
             <>
+              {selected.size > 0 && (
+                <button type="button" className={`${btn} text-slate-400 hover:text-white`} disabled={busy !== null} onClick={() => setSelected(new Set())}>
+                  Clear selection
+                </button>
+              )}
               {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
               {decisionButton('approve', 'Approve', 'bg-green-600 text-white hover:bg-green-500')}
             </>
@@ -385,15 +467,25 @@ export const ImportReviewView: React.FC = () => {
             <div className="text-xs text-slate-400">
               {tab === 'pending' ? 'No imported leads are waiting for review.' : 'No imported leads have been rejected.'}
             </div>
+            {tab === 'pending' && features.files && sources.length === 0 && batches.length === 0 && (
+              <button type="button" onClick={() => setUpload(true)} className="text-xs font-bold text-green-300 hover:text-green-200 cursor-pointer">
+                Upload a CSV or Excel file to get started
+              </button>
+            )}
           </div>
         )}
         {tab !== 'changes' && items.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+          <div>
+            {/* No horizontal scroll: short columns never wrap, long text truncates (full value on hover),
+                and the source is an icon whose hover names the file or sheet and the row. */}
+            {/* Fixed layout: the icon columns have a set width that fits their headings, Email gets
+                a larger share, and the other text columns split what is left equally. Long values
+                truncate, with the full text on hover. */}
+            <table className="w-full table-fixed text-xs">
               <thead className="text-2xs uppercase text-slate-500 text-left">
                 <tr>
                   {tab === 'pending' && (
-                    <th className="px-2 py-2 w-8">
+                    <th className="px-2 py-2 w-10">
                       <input
                         type="checkbox"
                         checked={allSelected}
@@ -404,18 +496,17 @@ export const ImportReviewView: React.FC = () => {
                   )}
                   <th className="px-2 py-2">Name</th>
                   <th className="px-2 py-2">Phone</th>
-                  <th className="px-2 py-2">Email</th>
+                  <th className="px-2 py-2 w-[30%]">Email</th>
                   <th className="px-2 py-2">Location</th>
                   <th className="px-2 py-2">Budget</th>
-                  <th className="px-2 py-2">Sheet</th>
-                  {/* As wide as its badges: the other columns take the spare width. */}
-                  <th className="px-2 py-2 w-px whitespace-nowrap">{tab === 'pending' ? 'Warnings' : 'Rejected'}</th>
+                  <th className="px-2 py-2 w-20 text-center">Source</th>
+                  <th className="px-2 py-2 w-24 text-center">{tab === 'pending' ? 'Warnings' : 'Rejected'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {items.map((i) => {
-                  // Our checks on the row (a bad email, a possible duplicate) — not the sheet's own notes column.
-                  const warnings = (i.lead?.reviewReasons ?? []).filter((r) => r !== IMPORT_REASON);
+                  // Our checks on the row (a bad email, a possible duplicate) — not the file's own notes column.
+                  const warnings = (i.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r));
                   return (
                     <tr key={i.rowId} className={selected.has(i.rowId) ? 'bg-green-500/5' : ''}>
                       {tab === 'pending' && (
@@ -428,38 +519,69 @@ export const ImportReviewView: React.FC = () => {
                           />
                         </td>
                       )}
-                      <td className="px-2 py-2 text-slate-100">{[i.lead?.firstName, i.lead?.lastName].filter(Boolean).join(' ') || '—'}</td>
-                      <td className="px-2 py-2 text-slate-300">{i.lead?.phone ?? '—'}</td>
-                      <td className="px-2 py-2 text-slate-300">{i.lead?.email ?? '—'}</td>
-                      <td className="px-2 py-2 text-slate-400">{i.lead?.location ?? '—'}</td>
-                      <td className="px-2 py-2 text-slate-400">{budget(i.lead?.minBudget ?? null, i.lead?.maxBudget ?? null)}</td>
-                      <td className="px-2 py-2 text-slate-500" title={i.source?.name}>
-                        row {i.rowNumber}
+                      <td className="px-2 py-2 text-slate-100">
+                        <span className="block truncate" title={[i.lead?.firstName, i.lead?.lastName].filter(Boolean).join(' ')}>
+                          {[i.lead?.firstName, i.lead?.lastName].filter(Boolean).join(' ') || '—'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-slate-300">
+                        <span className="block truncate" title={i.lead?.phone ?? undefined}>
+                          {i.lead?.phone ?? '—'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-slate-300">
+                        <span className="block truncate" title={i.lead?.email ?? undefined}>
+                          {i.lead?.email ?? '—'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-slate-400">
+                        <span className="block truncate" title={i.lead?.location ?? undefined}>
+                          {i.lead?.location ?? '—'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-slate-400">
+                        <span className="block truncate">{budget(i.lead?.minBudget ?? null, i.lead?.maxBudget ?? null)}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <SourceBadge
+                          kind={i.source?.kind ?? 'google_sheets'}
+                          label={false}
+                          title={`${i.source?.kind === 'file_upload' ? 'Uploaded file' : 'Google Sheet'}: ${i.source?.name ?? '—'} · row ${i.rowNumber}`}
+                        />
                       </td>
                       {tab === 'rejected' ? (
-                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap">
+                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap text-center">
                           {i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}
                         </td>
                       ) : (
                         <td className="px-2 py-2">
-                          <div className="flex gap-1 whitespace-nowrap">
+                          {/* Icons only; what each means is on hover, like the source. */}
+                          <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                             {i.lead?.dncStatus && (
-                              <span className="text-2xs font-bold uppercase px-1.5 py-0.5 rounded border bg-rose-500/20 text-rose-300 border-rose-500/40">
-                                do not contact
+                              <span
+                                className="p-1 rounded border bg-rose-500/15 text-rose-300 border-rose-500/30 inline-flex cursor-help"
+                                title="Do not contact — this contact opted out before"
+                                aria-label="Do not contact"
+                              >
+                                <Ban className="w-3 h-3" />
                               </span>
                             )}
                             {i.missing && (
-                              <span className="text-2xs font-bold uppercase px-1.5 py-0.5 rounded border bg-slate-800 text-slate-400 border-slate-700">
-                                removed from sheet
+                              <span
+                                className="p-1 rounded border bg-slate-800 text-slate-400 border-slate-700 inline-flex cursor-help"
+                                title="Removed from the sheet — the lead is kept; reject it if it should not be worked"
+                                aria-label="Removed from the sheet"
+                              >
+                                <FileX className="w-3 h-3" />
                               </span>
                             )}
                             {warnings.length > 0 && (
                               <span
-                                className="text-2xs font-bold uppercase px-1.5 py-0.5 rounded border bg-amber-500/20 text-amber-300 border-amber-500/40 flex items-center gap-1 cursor-help"
+                                className="p-1 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30 inline-flex cursor-help"
                                 title={warnings.join('\n')}
+                                aria-label={`${warnings.length} warning${warnings.length === 1 ? '' : 's'}`}
                               >
                                 <AlertTriangle className="w-3 h-3" />
-                                {warnings.length} warning{warnings.length === 1 ? '' : 's'}
                               </span>
                             )}
                           </div>
@@ -542,6 +664,31 @@ export const ImportReviewView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {upload && (
+        <FileImportModal
+          onClose={() => setUpload(false)}
+          onImported={(b) => {
+            setNotice({ tone: 'ok', text: `${b.rows?.imported ?? 0} lead${b.rows?.imported === 1 ? '' : 's'} from ${b.name} added for review.` });
+            void load();
+          }}
+        />
+      )}
+      {history && (
+        <ImportHistoryModal
+          onClose={() => setHistory(false)}
+          onReview={(b) => {
+            setHistory(false);
+            switchTab('pending');
+            setFilter(b.id);
+          }}
+          onChanged={() => {
+            // A removed upload may be the one the filter names: back to everything.
+            setFilter((f) => (batches.some((b) => b.id === f) ? '' : f));
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 };

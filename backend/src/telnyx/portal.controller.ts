@@ -69,12 +69,13 @@ function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
 /**
  * Where a lead came from, by the rule the Leads table uses (LeadsView
  * sourceLabel): a connected integration names its provider ("tally", "google
- * sheets"), a pasted webhook URL its transport, and no source at all is manual.
+ * sheets", "file upload"), a pasted webhook URL its transport, and no source at
+ * all is manual.
  */
 function sourceLabel(s: { source_type: string | null; provider: string | null; connection_method: string | null } | undefined): string {
   if (!s) return 'manual';
   const method = (s.connection_method ?? '').toUpperCase();
-  if ((method === 'API' || method === 'SYNC') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
+  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
   return s.source_type ?? 'webhook';
 }
 

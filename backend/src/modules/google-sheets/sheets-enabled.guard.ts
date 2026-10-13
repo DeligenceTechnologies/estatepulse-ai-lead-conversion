@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 
 /** The rollout flag: Google Sheets import exists only where GOOGLE_SHEETS_ENABLED=1. */
 export const sheetsEnabled = (config: ConfigService): boolean => config.get<string>('GOOGLE_SHEETS_ENABLED') === '1';
+/** Its own flag: CSV / XLSX upload exists only where FILE_IMPORT_ENABLED=1. */
+export const fileImportEnabled = (config: ConfigService): boolean => config.get<string>('FILE_IMPORT_ENABLED') === '1';
+
+const off = (code: string, message: string) => new HttpException({ error: { code, message } }, 404);
 
 /**
  * Declared after SessionGuard and OwnerGuard, so a caller who may not use the
@@ -15,11 +19,30 @@ export class SheetsEnabledGuard implements CanActivate {
   constructor(private readonly config: ConfigService) {}
 
   canActivate(): boolean {
-    if (!sheetsEnabled(this.config)) {
-      throw new HttpException(
-        { error: { code: 'GOOGLE_SHEETS_DISABLED', message: 'Google Sheets import is not enabled on this server.' } },
-        404,
-      );
+    if (!sheetsEnabled(this.config)) throw off('GOOGLE_SHEETS_DISABLED', 'Google Sheets import is not enabled on this server.');
+    return true;
+  }
+}
+
+/** The same, for the file upload. */
+@Injectable()
+export class FileImportEnabledGuard implements CanActivate {
+  constructor(private readonly config: ConfigService) {}
+
+  canActivate(): boolean {
+    if (!fileImportEnabled(this.config)) throw off('FILE_IMPORT_DISABLED', 'File import is not enabled on this server.');
+    return true;
+  }
+}
+
+/** Import Review serves both imports, so it is open while either is switched on. */
+@Injectable()
+export class ImportReviewEnabledGuard implements CanActivate {
+  constructor(private readonly config: ConfigService) {}
+
+  canActivate(): boolean {
+    if (!sheetsEnabled(this.config) && !fileImportEnabled(this.config)) {
+      throw off('IMPORT_REVIEW_DISABLED', 'Lead import is not enabled on this server.');
     }
     return true;
   }

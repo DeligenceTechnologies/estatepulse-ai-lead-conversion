@@ -72,9 +72,9 @@ const budgetRange = (l: LiveLead) => {
 const sourceLabel = (l: LiveLead): string => {
   const s = l.source;
   if (!s) return 'manual';
-  // API (Tally) and SYNC (Google Sheets, provider GOOGLE_SHEETS) name their provider.
+  // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
   const method = (s.connectionMethod ?? '').toUpperCase();
-  if ((method === 'API' || method === 'SYNC') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
+  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
   return s.type ?? 'webhook';
 };
 

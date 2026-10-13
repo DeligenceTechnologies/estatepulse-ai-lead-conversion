@@ -1,38 +1,22 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import { SessionGuard, type SessionRequest } from '../../common/guards/session.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import type { SessionIdentity } from './google-connections.service';
-import {
-  changesQuerySchema,
-  createSourceSchema,
-  decideSchema,
-  resolveSchema,
-  reviewQuerySchema,
-  saveMappingSchema,
-  type ChangesQuery,
-  type CreateSourceBody,
-  type DecideBody,
-  type ResolveBody,
-  type ReviewQuery,
-  type SaveMappingBody,
-} from './schemas';
-import { SheetReviewService } from './sheet-review.service';
+import { createSourceSchema, saveMappingSchema, type CreateSourceBody, type SaveMappingBody } from './schemas';
 import { SheetSourcesService } from './sheet-sources.service';
 import { SheetsEnabledGuard } from './sheets-enabled.guard';
 
 /**
- * Spreadsheet sources and the import review queue. Owner-only; the organization
- * always comes from the session, never from the request — a row id from another
- * organization is simply not found, and is reported as skipped.
+ * Spreadsheet sources. Owner-only; the organization always comes from the
+ * session, never from the request — a source id from another organization is
+ * simply not found. The review queue the sources feed is ImportReviewController,
+ * which uploaded files feed too.
  */
 @Controller('api/integrations/google-sheets')
 @UseGuards(SessionGuard, OwnerGuard, SheetsEnabledGuard)
 export class SheetSourcesController {
-  constructor(
-    private readonly sources: SheetSourcesService,
-    private readonly reviews: SheetReviewService,
-  ) {}
+  constructor(private readonly sources: SheetSourcesService) {}
 
   @Get('sources')
   async list(@Req() req: SessionRequest) {
@@ -92,43 +76,8 @@ export class SheetSourcesController {
   async runs(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
     return { runs: await this.sources.runs(req.auth.organizationId, id) };
   }
-
-  @Get('review')
-  review(
-    @Req() req: SessionRequest,
-    @Query(new ZodValidationPipe(reviewQuerySchema, 'Invalid review query')) q: ReviewQuery,
-  ) {
-    return this.sources.review(req.auth.organizationId, q);
-  }
-
-  /** Approve up to 500 pending rows. Lifts the import pause only where nothing else holds the lead. */
-  @Post('review/approve')
-  @HttpCode(200)
-  approve(@Req() req: SessionRequest, @Body(new ZodValidationPipe(decideSchema, 'Invalid approval')) body: DecideBody) {
-    return this.reviews.approve(identity(req), body.rowIds);
-  }
-
-  /** Reject up to 500 pending rows: the leads close and stay paused. */
-  @Post('review/reject')
-  @HttpCode(200)
-  reject(@Req() req: SessionRequest, @Body(new ZodValidationPipe(decideSchema, 'Invalid rejection')) body: DecideBody) {
-    return this.reviews.reject(identity(req), body.rowIds);
-  }
-
-  /** Reviewed rows the sheet has changed since, with a field-by-field diff. */
-  @Get('review/changes')
-  changes(@Req() req: SessionRequest, @Query(new ZodValidationPipe(changesQuerySchema, 'Invalid changes query')) q: ChangesQuery) {
-    return this.reviews.changes(req.auth.organizationId, q);
-  }
-
-  /** Apply the sheet's new values to the leads, or keep them as reviewed. */
-  @Post('review/changes/resolve')
-  @HttpCode(200)
-  resolve(@Req() req: SessionRequest, @Body(new ZodValidationPipe(resolveSchema, 'Invalid resolution')) body: ResolveBody) {
-    return this.reviews.resolve(identity(req), body.rowIds, body.action);
-  }
 }
 
-function identity(req: SessionRequest): SessionIdentity {
+export function identity(req: SessionRequest): SessionIdentity {
   return { organizationId: req.auth.organizationId, userId: req.auth.userId, sessionId: req.sessionId };
 }

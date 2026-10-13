@@ -205,6 +205,8 @@ export const sheetRuns = (id: string): Promise<SheetRun[]> =>
 
 // --- review ---------------------------------------------------------------------------
 
+export type ImportKind = 'google_sheets' | 'file_upload';
+
 export interface ReviewItem {
   rowId: string;
   rowNumber: number;
@@ -212,7 +214,8 @@ export interface ReviewItem {
   /** Set once decided; shown on the Rejected tab. */
   reviewedAt: string | null;
   missing: boolean;
-  source: { id: string; name: string } | null;
+  /** The sheet tab or the uploaded file the row came from. */
+  source: { id: string; name: string; kind: ImportKind } | null;
   lead: {
     id: string;
     firstName: string | null;
@@ -258,11 +261,14 @@ export interface ChangeItem {
 
 export const reviewQueue = (q: {
   state?: 'pending' | 'rejected';
+  /** Sheets only, uploaded files only, or (default) both. */
+  source?: 'all' | ImportKind;
   sourceId?: string;
   cursor?: string | null;
   limit?: number;
 }): Promise<ReviewPage> => {
   const p = new URLSearchParams({ limit: String(q.limit ?? 50), state: q.state ?? 'pending' });
+  if (q.source && q.source !== 'all') p.set('source', q.source);
   if (q.sourceId) p.set('sourceId', q.sourceId);
   if (q.cursor) p.set('cursor', q.cursor);
   return apiFetch<ReviewPage>(`${BASE}/review?${p.toString()}`, { auth: true });

@@ -7,6 +7,7 @@ import { GOOGLE_PROVIDER, GoogleConnectionsService, type SessionIdentity } from 
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
 import { GOOGLE_SHEETS_PROVIDER, SYNC_CONNECTION, SheetImportService } from './sheet-import.service';
 import {
+  FILE_UPLOAD_PROVIDER,
   FULL_NAME_TARGET,
   MAX_COLUMNS,
   analyzeHeaders,
@@ -477,11 +478,16 @@ export class SheetSourcesService {
    */
   async review(organizationId: string, q: ReviewQuery) {
     const cursor = decodeCursor(q.cursor);
+    // One queue for both imports; `source` narrows it to sheets or uploaded files.
+    const scope = {
+      organization_id: organizationId,
+      review_state: q.state,
+      ...(q.sourceId ? { lead_source_id: q.sourceId } : {}),
+      ...(q.source === 'all' ? {} : { lead_sources: { provider: q.source === 'file_upload' ? FILE_UPLOAD_PROVIDER : GOOGLE_SHEETS_PROVIDER } }),
+    };
     const rows = await this.prisma.sheet_import_rows.findMany({
       where: {
-        organization_id: organizationId,
-        review_state: q.state,
-        ...(q.sourceId ? { lead_source_id: q.sourceId } : {}),
+        ...scope,
         ...(cursor
           ? { OR: [{ created_at: { lt: cursor.t } }, { created_at: cursor.t, id: { lt: cursor.id } }] }
           : {}),
@@ -494,7 +500,7 @@ export class SheetSourcesService {
         missing_since: true,
         created_at: true,
         reviewed_at: true,
-        lead_sources: { select: { id: true, name: true } },
+        lead_sources: { select: { id: true, name: true, provider: true } },
         leads: {
           select: {
             id: true,
@@ -513,11 +519,7 @@ export class SheetSourcesService {
     });
     const page = rows.slice(0, q.limit);
     const last = page.at(-1);
-    const total = cursor
-      ? undefined
-      : await this.prisma.sheet_import_rows.count({
-          where: { organization_id: organizationId, review_state: q.state, ...(q.sourceId ? { lead_source_id: q.sourceId } : {}) },
-        });
+    const total = cursor ? undefined : await this.prisma.sheet_import_rows.count({ where: scope });
     return {
       items: page.map((r) => ({
         rowId: r.id,
@@ -526,7 +528,11 @@ export class SheetSourcesService {
         missing: r.missing_since !== null,
         importedAt: r.created_at,
         reviewedAt: r.reviewed_at,
-        source: r.lead_sources,
+        source: {
+          id: r.lead_sources.id,
+          name: r.lead_sources.name,
+          kind: r.lead_sources.provider === FILE_UPLOAD_PROVIDER ? ('file_upload' as const) : ('google_sheets' as const),
+        },
         lead: r.leads
           ? {
               id: r.leads.id,
