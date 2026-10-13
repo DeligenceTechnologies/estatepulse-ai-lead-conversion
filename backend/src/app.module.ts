@@ -6,6 +6,7 @@ import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
 import { RoleModule } from './role/role.module';
 import { OrgSettingModule } from './org-setting/org-setting.module';
+import { CalendarModule } from './calendar/calendar.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { OrgSettingModule } from './org-setting/org-setting.module';
     UserModule,
     RoleModule,
     OrgSettingModule,
+    CalendarModule,
   ],
 })
 export class AppModule {}

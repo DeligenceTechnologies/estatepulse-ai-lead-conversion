@@ -6,6 +6,7 @@ import {
   WEEK_ORDER,
   normalizeWeek,
   summarizeWeek,
+  toMinutes,
   weeklyHours,
   type WorkingDay,
 } from '../../utils/workingHours';
@@ -15,6 +16,12 @@ interface WorkingHoursEditorProps {
   onChange: (days: WorkingDay[]) => void;
   disabled?: boolean;
 }
+
+const formatDuration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+};
 
 /** Index of the first day whose end is not after its start, or -1. */
 export const invalidDay = (days: readonly WorkingDay[]): number =>
@@ -71,8 +78,11 @@ export const WorkingHoursEditor: React.FC<WorkingHoursEditorProps> = ({ value, o
         {WEEK_ORDER.map((dayOfWeek) => {
           const day = week[dayOfWeek];
           const invalid = day.isAvailable && day.startTime >= day.endTime;
+          const timeClass = `h-8 w-[6.75rem] bg-slate-900 border rounded-lg px-2 text-slate-200 tabular-nums focus:outline-none focus:border-emerald-500 disabled:opacity-60 ${
+            invalid ? 'border-rose-500/60' : 'border-slate-800'
+          }`;
           return (
-            <div key={dayOfWeek} className="flex items-center gap-3 px-3 py-2">
+            <div key={dayOfWeek} className="flex items-center gap-3 px-3 min-h-12 py-2">
               <button
                 type="button"
                 role="switch"
@@ -90,37 +100,38 @@ export const WorkingHoursEditor: React.FC<WorkingHoursEditorProps> = ({ value, o
                   }`}
                 />
               </button>
-              <span className={`w-9 font-semibold ${day.isAvailable ? 'text-slate-100' : 'text-slate-500'}`}>
+              <span className={`w-10 font-semibold shrink-0 ${day.isAvailable ? 'text-slate-100' : 'text-slate-500'}`}>
                 {DAY_SHORT[dayOfWeek]}
               </span>
               {day.isAvailable ? (
-                <div className="flex items-center gap-1.5 flex-1 justify-end">
-                  <input
-                    type="time"
-                    value={day.startTime}
-                    onChange={(e) => e.target.value && patch(dayOfWeek, { startTime: e.target.value })}
-                    disabled={disabled}
-                    aria-label={`${DAY_SHORT[dayOfWeek]} start`}
-                    aria-invalid={invalid}
-                    className={`h-8 bg-slate-900 border rounded-md px-2 text-slate-200 focus:outline-none focus:border-emerald-500 ${
-                      invalid ? 'border-rose-500/60' : 'border-slate-800'
-                    }`}
-                  />
-                  <span className="text-slate-500">to</span>
-                  <input
-                    type="time"
-                    value={day.endTime}
-                    onChange={(e) => e.target.value && patch(dayOfWeek, { endTime: e.target.value })}
-                    disabled={disabled}
-                    aria-label={`${DAY_SHORT[dayOfWeek]} end`}
-                    aria-invalid={invalid}
-                    className={`h-8 bg-slate-900 border rounded-md px-2 text-slate-200 focus:outline-none focus:border-emerald-500 ${
-                      invalid ? 'border-rose-500/60' : 'border-slate-800'
-                    }`}
-                  />
-                </div>
+                <>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <input
+                      type="time"
+                      value={day.startTime}
+                      onChange={(e) => e.target.value && patch(dayOfWeek, { startTime: e.target.value })}
+                      disabled={disabled}
+                      aria-label={`${DAY_SHORT[dayOfWeek]} start`}
+                      aria-invalid={invalid}
+                      className={timeClass}
+                    />
+                    <span className="text-slate-600">–</span>
+                    <input
+                      type="time"
+                      value={day.endTime}
+                      onChange={(e) => e.target.value && patch(dayOfWeek, { endTime: e.target.value })}
+                      disabled={disabled}
+                      aria-label={`${DAY_SHORT[dayOfWeek]} end`}
+                      aria-invalid={invalid}
+                      className={timeClass}
+                    />
+                  </div>
+                  <span className={`ml-auto hidden sm:block text-2xs tabular-nums ${invalid ? 'text-rose-300' : 'text-slate-500'}`}>
+                    {invalid ? 'Invalid' : formatDuration(toMinutes(day.endTime) - toMinutes(day.startTime))}
+                  </span>
+                </>
               ) : (
-                <span className="flex-1 text-right text-slate-500 italic">Day off</span>
+                <span className="text-slate-500">Closed</span>
               )}
             </div>
           );

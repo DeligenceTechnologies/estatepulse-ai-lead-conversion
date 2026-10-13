@@ -40,11 +40,11 @@ export class CreateUserDto {
   @MaxLength(255)
   email!: string;
 
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
   @IsString()
-  @IsNotEmpty()
   @MaxLength(50)
-  phone!: string;
+  phone?: string | null;
 
   /** IANA time zone, e.g. "Asia/Kolkata"; the database defaults to Asia/Kolkata. */
   @IsOptional()

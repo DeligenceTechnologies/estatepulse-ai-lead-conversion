@@ -6,9 +6,10 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  users    User[]
-  roles    Role[]
-  settings OrganizationSetting?
+  users               User[]
+  roles               Role[]
+  settings            OrganizationSetting?
+  calendarConnections CalendarConnection[]
 
   @@map("organizations")
 }

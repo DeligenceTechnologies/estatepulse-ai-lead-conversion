@@ -25,3 +25,11 @@ export interface AuthEnv {
   REFRESH_TOKEN_KEEP_SIGNED_IN_EXPIRES_IN_SECONDS: number;
   COOKIE_SECURE: boolean;
 }
+
+export interface IntegrationEnv {
+  APP_URL?: string;
+  INTEGRATION_ENCRYPTION_KEY?: string;
+  CALENDLY_CLIENT_ID?: string;
+  CALENDLY_CLIENT_SECRET?: string;
+  CALENDLY_REDIRECT_URI?: string;
+}

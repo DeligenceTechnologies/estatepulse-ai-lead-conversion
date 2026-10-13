@@ -11,17 +11,12 @@ const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, updatedAt:
 export class OrgSettingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * The organization's settings. Organizations created before settings
-   * existed get their row (with the defaults) on first read.
-   */
   async find(orgId: string) {
     const existing = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: PUBLIC_FIELDS });
     if (existing) return existing;
     try {
       return await this.prisma.organizationSetting.create({ data: { orgId }, select: PUBLIC_FIELDS });
     } catch (error) {
-      // Two first reads at once: the other one created it.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         return this.prisma.organizationSetting.findUniqueOrThrow({ where: { orgId }, select: PUBLIC_FIELDS });
       }

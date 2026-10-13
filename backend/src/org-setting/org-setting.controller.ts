@@ -6,7 +6,6 @@ import { PERMISSIONS } from '@/role/permissions';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 import { OrgSettingService } from './org-setting.service';
 
-/** The caller's own organization's settings; there is no way to address another's. */
 @Controller('org-settings')
 export class OrgSettingController {
   constructor(private readonly orgSettingService: OrgSettingService) {}

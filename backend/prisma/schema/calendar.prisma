@@ -1,0 +1,53 @@
+enum CalendarProvider {
+  calendly
+  cal
+
+  @@map("calendar_provider")
+}
+
+enum CalendarConnectionStatus {
+  active
+  error
+
+  @@map("calendar_connection_status")
+}
+
+enum CalendarWorkspaceType {
+  organization
+  team
+  personal
+
+  @@map("calendar_workspace_type")
+}
+
+model CalendarConnection {
+  id       String                   @id @default(uuid(7)) @db.Uuid
+  orgId    String                   @map("organization_id") @db.Uuid
+  provider CalendarProvider
+  status   CalendarConnectionStatus @default(active)
+  isActive Boolean                  @default(true) @map("is_active")
+
+  accountId     String                @map("account_id") @db.VarChar(255)
+  accountEmail  String?               @map("account_email") @db.VarChar(255)
+  accountName   String?               @map("account_name") @db.VarChar(255)
+  workspaceType CalendarWorkspaceType @map("workspace_type")
+  workspaceId   String                @map("workspace_id") @db.VarChar(255)
+  workspaceName String?               @map("workspace_name") @db.VarChar(255)
+  workspaceSlug String?               @map("workspace_slug") @db.VarChar(255)
+  workspaceRole String?               @map("workspace_role") @db.VarChar(50)
+
+  credentials    String    @map("credentials")
+  tokenExpiresAt DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  lastError      String?   @map("last_error") @db.VarChar(500)
+  connectedById  String?   @map("connected_by_id") @db.Uuid
+  connectedAt    DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connectedBy  User?        @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, provider])
+  @@map("calendar_connections")
+}

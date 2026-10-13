@@ -1,92 +1,40 @@
 import { apiFetch } from '../lib/api';
 
-/**
- * Calendars: the OFFICE's one Calendly connection, each agent's working hours,
- * and the appointments that syncing produces.
- *
- * Calendly belongs to the organization. The owner connects a single Calendly
- * account — one whose user is an owner or admin of its Calendly organization —
- * invites the agents into it there, and every member's bookings are read
- * through that one connection. So there is no per-agent connect here, and
- * nothing under `/agents/me/...` writes to Calendly any more.
- *
- * Split the same way the API is. Everything under `/agents/me/...` carries no
- * agent id at all — the server resolves the agent from the session, and nothing
- * here should ever grow a parameter that would let a browser ask about somebody
- * else. The owner-facing calls below are answered only for an owner, by
- * OwnerGuard.
- *
- * These types are declared here rather than in `types.ts` for the same reason
- * `LiveLead` lives in `api/client.ts`: `types.ts` belongs to the demo store, and
- * its unions are narrower than what the backend really returns.
- */
+export type CalendarProviderId = 'calendly' | 'cal';
 
-/**
- * The office's Calendly account, as much of it as the SPA is told.
- *
- * Narrow on purpose. It once carried the connected account's own `name`,
- * `timezone` and `schedulingUrl` — meaningful while a connection WAS an agent,
- * and misleading now that one account covers the whole office: booking pages
- * come from event types, and each agent's timezone from the member roster.
- */
+export type WorkspaceRole = 'owner' | 'admin' | 'member';
+
+export type WorkspaceType = 'organization' | 'team' | 'personal';
+
 export interface CalendarConnection {
-  status: 'active' | 'inactive' | 'error';
-  connected: boolean;
-  /** The Calendly account that authorized us — the office's, not an agent's. */
-  email: string | null;
-  lastSyncedAt: string | null;
-  /** Set when the connection needs the owner to re-authorize. */
+  status: 'active' | 'error';
+  accountEmail: string | null;
+  accountName: string | null;
+  workspaceType: WorkspaceType;
+  workspaceName: string | null;
+  workspaceRole: WorkspaceRole | null;
+  connectedAt: string;
   lastError: string | null;
 }
 
-/** 'calendly' | 'cal' — the scheduling tools this build supports. */
-export type CalendarProviderId = 'calendly' | 'cal';
-
-/** One provider, and whether this deployment can offer it. */
 export interface CalendarProviderStatus {
   id: CalendarProviderId;
   label: string;
-  /**
-   * False when the deployment cannot offer it at all — Calendly without an
-   * OAuth app registered on the server. Cal.com needs no such registration, so
-   * it is always true.
-   */
   canConnect: boolean;
   reason: string | null;
+  saved: CalendarConnection | null;
 }
 
-/**
- * The office's scheduling account, as the OWNER sees it.
- *
- * At most one provider is ever connected. Calendly and Cal.com are
- * alternatives: connecting one retires the other, because two live calendars
- * would sweep the same office twice.
- */
 export interface OrganizationCalendarStatus {
-  /** Which provider is live, or null. */
   provider: CalendarProviderId | null;
-  /** Every provider, connected or not — the screen has to offer the other one. */
   providers: CalendarProviderStatus[];
-  /** Whether the background sweep is running. Off means "Sync now" only. */
-  syncEnabled: boolean;
   connection: CalendarConnection | null;
-  /**
-   * The team this connection reads. Null for Calendly, which names an
-   * organization only by URI.
-   */
-  workspaceName: string | null;
-  /** The connected account's role there: owner | admin | member. */
-  workspaceRole: string | null;
-  membersSyncedAt: string | null;
 }
 
-/** A Cal.com team the pasted API key can see. */
 export interface CalComTeamOption {
   id: number;
   name: string;
   slug: string | null;
-  /** Cal.com organizations are a separate paid tier and cannot be used here. */
-  isOrganization: boolean;
 }
 
 /**
@@ -109,46 +57,26 @@ export interface CalendarStatus {
   lastSyncedAt: string | null;
 }
 
-/** One member of the office's scheduling team, and who they are here. */
 export interface CalendarMember {
-  /** The provider's own id for them — a Calendly URI, or a Cal.com user id. */
-  schedulingUserId: string;
+  externalId: string;
   name: string;
   email: string;
-  /** owner | admin | user, in Calendly's organization. */
-  role: string;
-  schedulingUrl: string;
-  timezone: string;
-  /** The agent this member is linked to, or null when unmatched. */
-  agentId: string | null;
-  agentName: string | null;
+  role: WorkspaceRole;
+  schedulingUrl: string | null;
+  timezone: string | null;
+  userId: string | null;
+  userName: string | null;
 }
 
-export interface MemberSyncResult {
-  members: number;
-  linked: number;
-  /** Calendly members whose email matches nobody on the EstatePulse roster. */
-  unmatched: number;
-  /** Agents linked to no member — their bookings cannot be attributed. */
-  agentsUnlinked: number;
-}
+export type PoolingType = 'round_robin' | 'collective' | 'managed' | 'multi_pool';
 
-/**
- * A bookable page.
- *
- * `poolingType` is the interesting one: 'round_robin' is the link to hand a
- * lead when the provider should choose the agent.
- */
 export interface CalendarEventType {
-  uri: string;
+  id: string;
   name: string;
-  active: boolean;
   durationMinutes: number;
-  schedulingUrl: string;
-  /** round_robin | collective | multi_pool | null (an ordinary one-on-one). */
-  poolingType: string | null;
-  ownerName: string | null;
-  ownerType: string | null;
+  bookingUrl: string | null;
+  poolingType: PoolingType | null;
+  hostName: string | null;
 }
 
 export interface AvailabilityDay {
@@ -190,16 +118,6 @@ export interface Appointment {
   createdAt: string;
 }
 
-export interface SyncResult {
-  scanned: number;
-  created: number;
-  updated: number;
-  /** Events on the calendar that matched no lead, and so were not stored. */
-  skippedNoLead: number;
-  /** Events whose Calendly host is not linked to any agent on this roster. */
-  skippedNoAgent: number;
-}
-
 export interface AgentCalendar {
   agentId: string;
   agentName: string;
@@ -213,59 +131,54 @@ export interface AgentCalendar {
   upcoming: Appointment[];
 }
 
-// --- the office's Calendly (owner only) --------------------------------------
+// --- the organization's scheduling account ----------------------------------
+
+const ORG_CALENDAR = '/org-settings/calendar';
 
 export const getOrganizationCalendar = (): Promise<OrganizationCalendarStatus> =>
-  apiFetch<OrganizationCalendarStatus>('/organization/calendar', { auth: true });
+  apiFetch<OrganizationCalendarStatus>(ORG_CALENDAR, { auth: true });
 
-export const startOrganizationCalendarConnect = (): Promise<{ authorizeUrl: string }> =>
-  apiFetch<{ authorizeUrl: string }>('/organization/calendar/connect', {
-    method: 'POST',
-    auth: true,
-  });
+export const startCalendlyConnect = (): Promise<{ authorizeUrl: string }> =>
+  apiFetch<{ authorizeUrl: string }>(`${ORG_CALENDAR}/calendly/authorize`, { method: 'POST', auth: true });
 
-export const syncOrganizationCalendar = (): Promise<SyncResult> =>
-  apiFetch<SyncResult>('/organization/calendar/sync', { method: 'POST', auth: true });
+export interface CalComAccountCheck {
+  account: { email: string | null; name: string | null; username: string | null };
+  teams: CalComTeamOption[];
+}
 
-export const disconnectOrganizationCalendar = (): Promise<void> =>
-  apiFetch<void>('/organization/calendar', { method: 'DELETE', auth: true });
-
-export const listCalendarMembers = (): Promise<CalendarMember[]> =>
-  apiFetch<CalendarMember[]>('/organization/calendar/members', { auth: true });
-
-/** POST, not GET: it writes which agent each Calendly member is. */
-export const syncCalendarMembers = (): Promise<MemberSyncResult> =>
-  apiFetch<MemberSyncResult>('/organization/calendar/members/sync', {
-    method: 'POST',
-    auth: true,
-  });
-
-export const listCalendarEventTypes = (): Promise<CalendarEventType[]> =>
-  apiFetch<CalendarEventType[]>('/organization/calendar/event-types', { auth: true });
-
-/**
- * Check a Cal.com key and list the teams it unlocks. Writes nothing, so a
- * mistyped key costs a round trip and no state.
- */
-export const listCalComTeams = (
-  apiKey: string,
-): Promise<{ email: string; teams: CalComTeamOption[] }> =>
-  apiFetch<{ email: string; teams: CalComTeamOption[] }>('/organization/calendar/cal/teams', {
+export const listCalComTeams = (apiKey: string): Promise<CalComAccountCheck> =>
+  apiFetch<CalComAccountCheck>(`${ORG_CALENDAR}/cal/teams`, {
     method: 'POST',
     body: { apiKey },
     auth: true,
   });
 
-/** Connect Cal.com. Retires an active Calendly connection as a side effect. */
-export const connectCalCom = (
-  apiKey: string,
-  teamId: number,
-): Promise<OrganizationCalendarStatus> =>
-  apiFetch<OrganizationCalendarStatus>('/organization/calendar/cal/connect', {
+export const connectCalCom = (apiKey: string, teamId: number | null): Promise<OrganizationCalendarStatus> =>
+  apiFetch<OrganizationCalendarStatus>(`${ORG_CALENDAR}/cal/connect`, {
     method: 'POST',
     body: { apiKey, teamId },
     auth: true,
   });
+
+export const activateCalendar = (provider: CalendarProviderId): Promise<OrganizationCalendarStatus> =>
+  apiFetch<OrganizationCalendarStatus>(`${ORG_CALENDAR}/activate`, { method: 'POST', body: { provider }, auth: true });
+
+export const disconnectOrganizationCalendar = (): Promise<void> =>
+  apiFetch<void>(ORG_CALENDAR, { method: 'DELETE', auth: true });
+
+export const listCalendarMembers = (): Promise<CalendarMember[]> =>
+  apiFetch<CalendarMember[]>(`${ORG_CALENDAR}/members`, { auth: true });
+
+export interface AddedAgent {
+  user: { id: string; name: string; email: string };
+  credentialsEmail: { sent: boolean; to: string; reason?: string };
+}
+
+export const addCalendarMemberAsAgent = (externalId: string): Promise<AddedAgent> =>
+  apiFetch<AddedAgent>(`${ORG_CALENDAR}/members/add-agent`, { method: 'POST', body: { externalId }, auth: true });
+
+export const listCalendarEventTypes = (): Promise<CalendarEventType[]> =>
+  apiFetch<CalendarEventType[]>(`${ORG_CALENDAR}/event-types`, { auth: true });
 
 // --- the agent's own calendar ------------------------------------------------
 
@@ -313,75 +226,37 @@ export const getAgentCalendar = (userId: string): Promise<AgentCalendar> =>
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/**
- * Origins the OAuth result may legitimately arrive from: this app (when the API
- * is same-origin behind a proxy) and the configured API host.
- */
-function apiOrigins(): string[] {
-  const origins = [window.location.origin];
-  const base = import.meta.env.VITE_API_URL;
-  if (base) {
-    try {
-      origins.push(new URL(base, window.location.origin).origin);
-    } catch {
-      /* a malformed VITE_API_URL is a config problem, not a reason to throw here */
-    }
-  }
-  return origins;
-}
+export type CalendlyPopupResult = { outcome: 'ok' | 'failed' | 'closed'; message: string | null };
 
-/**
- * Open the Calendly consent screen and resolve once it finishes.
- *
- * The popup is an optimisation, not the mechanism: the caller reloads its
- * status either way, and that reload is what actually flips the card to
- * connected. If the popup is blocked, or the message never arrives, the page
- * still catches up — so this resolves rather than rejects when the window
- * simply closes.
- */
-export function openCalendlyPopup(authorizeUrl: string): Promise<'ok' | 'failed' | 'closed'> {
+export function openCalendlyPopup(authorizeUrl: string): Promise<CalendlyPopupResult> {
   return new Promise((resolve) => {
-    const popup = window.open(authorizeUrl, 'calendly-oauth', 'width=600,height=780');
+    const width = 600;
+    const height = 760;
+    const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2);
+    const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2);
+    const popup = window.open(authorizeUrl, 'calendly-oauth', `width=${width},height=${height},left=${left},top=${top}`);
     if (!popup) {
-      // Blocked. The callback page falls back to a redirect with ?calendly=,
-      // which AppContext reads once at boot.
-      window.location.href = authorizeUrl;
+      window.location.assign(authorizeUrl);
       return;
     }
+    popup.focus();
 
-    let settled = false;
-    const finish = (outcome: 'ok' | 'failed' | 'closed') => {
-      if (settled) return;
-      settled = true;
+    const finish = (result: CalendlyPopupResult) => {
       window.removeEventListener('message', onMessage);
       clearInterval(poll);
-      resolve(outcome);
+      resolve(result);
     };
 
     const onMessage = (event: MessageEvent) => {
-      // `event.origin` is the SENDER's origin — the API, which served the
-      // callback page — not this app's. In development they differ (the Vite
-      // proxy only makes XHR same-origin; the OAuth redirect is a real
-      // navigation to PUBLIC_API_BASE_URL), and in production they are
-      // different hosts, so comparing against window.location.origin here
-      // would reject every message we actually want.
-      //
-      // Confidentiality is already handled on the other side: the callback
-      // posts with an explicit targetOrigin, so only this app can receive it.
-      // What is left to check is that the message is ours in shape, and it is
-      // only a hint to refresh — the authoritative state comes from the
-      // authenticated status endpoint immediately afterwards.
-      if (!apiOrigins().includes(event.origin)) return;
-      const data = event.data as { source?: string; ok?: boolean } | null;
+      if (event.source !== popup) return;
+      const data = event.data as { source?: unknown; ok?: unknown; message?: unknown } | null;
       if (data?.source !== 'estatepulse:calendly') return;
-      finish(data.ok ? 'ok' : 'failed');
+      finish({ outcome: data.ok === true ? 'ok' : 'failed', message: typeof data.message === 'string' ? data.message : null });
     };
 
     window.addEventListener('message', onMessage);
-    // The user can always just close the window; treat that as done and let the
-    // status refresh decide what really happened.
-    const poll = setInterval(() => {
-      if (popup.closed) finish('closed');
+    const poll = window.setInterval(() => {
+      if (popup.closed) finish({ outcome: 'closed', message: null });
     }, 500);
   });
 }

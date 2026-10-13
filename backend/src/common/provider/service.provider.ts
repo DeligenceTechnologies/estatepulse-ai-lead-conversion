@@ -2,6 +2,7 @@ import { Global, Module, Provider, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 
 import { MailService } from '@/common/service/mail.service';
+import { SecretBoxService } from '@/common/service/secret-box.service';
 import {
   PrismaService,
   TENANT_PRISMA,
@@ -12,6 +13,7 @@ import { TenantContextInterceptor } from '@/common/prisma/tenant-context';
 const SERVICES: Provider[] = [
   PrismaService,
   MailService,
+  SecretBoxService,
 ];
 
 const TENANT_PRISMA_PROVIDER: Provider = {

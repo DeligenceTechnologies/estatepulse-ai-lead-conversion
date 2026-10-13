@@ -5,6 +5,7 @@ export const TENANT_SCOPED_MODELS: ReadonlySet<Prisma.ModelName> =
       Prisma.ModelName.User,
       Prisma.ModelName.Role,
       Prisma.ModelName.OrganizationSetting,
+      Prisma.ModelName.CalendarConnection,
     ]);
 
 const WHERE_OPERATIONS = new Set([

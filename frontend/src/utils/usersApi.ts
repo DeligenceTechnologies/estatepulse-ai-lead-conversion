@@ -26,7 +26,7 @@ export interface TeamMember {
   firstName: string;
   lastName: string;
   email: string;
-  phone: string;
+  phone: string | null;
   status: UserStatus;
   /** IANA time zone, e.g. "Asia/Kolkata" (the default). */
   timezone: string;
@@ -116,7 +116,7 @@ export interface NewMemberInput {
   firstName: string;
   lastName: string;
   email: string;
-  phone: string;
+  phone?: string | null;
   /** IANA time zone; the server defaults to Asia/Kolkata when omitted. */
   timezone?: string;
   /** 0-1000; the server defaults to 25 when omitted. */

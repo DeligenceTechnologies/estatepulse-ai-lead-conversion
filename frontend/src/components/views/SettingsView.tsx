@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Globe,
   Loader2,
@@ -24,11 +25,10 @@ import {
   localTimeIn,
   normalizeWeek,
   utcOffset,
-  weeklyHours,
   type WorkingDay,
 } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
-import { SchedulingCards } from '../integrations/SchedulingCards';
+import { CalendarIntegration } from '../integrations/calendar/CalendarIntegration';
 import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
 
@@ -36,8 +36,8 @@ type SettingsTab = 'general' | 'telnyx' | 'calendar';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
+  { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
-  { id: 'calendar', label: 'Calendly', hint: 'Calendar & bookings', icon: CalendarDays },
 ];
 
 const isTab = (value: string | null): value is SettingsTab => TABS.some((t) => t.id === value);
@@ -48,6 +48,14 @@ const browserZone = (): string | null => {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
   } catch {
     return null;
+  }
+};
+
+const localDateIn = (timeZone: string, now: Date): string => {
+  try {
+    return now.toLocaleDateString('en-US', { timeZone, weekday: 'short', day: 'numeric', month: 'short' });
+  } catch {
+    return '';
   }
 };
 
@@ -209,44 +217,54 @@ const GeneralSettings: React.FC = () => {
         title="Timezone"
         description="Business hours, reports and schedules are read in this zone."
       >
-        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-          <div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="min-w-0">
             <label htmlFor="org-timezone" className="block text-xs font-semibold text-slate-300 mb-1.5">
               Organization timezone
             </label>
-            <TimezoneSelect
-              id="org-timezone"
-              value={timezone}
-              onChange={setTimezone}
-              disabled={!canEdit || saving}
-              className="w-full h-10 bg-slate-950 border border-slate-800 rounded-lg px-3 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            />
-            {canEdit && device && device !== timezone && (
-              <button
-                type="button"
-                onClick={() => setTimezone(device)}
-                disabled={saving}
-                className="mt-2 inline-flex items-center gap-1.5 text-2xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer"
-              >
-                <LocateFixed className="w-3 h-3" />
-                Use this device’s timezone ({device.replace(/_/g, ' ')})
-              </button>
-            )}
+            <div className="relative">
+              <Globe className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <TimezoneSelect
+                id="org-timezone"
+                value={timezone}
+                onChange={setTimezone}
+                disabled={!canEdit || saving}
+                className="w-full h-11 appearance-none bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-9 text-xs text-white truncate focus:outline-none focus:border-emerald-500 hover:border-slate-700 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              />
+              <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
-          <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-2.5">
-            <Clock className="w-4 h-4 text-slate-500" />
-            <div>
-              <div className="text-base font-bold text-white tabular-nums leading-tight">{local ?? '—'}</div>
-              <div className="text-2xs text-slate-500">Local time · {utcOffset(timezone, now)}</div>
+
+          <div className="min-w-0">
+            <span className="block text-xs font-semibold text-slate-300 mb-1.5">Current local time</span>
+            <div className="h-11 flex items-center gap-3 bg-slate-950/60 border border-slate-800 rounded-xl px-3">
+              <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-sm font-bold text-white tabular-nums">{local ?? '—'}</span>
+              <span className="text-2xs text-slate-500 truncate">{localDateIn(timezone, now)}</span>
+              <span className="ml-auto text-2xs font-semibold text-slate-400 bg-slate-800/80 rounded-md px-1.5 py-0.5 shrink-0 tabular-nums">
+                {utcOffset(timezone, now) || 'UTC'}
+              </span>
             </div>
           </div>
         </div>
+
+        {canEdit && device && device !== timezone && (
+          <button
+            type="button"
+            onClick={() => setTimezone(device)}
+            disabled={saving}
+            className="mt-3 inline-flex items-center gap-1.5 text-2xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer disabled:opacity-60"
+          >
+            <LocateFixed className="w-3 h-3" />
+            Use this device’s timezone ({device.replace(/_/g, ' ')})
+          </button>
+        )}
       </Card>
 
       <Card
         icon={<Clock className="w-4 h-4" />}
         title="Business hours"
-        description="When your office is open. New team members start with these hours."
+        description={`When your office is open, in ${timezone.replace(/_/g, ' ')} time. New team members start with these hours.`}
         aside={
           <span
             className={`inline-flex items-center gap-1.5 text-2xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${
@@ -261,9 +279,6 @@ const GeneralSettings: React.FC = () => {
         <div className="text-xs">
           <WorkingHoursEditor value={hours} onChange={setHours} disabled={!canEdit || saving} />
         </div>
-        <p className="mt-3 text-2xs text-slate-500">
-          {weeklyHours(hours)} hours a week · times are in {timezone.replace(/_/g, ' ')}
-        </p>
       </Card>
 
       {/* Save bar: appears with unsaved changes, and briefly after a save */}
@@ -331,8 +346,8 @@ const GeneralSettings: React.FC = () => {
 
 /**
  * Settings: everything about how the organization runs, in one place, one
- * section at a time — General (timezone, business hours), Telnyx (calling)
- * and Calendly (calendar and bookings). The open section is in the URL
+ * section at a time — General (timezone, business hours), Calendar (Calendly
+ * or Cal.com) and Telnyx (calling). The open section is in the URL
  * (?tab=telnyx) so it can be linked to and survives a reload.
  */
 export const SettingsView: React.FC = () => {
@@ -404,11 +419,7 @@ export const SettingsView: React.FC = () => {
             </div>
           )}
 
-          {tab === 'calendar' && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-              <SchedulingCards />
-            </div>
-          )}
+          {tab === 'calendar' && <CalendarIntegration />}
         </div>
       </div>
     </div>

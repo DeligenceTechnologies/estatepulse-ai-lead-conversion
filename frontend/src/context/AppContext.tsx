@@ -201,31 +201,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeSimulatedLead, setActiveSimulatedLead] = useState<Lead | null>(null);
   const [externalLeads, setExternalLeads] = useState<Record<string, Lead>>({});
 
-  /**
-   * One-shot boot signal from the Calendly OAuth callback.
-   *
-   * The popup normally posts its result back and closes itself. When it was
-   * blocked, the callback page redirects here with `?calendly=` instead. This
-   * reads that, sends the user somewhere the outcome is visible, and strips
-   * the parameter again — so the query string is a boot signal and never
-   * becomes part of a route.
-   *
-   * An agent never reaches this provider (AgentApp is a separate shell), and
-   * since Calendly became the OFFICE's one connection the only person who can
-   * start that flow is an owner — so they land back on Integrations, the screen
-   * that holds the card they pressed.
-   *
-   * Otherwise, any path that is not a view (`/` after login, a typo, an
-   * agent-only path) is rewritten to /dashboard in place, without adding a
-   * history entry.
-   */
   useEffect(() => {
-    if (new URLSearchParams(location.search).has('calendly')) {
-      navigate(pathForView('integrations'), { replace: true });
-    } else if (!viewForPath(location.pathname)) {
+    if (!viewForPath(location.pathname)) {
       navigate(pathForView('dashboard'), { replace: true });
     }
-  }, [location.pathname, location.search]);
+  }, [location.pathname]);
 
   // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
   useEffect(() => {

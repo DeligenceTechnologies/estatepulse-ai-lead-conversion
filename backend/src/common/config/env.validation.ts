@@ -56,4 +56,13 @@ export const envValidationSchema = Joi.object({
         is: 'resend',
         then: Joi.required(),
     }),
+
+    // 32 random bytes, base64 (openssl rand -base64 32). Encrypts stored integration credentials.
+    INTEGRATION_ENCRYPTION_KEY: Joi.string().base64().empty('').optional(),
+
+    CALENDLY_CLIENT_ID: Joi.string().empty('').optional(),
+    CALENDLY_CLIENT_SECRET: Joi.string().empty('').optional(),
+    // Must match the redirect URI registered on the Calendly OAuth app and reach
+    // GET /org-settings/calendar/calendly/callback on this server.
+    CALENDLY_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
 });

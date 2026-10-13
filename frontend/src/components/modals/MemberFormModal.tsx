@@ -136,7 +136,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
     if (firstName.trim() !== member.firstName) out.firstName = firstName.trim();
     if (lastName.trim() !== member.lastName) out.lastName = lastName.trim();
     if (email.trim().toLowerCase() !== member.email.toLowerCase()) out.email = email.trim();
-    if (phone.trim() !== member.phone) out.phone = phone.trim();
+    if (phone.trim() !== (member.phone ?? '')) out.phone = phone.trim() || null;
     if (timezone !== member.timezone) out.timezone = timezone;
     if (leadCapValid && leadCap !== member.maxActiveLeads) out.maxActiveLeads = leadCap;
     if (!sameWeek(workingHours, member.workingHours ?? DEFAULT_WORKING_HOURS)) out.workingHours = workingHours;
@@ -153,8 +153,8 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
     e.preventDefault();
     if (saving) return;
 
-    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim()) {
-      setError('First name, last name, email and phone are required.');
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
+      setError('First name, last name and email are required.');
       return;
     }
     if (roleIds.length === 0) {
@@ -187,7 +187,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
-        phone: phone.trim(),
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
         timezone,
         maxActiveLeads: leadCap,
         workingHours,
@@ -298,7 +298,9 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                   <p className="text-slate-500 mt-1">This is what they sign in with.</p>
                 </div>
                 <div>
-                  <label className={label} htmlFor="member-phone">Phone</label>
+                  <label className={label} htmlFor="member-phone">
+                    Phone <span className="font-normal text-slate-500">(optional)</span>
+                  </label>
                   <input
                     id="member-phone"
                     type="tel"
@@ -308,7 +310,6 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                     autoComplete="off"
                     maxLength={50}
                     placeholder="+91 98765 43210"
-                    required
                     disabled={saving}
                   />
                 </div>
