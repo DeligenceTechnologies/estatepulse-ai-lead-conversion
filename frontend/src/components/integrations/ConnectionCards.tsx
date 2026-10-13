@@ -20,6 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { FileImportCard } from './FileImportCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
@@ -326,6 +327,9 @@ export const ConnectionCards: React.FC = () => {
 
         {/* Google Sheets — self-loading, like Telnyx: its account is not a lead source. */}
         <GoogleSheetsCard />
+
+        {/* File upload — one-off CSV / XLSX imports into the same Import Review. */}
+        <FileImportCard />
 
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard

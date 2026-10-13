@@ -10,6 +10,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { FollowupModule } from './modules/followup/followup.module';
 import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
+import { FileImportModule } from './modules/file-import/file-import.module';
 import { GoogleSheetsModule } from './modules/google-sheets/google-sheets.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
@@ -173,6 +174,12 @@ export const envSchema = z.object({
   // Skip reading a sheet whose Drive version has not moved — never for longer
   // than SHEETS_FULL_READ_MAX_AGE_MS. Off unless SHEETS_VERSION_PROBE=1.
   SHEETS_VERSION_PROBE: z.string().optional(),
+  // CSV / XLSX lead upload, off unless FILE_IMPORT_ENABLED=1: its endpoints
+  // answer 404 and the card is hidden. Import Review is open while either this
+  // or GOOGLE_SHEETS_ENABLED is on. Switching it off changes no data.
+  FILE_IMPORT_ENABLED: z.string().optional(),
+  // Largest CSV / XLSX an owner may upload to import leads.
+  FILE_IMPORT_MAX_BYTES: z.coerce.number().default(5 * 1024 * 1024),
   SHEETS_FULL_READ_MAX_AGE_MS: z.coerce.number().default(21_600_000),
 });
 
@@ -220,6 +227,7 @@ export const envSchema = z.object({
     ProvidersModule,
     IntegrationsModule,
     GoogleSheetsModule,
+    FileImportModule,
   ],
   controllers: [HealthController],
 })

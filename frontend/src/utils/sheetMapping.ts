@@ -110,6 +110,7 @@ export const ISSUE_TEXT: Record<string, string> = {
   NO_NAME: 'No name',
   NO_CONTACT: 'No usable phone or email',
   DUPLICATE_IN_SHEET: 'Same ID as an earlier row',
+  DUPLICATE_IN_FILE: 'Same name, phone and email as an earlier row',
 };
 
 const HOLD_TEXT: Record<string, string> = {

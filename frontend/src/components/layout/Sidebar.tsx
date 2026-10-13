@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
-import { googleSheetsEnabled } from '../../utils/googleSheetsApi';
+import { importReviewEnabled } from '../../utils/fileImportApi';
 import { ThemeToggle } from './ThemeToggle';
 
 type NavItem = { id: AppView; label: string; icon: React.ReactNode; badge?: number };
@@ -28,10 +28,10 @@ export const Sidebar: React.FC = () => {
   const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
-  // Import Review exists only where the server has Google Sheets import switched on.
+  // Import Review exists only where the server has Google Sheets import or file import switched on.
   const [sheetsOn, setSheetsOn] = useState(false);
   useEffect(() => {
-    if (isOwner) void googleSheetsEnabled().then(setSheetsOn);
+    if (isOwner) void importReviewEnabled().then(setSheetsOn);
   }, [isOwner]);
 
   // Grouped by the job the owner is doing: working leads, managing the team,

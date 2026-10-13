@@ -463,6 +463,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         runPhones,
         runEmails,
         stats,
+        IMPORT_REVIEW_REASON,
       );
     }
 
@@ -582,6 +583,43 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Rows that arrived some other way than a sync — an uploaded file — written
+   * exactly as a sheet's rows are: paused leads awaiting review, one tracking
+   * row each, never twice. `rows` must already be deduplicated by key. Safe to
+   * call again for the same source: rows it already holds are left alone.
+   */
+  async importRows(
+    organizationId: string,
+    sourceId: string,
+    defaultConsent: string,
+    rows: BuiltRow[],
+    stats: RunStats,
+    importReason: string,
+  ): Promise<void> {
+    stats.dbStatements += 1;
+    const tracked = (await this.prisma.sheet_import_rows.findMany({
+      where: { organization_id: organizationId, lead_source_id: sourceId },
+      select: {
+        id: true,
+        row_key: true,
+        content_hash: true,
+        review_state: true,
+        lead_id: true,
+        row_number: true,
+        changed_after_review_at: true,
+        changed_values: true,
+        missing_since: true,
+      },
+    })) as Tracked[];
+    const known = new Map(tracked.map((t) => [t.row_key, t]));
+    const runPhones = new Set<string>();
+    const runEmails = new Set<string>();
+    for (let i = 0; i < rows.length; i += DB_BATCH) {
+      await this.persistBatch(organizationId, sourceId, defaultConsent, rows.slice(i, i + DB_BATCH), known, null, runPhones, runEmails, stats, importReason);
+    }
+  }
+
+  /**
    * One batch, two round trips whatever its size: who the new and changed rows
    * might duplicate (and whether any opted out), then every insert and update
    * in ONE transaction.
@@ -597,6 +635,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     runPhones: Set<string>,
     runEmails: Set<string>,
     stats: RunStats,
+    /** The review reason every new lead starts with — which import it came from. */
+    importReason: string,
     retried = false,
   ): Promise<void> {
     const fresh: BuiltRow[] = [];
@@ -709,7 +749,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       return { dnc, duplicate };
     };
     const reasons = (dnc: boolean, duplicate: boolean, rest: string[]) => [
-      IMPORT_REVIEW_REASON,
+      importReason,
       ...(dnc ? [DNC_REASON] : []),
       ...(duplicate ? [DUPLICATE_REASON] : []),
       ...rest,
@@ -764,7 +804,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         lead: row.lead!,
         externalId: row.externalId ?? null,
         dnc,
-        reviewReasons: reasons(dnc, duplicate, row.reviewReasons).filter((r) => r !== IMPORT_REVIEW_REASON),
+        reviewReasons: reasons(dnc, duplicate, row.reviewReasons).filter((r) => r !== importReason),
       };
       // The reviewed hash stays: it is what the lead still holds.
       rowUpdates.push({ id: tracked.id, hash: tracked.content_hash, rowNumber: row.rowNumber, set: changed, clear: false, requirePending: false });
@@ -823,7 +863,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           where: { organization_id: organizationId, lead_source_id: sourceId, row_key: { in: batch.map((b) => b.key!) } },
         });
         for (const t of again) known.set(t.row_key, t as Tracked);
-        return this.persistBatch(organizationId, sourceId, defaultConsent, batch, known, rebaseline, runPhones, runEmails, stats, true);
+        return this.persistBatch(organizationId, sourceId, defaultConsent, batch, known, rebaseline, runPhones, runEmails, stats, importReason, true);
       }
       throw err;
     }

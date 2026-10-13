@@ -20,28 +20,31 @@ export type CreateSourceBody = z.infer<typeof createSourceSchema>;
 
 const fieldKey = z.string().trim().min(1).max(200);
 
+/** Column -> lead field pairs, as a sheet mapping or a file upload sends them. */
+export const mappingColumnsSchema = z
+  .array(
+    z.object({
+      fieldKey,
+      target: z.enum([
+        'first_name',
+        'last_name',
+        'phone',
+        'email',
+        'location',
+        'min_budget',
+        'max_budget',
+        'bedrooms',
+        'motivation',
+        'full_name',
+        '__custom__',
+      ]),
+    }),
+  )
+  .min(1)
+  .max(100);
+
 export const saveMappingSchema = z.object({
-  columns: z
-    .array(
-      z.object({
-        fieldKey,
-        target: z.enum([
-          'first_name',
-          'last_name',
-          'phone',
-          'email',
-          'location',
-          'min_budget',
-          'max_budget',
-          'bedrooms',
-          'motivation',
-          'full_name',
-          '__custom__',
-        ]),
-      }),
-    )
-    .min(1)
-    .max(100),
+  columns: mappingColumnsSchema,
   /**
    * The row identity. 'fallback' must be acknowledged explicitly: the owner has
    * been told that editing a phone, email or name makes a new pending lead.
@@ -75,6 +78,9 @@ export type ChangesQuery = z.infer<typeof changesQuerySchema>;
 export const reviewQuerySchema = z.object({
   /** Waiting for a decision, or rejected (kept here, out of the lead lists). */
   state: z.enum(['pending', 'rejected']).default('pending'),
+  /** Where the rows came from; a sheet and an uploaded file share this queue. */
+  source: z.enum(['all', 'google_sheets', 'file_upload']).default('all'),
+  /** One sheet, or one uploaded file. */
   sourceId: z.string().uuid().optional(),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),

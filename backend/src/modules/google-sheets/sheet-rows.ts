@@ -48,9 +48,16 @@ export type SheetTarget = (typeof SHEET_TARGETS)[number];
 export const MAPPING_TARGETS = [...SHEET_TARGETS, FULL_NAME_TARGET, CUSTOM_TARGET] as const;
 export type MappingTarget = (typeof MAPPING_TARGETS)[number];
 
-export type RowIssue = 'NO_ROW_ID' | 'NO_NAME' | 'NO_CONTACT' | 'DUPLICATE_IN_SHEET';
+export type RowIssue = 'NO_ROW_ID' | 'NO_NAME' | 'NO_CONTACT' | 'DUPLICATE_IN_SHEET' | 'DUPLICATE_IN_FILE';
 
 export const IMPORT_REVIEW_REASON = 'Imported from Google Sheets — awaiting owner approval';
+export const FILE_IMPORT_REVIEW_REASON = 'Imported from a file — awaiting owner approval';
+/** Every reason an import starts with; approval and rejection spend whichever one the lead carries. */
+export const IMPORT_REVIEW_REASONS = [IMPORT_REVIEW_REASON, FILE_IMPORT_REVIEW_REASON] as const;
+
+/** A file upload is a lead_source too: one per uploaded file, never synced again. */
+export const FILE_UPLOAD_PROVIDER = 'FILE_UPLOAD';
+export const UPLOAD_CONNECTION = 'UPLOAD';
 
 /**
  * A `leads` filter: a lead imported from a sheet belongs to Import Review until

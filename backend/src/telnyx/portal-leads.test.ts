@@ -218,6 +218,7 @@ test('the lead list names where each lead came from, not a fixed "Website"', asy
   try {
     await lead(`Tallyform${RUN}`, await source({ source_type: 'webhook', provider: 'TALLY', connection_method: 'API' }));
     await lead(`Sheetrow${RUN}`, await source({ source_type: 'other', provider: 'GOOGLE_SHEETS', connection_method: 'SYNC' }));
+    await lead(`Filerow${RUN}`, await source({ source_type: 'other', provider: 'FILE_UPLOAD', connection_method: 'UPLOAD' }));
     await lead(`Pastedurl${RUN}`, await source({ source_type: 'webhook', connection_method: 'MANUAL' }));
     await lead(`Nosource${RUN}`, null);
 
@@ -226,6 +227,7 @@ test('the lead list names where each lead came from, not a fixed "Website"', asy
     const by = (name: string) => res.body.leads.find((l: { firstName: string }) => l.firstName === `${name}${RUN}`)?.source;
     assert.equal(by('Tallyform'), 'tally');
     assert.equal(by('Sheetrow'), 'google sheets');
+    assert.equal(by('Filerow'), 'file upload');
     assert.equal(by('Pastedurl'), 'webhook');
     assert.equal(by('Nosource'), 'manual');
   } finally {

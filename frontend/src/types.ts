@@ -38,6 +38,8 @@ export type LeadSource =
   | 'tally'
   // Imported from a connected Google spreadsheet (provider GOOGLE_SHEETS).
   | 'google sheets'
+  // Imported from an uploaded CSV / XLSX (provider FILE_UPLOAD).
+  | 'file upload'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';
