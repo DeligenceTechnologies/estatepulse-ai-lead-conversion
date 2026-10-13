@@ -41,6 +41,8 @@ const APP_VIEWS = [
   // Live-backend screen. Its data comes from the real API, NOT from this
   // context — see src/api/client.ts. Only the view id lives here.
   'lead_sources',
+  // Leads imported from Google Sheets waiting for the owner. Live API.
+  'import_review',
   // An owner who also takes leads: their own working hours and calendar
   // status, the same screen an agent sees. Live API, like lead_sources.
   'my_availability',

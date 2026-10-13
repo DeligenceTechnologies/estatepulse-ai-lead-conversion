@@ -25,3 +25,6 @@ dist-test/
 
 # local perf-measurement build (PERF_TIMING runs)
 backend/dist-perf/
+
+# JetBrains IDE settings (per developer)
+.idea/

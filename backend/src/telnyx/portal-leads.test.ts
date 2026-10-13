@@ -197,3 +197,39 @@ test('qualified: a lead that does not exist is the same 404', async () => {
   });
   assert.equal(res.status, 404, res.text);
 });
+
+test('the lead list names where each lead came from, not a fixed "Website"', async () => {
+  const sources: string[] = [];
+  const source = async (data: { source_type: string; provider?: string; connection_method?: string }) => {
+    const row = await prisma.lead_sources.create({
+      data: { organization_id: ownerA.orgId, name: `Src ${data.provider ?? data.source_type}`, code: `pl-${RUN}-${sources.length}`, ...data },
+      select: { id: true },
+    });
+    sources.push(row.id);
+    return row.id;
+  };
+  const lead = async (name: string, lead_source_id: string | null) => {
+    const row = await prisma.leads.create({
+      data: { organization_id: ownerA.orgId, status: LeadStatus.NEW, first_name: name, lead_source_id },
+      select: { id: true },
+    });
+    createdLeadIds.push(row.id);
+  };
+  try {
+    await lead(`Tallyform${RUN}`, await source({ source_type: 'webhook', provider: 'TALLY', connection_method: 'API' }));
+    await lead(`Sheetrow${RUN}`, await source({ source_type: 'other', provider: 'GOOGLE_SHEETS', connection_method: 'SYNC' }));
+    await lead(`Pastedurl${RUN}`, await source({ source_type: 'webhook', connection_method: 'MANUAL' }));
+    await lead(`Nosource${RUN}`, null);
+
+    const res = await call('/api/leads', ownerA.token);
+    assert.equal(res.status, 200, res.text);
+    const by = (name: string) => res.body.leads.find((l: { firstName: string }) => l.firstName === `${name}${RUN}`)?.source;
+    assert.equal(by('Tallyform'), 'tally');
+    assert.equal(by('Sheetrow'), 'google sheets');
+    assert.equal(by('Pastedurl'), 'webhook');
+    assert.equal(by('Nosource'), 'manual');
+  } finally {
+    await prisma.leads.deleteMany({ where: { lead_source_id: { in: sources } } });
+    await prisma.lead_sources.deleteMany({ where: { id: { in: sources } } });
+  }
+});

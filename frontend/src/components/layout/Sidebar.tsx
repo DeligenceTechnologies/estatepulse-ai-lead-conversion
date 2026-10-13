@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -13,10 +13,12 @@ import {
   Building2,
   LogOut,
   Webhook,
-  Clock
+  Clock,
+  ClipboardCheck
 } from 'lucide-react';
 import { useApp, AppView, isLockedView } from '../../context/AppContext';
 import { displayName, initialsFor, roleLabel, useAuth } from '../../context/AuthContext';
+import { googleSheetsEnabled } from '../../utils/googleSheetsApi';
 import { ThemeToggle } from './ThemeToggle';
 
 type NavItem = { id: AppView; label: string; icon: React.ReactNode; badge?: number };
@@ -26,6 +28,11 @@ export const Sidebar: React.FC = () => {
   const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
+  // Import Review exists only where the server has Google Sheets import switched on.
+  const [sheetsOn, setSheetsOn] = useState(false);
+  useEffect(() => {
+    if (isOwner) void googleSheetsEnabled().then(setSheetsOn);
+  }, [isOwner]);
 
   // Grouped by the job the owner is doing: working leads, managing the team,
   // and one-time setup. Short labels — the page itself carries the full title.
@@ -35,6 +42,9 @@ export const Sidebar: React.FC = () => {
       label: 'Pipeline',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users className="w-[18px] h-[18px]" />, badge: leads.length },
+        ...(sheetsOn
+          ? [{ id: 'import_review' as const, label: 'Import Review', icon: <ClipboardCheck className="w-[18px] h-[18px]" /> }]
+          : []),
         { id: 'conversations', label: 'Conversations', icon: <MessageSquare className="w-[18px] h-[18px]" /> },
         { id: 'calls', label: 'AI Calls', icon: <PhoneCall className="w-[18px] h-[18px]" /> },
         { id: 'appointments', label: 'Appointments', icon: <Calendar className="w-[18px] h-[18px]" /> },

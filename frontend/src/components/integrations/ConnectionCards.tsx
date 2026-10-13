@@ -20,6 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
 import { TelnyxCard } from './TelnyxCard';
@@ -322,6 +323,9 @@ export const ConnectionCards: React.FC = () => {
             would disagree with each other for as long as the slower one took,
             on a screen whose whole job is saying what is connected. */}
         <SchedulingCards />
+
+        {/* Google Sheets — self-loading, like Telnyx: its account is not a lead source. */}
+        <GoogleSheetsCard />
 
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard

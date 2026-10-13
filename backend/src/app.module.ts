@@ -10,6 +10,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { FollowupModule } from './modules/followup/followup.module';
 import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
+import { GoogleSheetsModule } from './modules/google-sheets/google-sheets.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
 import { LeadsModule } from './modules/leads/leads.module';
@@ -149,6 +150,30 @@ export const envSchema = z.object({
   // Cal.com versions endpoints by date; an unset header silently selects an
   // older response shape rather than failing.
   CALCOM_API_VERSION: z.string().default('2026-06-12'),
+  // Google Sheets import, off unless GOOGLE_SHEETS_ENABLED=1: its endpoints
+  // answer 404 and nothing syncs. Switching it off changes no data. Unset
+  // client id/secret = the Google card says "not configured" instead of
+  // failing at boot.
+  GOOGLE_SHEETS_ENABLED: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  // Defaults to `${PUBLIC_APP_URL}/oauth/google-callback.html`; must match the
+  // Google Cloud console exactly.
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  // Public (browser) values for the Google Picker: an API key restricted to the
+  // app's origin, and the Cloud project NUMBER, which drive.file needs.
+  GOOGLE_PICKER_API_KEY: z.string().optional(),
+  GOOGLE_APP_ID: z.string().optional(),
+  // Periodic sheet sync, off unless SHEETS_SYNC=1 (owner-triggered syncs run
+  // either way). Poll = how often due sources are looked for; interval = how
+  // often each source is synced.
+  SHEETS_SYNC: z.string().optional(),
+  SHEETS_POLL_MS: z.coerce.number().default(60_000),
+  SHEETS_SYNC_INTERVAL_MS: z.coerce.number().default(300_000),
+  // Skip reading a sheet whose Drive version has not moved — never for longer
+  // than SHEETS_FULL_READ_MAX_AGE_MS. Off unless SHEETS_VERSION_PROBE=1.
+  SHEETS_VERSION_PROBE: z.string().optional(),
+  SHEETS_FULL_READ_MAX_AGE_MS: z.coerce.number().default(21_600_000),
 });
 
 @Module({
@@ -194,6 +219,7 @@ export const envSchema = z.object({
     ProcessingModule,
     ProvidersModule,
     IntegrationsModule,
+    GoogleSheetsModule,
   ],
   controllers: [HealthController],
 })
