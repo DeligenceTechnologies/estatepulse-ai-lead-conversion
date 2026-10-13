@@ -12,3 +12,18 @@ model Organization {
 
   @@map("organizations")
 }
+
+model OrganizationSetting {
+  id    String @id @default(uuid(7)) @db.Uuid
+  orgId String @unique @map("organization_id") @db.Uuid
+
+  timezone     String @default("Asia/Kolkata") @db.VarChar(100)
+  workingHours Json   @default("[{\"dayOfWeek\":0,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":1,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":2,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":3,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":4,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":5,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":6,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"}]") @map("working_hours")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("org_settings")
+}
