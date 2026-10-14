@@ -514,6 +514,37 @@ describe('CalendarSyncService.reconcile', () => {
     expect(appointments[0].status).toBe('rescheduled');
   });
 
+  it('records which booking a reschedule replaced, re-reading a row synced before that was stored', async () => {
+    const { service, conn, appointments } = makeService([lead()], [event()], {
+      [EVENT_URI]: [invitee({ old_invitee: 'https://api.calendly.com/scheduled_events/evt-0/invitees/i0' })],
+    });
+    // An older sync's row: same updated_at, no rescheduledFrom key yet.
+    appointments.push({
+      id: 'a1', organization_id: ORG, lead_id: LEAD, agent_id: AGENT, provider: 'calendly',
+      external_event_id: 'evt-1', status: 'scheduled', start_at: new Date(), end_at: new Date(),
+      meeting_url: 'https://meet.example/abc', metadata: { externalUpdatedAt: '2026-09-20T10:00:00.000Z' },
+    });
+
+    await service.syncConnection(conn);
+    expect(appointments[0].metadata.rescheduledFrom).toBe('evt-0');
+  });
+
+  it("keeps the replaced booking's lead, even when the new invitee matches none", async () => {
+    const { service, conn, appointments } = makeService([lead()], [event()], {
+      [EVENT_URI]: [
+        invitee({ email: 'typo@example.com', old_invitee: 'https://api.calendly.com/scheduled_events/evt-0/invitees/i0' }),
+      ],
+    });
+    appointments.push({
+      id: 'a0', organization_id: ORG, lead_id: LEAD, agent_id: AGENT, provider: 'calendly',
+      external_event_id: 'evt-0', status: 'rescheduled', start_at: new Date(), end_at: new Date(),
+      meeting_url: null, metadata: { externalUpdatedAt: '2026-09-19T10:00:00.000Z', rescheduledFrom: null },
+    });
+
+    await service.syncConnection(conn);
+    expect(appointments.find((a) => a.external_event_id === 'evt-1')?.lead_id).toBe(LEAD);
+  });
+
   it('never re-points an existing appointment at a different lead', async () => {
     const first = makeService([lead()], [event()], { [EVENT_URI]: [invitee()] });
     await first.service.syncConnection(first.conn);

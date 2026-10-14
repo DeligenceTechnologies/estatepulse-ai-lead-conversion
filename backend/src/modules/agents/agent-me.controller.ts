@@ -81,9 +81,9 @@ export class AgentMeController {
                where ap.organization_id = ${auth.organizationId}::uuid
                  and ap.agent_id = ${agentId}::uuid
                  and ap.start_at >= ${new Date()}
-                 -- Verbatim from appointments_status_check; cancelled, completed
-                 -- and no_show are not upcoming.
-                 and ap.status in ('scheduled', 'rescheduled')
+                 -- Cancelled, completed and no_show are not upcoming, nor is
+                 -- 'rescheduled': the slot a meeting moved away from.
+                 and ap.status = 'scheduled'
              )::int as upcoming_appointments
         from leads l
        where l.organization_id = ${auth.organizationId}::uuid

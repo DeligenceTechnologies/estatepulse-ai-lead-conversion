@@ -131,6 +131,7 @@ export class CalComProvider implements CalendarProvider {
             // which `statusOf` has already read. Nothing is deferred to the
             // attendee the way it is on Calendly.
             rescheduled: false,
+            rescheduledFrom: b.rescheduledFromUid ?? null,
             externalId: b.uid,
             leadRef: typeof b.metadata?.leadId === 'string' ? b.metadata.leadId.trim() || null : null,
           }

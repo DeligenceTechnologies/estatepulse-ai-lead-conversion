@@ -196,6 +196,8 @@ export class CalendlyProvider implements CalendarProvider {
       cancelUrl: i.cancel_url,
       rescheduleUrl: i.reschedule_url,
       rescheduled: i.rescheduled,
+      // `.../scheduled_events/{uuid}/invitees/{id}` -> `{uuid}`, the old event's externalId.
+      rescheduledFrom: i.old_invitee?.match(/scheduled_events\/([^/]+)/)?.[1] ?? null,
       externalId: i.uri,
       leadRef: leadRefFromTracking(i.tracking),
     };
