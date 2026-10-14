@@ -28,8 +28,9 @@ import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '.
  * The demo pipeline that used to render here came from AppContext's localStorage
  * store, and a second "Live Leads" panel sat above it. Both are gone: this table
  * shows exactly what the backend holds. A row carries only what the pipeline is
- * worked by — who, how to reach them, how hot, who holds them, where they stand —
- * and the dossier has the rest (budget, location, timeline, the form's answers).
+ * worked by — who, the number to call, how hot, their budget, who holds them, where
+ * they stand — and the dossier has the rest (email, location, timeline, the form's
+ * answers).
  * A fact with nothing behind it yet renders a muted dash instead of being dropped.
  *
  * Rows are mapped to `Lead` for the shared detail / pre-call modals and
@@ -49,6 +50,17 @@ const fullName = (l: LiveLead) =>
 const initialsOf = (name: string) => {
   const parts = name.trim().split(/\s+/);
   return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase();
+};
+
+const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
+
+/** "$250k – $400k", "$250k+", "up to $400k"; null when the lead gave no budget. */
+const budgetRange = (l: LiveLead): string | null => {
+  const { minBudget: lo, maxBudget: hi } = l;
+  if (lo !== null && hi !== null) return lo === hi ? thousands(lo) : `${thousands(lo)} – ${thousands(hi)}`;
+  if (lo !== null) return `${thousands(lo)}+`;
+  if (hi !== null) return `up to ${thousands(hi)}`;
+  return null;
 };
 
 /**
@@ -434,6 +446,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               <tr>
                 <th className="px-4 py-2.5">Lead</th>
                 <th className="px-4 py-2.5">Temperature</th>
+                <th className="px-4 py-2.5">Budget</th>
                 <th className="px-4 py-2.5">Assigned agent</th>
                 <th className="px-4 py-2.5">Status</th>
                 <th className="px-4 py-2.5 text-right">
@@ -450,7 +463,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       <div className="h-3.5 w-32 rounded bg-slate-800" />
                       <div className="h-3 w-44 rounded bg-slate-800/70 mt-2" />
                     </td>
-                    {[14, 24, 28, 10].map((w, j) => (
+                    {[14, 20, 24, 28, 10].map((w, j) => (
                       <td key={j} className="px-4 py-3.5">
                         <div className="h-3.5 rounded bg-slate-800/80" style={{ width: `${w * 4}px` }} />
                       </td>
@@ -460,6 +473,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
               ) : filteredLeads.length > 0 ? (
                 filteredLeads.map(lead => {
                   const attention = attentionReasons(lead);
+                  const budget = budgetRange(lead);
                   return (
                     <tr
                       key={lead.id}
@@ -473,9 +487,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                         if (e.key === 'Enter' || e.key === ' ') openLead(lead);
                       }}
                     >
-                      {/* Lead: the name, then how to reach them. Anything worth a second look is
-                          one icon with the reasons on hover; the dossier has the rest (budget,
-                          location, timeline, source, the form's other answers). */}
+                      {/* Lead: the name, then the number to call (the email when there is none).
+                          Anything worth a second look is one icon with the reasons on hover; the
+                          dossier has the rest (email, location, timeline, source, other answers). */}
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="font-semibold text-slate-100 hover:text-emerald-300 transition-colors truncate">
@@ -487,15 +501,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        <div className="text-2xs text-slate-400 flex items-center gap-1.5 min-w-0 mt-0.5">
-                          {lead.phone && <span className="shrink-0">{lead.phone}</span>}
-                          {lead.phone && lead.email && (
-                            <span className="text-slate-600" aria-hidden="true">
-                              ·
-                            </span>
-                          )}
-                          {lead.email && <span className="truncate max-w-[220px]">{lead.email}</span>}
-                          {!lead.phone && !lead.email && <span className="text-slate-600">{DASH}</span>}
+                        <div className="text-2xs text-slate-400 mt-0.5 truncate max-w-[220px]">
+                          {lead.phone || lead.email || <span className="text-slate-600">{DASH}</span>}
                         </div>
                       </td>
 
@@ -512,6 +519,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                           <span title="Not rated yet — the AI call rates the lead" className="text-slate-500">
                             Not rated
                           </span>
+                        )}
+                      </td>
+
+                      {/* Budget — what they said they can spend. A value, not a call to action. */}
+                      <td className="px-4 py-3.5">
+                        {budget ? (
+                          <span className="text-slate-200 font-medium whitespace-nowrap">{budget}</span>
+                        ) : (
+                          <span className="text-slate-600">{DASH}</span>
                         )}
                       </td>
 
@@ -578,7 +594,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                 })
               ) : rows.length === 0 && !error ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center space-y-2">
+                  <td colSpan={6} className="px-4 py-12 text-center space-y-2">
                     <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
                     <div className="text-xs text-slate-400">No live leads yet.</div>
                     <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
@@ -590,7 +606,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                 </tr>
               ) : (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                     No leads match the selected criteria.
                   </td>
                 </tr>
