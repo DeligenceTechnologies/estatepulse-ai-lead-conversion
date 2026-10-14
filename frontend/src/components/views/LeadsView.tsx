@@ -8,6 +8,8 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
+  Snowflake,
+  Sun,
   Users,
   Webhook,
 } from 'lucide-react';
@@ -349,22 +351,23 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
         {/* Filter Tabs */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {[
-            { id: 'all', label: `All Leads (${rows.length})` },
-            { id: 'hot', label: `🔥 Hot (${rows.filter(l => l.temperature === 'hot').length})` },
-            { id: 'warm', label: `☀️ Warm (${rows.filter(l => l.temperature === 'warm').length})` },
-            { id: 'cold', label: `❄️ Cold (${rows.filter(l => l.temperature === 'cold').length})` },
-            { id: 'new', label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
-            { id: 'booked', label: `Appointments (${rows.filter(l => normalizeStatus(l.status) === 'appointment_booked').length})` },
+            { id: 'all', icon: null, label: `All Leads (${rows.length})` },
+            { id: 'hot', icon: <Flame className="w-3.5 h-3.5" />, label: `Hot (${rows.filter(l => l.temperature === 'hot').length})` },
+            { id: 'warm', icon: <Sun className="w-3.5 h-3.5" />, label: `Warm (${rows.filter(l => l.temperature === 'warm').length})` },
+            { id: 'cold', icon: <Snowflake className="w-3.5 h-3.5" />, label: `Cold (${rows.filter(l => l.temperature === 'cold').length})` },
+            { id: 'new', icon: null, label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
+            { id: 'booked', icon: null, label: `Appointments (${rows.filter(l => normalizeStatus(l.status) === 'appointment_booked').length})` },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setSelectedTab(tab.id as Tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                 selectedTab === tab.id
                   ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 font-semibold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
+              {tab.icon}
               {tab.label}
             </button>
           ))}
@@ -512,30 +515,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               )}
                             </span>
                           )}
-                          {!lead.phone && !lead.email && DASH}
+                          {!lead.phone && !lead.email && <span className="text-slate-600">{DASH}</span>}
                         </div>
                       </div>
                     </td>
 
                     {/* Temperature (Hot / Warm / Cold) — no numeric score in Milestone 2 */}
                     <td className="px-4 py-3.5">
-                      <span
-                        title={lead.temperature ? undefined : 'Not rated yet — the AI call rates the lead'}
-                        className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
-                      >
-                        {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
-                        {lead.temperature ?? DASH}
-                      </span>
+                      {lead.temperature ? (
+                        <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}>
+                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
+                          {lead.temperature}
+                        </span>
+                      ) : (
+                        <span title="Not rated yet — the AI call rates the lead" className="text-slate-500">
+                          Not rated
+                        </span>
+                      )}
                     </td>
 
                     {/* Target Budget & Location */}
                     <td className="px-4 py-3.5">
                       <div className="space-y-0.5">
-                        <div className="font-bold text-emerald-400 font-mono">
+                        <div className="text-slate-200 font-medium">
                           {budgetRange(lead)}
                         </div>
                         <div className="text-xs text-slate-300 truncate max-w-[150px]">
-                          {lead.location ?? DASH}
+                          {lead.location ?? <span className="text-slate-600">{DASH}</span>}
                         </div>
                       </div>
                     </td>
@@ -543,7 +549,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     {/* Timeline */}
                     <td className="px-4 py-3.5">
                       <span className="text-slate-200 font-medium">
-                        {humanize(lead.timeline) ?? DASH}
+                        {humanize(lead.timeline) ?? <span className="text-slate-600">{DASH}</span>}
                       </span>
                     </td>
 
@@ -572,7 +578,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     <td className="px-4 py-3.5">
                       <span
                         title={lead.statusReason || undefined}
-                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-full ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
                       >
                         {statusLabel(lead.status)}
                       </span>
