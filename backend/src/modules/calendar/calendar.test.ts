@@ -464,6 +464,42 @@ test('disconnecting when nothing is connected succeeds quietly', async () => {
   assert.equal(res.status, 204, res.text);
 });
 
+test('after a disconnect the status reports nothing connected, so Connect is offered again', async () => {
+  // Written directly: a real connect needs Calendly's consent screen. The
+  // credential is not a real envelope, so the disconnect cannot decrypt it and
+  // skips the revoke — no request reaches Calendly.
+  const row = await prisma.calendar_connections.create({
+    data: {
+      organization_id: ownerB.orgId,
+      agent_id: null,
+      provider: 'calendly',
+      status: 'active',
+      credentials_secret_ref: 'not-a-real-envelope',
+      last_synced_at: new Date(),
+      metadata: { email: emailFor('office-calendly') },
+    },
+  });
+
+  try {
+    const before = asRecord((await call('GET', '/api/organization/calendar', { token: ownerB.token })).body);
+    assert.equal(before['provider'], 'calendly', 'the live row is what status reads');
+    assert.equal(asRecord(before['connection'])['connected'], true);
+
+    const res = await call('DELETE', '/api/organization/calendar', { token: ownerB.token });
+    assert.equal(res.status, 204, res.text);
+
+    // The row survives as 'inactive' — appointments may reference it — but it
+    // is no longer the office calendar. Reporting it as the live provider made
+    // the screen offer "Manage" for a calendar that is gone, and hide Connect.
+    const after = await call('GET', '/api/organization/calendar', { token: ownerB.token });
+    assert.equal(after.status, 200, after.text);
+    assert.equal(asRecord(after.body)['provider'], null, 'no provider is live after a disconnect');
+    assert.equal(asRecord(after.body)['connection'], null);
+  } finally {
+    await prisma.calendar_connections.delete({ where: { id: row.id } });
+  }
+});
+
 test('a malformed Cal.com key is refused before anything reaches Cal.com', async () => {
   for (const body of [{}, { apiKey: '' }, { apiKey: 'not-a-cal-key' }]) {
     const res = await call('POST', '/api/organization/calendar/cal/teams', {
