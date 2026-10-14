@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CalendarBlockKind, CalendarProvider } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { addDays, localDate, zonedToInstant } from '@/common/utils/zoned-time';
+import { addDays, isTimeZone, localDate, zonedToInstant } from '@/common/utils/zoned-time';
 import type { BusySource, MemberAvailabilitySource } from '../calendar.types';
 import { findLinkedUsers } from '../members/linked-users';
+import { readDateOverrides, readWeeklySchedule } from '../members/schedule-to-working-hours';
 import type { CalendlySchedule } from '../providers/calendly.client';
 import {
   CalendarSyncService,
@@ -20,17 +21,18 @@ import { inUse } from '../connection/connection-state';
 
 const DEFAULT_TIMEZONE = 'UTC';
 const HISTORY_VIEW_DAYS = 30;
+/** The earliest and latest clocks on Earth, so a date is in range for whoever is viewing. */
+const EARLIEST_ZONE = 'Etc/GMT+12';
+const LATEST_ZONE = 'Etc/GMT-14';
 
 const MEMBER_FIELDS = {
   id: true,
   externalId: true,
   name: true,
   email: true,
-  role: true,
   timezone: true,
-  username: true,
-  schedulingUrl: true,
   schedule: true,
+  scheduleTimezone: true,
   syncStatus: true,
   syncMessage: true,
 } as const;
@@ -45,7 +47,10 @@ export interface MemberAvailability extends MemberAvailabilitySource {
   externalId: string;
   name: string;
   email: string;
-  timezone: string | null;
+  /** The timezone this member's row is in: their calendar's. */
+  timezone: string;
+  /** The report's dates as this member's own days, midnight to midnight in `timezone`. */
+  days: AvailabilityDay[];
   userId: string | null;
   userName: string | null;
   summary: AvailabilitySummary;
@@ -53,9 +58,9 @@ export interface MemberAvailability extends MemberAvailabilitySource {
 
 export interface AvailabilityReport {
   provider: CalendarProvider;
-  timezone: string;
   generatedAt: string;
-  days: AvailabilityDay[];
+  /** The calendar dates shown; each member sees them in their own timezone. */
+  dates: string[];
   range: { minDate: string; maxDate: string };
   members: MemberAvailability[];
   totalMembers: number;
@@ -72,8 +77,9 @@ interface StoredBlock {
 }
 
 /**
- * Who is free and who is busy: the day/week report built from synced calendar
- * blocks, in the organization's timezone.
+ * Who is free and who is busy, from synced calendar blocks. Every member is
+ * shown in their own calendar timezone: a date is their day, midnight to
+ * midnight where they are.
  */
 @Injectable()
 export class CalendarAvailabilityService {
@@ -84,45 +90,46 @@ export class CalendarAvailabilityService {
 
   async report(orgId: string, query: AvailabilityQueryDto): Promise<AvailabilityReport> {
     const connection = await this.sync.freshConnection(orgId);
-    const timezone = query.timezone ?? (await this.orgTimezone(orgId));
-    const span = query.days ?? 1;
-    const today = localDate(Date.now(), timezone);
-    const minDate = addDays(today, -HISTORY_VIEW_DAYS);
-    const maxDate = addDays(today, SYNC_HORIZON_DAYS - span);
-    const date = query.date ?? today;
-    if (date < minDate || date > maxDate) {
-      throw new BadRequestException(`Pick a date between ${minDate} and ${maxDate}.`);
-    }
-
-    const days: AvailabilityDay[] = Array.from({ length: span }, (_, index) => {
-      const day = addDays(date, index);
-      return {
-        date: day,
-        start: new Date(zonedToInstant(day, 0, timezone)).toISOString(),
-        end: new Date(zonedToInstant(addDays(day, 1), 0, timezone)).toISOString(),
-      };
-    });
-    const window: Interval = { start: Date.parse(days[0].start), end: Date.parse(days[days.length - 1].end) };
     const now = Date.now();
-    const upcoming: Interval = { start: Math.min(Math.max(window.start, now), window.end), end: window.end };
+    const span = query.days ?? 1;
+    const minDate = addDays(localDate(now, EARLIEST_ZONE), -HISTORY_VIEW_DAYS);
+    const maxDate = addDays(localDate(now, LATEST_ZONE), SYNC_HORIZON_DAYS - span);
 
-    const [members, blocks] = await Promise.all([
+    const [members, organizationTimezone] = await Promise.all([
       this.prisma.calendarMember.findMany({
         where: { connectionId: connection.id },
         select: MEMBER_FIELDS,
         orderBy: { name: 'asc' },
       }),
-      this.prisma.calendarTimeBlock.findMany({
-        where: {
-          connectionId: connection.id,
-          startsAt: { lt: new Date(window.end) },
-          endsAt: { gt: new Date(window.start) },
-        },
-        select: { memberId: true, kind: true, startsAt: true, endsAt: true, blockedStartsAt: true, blockedEndsAt: true },
-        orderBy: { startsAt: 'asc' },
-      }),
+      this.orgTimezone(orgId),
     ]);
+    const date = query.date ?? localDate(now, organizationTimezone);
+    if (date < minDate || date > maxDate) {
+      throw new BadRequestException(`Pick a date between ${minDate} and ${maxDate}.`);
+    }
+    const dates = Array.from({ length: span }, (_, index) => addDays(date, index));
 
+    const rows = members.map((member) => {
+      const timezone = workingTimezone(member) ?? organizationTimezone;
+      const days = dates.map((day) => ({
+        date: day,
+        start: zonedToInstant(day, 0, timezone),
+        end: zonedToInstant(addDays(day, 1), 0, timezone),
+      }));
+      return { member, timezone, days, window: { start: days[0].start, end: days[days.length - 1].end } };
+    });
+
+    const blocks = rows.length
+      ? await this.prisma.calendarTimeBlock.findMany({
+          where: {
+            connectionId: connection.id,
+            startsAt: { lt: new Date(Math.max(...rows.map((row) => row.window.end))) },
+            endsAt: { gt: new Date(Math.min(...rows.map((row) => row.window.start))) },
+          },
+          select: { memberId: true, kind: true, startsAt: true, endsAt: true, blockedStartsAt: true, blockedEndsAt: true },
+          orderBy: { startsAt: 'asc' },
+        })
+      : [];
     const byMember = new Map<string, StoredBlock[]>();
     for (const block of blocks) {
       const list = byMember.get(block.memberId);
@@ -133,14 +140,15 @@ export class CalendarAvailabilityService {
 
     return {
       provider: connection.provider,
-      timezone,
       generatedAt: new Date(now).toISOString(),
-      days,
+      dates,
       range: { minDate, maxDate },
       totalMembers: members.length,
       sync: syncState(connection),
-      members: members.map((member) => {
-        const own = byMember.get(member.id) ?? [];
+      members: rows.map(({ member, timezone, days, window }) => {
+        const own = (byMember.get(member.id) ?? []).filter(
+          (block) => block.startsAt.getTime() < window.end && block.endsAt.getTime() > window.start,
+        );
         const busy: (Busy & { source: BusySource })[] = own
           .filter((block) => block.kind !== 'free')
           .map((block) => ({
@@ -150,13 +158,15 @@ export class CalendarAvailabilityService {
             blockedEnd: block.blockedEndsAt.getTime(),
             source: block.kind as BusySource,
           }));
+        const upcoming: Interval = { start: Math.min(Math.max(window.start, now), window.end), end: window.end };
 
-        let hours: Interval[] | null = null;
+        const schedule = scheduleOf(member);
+        const hours = schedule ? expandSchedule(schedule, window) : null;
         let free: Interval[];
         if (connection.provider === 'calendly') {
-          hours = member.schedule ? expandSchedule(member.schedule as unknown as CalendlySchedule, window) : null;
           free = hours ? freeTime(hours, busy, upcoming) : [];
         } else {
+          // Cal.com's slots already apply the hours (shown for the key's owner only).
           const slots = own
             .filter((block) => block.kind === 'free')
             .map((block) => ({ start: block.startsAt.getTime(), end: block.endsAt.getTime() }));
@@ -168,7 +178,8 @@ export class CalendarAvailabilityService {
           externalId: member.externalId,
           name: member.name,
           email: member.email,
-          timezone: member.timezone,
+          timezone,
+          days: days.map(({ date: day, start, end }) => ({ date: day, ...toRange({ start, end }) })),
           userId: user?.id ?? null,
           userName: user?.name ?? null,
           hours: hours ? hours.map(toRange) : null,
@@ -194,8 +205,30 @@ export class CalendarAvailabilityService {
 
   private async orgTimezone(orgId: string): Promise<string> {
     const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } });
-    return settings?.timezone ?? DEFAULT_TIMEZONE;
+    return isTimeZone(settings?.timezone) ? settings.timezone : DEFAULT_TIMEZONE;
   }
+}
+
+interface ScheduledMember {
+  timezone: string | null;
+  schedule: unknown;
+  scheduleTimezone: string | null;
+}
+
+/**
+ * The timezone a member works in: their schedule's (Calendly keeps one per
+ * schedule, and it can differ from the profile), else their profile's.
+ */
+export function workingTimezone(member: Omit<ScheduledMember, 'schedule'>): string | null {
+  return [member.scheduleTimezone, member.timezone].find(isTimeZone) ?? null;
+}
+
+/** The saved working hours in the shape `expandSchedule` reads; null when there are none or no zone for them. */
+export function scheduleOf(member: ScheduledMember): CalendlySchedule | null {
+  const weekly = readWeeklySchedule(member.schedule);
+  const timezone = workingTimezone(member);
+  if (!weekly || !timezone) return null;
+  return { timezone, weekly: weekly.weekly, dates: readDateOverrides((member.schedule as { dates?: unknown }).dates) };
 }
 
 function toRange({ start, end }: Interval) {

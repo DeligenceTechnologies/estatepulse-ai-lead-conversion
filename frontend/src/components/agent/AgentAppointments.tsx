@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, Clock, Loader2, Video } from 'lucide-react';
 import { ApiError, messageFor } from '../../lib/api';
 import { getMyAppointments, type Appointment } from '../../utils/calendarApi';
+import { formatDate, formatTime } from '../../lib/datetime';
 
 /** Tone per appointment status, using the same palette as the rest of the shell. */
 function statusTone(status: string): string {
@@ -133,7 +134,7 @@ const Section: React.FC<{
                 <div className="flex items-center gap-2 text-slate-300">
                   <CalendarClock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>
-                    {new Date(a.startTime).toLocaleDateString([], {
+                    {formatDate(a.startTime, {
                       weekday: 'short',
                       month: 'short',
                       day: 'numeric',
@@ -145,12 +146,12 @@ const Section: React.FC<{
                   {/* A cancelled slot is information, not noise: it is struck
                       through rather than hidden. */}
                   <span className={cancelled ? 'line-through text-slate-500' : ''}>
-                    {new Date(a.startTime).toLocaleTimeString([], {
+                    {formatTime(a.startTime, {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}{' '}
                     –{' '}
-                    {new Date(a.endTime).toLocaleTimeString([], {
+                    {formatTime(a.endTime, {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}

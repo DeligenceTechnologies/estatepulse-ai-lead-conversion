@@ -21,6 +21,17 @@ import {
   type CallRow,
 } from '../../utils/historyApi';
 import { CallQualificationCard } from './CallQualificationCard';
+import { addDays, dayFromIsoDate, formatDateTime } from '../../lib/datetime';
+
+const dayStartIso = (date: string): string | undefined => {
+  const day = date ? dayFromIsoDate(date) : null;
+  return day === null ? undefined : new Date(day).toISOString();
+};
+
+const dayEndIso = (date: string): string | undefined => {
+  const day = date ? dayFromIsoDate(date) : null;
+  return day === null ? undefined : new Date(addDays(day, 1) - 1).toISOString();
+};
 
 /**
  * Call history for the office.
@@ -133,10 +144,10 @@ export const CallsView: React.FC = () => {
         outcome: outcome || undefined,
         temperature: temperature || undefined,
         agentId: agentId || undefined,
-        // Dates arrive as yyyy-mm-dd; widen `to` to the end of that day, or a
-        // filter of "today to today" would match nothing.
-        from: from || undefined,
-        to: to ? `${to}T23:59:59.999Z` : undefined,
+        // Dates arrive as yyyy-mm-dd: days in the user's timezone, sent as
+        // the UTC instants they start and end at (`to` takes its whole day).
+        from: dayStartIso(from),
+        to: dayEndIso(to),
       }),
     [search, outcome, temperature, agentId, from, to],
   );
@@ -348,8 +359,8 @@ export const CallsView: React.FC = () => {
                       </span>
                     )}
                   </span>
-                  <span title={new Date(call.createdAt).toLocaleString()}>
-                    {new Date(call.startedAt ?? call.createdAt).toLocaleString([], {
+                  <span title={formatDateTime(call.createdAt)}>
+                    {formatDateTime(call.startedAt ?? call.createdAt, {
                       month: 'short',
                       day: 'numeric',
                       hour: '2-digit',
@@ -373,7 +384,7 @@ export const CallsView: React.FC = () => {
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {detail.provider} • {detail.direction} •{' '}
-                  {detail.startedAt ? new Date(detail.startedAt).toLocaleString() : 'not started'}
+                  {detail.startedAt ? formatDateTime(detail.startedAt) : 'not started'}
                   {detail.agentName && <> • owned by {detail.agentName}</>}
                 </p>
               </div>

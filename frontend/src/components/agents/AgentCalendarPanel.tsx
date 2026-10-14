@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, Loader2, X } from 'lucide-react';
 import { ApiError, messageFor } from '../../lib/api';
 import { DAY_SHORT, getAgentCalendar, type AgentCalendar } from '../../utils/calendarApi';
+import { formatDate, formatTime } from '../../lib/datetime';
 
 interface Props {
   /** users.id of the member whose calendar to show. */
@@ -172,13 +173,13 @@ export const AgentCalendarPanel: React.FC<Props> = ({ userId, memberName, onClos
                         </div>
                         <div className="text-right shrink-0 text-slate-300">
                           <div>
-                            {new Date(a.startTime).toLocaleDateString([], {
+                            {formatDate(a.startTime, {
                               month: 'short',
                               day: 'numeric',
                             })}
                           </div>
                           <div className="text-xs text-slate-500">
-                            {new Date(a.startTime).toLocaleTimeString([], {
+                            {formatTime(a.startTime, {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}

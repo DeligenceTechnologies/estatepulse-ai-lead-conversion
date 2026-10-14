@@ -91,8 +91,8 @@ interface CalBooking {
   meetingUrl?: string | null;
   location?: string | null;
   cancellationReason?: string | null;
-  hosts?: { id: number; name?: string | null; email?: string | null }[];
-  attendees?: { name?: string | null; email?: string | null }[];
+  hosts?: { id: number; name?: string | null; email?: string | null; timeZone?: string | null }[];
+  attendees?: { name?: string | null; email?: string | null; timeZone?: string | null }[];
 }
 
 export interface CalBookingWindow {
@@ -292,12 +292,18 @@ function toMeeting(booking: CalBooking): BookedMeeting {
     title: booking.title,
     start: booking.start,
     end: booking.end,
+    timezone: booking.hosts?.[0]?.timeZone ?? null,
     status: canceled ? 'canceled' : booking.status === 'pending' ? 'pending' : 'scheduled',
     invitees: (booking.attendees ?? []).map((attendee) => ({
       name: attendee.name ?? attendee.email ?? 'Guest',
       email: attendee.email ?? null,
+      timezone: attendee.timeZone ?? null,
     })),
-    hosts: (booking.hosts ?? []).map((host) => ({ name: host.name ?? host.email ?? 'Host', email: host.email ?? null })),
+    hosts: (booking.hosts ?? []).map((host) => ({
+      name: host.name ?? host.email ?? 'Host',
+      email: host.email ?? null,
+      timezone: host.timeZone ?? null,
+    })),
     meetingUrl: place.meetingUrl,
     location: place.location,
     rescheduleUrl: open ? `${BOOKING_BASE}/reschedule/${booking.uid}` : null,

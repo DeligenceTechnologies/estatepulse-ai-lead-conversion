@@ -28,6 +28,7 @@ import {
 } from '../../utils/historyApi';
 import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
+import { formatDateTime } from '../../lib/datetime';
 
 /** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -89,7 +90,7 @@ const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
             </span>
           </div>
           <div className="text-xs text-slate-400 mt-0.5">
-            {new Date(call.startedAt ?? call.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+            {formatDateTime(call.startedAt ?? call.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}
             {' · '}
             {duration(call.durationSeconds)}
             {call.agentName && ` · ${call.agentName}`}
@@ -469,7 +470,7 @@ export const LeadDetailModal: React.FC = () => {
                       <div className="text-2xs text-slate-500 mb-1 px-1">
                         {inbound ? lead.firstName : msg.senderType === 'ai' ? 'AI assistant' : 'Agent'}
                         {' · '}
-                        {new Date(msg.sentAt ?? msg.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        {formatDateTime(msg.sentAt ?? msg.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}
                         {failed && <span className="text-rose-400 font-semibold"> · not delivered</span>}
                       </div>
                       <div className={`px-3.5 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed whitespace-pre-wrap ${

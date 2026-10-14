@@ -21,6 +21,7 @@ import {
   type Role,
 } from '../lib/api';
 import { startIdleWatch } from '../lib/idle';
+import { setDisplayTimeZone } from '../lib/datetime';
 
 type AuthStatus = 'loading' | 'authed' | 'anon';
 
@@ -250,6 +251,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Both shells start from their own dashboard; a path from one may not exist in the other.
     navigate('/dashboard');
   };
+
+  // Every screen shows times in the signed-in user's profile timezone. Set
+  // during render (it is idempotent) so the children rendering next see it.
+  setDisplayTimeZone(me?.timezone);
 
   return (
     <AuthContext.Provider

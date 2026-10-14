@@ -12,13 +12,14 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma, type CalendarBlockKind, type CalendarMemberSyncStatus } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { isTimeZone } from '@/common/utils/zoned-time';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { mapLimit } from '@/common/utils/map-limit';
 import { merge } from '../availability/intervals';
 import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
 import { inUse } from '../connection/connection-state';
-import { PROVIDER_LABEL, type SchedulingMember } from '../calendar.types';
+import { PROVIDER_LABEL, type BookedMeeting, type SchedulingMember } from '../calendar.types';
 import { CalClient, type CalBookingWindow } from '../providers/cal.client';
 import { CalendlyClient } from '../providers/calendly.client';
 import { ProviderHttpError } from '../providers/provider-http';
@@ -31,7 +32,6 @@ const STALE_AFTER_MS = 10 * MINUTE_MS;
 const LEASE_MS = 4 * MINUTE_MS;
 const FAILURE_BACKOFF_MS = 2 * MINUTE_MS;
 const MANUAL_COOLDOWN_MS = 30_000;
-const SCHEDULE_TTL_MS = 6 * 60 * MINUTE_MS;
 const WEBHOOK_RETRY_MS = DAY_MS;
 const WEBHOOK_DEBOUNCE_MS = 5_000;
 const WEBHOOK_BUSY_RETRY_MS = 30_000;
@@ -40,9 +40,17 @@ const CALENDLY_BUSY_SPAN_MS = 7 * DAY_MS;
 const CONCURRENCY = 4;
 const CRON_CONCURRENCY = 2;
 const CRON_BATCH = 200;
+/** Booked meetings cost a call per meeting (Calendly invitees), so routine syncs refresh them at most this often. */
+const MEETINGS_TTL_MS = 15 * MINUTE_MS;
 
 export const SYNC_HORIZON_DAYS = 14;
 export const HISTORY_DAYS = 90;
+/** Booked meetings kept in sync: two weeks back covers "Last week", a month ahead covers upcoming. */
+export const MEETINGS_PAST_DAYS = 14;
+export const MEETINGS_AHEAD_DAYS = 30;
+
+/** 'now' also refreshes booked meetings (a webhook, Sync now); 'due' only when they are older than the TTL. */
+export type MeetingsRefresh = 'due' | 'now';
 
 export type SyncOutcome = 'synced' | 'busy' | 'skipped';
 
@@ -55,6 +63,8 @@ export const SYNC_STATUS_FIELDS = {
   syncedAt: true,
   syncError: true,
   syncLeaseUntil: true,
+  meetingsSyncedAt: true,
+  meetingsError: true,
 } as const satisfies Prisma.CalendarConnectionSelect;
 
 export type SyncedConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof SYNC_STATUS_FIELDS }>;
@@ -78,14 +88,19 @@ interface SyncedMember {
   externalId: string;
   name: string;
   username: string | null;
-  scheduleSyncedAt: Date | null;
 }
 
 interface MemberPull {
   blocks: { kind: CalendarBlockKind; start: number; end: number; blockedStart?: number; blockedEnd?: number }[];
-  schedule?: Prisma.InputJsonValue | null;
+  schedule?: SavedSchedule;
   status: CalendarMemberSyncStatus;
   message: string | null;
+}
+
+/** Working hours as saved: wall-clock `{ weekly, dates }` and the timezone they are in. */
+interface SavedSchedule {
+  hours: Prisma.InputJsonValue | null;
+  timezone: string | null;
 }
 
 interface Window {
@@ -132,10 +147,14 @@ export class CalendarSyncService implements OnModuleDestroy {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'calendar-availability-prune' })
   async prune(): Promise<void> {
-    const { count } = await this.prisma.calendarTimeBlock.deleteMany({
-      where: { endsAt: { lt: new Date(Date.now() - HISTORY_DAYS * DAY_MS) } },
-    });
-    if (count) this.logger.log(`Pruned ${count} calendar blocks older than ${HISTORY_DAYS} days.`);
+    const before = new Date(Date.now() - HISTORY_DAYS * DAY_MS);
+    const [blocks, meetings] = await Promise.all([
+      this.prisma.calendarTimeBlock.deleteMany({ where: { endsAt: { lt: before } } }),
+      this.prisma.calendarMeeting.deleteMany({ where: { endsAt: { lt: before } } }),
+    ]);
+    if (blocks.count || meetings.count) {
+      this.logger.log(`Pruned ${blocks.count} calendar blocks and ${meetings.count} meetings older than ${HISTORY_DAYS} days.`);
+    }
   }
 
   /**
@@ -176,7 +195,7 @@ export class CalendarSyncService implements OnModuleDestroy {
     });
     if (!connection) throw new NotFoundException('No calendar is connected.');
     if (connection.syncedAt && Date.now() - connection.syncedAt.getTime() < MANUAL_COOLDOWN_MS) return 'skipped';
-    return this.sync(connection.id);
+    return this.sync(connection.id, 'now');
   }
 
   async receiveWebhook(connectionId: string, headers: Record<string, string | string[] | undefined>, body: Buffer | undefined) {
@@ -195,7 +214,7 @@ export class CalendarSyncService implements OnModuleDestroy {
     return { received: true };
   }
 
-  async sync(connectionId: string): Promise<SyncOutcome> {
+  async sync(connectionId: string, meetings: MeetingsRefresh = 'due'): Promise<SyncOutcome> {
     const now = new Date();
     const lease = await this.prisma.calendarConnection.updateMany({
       where: {
@@ -216,6 +235,7 @@ export class CalendarSyncService implements OnModuleDestroy {
       await this.access.useActive(orgId, async (connection, secret) => {
         if (connection.id !== connectionId) return;
         await this.pull(connection, secret);
+        await this.pullMeetings(connection, secret, meetings);
         await this.ensureWebhook(connection, secret);
       });
       await this.prisma.calendarConnection.updateMany({
@@ -250,7 +270,8 @@ export class CalendarSyncService implements OnModuleDestroy {
     const timer = setTimeout(
       () => {
         this.pending.delete(connectionId);
-        this.sync(connectionId)
+        // A webhook means a booking changed, so its meetings are read now.
+        this.sync(connectionId, 'now')
           .then((outcome) => {
             if (outcome === 'busy' && attempt < 3) this.requestSync(connectionId, attempt + 1);
           })
@@ -298,21 +319,93 @@ export class CalendarSyncService implements OnModuleDestroy {
     });
   }
 
+  /**
+   * Saves the booked meetings from two weeks back to a month ahead. Best
+   * effort: when they cannot be read the saved ones stay and the error is
+   * kept for the page to show; only a rejected credential fails the sync.
+   * Meetings are never deleted here, as both providers keep a canceled one
+   * (with its status); they age out with `prune`.
+   */
+  private async pullMeetings(connection: UsableConnection, secret: string, refresh: MeetingsRefresh): Promise<void> {
+    if (refresh === 'due') {
+      const state = await this.prisma.calendarConnection.findUnique({
+        where: { id: connection.id },
+        select: { meetingsSyncedAt: true },
+      });
+      if (state?.meetingsSyncedAt && Date.now() - state.meetingsSyncedAt.getTime() < MEETINGS_TTL_MS) return;
+    }
+
+    const now = Date.now();
+    let meetings: BookedMeeting[];
+    try {
+      meetings = await this.provider.meetings(
+        connection,
+        secret,
+        new Date(now - MEETINGS_PAST_DAYS * DAY_MS),
+        new Date(now + MEETINGS_AHEAD_DAYS * DAY_MS),
+      );
+    } catch (error) {
+      if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+      const message = (error as Error).message;
+      this.logger.warn(`${PROVIDER_LABEL[connection.provider]} meetings for connection ${connection.id} unavailable: ${message}`);
+      await this.prisma.calendarConnection.updateMany({
+        where: { id: connection.id },
+        data: { meetingsError: message.slice(0, 500) },
+      });
+      return;
+    }
+
+    const syncedAt = new Date();
+    const zones = await this.memberZones(connection.id);
+    const unique = [...new Map(meetings.map((meeting) => [meeting.id, withHostZones(meeting, zones)])).values()].filter(
+      validMeeting,
+    );
+    for (let index = 0; index < unique.length; index += MEETING_WRITE_BATCH) {
+      await this.prisma.$transaction(
+        unique.slice(index, index + MEETING_WRITE_BATCH).map((meeting) => {
+          const data = meetingRow(meeting, syncedAt);
+          return this.prisma.calendarMeeting.upsert({
+            where: { connectionId_externalId: { connectionId: connection.id, externalId: data.externalId } },
+            create: { orgId: connection.orgId, connectionId: connection.id, ...data },
+            update: data,
+          });
+        }),
+      );
+    }
+    await this.prisma.calendarConnection.updateMany({
+      where: { id: connection.id },
+      data: { meetingsSyncedAt: syncedAt, meetingsError: null },
+    });
+  }
+
+  /** Each calendar member's working timezone by email, for hosts the provider gives no timezone for. */
+  private async memberZones(connectionId: string): Promise<Map<string, string>> {
+    const members = await this.prisma.calendarMember.findMany({
+      where: { connectionId },
+      select: { email: true, timezone: true, scheduleTimezone: true },
+    });
+    const zones = new Map<string, string>();
+    for (const member of members) {
+      const zone = [member.scheduleTimezone, member.timezone].find(isTimeZone);
+      if (zone && member.email) zones.set(member.email.toLowerCase(), zone);
+    }
+    return zones;
+  }
+
   private async pullCalendly(token: string, member: SyncedMember, window: Window): Promise<MemberPull> {
-    const scheduleDue = !member.scheduleSyncedAt || Date.now() - member.scheduleSyncedAt.getTime() > SCHEDULE_TTL_MS;
     const spans: Window[] = [];
     for (let start = window.from; start < window.until; start += CALENDLY_BUSY_SPAN_MS) {
       spans.push({ from: start, until: Math.min(start + CALENDLY_BUSY_SPAN_MS, window.until) });
     }
 
     const [schedule, ...busy] = await Promise.all([
-      scheduleDue ? this.calendly.defaultSchedule(token, member.externalId) : Promise.resolve(undefined),
+      this.readSchedule('Calendly', member, () => this.calendly.defaultSchedule(token, member.externalId)),
       ...spans.map((span) => this.calendly.busyTimes(token, member.externalId, new Date(span.from), new Date(span.until))),
     ]);
 
     const current =
       schedule !== undefined
-        ? schedule
+        ? schedule.hours
         : (
             await this.prisma.calendarMember.findUnique({ where: { id: member.id }, select: { schedule: true } })
           )?.schedule;
@@ -325,7 +418,7 @@ export class CalendarSyncService implements OnModuleDestroy {
         blockedStart: entry.blockedStart,
         blockedEnd: entry.blockedEnd,
       })),
-      ...(schedule !== undefined ? { schedule: (schedule ?? null) as Prisma.InputJsonValue | null } : {}),
+      ...(schedule !== undefined ? { schedule } : {}),
       status: current ? 'ok' : 'limited',
       message: current ? null : `${member.name} has no working hours set in Calendly.`,
     };
@@ -343,12 +436,15 @@ export class CalendarSyncService implements OnModuleDestroy {
         ? bookings
         : bookings.filter((booking) => booking.hostIds.includes(member.externalId));
     const busy = merge(own).map(({ start, end }) => ({ kind: 'booking' as const, start, end }));
-    const schedule = await this.calOwnSchedule(apiKey, connection, member);
+    const schedule =
+      member.externalId === connection.accountId
+        ? await this.readSchedule('Cal.com', member, () => this.cal.defaultSchedule(apiKey))
+        : undefined;
 
     if (!member.username) {
       return {
         blocks: busy,
-        ...schedule,
+        ...(schedule !== undefined ? { schedule } : {}),
         status: 'limited',
         message: `${member.name} has no Cal.com username, so free time cannot be read.`,
       };
@@ -357,36 +453,38 @@ export class CalendarSyncService implements OnModuleDestroy {
     if (!eventType) {
       return {
         blocks: busy,
-        ...schedule,
+        ...(schedule !== undefined ? { schedule } : {}),
         status: 'limited',
         message: `${member.name} has no public meeting type in Cal.com, so free time cannot be read.`,
       };
     }
     const slots = await this.cal.slots(apiKey, eventType.id, new Date(window.from), new Date(window.until));
     const free = merge(slots).map(({ start, end }) => ({ kind: 'free' as const, start, end }));
-    return { blocks: [...free, ...busy], ...schedule, status: 'ok', message: null };
+    return { blocks: [...free, ...busy], ...(schedule !== undefined ? { schedule } : {}), status: 'ok', message: null };
   }
 
   /**
-   * Cal.com shows a working-hours schedule only to its owner, so only the API
-   * key's own member gets one; it is shown as their hours, not used for free
-   * time (Cal.com slots already account for it). Best effort: failing to read
-   * it never fails the member's sync.
+   * The member's working hours, read on every sync so a change in the calendar
+   * shows on the next one (neither provider sends a webhook for it). Cal.com
+   * shows a schedule only to its owner, so there only the API key's own member
+   * has one, and it is display only (Cal.com slots already account for it).
+   * Best effort: when it cannot be read the stored hours stay (undefined), and
+   * only a rejected credential fails the sync.
    */
-  private async calOwnSchedule(
-    apiKey: string,
-    connection: UsableConnection,
+  private async readSchedule(
+    label: string,
     member: SyncedMember,
-  ): Promise<Pick<MemberPull, 'schedule'>> {
-    if (member.externalId !== connection.accountId) return {};
-    if (member.scheduleSyncedAt && Date.now() - member.scheduleSyncedAt.getTime() <= SCHEDULE_TTL_MS) return {};
+    read: () => Promise<{ timezone: string | null } | null>,
+  ): Promise<SavedSchedule | undefined> {
     try {
-      const schedule = await this.cal.defaultSchedule(apiKey);
-      return { schedule: (schedule ?? null) as Prisma.InputJsonValue | null };
+      const schedule = await read();
+      if (!schedule) return { hours: null, timezone: null };
+      const { timezone, ...hours } = schedule;
+      return { hours: hours as Prisma.InputJsonValue, timezone: isTimeZone(timezone) ? timezone : null };
     } catch (error) {
       if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
-      this.logger.warn(`Cal.com schedule for member ${member.externalId} unavailable: ${(error as Error).message}`);
-      return {};
+      this.logger.warn(`${label} schedule for member ${member.externalId} unavailable, keeping the last one: ${(error as Error).message}`);
+      return undefined;
     }
   }
 
@@ -413,7 +511,7 @@ export class CalendarSyncService implements OnModuleDestroy {
       }
       return tx.calendarMember.findMany({
         where: { connectionId: connection.id },
-        select: { id: true, externalId: true, name: true, username: true, scheduleSyncedAt: true },
+        select: { id: true, externalId: true, name: true, username: true },
       });
     });
   }
@@ -443,7 +541,11 @@ export class CalendarSyncService implements OnModuleDestroy {
           syncMessage: pull.message,
           syncedAt: now,
           ...(pull.schedule !== undefined
-            ? { schedule: pull.schedule === null ? Prisma.DbNull : pull.schedule, scheduleSyncedAt: now }
+            ? {
+                schedule: pull.schedule.hours ?? Prisma.DbNull,
+                scheduleTimezone: pull.schedule.timezone,
+                scheduleSyncedAt: now,
+              }
             : {}),
         },
       }),
@@ -513,6 +615,53 @@ export class CalendarSyncService implements OnModuleDestroy {
       return null;
     }
   }
+}
+
+const MEETING_WRITE_BATCH = 50;
+
+/** Fills each host's timezone from their calendar member, and the meeting's from its first host. */
+export function withHostZones(meeting: BookedMeeting, zones: Map<string, string>): BookedMeeting {
+  const hosts = meeting.hosts.map((host) => ({
+    ...host,
+    timezone: host.timezone ?? (host.email ? (zones.get(host.email.toLowerCase()) ?? null) : null),
+  }));
+  return { ...meeting, hosts, timezone: meeting.timezone ?? hosts.find((host) => host.timezone)?.timezone ?? null };
+}
+
+/** A meeting with real start and end instants; anything else is not saved. */
+function validMeeting(meeting: BookedMeeting): boolean {
+  const start = Date.parse(meeting.start);
+  const end = Date.parse(meeting.end);
+  return Boolean(meeting.id) && Number.isFinite(start) && Number.isFinite(end) && end >= start;
+}
+
+/** A provider meeting as its database row: instants as Date (stored UTC), text cut to the column sizes. */
+export function meetingRow(meeting: BookedMeeting, syncedAt: Date) {
+  const cut = (value: string | null, max: number) => (value ? value.slice(0, max) : null);
+  const zone = (value: string | null) => (isTimeZone(value) ? value : null);
+  const people = (list: BookedMeeting['invitees']) =>
+    list.slice(0, 100).map((person) => ({
+      name: (person.name ?? '').slice(0, 255),
+      email: cut(person.email, 255),
+      timezone: zone(person.timezone),
+    }));
+  return {
+    externalId: meeting.id.slice(0, 500),
+    eventTypeId: cut(meeting.eventTypeId, 500),
+    title: (meeting.title || 'Meeting').slice(0, 500),
+    startsAt: new Date(meeting.start),
+    endsAt: new Date(meeting.end),
+    timezone: zone(meeting.timezone),
+    status: meeting.status,
+    invitees: people(meeting.invitees),
+    hosts: people(meeting.hosts),
+    meetingUrl: cut(meeting.meetingUrl, 2000),
+    location: cut(meeting.location, 1000),
+    rescheduleUrl: cut(meeting.rescheduleUrl, 2000),
+    cancelUrl: cut(meeting.cancelUrl, 2000),
+    canceledReason: cut(meeting.canceledReason, 1000),
+    syncedAt,
+  };
 }
 
 function dedupe<T extends { start: number; end: number; source: string }>(entries: T[]): T[] {

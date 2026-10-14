@@ -21,6 +21,7 @@ import { useApp } from '../../context/AppContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { ConnectionPill, SourceStatusPill } from '../leadsources/StatusPills';
+import { formatDateTime } from '../../lib/datetime';
 
 
 const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> = ({
@@ -67,7 +68,7 @@ const DeliveryCard: React.FC<{ d: WebhookDelivery }> = ({ d }) => {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-300 font-medium">
-            {new Date(d.receivedAt).toLocaleString()}
+            {formatDateTime(d.receivedAt)}
           </span>
           <SignaturePill state={d.signatureState} usedPrevious={d.usedPreviousSecret} />
           {d.formName && (
@@ -192,7 +193,7 @@ const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
     </div>
     <div className="text-right shrink-0 space-y-1">
       <div className="text-2xs text-slate-500">
-        {new Date(lead.createdAt).toLocaleString()}
+        {formatDateTime(lead.createdAt)}
       </div>
       <div className="flex items-center gap-1 justify-end">
         {lead.contactLeadCount > 1 && (
@@ -423,7 +424,7 @@ export const LeadSourcesView: React.FC = () => {
                 </div>
                 <div className="text-xs text-slate-400">
                   {s.lastEventAt
-                    ? `Last delivery ${new Date(s.lastEventAt).toLocaleString()}`
+                    ? `Last delivery ${formatDateTime(s.lastEventAt)}`
                     : (s.mappingStatus ?? '').toUpperCase() !== 'UNCONFIGURED'
                       ? 'Ready — listening for submissions'
                       : 'Awaiting first submission'}

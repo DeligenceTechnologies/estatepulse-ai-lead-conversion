@@ -13,6 +13,7 @@ import {
   type Appointment,
   type LeadBookingOptions,
 } from "../../utils/calendarApi";
+import { formatDateTime } from '../../lib/datetime';
 
 /**
  * Booking a meeting for one lead, and the lead's real appointments.
@@ -213,7 +214,7 @@ export const LeadAppointments: React.FC<{
                     </span>
                   </div>
                   <div className="text-xs text-slate-300 mt-0.5">
-                    {new Date(appt.startTime).toLocaleString([], {
+                    {formatDateTime(appt.startTime, {
                       dateStyle: "medium",
                       timeStyle: "short",
                     })}

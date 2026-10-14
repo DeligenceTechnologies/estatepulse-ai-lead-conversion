@@ -1,4 +1,8 @@
 import type { BookedMeeting, CalendarEventType } from '../../../utils/calendarApi';
+import { addDays, formatDate, formatTime, startOfDay, weekdayOf, yearOf } from '../../../lib/datetime';
+
+// Days are the signed-in user's, in their profile timezone (see lib/datetime).
+export { addDays, startOfDay };
 
 export type MeetingPhase = 'live' | 'upcoming' | 'past' | 'canceled';
 
@@ -16,29 +20,15 @@ export type RangeId = 'today' | 'upcoming' | 'this_week' | 'last_week' | 'date';
 
 export interface Range {
   id: RangeId;
-  /** Local midnight of the picked day, for `date`. */
+  /** Midnight of the picked day in the user's timezone, for `date`. */
   day?: number;
 }
 
-const DAY_MS = 86_400_000;
-
-export const startOfDay = (time: number): number => {
-  const date = new Date(time);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-};
-
-/** Adds whole calendar days, staying on local midnight across DST changes. */
-export const addDays = (day: number, days: number): number => {
-  const date = new Date(day);
-  date.setDate(date.getDate() + days);
-  return date.getTime();
-};
 
 /** Weeks start on Monday. */
 const startOfWeek = (time: number): number => {
   const day = startOfDay(time);
-  return addDays(day, -((new Date(day).getDay() + 6) % 7));
+  return addDays(day, -((weekdayOf(day) + 6) % 7));
 };
 
 /** The [from, to) a range covers; `upcoming` starts at `now` and has no end. */
@@ -153,21 +143,17 @@ export const nowLineIndex = (section: DaySection, now: number): number => {
 export const isToday = (day: number, now: number) => day === startOfDay(now);
 
 export const dayParts = (day: number, now: number): { weekday: string; date: string; tag: string | null } => {
-  const date = new Date(day);
-  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  const sameYear = yearOf(day) === yearOf(now);
   return {
-    weekday: date.toLocaleDateString(undefined, { weekday: 'short' }),
-    date: date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) }),
+    weekday: formatDate(day, { weekday: 'short' }),
+    date: formatDate(day, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) }),
     tag: isToday(day, now) ? 'Today' : day === addDays(startOfDay(now), 1) ? 'Tomorrow' : null,
   };
 };
 
 // --- formatting --------------------------------------------------------------
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-
-export const timeRange = (start: string, end: string): string =>
-  `${timeFormat.format(new Date(start))} – ${timeFormat.format(new Date(end))}`;
+export const timeRange = (start: string, end: string): string => `${formatTime(start)} – ${formatTime(end)}`;
 
 export const durationLabel = (minutes: number): string => {
   if (minutes < 60) return `${minutes} min`;

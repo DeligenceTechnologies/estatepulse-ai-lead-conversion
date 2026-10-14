@@ -53,6 +53,7 @@ import { ContactWindowCard } from './ContactWindowCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
+import { formatDate } from '../../lib/datetime';
 
 export const AISettingsView: React.FC = () => {
   const { orgSettings, updateOrgSettings, setActiveView } = useApp();
@@ -484,7 +485,7 @@ export const AISettingsView: React.FC = () => {
           <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-slate-800">
             <p className="text-xs text-slate-500 min-w-0">
               {status.connectedAt
-                ? `Connected ${new Date(status.connectedAt).toLocaleDateString(undefined, {
+                ? `Connected ${formatDate(status.connectedAt, {
                     day: 'numeric',
                     month: 'short',
                     year: 'numeric',

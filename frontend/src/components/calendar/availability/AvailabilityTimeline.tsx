@@ -1,14 +1,14 @@
 import React from 'react';
-import { AlertTriangle, UserCheck } from 'lucide-react';
+import { AlertTriangle, Globe, UserCheck } from 'lucide-react';
 import type {
-  AvailabilityDay,
-  AvailabilityReport,
+  AvailabilityReportDay,
   BusySource,
   MemberAvailability,
   TimeRange,
 } from '../../../utils/calendarApi';
 import { gradientFor } from '../../team/MemberParts';
-import { dayLabel, duration, hourLabel, minutesInDay, ms, overlaps, placeIn } from './time';
+import { zoneOffsetLabel } from '../../../lib/datetime';
+import { dayLabel, duration, hourLabel, minutesInDay, ms, overlaps, placeIn, timeFormatter, zoneCity } from './time';
 
 type SegmentKind = 'free' | BusySource;
 
@@ -43,9 +43,24 @@ const SEGMENT_EDGE = 'shadow-[inset_0_1px_0_rgb(255_255_255/0.28),inset_-1px_0_0
 
 export const UNAVAILABLE_SWATCH = 'bg-slate-800';
 
-const NAME_COLUMN = '15rem';
+/** Their working hours: the band free time and meetings sit on, so the hours show even where nothing is free. */
+export const WORKING_SWATCH = 'bg-slate-600 ring-1 ring-inset ring-sky-400/50';
+const WORKING_FILL = 'bg-slate-600/90 shadow-[inset_0_2px_0_rgb(56_189_248/0.55),inset_0_-2px_0_rgb(56_189_248/0.55)]';
 
-const segmentsFor = (member: MemberAvailability, day: AvailabilityDay): { range: TimeRange; kind: SegmentKind }[] => [
+/** Their working hours that fall on this day, clipped to it. Null when the calendar gives none. */
+const workingOn = (member: MemberAvailability, day: AvailabilityReportDay): TimeRange[] | null =>
+  member.hours === null
+    ? null
+    : member.hours
+        .filter((range) => overlaps(range, day))
+        .map((range) => ({
+          start: new Date(Math.max(ms(range.start), ms(day.start))).toISOString(),
+          end: new Date(Math.min(ms(range.end), ms(day.end))).toISOString(),
+        }));
+
+const NAME_COLUMN = '16rem';
+
+const segmentsFor = (member: MemberAvailability, day: AvailabilityReportDay): { range: TimeRange; kind: SegmentKind }[] => [
   ...member.free.filter((range) => overlaps(range, day)).map((range) => ({ range, kind: 'free' as const })),
   ...member.busy.filter((range) => overlaps(range, day)).map((range) => ({ range, kind: range.source })),
 ];
@@ -69,12 +84,24 @@ export function nowState(member: MemberAvailability, now: number): NowState {
   return { kind: 'away', next: member.summary.nextFreeAt ? ms(member.summary.nextFreeAt) : null };
 }
 
-const MemberCell: React.FC<{
-  member: MemberAvailability;
-  now: number;
-  live: boolean;
-  format: Intl.DateTimeFormat;
-}> = ({ member, now, live, format }) => {
+const isNowIn = (day: AvailabilityReportDay, now: number): boolean => now >= ms(day.start) && now < ms(day.end);
+
+/** Where they are and what time it is there: "Toronto · GMT-4 · 5:20 AM". */
+const ZoneClock: React.FC<{ timezone: string; now: number }> = ({ timezone, now }) => {
+  const offset = zoneOffsetLabel(timezone, now);
+  return (
+    <div className="flex items-center gap-1 text-2xs text-sky-300/80 min-w-0" title={timezone.replace(/_/g, ' ')}>
+      <Globe className="w-3 h-3 shrink-0" aria-hidden />
+      <span className="truncate">
+        {zoneCity(timezone)}
+        {offset && ` · ${offset}`} · <span className="tabular-nums">{timeFormatter(timezone).format(now)}</span>
+      </span>
+    </div>
+  );
+};
+
+const MemberCell: React.FC<{ member: MemberAvailability; now: number; live: boolean }> = ({ member, now, live }) => {
+  const format = timeFormatter(member.timezone);
   const state = nowState(member, now);
   const status =
     member.status === 'unavailable'
@@ -109,6 +136,7 @@ const MemberCell: React.FC<{
           )}
         </div>
         <div className={`text-2xs font-medium truncate ${status.text}`}>{status.label}</div>
+        <ZoneClock timezone={member.timezone} now={now} />
       </div>
     </div>
   );
@@ -116,12 +144,12 @@ const MemberCell: React.FC<{
 
 const Bar: React.FC<{
   member: MemberAvailability;
-  day: AvailabilityDay;
+  day: AvailabilityReportDay;
   hours: [number, number];
   now: number;
-  format: Intl.DateTimeFormat;
   size: 'lg' | 'sm';
-}> = ({ member, day, hours, now, format, size }) => {
+}> = ({ member, day, hours, now, size }) => {
+  const format = timeFormatter(member.timezone);
   const large = size === 'lg';
   const hourCount = hours[1] - hours[0];
   const past = placeIn({ start: day.start, end: new Date(Math.min(now, ms(day.end))).toISOString() }, day, hours);
@@ -142,6 +170,18 @@ const Bar: React.FC<{
             style={{ left: `${((i + 1) / hourCount) * 100}%` }}
           />
         ))}
+      {(workingOn(member, day) ?? []).map((range, index) => {
+        const position = placeIn(range, day, hours);
+        if (!position) return null;
+        return (
+          <span
+            key={`working-${index}`}
+            title={`${member.name} · Working hours · ${format.format(ms(range.start))} – ${format.format(ms(range.end))}`}
+            className={`absolute inset-y-0 ${WORKING_FILL}`}
+            style={{ left: `${position.left}%`, width: `${position.width}%` }}
+          />
+        );
+      })}
       {segmentsFor(member, day).map(({ range, kind }, index) => {
         const position = placeIn(range, day, hours);
         if (!position) return null;
@@ -196,16 +236,12 @@ const UnavailableNotice: React.FC<{ message: string | null }> = ({ message }) =>
 );
 
 export const DayTimeline: React.FC<{
-  report: AvailabilityReport;
   members: MemberAvailability[];
   hours: [number, number];
   now: number;
-  format: Intl.DateTimeFormat;
-}> = ({ report, members, hours, now, format }) => {
-  const day = report.days[0];
+}> = ({ members, hours, now }) => {
   const hourCount = hours[1] - hours[0];
   const step = hourCount > 14 ? 2 : 1;
-  const nowAt = now > ms(day.start) && now < ms(day.end) ? placeIn({ start: new Date(now).toISOString(), end: day.end }, day, hours) : null;
   const columns = { gridTemplateColumns: `${NAME_COLUMN} minmax(0, 1fr)` };
 
   return (
@@ -228,46 +264,39 @@ export const DayTimeline: React.FC<{
                 {hourLabel(hour)}
               </span>
             ))}
-          {nowAt && (
-            <span
-              className="absolute bottom-1.5 -translate-x-1/2 z-10 px-1.5 py-0.5 rounded-md bg-sky-500 text-on-accent text-2xs font-bold tabular-nums shadow-md shadow-sky-500/30 whitespace-nowrap"
-              style={{ left: `${nowAt.left}%` }}
-            >
-              {format.format(now)}
-            </span>
-          )}
         </div>
       </div>
 
       <ul className="list-none divide-y divide-slate-800/60">
-        {members.map((member) => (
-          <li key={member.externalId} className="grid gap-4 px-4 py-3.5 items-center hover:bg-slate-800/20 transition-colors" style={columns}>
-            <MemberCell member={member} now={now} live={Boolean(nowAt)} format={format} />
-            {member.status === 'unavailable' ? (
-              <UnavailableNotice message={member.message} />
-            ) : (
-              <div className="space-y-1 min-w-0">
-                <Bar member={member} day={day} hours={hours} now={now} format={format} size="lg" />
-                {member.message && <p className="text-2xs text-amber-300/80 truncate">{member.message}</p>}
-              </div>
-            )}
-          </li>
-        ))}
+        {members.map((member) => {
+          const day = member.days[0];
+          return (
+            <li key={member.externalId} className="grid gap-4 px-4 py-3.5 items-center hover:bg-slate-800/20 transition-colors" style={columns}>
+              <MemberCell member={member} now={now} live={isNowIn(day, now)} />
+              {member.status === 'unavailable' ? (
+                <UnavailableNotice message={member.message} />
+              ) : (
+                <div className="space-y-1 min-w-0">
+                  <Bar member={member} day={day} hours={hours} now={now} size="lg" />
+                  {member.message && <p className="text-2xs text-amber-300/80 truncate">{member.message}</p>}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
 };
 
 export const WeekTimeline: React.FC<{
-  report: AvailabilityReport;
+  dates: string[];
   members: MemberAvailability[];
   hours: [number, number];
   now: number;
-  today: string | null;
-  format: Intl.DateTimeFormat;
-}> = ({ report, members, hours, now, today, format }) => {
-  const columns = { gridTemplateColumns: `${NAME_COLUMN} repeat(${report.days.length}, minmax(0, 1fr))` };
-  const live = report.days.some((day) => day.date === today);
+  today: string;
+}> = ({ dates, members, hours, now, today }) => {
+  const columns = { gridTemplateColumns: `${NAME_COLUMN} repeat(${dates.length}, minmax(0, 1fr))` };
 
   return (
     <div className="min-w-[1000px]">
@@ -276,23 +305,21 @@ export const WeekTimeline: React.FC<{
           <div className="text-2xs font-semibold uppercase tracking-wider text-slate-500">
             {members.length} member{members.length === 1 ? '' : 's'}
           </div>
-          <div className="text-2xs text-slate-500">
-            Each day {hourLabel(hours[0], true)} – {hourLabel(hours[1], true)}
-          </div>
+          <div className="text-2xs text-slate-500">Each day in their own timezone</div>
         </div>
-        {report.days.map((day) => {
-          const isToday = day.date === today;
+        {dates.map((date) => {
+          const isToday = date === today;
           return (
-            <div key={day.date} className="flex items-center justify-center gap-1.5">
+            <div key={date} className="flex items-center justify-center gap-1.5">
               <span className={`text-2xs font-semibold uppercase tracking-wide ${isToday ? 'text-sky-300' : 'text-slate-500'}`}>
-                {dayLabel(day.date, 'weekday')}
+                {dayLabel(date, 'weekday')}
               </span>
               <span
                 className={`min-w-6 h-6 px-1 rounded-full inline-flex items-center justify-center text-xs font-bold tabular-nums ${
                   isToday ? 'bg-sky-500 text-on-accent' : 'text-slate-200'
                 }`}
               >
-                {Number(day.date.slice(8))}
+                {Number(date.slice(8))}
               </span>
             </div>
           );
@@ -302,17 +329,17 @@ export const WeekTimeline: React.FC<{
       <ul className="list-none divide-y divide-slate-800/60">
         {members.map((member) => (
           <li key={member.externalId} className="grid gap-x-2 px-4 py-3.5 items-center hover:bg-slate-800/20 transition-colors" style={columns}>
-            <MemberCell member={member} now={now} live={live} format={format} />
+            <MemberCell member={member} now={now} live={member.days.some((day) => isNowIn(day, now))} />
             {member.status === 'unavailable' ? (
-              <div style={{ gridColumn: `span ${report.days.length}` }}>
+              <div style={{ gridColumn: `span ${dates.length}` }}>
                 <UnavailableNotice message={member.message} />
               </div>
             ) : (
-              report.days.map((day) => {
+              member.days.map((day) => {
                 const free = member.free.reduce((total, range) => total + minutesInDay(range, day), 0);
                 return (
                   <div key={day.date} className="min-w-0">
-                    <Bar member={member} day={day} hours={hours} now={now} format={format} size="sm" />
+                    <Bar member={member} day={day} hours={hours} now={now} size="sm" />
                     <div className={`mt-1.5 text-center text-2xs font-semibold tabular-nums ${free > 0 ? 'text-emerald-300' : 'text-slate-600'}`}>
                       {free > 0 ? `${duration(free)} free` : 'No free time'}
                     </div>

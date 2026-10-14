@@ -14,6 +14,7 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listAppointments, type Appointment } from '../../utils/calendarApi';
+import { formatDate, formatTime } from '../../lib/datetime';
 
 type Tab = 'upcoming' | 'past' | 'cancelled' | 'all';
 
@@ -235,7 +236,7 @@ export const AppointmentsView: React.FC = () => {
                     <div className="flex items-center gap-2 text-slate-300">
                       <CalendarIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span>
-                        {new Date(appt.startTime).toLocaleDateString([], {
+                        {formatDate(appt.startTime, {
                           weekday: 'short',
                           month: 'short',
                           day: 'numeric',
@@ -248,12 +249,12 @@ export const AppointmentsView: React.FC = () => {
                       {/* Struck through rather than hidden: a cancellation is
                           information the office needs to see. */}
                       <span className={cancelled ? 'line-through text-slate-500' : ''}>
-                        {new Date(appt.startTime).toLocaleTimeString([], {
+                        {formatTime(appt.startTime, {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}{' '}
                         –{' '}
-                        {new Date(appt.endTime).toLocaleTimeString([], {
+                        {formatTime(appt.endTime, {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}

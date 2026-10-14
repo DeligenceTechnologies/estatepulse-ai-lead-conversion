@@ -21,6 +21,7 @@ const MEMBER_FIELDS = {
   username: true,
   schedulingUrl: true,
   schedule: true,
+  scheduleTimezone: true,
 } as const;
 
 /**
@@ -48,12 +49,13 @@ export class CalendarMembersService {
       orderBy: { name: 'asc' },
     });
     const users = await findLinkedUsers(this.prisma, orgId, members);
-    return members.map((member) => {
+    return members.map(({ scheduleTimezone, ...member }) => {
       const user = users.get(member.email.toLowerCase());
+      const weekly = readWeeklySchedule(member.schedule);
       return {
         ...member,
         role: member.role as WorkspaceRole,
-        schedule: readWeeklySchedule(member.schedule),
+        schedule: weekly && { ...weekly, timezone: scheduleTimezone ?? weekly.timezone },
         userId: user?.id ?? null,
         userName: user?.name ?? null,
       };

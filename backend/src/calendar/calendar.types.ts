@@ -51,6 +51,8 @@ export type MeetingStatus = 'scheduled' | 'pending' | 'canceled';
 export interface MeetingPerson {
   name: string;
   email: string | null;
+  /** Their IANA timezone, when the provider gives one. */
+  timezone: string | null;
 }
 
 /** A meeting someone booked on one of the workspace's event types. */
@@ -61,6 +63,8 @@ export interface BookedMeeting {
   title: string;
   start: string;
   end: string;
+  /** The host's timezone: the clock the meeting was set in. */
+  timezone: string | null;
   status: MeetingStatus;
   /** Who booked (Calendly invitees, Cal.com attendees). */
   invitees: MeetingPerson[];

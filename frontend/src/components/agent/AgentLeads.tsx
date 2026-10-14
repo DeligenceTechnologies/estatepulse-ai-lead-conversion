@@ -10,6 +10,7 @@ import {
   type AgentLeadDetail,
 } from '../../utils/agentMeApi';
 import { statusLabel, statusTone } from '../../lib/leadStatus';
+import { formatDate as formatDay } from '../../lib/datetime';
 
 /** Same tones the owner's pipeline uses, so one lead reads the same on both screens. */
 const TEMPERATURE_TONE: Record<string, string> = {
@@ -23,7 +24,7 @@ const NEUTRAL = 'bg-slate-800 text-slate-400 border-slate-700';
 const PILL = 'text-2xs font-bold uppercase px-2 py-0.5 rounded-full border font-mono';
 const DASH = '—';
 
-const formatDate = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString() : DASH);
+const formatDate = (iso: string | null): string => (iso ? formatDay(iso) : DASH);
 const humanize = (v: string): string => v.replace(/_/g, ' ');
 const money = (n: number | null): string => (n === null ? DASH : `$${n.toLocaleString()}`);
 

@@ -94,6 +94,7 @@ export type MeetingStatus = 'scheduled' | 'pending' | 'canceled';
 export interface MeetingPerson {
   name: string;
   email: string | null;
+  timezone: string | null;
 }
 
 /** A meeting someone booked on one of the workspace's meeting types. */
@@ -104,6 +105,8 @@ export interface BookedMeeting {
   title: string;
   start: string;
   end: string;
+  /** The host's timezone: the clock the meeting was set in. */
+  timezone: string | null;
   status: MeetingStatus;
   /** Who booked. */
   invitees: MeetingPerson[];
@@ -122,6 +125,8 @@ export interface MeetingTypesReport {
   /** Oldest first, from two weeks ago to a month ahead. */
   meetings: BookedMeeting[];
   meetingsWindow: { from: string; to: string };
+  /** When the booked meetings were last synced from the provider into the database. */
+  meetingsSyncedAt: string | null;
   /** Set when meeting types loaded but booked meetings did not. */
   meetingsError: string | null;
 }
@@ -239,7 +244,10 @@ export interface MemberAvailability {
   externalId: string;
   name: string;
   email: string;
-  timezone: string | null;
+  /** Their calendar's timezone; their row is drawn in it. */
+  timezone: string;
+  /** The report's dates as this member's own days, midnight to midnight in `timezone`. */
+  days: AvailabilityReportDay[];
   userId: string | null;
   userName: string | null;
   hours: TimeRange[] | null;
@@ -256,7 +264,8 @@ export interface MemberAvailability {
   };
 }
 
-export interface AvailabilityDay {
+/** One day of the team availability report, as instants bounding it in the report's timezone. */
+export interface AvailabilityReportDay {
   date: string;
   start: string;
   end: string;
@@ -264,9 +273,9 @@ export interface AvailabilityDay {
 
 export interface AvailabilityReport {
   provider: CalendarProviderId;
-  timezone: string;
   generatedAt: string;
-  days: AvailabilityDay[];
+  /** The calendar dates shown; each member's row shows them in that member's own timezone. */
+  dates: string[];
   range: { minDate: string; maxDate: string };
   members: MemberAvailability[];
   totalMembers: number;
@@ -282,14 +291,12 @@ export interface AvailabilitySync {
 export interface AvailabilityQuery {
   date?: string;
   days?: 1 | 7;
-  timezone?: string;
 }
 
 export const getCalendarAvailability = (query: AvailabilityQuery = {}): Promise<AvailabilityReport> => {
   const params = new URLSearchParams();
   if (query.date) params.set('date', query.date);
   if (query.days) params.set('days', String(query.days));
-  if (query.timezone) params.set('timezone', query.timezone);
   const search = params.toString();
   return apiFetch<AvailabilityReport>(`${ORG_CALENDAR}/availability${search ? `?${search}` : ''}`, { auth: true });
 };

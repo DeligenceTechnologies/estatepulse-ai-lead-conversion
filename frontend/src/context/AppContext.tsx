@@ -25,6 +25,7 @@ import {
   INITIAL_INTEGRATIONS,
   INITIAL_AUDIT_LOGS,
 } from '../data/mockData';
+import { formatDate } from '../lib/datetime';
 
 // A runtime list, not just a union, because the URL is parsed back into a view.
 const APP_VIEWS = [
@@ -509,7 +510,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...l,
           status: 'appointment_booked',
           automationPaused: true, // Stop cold/no-answer sequences
-          nextFollowupAt: `${new Date(newAppt.startTime).toLocaleDateString()} (${newAppt.appointmentType})`,
+          nextFollowupAt: `${formatDate(newAppt.startTime)} (${newAppt.appointmentType})`,
           updatedAt: new Date().toISOString(),
         };
       }

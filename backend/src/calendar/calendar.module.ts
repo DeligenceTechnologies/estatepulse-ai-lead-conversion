@@ -14,12 +14,6 @@ import { SchedulingProvider } from './providers/scheduling-provider';
 import { CalendarSyncService } from './sync/calendar-sync.service';
 import { CalendarWebhookController } from './sync/calendar-webhook.controller';
 
-/**
- * The organization's one Calendly or Cal.com account. See README.md for what
- * each folder owns. Dependencies only point downwards:
- *
- *   members, meeting-types, availability  →  sync  →  connection/access  →  providers
- */
 @Module({
   controllers: [
     CalendarConnectionController,
@@ -29,16 +23,12 @@ import { CalendarWebhookController } from './sync/calendar-webhook.controller';
     CalendarWebhookController,
   ],
   providers: [
-    // providers/ — HTTP to Calendly and Cal.com
     CalendlyClient,
     CalClient,
     SchedulingProvider,
-    // connection/ — connect, disconnect and credential access
     CalendarAccessService,
     CalendarConnectionService,
-    // sync/ — background sync and webhooks
     CalendarSyncService,
-    // features that read the connected calendar
     CalendarMembersService,
     MeetingTypesService,
     CalendarAvailabilityService,

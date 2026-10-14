@@ -20,6 +20,7 @@ import { useLiveQuery } from '../../lib/useLiveQuery';
 import { messageFor } from '../../lib/api';
 import { Lead, LeadStatus, LeadTemperature } from '../../types';
 import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
+import { formatDateTime } from '../../lib/datetime';
 
 /**
  * Lead pipeline — live rows only.
@@ -556,7 +557,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     {/* Agent — the current assignment, or honestly unassigned. */}
                     <td className="px-4 py-3.5">
                       {lead.assignedAgent ? (
-                        <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${new Date(lead.assignedAgent.assignedAt).toLocaleString()}`}>
+                        <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${formatDateTime(lead.assignedAgent.assignedAt)}`}>
                           <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-2xs font-bold text-emerald-300 flex items-center justify-center">
                             {initialsOf(lead.assignedAgent.name)}
                           </div>

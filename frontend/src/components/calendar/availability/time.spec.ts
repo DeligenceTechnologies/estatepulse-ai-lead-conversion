@@ -1,45 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import type { AvailabilityReport, MemberAvailability } from '../../../utils/calendarApi';
-import { DEFAULT_HOURS, visibleHours } from './time';
+import { DAY_HOURS, hourLabel, placeIn, zoneCity } from './time';
 
-// A UTC day, so offsets read as wall-clock hours.
-const DAY = { date: '2026-10-14', start: '2026-10-14T00:00:00Z', end: '2026-10-15T00:00:00Z' };
-const at = (hhmm: string) => `2026-10-14T${hhmm}:00Z`;
-
-const member = (parts: Partial<MemberAvailability>): MemberAvailability =>
-  ({ hours: null, free: [], busy: [], ...parts }) as MemberAvailability;
-
-const report = (members: MemberAvailability[]): AvailabilityReport =>
-  ({ days: [DAY], members }) as unknown as AvailabilityReport;
-
-describe('visibleHours', () => {
-  it('shows the working day with one hour either side', () => {
-    const hours = [{ start: at('09:00'), end: at('18:00') }];
-    expect(visibleHours(report([member({ hours })]))).toEqual([8, 19]);
+describe('hourLabel', () => {
+  it('reads the whole day, midnight to midnight', () => {
+    expect(hourLabel(0)).toBe('12 AM');
+    expect(hourLabel(13, true)).toBe('1:00 PM');
+    expect(hourLabel(24)).toBe('12 AM');
+    expect(DAY_HOURS).toEqual([0, 24]);
   });
+});
 
-  it('spans the earliest start and latest end across members', () => {
-    const a = member({ hours: [{ start: at('09:00'), end: at('17:00') }] });
-    const b = member({ hours: [{ start: at('10:00'), end: at('19:00') }] });
-    expect(visibleHours(report([a, b]))).toEqual([8, 20]);
-  });
+describe('placeIn on the fixed day', () => {
+  const day = { date: '2026-10-14', start: '2026-10-14T00:00:00.000Z', end: '2026-10-15T00:00:00.000Z' };
 
-  it('rounds a half-hour working day outward', () => {
-    const hours = [{ start: at('09:30'), end: at('17:30') }];
-    expect(visibleHours(report([member({ hours })]))).toEqual([8, 19]);
-  });
-
-  it('is not stretched by meetings outside working hours', () => {
-    const m = member({
-      hours: [{ start: at('09:00'), end: at('18:00') }],
-      busy: [{ start: at('05:00'), end: at('23:00'), source: 'calendar' }],
+  it('places a range by its share of the whole day', () => {
+    expect(placeIn({ start: '2026-10-14T06:00:00.000Z', end: '2026-10-14T18:00:00.000Z' }, day, DAY_HOURS)).toMatchObject({
+      left: 25,
+      width: 50,
     });
-    expect(visibleHours(report([m]))).toEqual([8, 19]);
   });
 
-  it('falls back to free time, then to the default day', () => {
-    const free = [{ start: at('10:00'), end: at('16:00') }];
-    expect(visibleHours(report([member({ free })]))).toEqual([9, 17]);
-    expect(visibleHours(report([member({})]))).toEqual(DEFAULT_HOURS);
+  it('clips ranges that cross midnight and skips other days', () => {
+    expect(placeIn({ start: '2026-10-13T22:00:00.000Z', end: '2026-10-14T03:00:00.000Z' }, day, DAY_HOURS)).toMatchObject({
+      left: 0,
+      width: 12.5,
+    });
+    expect(placeIn({ start: '2026-10-15T01:00:00.000Z', end: '2026-10-15T02:00:00.000Z' }, day, DAY_HOURS)).toBeNull();
+  });
+});
+
+describe('zoneCity', () => {
+  it('names the city part', () => {
+    expect(zoneCity('America/Toronto')).toBe('Toronto');
+    expect(zoneCity('Pacific/Pago_Pago')).toBe('Pago Pago');
   });
 });

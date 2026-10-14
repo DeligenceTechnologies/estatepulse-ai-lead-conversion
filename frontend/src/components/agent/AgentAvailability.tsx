@@ -18,6 +18,7 @@ import {
   type AvailabilityDay,
   type CalendarStatus,
 } from '../../utils/calendarApi';
+import { formatDate } from '../../lib/datetime';
 
 const field =
   'bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 ' +
@@ -30,7 +31,7 @@ function relativeTime(iso: string | null): string {
   if (secs < 60) return `${secs}s ago`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 /** What the office actually uses, so this screen never sends anyone to the wrong tool. */

@@ -24,11 +24,9 @@ import {
   panel,
   type NoticeTone,
 } from '../shared/ui';
+import { formatDate } from '../../../lib/datetime';
 
 type Flash = { tone: NoticeTone; text: string };
-
-const formatDate = (iso: string): string =>
-  new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 const Fact: React.FC<{ label: string; value: string | null }> = ({ label, value }) => (
   <div className="min-w-0">

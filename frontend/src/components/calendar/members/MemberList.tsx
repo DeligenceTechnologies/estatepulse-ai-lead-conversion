@@ -106,7 +106,9 @@ export const MemberList: React.FC<{
         {items.map((member) => {
           const onTeam = Boolean(member.userId);
           const busy = adding === member.externalId;
-          const time = localTime(member.timezone, now);
+          // Their hours are in the schedule's zone, so that is their working clock.
+          const zone = member.schedule?.timezone || member.timezone;
+          const time = localTime(zone, now);
           const linkedAs = member.userName && member.userName !== member.name ? member.userName : null;
 
           return (
@@ -160,11 +162,11 @@ export const MemberList: React.FC<{
                 <WorkingHours member={member} />
               </div>
 
-              <span className="hidden lg:block min-w-0 text-xs text-slate-300 tabular-nums truncate" title={member.timezone ?? undefined}>
+              <span className="hidden lg:block min-w-0 text-xs text-slate-300 tabular-nums truncate" title={zone ?? undefined}>
                 {time ? (
                   <>
                     {time}
-                    <span className="block text-2xs text-slate-500 truncate">{member.timezone!.replace(/_/g, ' ')}</span>
+                    <span className="block text-2xs text-slate-500 truncate">{zone!.replace(/_/g, ' ')}</span>
                   </>
                 ) : (
                   <span className="text-slate-500">—</span>

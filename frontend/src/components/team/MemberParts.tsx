@@ -3,6 +3,7 @@ import { Eye, Loader2, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import { displayName, initialsFor } from '../../context/AuthContext';
 import type { TeamMember, UserStatus } from '../../utils/usersApi';
 import { DAY_SHORT, isWorkingNow } from '../../utils/workingHours';
+import { formatDate as formatDay, formatDateTime } from '../../lib/datetime';
 
 /**
  * The pieces a team member is drawn with on the Team Members screen. The card
@@ -27,7 +28,7 @@ export const gradientFor = (id: string): string => {
 };
 
 export const formatDate = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  iso ? formatDay(iso) : '—';
 
 /** "today", "5 days", "3 mo", "2 yrs" since `iso`. */
 export function timeSince(iso: string | null, now = new Date()): string {
@@ -172,7 +173,7 @@ export const Identity: React.FC<{ member: TeamMember; isSelf: boolean }> = ({ me
 export const LoginStatus: React.FC<{ member: TeamMember }> = ({ member }) => (
   <span className="text-xs text-slate-300 whitespace-nowrap">
     {member.lastLoginAt
-      ? new Date(member.lastLoginAt).toLocaleString(undefined, {
+      ? formatDateTime(member.lastLoginAt, {
           day: 'numeric',
           month: 'short',
           year: 'numeric',

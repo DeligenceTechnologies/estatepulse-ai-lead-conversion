@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -22,11 +22,13 @@ import {
   DayTimeline,
   SEGMENT_STYLE,
   UNAVAILABLE_SWATCH,
+  WORKING_SWATCH,
   WeekTimeline,
   nowState,
 } from './AvailabilityTimeline';
-import { DEFAULT_HOURS, dayLabel, ms, shiftDate, timeFormatter, todayIn, visibleHours } from './time';
+import { DAY_HOURS, dayLabel, ms, shiftDate, todayIn } from './time';
 import { PROVIDERS } from '../shared/ui';
+import { displayTimeZone } from '../../../lib/datetime';
 
 type Span = 1 | 7;
 type Filter = 'all' | 'free' | 'busy';
@@ -60,8 +62,12 @@ const Legend: React.FC = () => (
       </span>
     ))}
     <span className="inline-flex items-center gap-1.5">
+      <span className={`w-3.5 h-2.5 rounded-[3px] ${WORKING_SWATCH}`} />
+      Working hours
+    </span>
+    <span className="inline-flex items-center gap-1.5">
       <span className={`w-3.5 h-2.5 rounded-[3px] ring-1 ring-inset ring-slate-700/60 ${UNAVAILABLE_SWATCH}`} />
-      Unavailable
+      Off hours
     </span>
   </div>
 );
@@ -129,7 +135,7 @@ export const TeamAvailability: React.FC = () => {
           setError(null);
           return;
         }
-        const next = await getCalendarAvailability({ date: date ?? undefined, days: span });
+        const next = await getCalendarAvailability({ date: date ?? todayIn(displayTimeZone()), days: span });
         if (id !== request.current) return;
         setReport(next);
         setError(null);
@@ -143,6 +149,7 @@ export const TeamAvailability: React.FC = () => {
     },
     [date, span],
   );
+
 
   useEffect(() => {
     void load();
@@ -176,12 +183,9 @@ export const TeamAvailability: React.FC = () => {
     await load();
   };
 
-  const timezone = report?.timezone ?? null;
-  const today = timezone ? todayIn(timezone) : null;
-  const first = report?.days[0]?.date ?? null;
-  const format = useMemo(() => timeFormatter(timezone ?? 'UTC'), [timezone]);
-  const hours = useMemo(() => (report ? visibleHours(report) : DEFAULT_HOURS), [report]);
-  const live = Boolean(report && today && report.days.some((day) => day.date === today));
+  const today = todayIn(displayTimeZone());
+  const first = report?.dates[0] ?? null;
+  const live = Boolean(report?.dates.includes(today));
 
   const members = report?.members ?? [];
   const reachable = members.filter((member) => member.status !== 'unavailable');
@@ -198,7 +202,7 @@ export const TeamAvailability: React.FC = () => {
 
   const range = report?.range ?? null;
   const move = (direction: -1 | 1) => {
-    if (!first || !today || !range) return;
+    if (!first || !range) return;
     let next = shiftDate(first, direction * span);
     if (next < range.minDate) next = range.minDate;
     if (next > range.maxDate) next = range.maxDate;
@@ -208,8 +212,8 @@ export const TeamAvailability: React.FC = () => {
 
   const title = report
     ? span === 1
-      ? dayLabel(report.days[0].date, 'long')
-      : `${dayLabel(report.days[0].date, 'short')} – ${dayLabel(report.days[report.days.length - 1].date, 'short')}`
+      ? dayLabel(report.dates[0], 'long')
+      : `${dayLabel(report.dates[0], 'short')} – ${dayLabel(report.dates[report.dates.length - 1], 'short')}`
     : '';
   const provider = calendar?.provider ? PROVIDERS[calendar.provider] : null;
 
@@ -315,16 +319,16 @@ export const TeamAvailability: React.FC = () => {
           ) : (
             <div className={`overflow-auto custom-scrollbar max-h-[calc(100vh-20rem)] min-h-[12rem] transition-opacity ${loading ? 'opacity-70' : ''}`}>
               {span === 1 ? (
-                <DayTimeline report={report} members={visible} hours={hours} now={now} format={format} />
+                <DayTimeline members={visible} hours={DAY_HOURS} now={now} />
               ) : (
-                <WeekTimeline report={report} members={visible} hours={hours} now={now} today={today} format={format} />
+                <WeekTimeline dates={report.dates} members={visible} hours={DAY_HOURS} now={now} today={today} />
               )}
             </div>
           )}
 
           <footer className="px-4 py-2.5 border-t border-slate-800 text-2xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
             <span>
-              Times in {report.timezone.replace(/_/g, ' ')}
+              Each member’s times are in their own {provider?.label ?? 'calendar'} timezone
               {report.totalMembers > members.length ? ` · showing ${members.length} of ${report.totalMembers} members` : ''}
             </span>
             <span className="inline-flex items-center gap-1.5">

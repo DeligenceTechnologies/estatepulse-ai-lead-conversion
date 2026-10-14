@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Check } from 'lucide-react';
-import { getMeetingTypes, type CalendarEventType, type CalendarProviderId } from '../../../utils/calendarApi';
+import {
+  getMeetingTypes,
+  syncCalendarAvailability,
+  type CalendarEventType,
+  type CalendarProviderId,
+} from '../../../utils/calendarApi';
 import { PanelCard, RowSkeleton, useProviderData } from '../shared/CalendarPanel';
 import { Empty, Notice, POOLING_LABEL, PROVIDERS } from '../shared/ui';
 import { CopyLink, OpenLink } from './links';
@@ -102,7 +107,11 @@ export const MeetingTypes: React.FC<{ provider: CalendarProviderId }> = ({ provi
     if (!only) meetingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const refresh = () => void reload();
+  // Meetings are served from the database; Refresh first pulls the latest from the provider.
+  const refresh = () =>
+    void syncCalendarAvailability()
+      .catch(() => undefined)
+      .then(() => reload());
 
   if (error) {
     return (

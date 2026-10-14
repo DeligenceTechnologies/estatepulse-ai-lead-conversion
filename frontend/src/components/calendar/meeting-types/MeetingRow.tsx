@@ -16,6 +16,7 @@ import type { BookedMeeting, CalendarEventType, MeetingPerson } from '../../../u
 import { POOLING_LABEL } from '../shared/ui';
 import { CopyLink, OpenLink } from './links';
 import { durationLabel, isOpen, meetingMinutes, meetingPhase, meetingTool, startsIn, timeRange } from './meetings';
+import { displayTimeZone, formatDate, formatTime, zoneOffsetLabel } from '../../../lib/datetime';
 
 const smallAction =
   'h-8 px-3 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:border-slate-600 hover:text-white inline-flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500';
@@ -34,22 +35,37 @@ const Detail: React.FC<{ icon: React.ElementType; label: string; children: React
   </div>
 );
 
-const Person: React.FC<{ person: MeetingPerson }> = ({ person }) => (
-  <div className="flex items-center gap-2 min-w-0">
-    <span className="w-6 h-6 rounded-full bg-slate-800 text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0 uppercase">
-      {person.name.trim().charAt(0) || '?'}
-    </span>
-    <span className="min-w-0">
-      <span className="block truncate font-medium">{person.name}</span>
-      {person.email && (
-        <a href={`mailto:${person.email}`} className="block text-2xs text-slate-400 hover:text-slate-200 truncate">
-          {person.email}
-        </a>
-      )}
-    </span>
-    {person.email && <CopyLink url={person.email} title={`Copy ${person.name}'s email`} />}
-  </div>
-);
+/** The meeting on someone else's clock, when theirs differs from the viewer's: "Tue, 5:30 AM Toronto". */
+const theirTime = (timezone: string | null, start: string): string | null => {
+  if (!timezone || zoneOffsetLabel(timezone, start) === zoneOffsetLabel(displayTimeZone(), start)) return null;
+  const when = formatTime(start, { timeZone: timezone, weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  return `${when} ${(timezone.split('/').pop() ?? timezone).replace(/_/g, ' ')}`;
+};
+
+const Person: React.FC<{ person: MeetingPerson; start: string }> = ({ person, start }) => {
+  const local = theirTime(person.timezone, start);
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="w-6 h-6 rounded-full bg-slate-800 text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0 uppercase">
+        {person.name.trim().charAt(0) || '?'}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{person.name}</span>
+        {person.email && (
+          <a href={`mailto:${person.email}`} className="block text-2xs text-slate-400 hover:text-slate-200 truncate">
+            {person.email}
+          </a>
+        )}
+        {local && (
+          <span className="block text-2xs text-sky-300/80 truncate" title={person.timezone ?? undefined}>
+            Their time: {local}
+          </span>
+        )}
+      </span>
+      {person.email && <CopyLink url={person.email} title={`Copy ${person.name}'s email`} />}
+    </div>
+  );
+};
 
 const StatusTag: React.FC<{ meeting: BookedMeeting; now: number }> = ({ meeting, now }) => {
   const phase = meetingPhase(meeting, now);
@@ -187,13 +203,18 @@ export const MeetingRow: React.FC<{
                 )}
               </div>
               <div className="text-2xs text-slate-400">
-                {new Date(meeting.start).toLocaleDateString(undefined, {
+                {formatDate(meeting.start, {
                   weekday: 'long',
                   day: 'numeric',
                   month: 'long',
                 })}
                 , {timeRange(meeting.start, meeting.end)}
               </div>
+              {theirTime(meeting.timezone, meeting.start) && (
+                <div className="text-2xs text-sky-300/80" title={meeting.timezone ?? undefined}>
+                  Host’s time: {theirTime(meeting.timezone, meeting.start)}
+                </div>
+              )}
             </Detail>
 
             <Detail icon={MapPin} label="Where">
@@ -221,7 +242,9 @@ export const MeetingRow: React.FC<{
               label={meeting.invitees.length > 1 ? `Booked by · ${meeting.invitees.length}` : 'Booked by'}
             >
               {meeting.invitees.length ? (
-                meeting.invitees.map((person, index) => <Person key={`${person.email ?? person.name}-${index}`} person={person} />)
+                meeting.invitees.map((person, index) => (
+                  <Person key={`${person.email ?? person.name}-${index}`} person={person} start={meeting.start} />
+                ))
               ) : (
                 <div className="text-slate-500">No invitee details</div>
               )}
@@ -229,7 +252,9 @@ export const MeetingRow: React.FC<{
 
             <Detail icon={BadgeCheck} label={meeting.hosts.length > 1 ? 'Hosts' : 'Host'}>
               {meeting.hosts.length ? (
-                meeting.hosts.map((person, index) => <Person key={`${person.email ?? person.name}-${index}`} person={person} />)
+                meeting.hosts.map((person, index) => (
+                  <Person key={`${person.email ?? person.name}-${index}`} person={person} start={meeting.start} />
+                ))
               ) : (
                 <div className="text-slate-500">—</div>
               )}

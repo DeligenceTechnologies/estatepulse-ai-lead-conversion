@@ -8,6 +8,7 @@ import {
   type ConversationRow,
   type MessageRow,
 } from '../../utils/historyApi';
+import { formatDateTime } from '../../lib/datetime';
 
 /**
  * SMS history for the office.
@@ -185,7 +186,7 @@ export const ConversationsView: React.FC = () => {
                   <span className="font-mono">{t.leadPhone ?? '—'}</span>
                   <span>
                     {t.lastMessageAt
-                      ? new Date(t.lastMessageAt).toLocaleString([], {
+                      ? formatDateTime(t.lastMessageAt, {
                           month: 'short',
                           day: 'numeric',
                           hour: '2-digit',
@@ -255,7 +256,7 @@ export const ConversationsView: React.FC = () => {
                       <div className="flex items-center gap-2 text-2xs text-slate-500">
                         <span className="uppercase font-semibold">{m.senderType}</span>
                         <span>
-                          {new Date(m.sentAt ?? m.createdAt).toLocaleString([], {
+                          {formatDateTime(m.sentAt ?? m.createdAt, {
                             month: 'short',
                             day: 'numeric',
                             hour: '2-digit',

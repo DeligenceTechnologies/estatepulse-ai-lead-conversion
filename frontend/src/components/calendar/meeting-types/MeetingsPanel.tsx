@@ -18,6 +18,7 @@ import {
   type Range,
   type RangeId,
 } from './meetings';
+import { dayFromIsoDate, formatDate, isoDateOf } from '../../../lib/datetime';
 
 const RANGES: { id: Exclude<RangeId, 'date'>; label: string }[] = [
   { id: 'today', label: 'Today' },
@@ -26,15 +27,9 @@ const RANGES: { id: Exclude<RangeId, 'date'>; label: string }[] = [
   { id: 'last_week', label: 'Last week' },
 ];
 
-const toInputDate = (time: number) => {
-  const d = new Date(time);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-const fromInputDate = (value: string): number | null => {
-  const [y, m, d] = value.split('-').map(Number);
-  return y && m && d ? new Date(y, m - 1, d).getTime() : null;
-};
+// The date input speaks 'YYYY-MM-DD'; the day is the user's, in their timezone.
+const toInputDate = isoDateOf;
+const fromInputDate = dayFromIsoDate;
 
 /** The day the list is on, as a button that opens the native date picker. */
 const DayPicker: React.FC<{ day: number; min: string; max: string; onPick: (day: number) => void }> = ({
@@ -60,7 +55,7 @@ const DayPicker: React.FC<{ day: number; min: string; max: string; onPick: (day:
         onClick={open}
         className="h-9 px-2 -ml-2 rounded-lg text-sm font-bold text-white inline-flex items-center gap-1.5 hover:bg-slate-800/70 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
       >
-        {new Date(day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+        {formatDate(day, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
         <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
       </button>
       <input

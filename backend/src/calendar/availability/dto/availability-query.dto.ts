@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsTimeZone, Matches } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Matches } from 'class-validator';
 
 export const AVAILABILITY_SPANS = [1, 7] as const;
 
@@ -13,8 +13,4 @@ export class AvailabilityQueryDto {
   @IsInt()
   @IsIn(AVAILABILITY_SPANS, { message: 'days must be 1 or 7' })
   days?: number;
-
-  @IsOptional()
-  @IsTimeZone({ message: 'timezone must be a valid IANA time zone, e.g. Asia/Kolkata' })
-  timezone?: string;
 }

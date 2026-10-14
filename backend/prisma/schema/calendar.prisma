@@ -34,6 +34,15 @@ enum CalendarBlockKind {
   @@map("calendar_block_kind")
 }
 
+/// A booked meeting's state at the provider. pending: Cal.com, awaiting the host's confirmation.
+enum CalendarMeetingStatus {
+  scheduled
+  pending
+  canceled
+
+  @@map("calendar_meeting_status")
+}
+
 enum CalendarMemberSyncStatus {
   ok
   limited
@@ -69,6 +78,8 @@ model CalendarConnection {
   webhookId        String?   @map("webhook_id") @db.VarChar(500)
   webhookSecret    String?   @map("webhook_secret")
   webhookAttemptAt DateTime? @map("webhook_attempt_at") @db.Timestamptz(6)
+  meetingsSyncedAt DateTime? @map("meetings_synced_at") @db.Timestamptz(6)
+  meetingsError    String?   @map("meetings_error") @db.VarChar(500)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -77,6 +88,7 @@ model CalendarConnection {
   connectedBy  User?               @relation(fields: [connectedById], references: [id], onDelete: SetNull)
   members      CalendarMember[]
   blocks       CalendarTimeBlock[]
+  meetings     CalendarMeeting[]
 
   @@unique([orgId, provider])
   @@index([status, syncedAt])
@@ -95,7 +107,10 @@ model CalendarMember {
   username      String? @db.VarChar(255)
   schedulingUrl String? @map("scheduling_url") @db.VarChar(500)
 
+  /// Weekly hours as wall-clock 'HH:MM' ({ weekly, dates }), in schedule_timezone.
   schedule         Json?
+  /// The timezone the schedule's hours are in; Calendly keeps one per schedule.
+  scheduleTimezone String?                  @map("schedule_timezone") @db.VarChar(100)
   scheduleSyncedAt DateTime?                @map("schedule_synced_at") @db.Timestamptz(6)
   syncStatus       CalendarMemberSyncStatus @default(ok) @map("sync_status")
   syncMessage      String?                  @map("sync_message") @db.VarChar(500)
@@ -132,4 +147,43 @@ model CalendarTimeBlock {
   @@index([endsAt])
   @@index([orgId])
   @@map("calendar_time_blocks")
+}
+
+/// Meetings booked on the connection's event types, synced from the provider.
+/// Times are instants (timestamptz, stored as UTC); the app shows them in
+/// each viewer's own timezone.
+model CalendarMeeting {
+  id             String                @id @default(uuid(7)) @db.Uuid
+  orgId          String                @map("organization_id") @db.Uuid
+  connectionId   String                @map("connection_id") @db.Uuid
+  /// The provider's id: Calendly's event URI, Cal.com's booking uid.
+  externalId     String                @map("external_id") @db.VarChar(500)
+  eventTypeId    String?               @map("event_type_id") @db.VarChar(500)
+  title          String                @db.VarChar(500)
+  startsAt       DateTime              @map("starts_at") @db.Timestamptz(6)
+  endsAt         DateTime              @map("ends_at") @db.Timestamptz(6)
+  /// The host's timezone: the clock the meeting was set in.
+  timezone       String?               @db.VarChar(100)
+  status         CalendarMeetingStatus
+  /// [{ name, email, timezone }]: who booked.
+  invitees       Json                  @default("[]")
+  /// [{ name, email, timezone }]: who hosts.
+  hosts          Json                  @default("[]")
+  meetingUrl     String?               @map("meeting_url") @db.VarChar(2000)
+  location       String?               @db.VarChar(1000)
+  rescheduleUrl  String?               @map("reschedule_url") @db.VarChar(2000)
+  cancelUrl      String?               @map("cancel_url") @db.VarChar(2000)
+  canceledReason String?               @map("canceled_reason") @db.VarChar(1000)
+  syncedAt       DateTime              @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalId])
+  @@index([connectionId, startsAt])
+  @@index([endsAt])
+  @@index([orgId])
+  @@map("calendar_meetings")
 }

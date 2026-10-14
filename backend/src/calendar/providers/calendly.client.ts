@@ -69,6 +69,7 @@ interface CalendlyScheduledEvent {
 interface CalendlyInvitee {
   name: string;
   email: string;
+  timezone?: string | null;
   status: 'active' | 'canceled';
   cancel_url: string | null;
   reschedule_url: string | null;
@@ -359,11 +360,14 @@ function toMeeting(event: CalendlyScheduledEvent, invitees: CalendlyInvitee[]): 
     title: event.name,
     start: event.start_time,
     end: event.end_time,
+    // Calendly does not say; the sync fills it from the host's calendar member.
+    timezone: null,
     status: canceled ? 'canceled' : 'scheduled',
-    invitees: invitees.map(({ name, email }) => ({ name, email })),
+    invitees: invitees.map(({ name, email, timezone }) => ({ name, email, timezone: timezone ?? null })),
     hosts: event.event_memberships.map((host) => ({
       name: host.user_name ?? host.user_email ?? 'Host',
       email: host.user_email ?? null,
+      timezone: null,
     })),
     meetingUrl: place.meetingUrl,
     location: place.location ?? LOCATION_LABEL[event.location?.type ?? ''] ?? null,
