@@ -463,8 +463,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                   return (
                     <tr
                       key={lead.id}
-                      className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
+                      tabIndex={0}
+                      className="hover:bg-slate-800/40 transition-colors group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/60"
                       onClick={() => openLead(lead)}
+                      onKeyDown={(e) => {
+                        // The row itself only: a button inside it already answers its own Enter.
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === ' ') e.preventDefault();
+                        if (e.key === 'Enter' || e.key === ' ') openLead(lead);
+                      }}
                     >
                       {/* Lead: the name, then how to reach them. Anything worth a second look is
                           one icon with the reasons on hover; the dossier has the rest (budget,
@@ -551,7 +558,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             <button
                               onClick={() => setPreCallLeadId(lead.id)}
                               title="Agent Pre-Call Briefing"
-                              className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition cursor-pointer"
                             >
                               <Flame className="w-3.5 h-3.5 text-rose-400" />
                             </button>
@@ -560,7 +567,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                           <button
                             onClick={() => openLead(lead)}
                             title="Open Full Dossier"
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                            className="h-7 w-7 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition cursor-pointer"
                           >
                             <ChevronRight className="w-3.5 h-3.5" />
                           </button>
