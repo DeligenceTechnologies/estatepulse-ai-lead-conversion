@@ -41,7 +41,9 @@ import { xlsxFixture } from './xlsx-fixture.test';
 process.env['STRATEGY_ENGINE'] = '0';
 process.env['CALENDAR_SYNC'] = '0';
 process.env['WORKER_ENABLED'] = 'false';
-delete process.env['SHEETS_SYNC'];
+// Set, not deleted: ConfigModule re-reads backend/.env, where a developer may have switched these on.
+process.env['SHEETS_SYNC'] = '0';
+process.env['SHEETS_VERSION_PROBE'] = '0';
 process.env['GOOGLE_SHEETS_ENABLED'] = '1';
 process.env['FILE_IMPORT_ENABLED'] = '1';
 delete process.env['SMTP_HOST'];
@@ -405,9 +407,10 @@ test('an XLSX previews the same way, with numbers and dates as text', async () =
   assert.equal(r.body.rows[1].lead.normalized_phone, '+15125550132');
 });
 
-test('import: every importable row becomes a paused lead awaiting review; rows with errors are never imported', async () => {
+test('import with nothing ticked: every importable row becomes a paused lead awaiting review; rows with errors are never imported', async () => {
   const token = randomUUID();
-  const r = await upload(`${API}/batches`, A.token, { name: 'leads.csv', bytes: CSV }, { mapping: MAPPING, clientToken: token });
+  // approveRows [] = the owner unticked everything: nothing is approved on arrival.
+  const r = await upload(`${API}/batches`, A.token, { name: 'leads.csv', bytes: CSV }, { mapping: MAPPING, clientToken: token, approveRows: '[]' });
   assert.equal(r.status, 200, r.text);
   const b = r.body;
   batchId = b.id;
@@ -421,6 +424,7 @@ test('import: every importable row becomes a paused lead awaiting review; rows w
   assert.equal(b.rows.possibleDuplicates, 2);
   assert.equal(b.rows.dncInherited, 1);
   assert.deepEqual(b.review, { pending: 7, approved: 0, rejected: 0 });
+  assert.deepEqual(b.approval, { approved: 0, released: 0, held: [], skipped: [] });
   assert.ok(!JSON.stringify(b).includes('@example.test'), 'the batch summary leaked an email');
   assert.ok(!JSON.stringify(b).includes('555-01'), 'the batch summary leaked a phone');
 
@@ -473,17 +477,21 @@ test('import: every importable row becomes a paused lead awaiting review; rows w
   assert.equal(await prisma.lead_source_field_mappings.count({ where: { organization_id: A.orgId, lead_source_id: batchId } }), 8);
 
   // The same request again: the same batch, nothing twice.
-  const again = await upload(`${API}/batches`, A.token, { name: 'leads.csv', bytes: CSV }, { mapping: MAPPING, clientToken: token });
+  const again = await upload(`${API}/batches`, A.token, { name: 'leads.csv', bytes: CSV }, { mapping: MAPPING, clientToken: token, approveRows: '[]' });
   assert.equal(again.status, 200, again.text);
   assert.equal(again.body.id, batchId);
+  assert.equal(again.body.approval, null, 'a retry that imported nothing approves nothing');
   assert.equal(await prisma.sheet_import_rows.count({ where: { organization_id: A.orgId, lead_source_id: batchId } }), 7);
   assert.equal(await prisma.leads.count({ where: { organization_id: A.orgId, email: email(1) } }), 1);
-  // A different token with the same file is a new batch, by the owner's choice — its rows are flagged as possible duplicates.
+  // A different token with the same file is a new batch, by the owner's choice — its rows are flagged as possible
+  // duplicates, and nothing was ticked, so none of them is approved.
   const twice = await upload(`${API}/batches`, A.token, { name: 'leads.csv', bytes: CSV }, { mapping: MAPPING, clientToken: randomUUID() });
   assert.equal(twice.status, 200, twice.text);
   assert.notEqual(twice.body.id, batchId);
   assert.equal(twice.body.rows.imported, 7);
   assert.equal(twice.body.rows.possibleDuplicates, 7);
+  assert.equal(twice.body.approval.approved, 0);
+  assert.deepEqual(twice.body.review, { pending: 7, approved: 0, rejected: 0 });
 });
 
 test('no imported lead is visible to the outreach watcher', async () => {
@@ -793,4 +801,135 @@ test('remove an upload: its pending rows are rejected, approved leads are kept, 
     where: { organization_id: A.orgId, action: 'file_import.removed', entity_id: batchId },
   });
   assert.deepEqual(audit?.payload, { rejected: 3, approvedKept: 3 });
+});
+
+test('import only the clean rows: they are approved at once; flagged rows are left out entirely', async () => {
+  const csv =
+    'Name,Phone,Email\n' +
+    `Clean One,+15125550321,${email(321)}\n` +
+    `Clean Two,+15125550322,${email(322)}\n` +
+    `Bad Email,+15125550323,not-an-email\n` + // a data warning
+    `Opted Four,+15125550196,${email(324)}\n` + // matches the opted-out contact
+    `Clean One,+15125550321,${email(325)}\n`; // same phone as row 2: a possible duplicate
+  const mapping = JSON.stringify([
+    { fieldKey: 'name', target: 'full_name' },
+    { fieldKey: 'phone', target: 'phone' },
+    { fieldKey: 'email', target: 'email' },
+  ]);
+  const r = await upload(`${API}/batches`, A.token, { name: 'clean.csv', bytes: csv }, { mapping, clientToken: randomUUID(), onlyClean: '1' });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.rows.imported, 2);
+  assert.equal(r.body.rows.flaggedLeftOut, 3);
+  assert.deepEqual(r.body.review, { pending: 0, approved: 2, rejected: 0 });
+  assert.equal(r.body.approval.approved, 2);
+  assert.equal(r.body.approval.released, 2);
+  const rows = await prisma.sheet_import_rows.findMany({
+    where: { organization_id: A.orgId, lead_source_id: r.body.id },
+    include: { leads: true },
+    orderBy: { row_number: 'asc' },
+  });
+  assert.deepEqual(
+    rows.map((x) => [x.row_number, x.review_state, x.leads!.automation_paused]),
+    [
+      [2, 'approved', false],
+      [3, 'approved', false],
+    ],
+  );
+  assert.equal(await prisma.leads.count({ where: { organization_id: A.orgId, lead_source_id: r.body.id } }), 2, 'a flagged row was imported');
+  // A file where every importable row is flagged has nothing to import this way.
+  const allFlagged = await upload(
+    `${API}/batches`,
+    A.token,
+    { name: 'flagged.csv', bytes: 'Name,Phone,Email\nOpted Only,+15125550196,x@example.test\n' },
+    { mapping, clientToken: randomUUID(), onlyClean: '1' },
+  );
+  assert.equal(allFlagged.status, 400, allFlagged.text);
+  assert.equal(allFlagged.body.error.code, 'NO_CLEAN_ROWS');
+});
+
+test('a pending row whose lead was deleted out of band is neither waiting for review nor counted', async () => {
+  const csv = 'Name,Phone,Email\n' + `Gone One,+15125550331,${email(331)}\n` + `Kept Two,+15125550332,${email(332)}\n`;
+  const mapping = JSON.stringify([
+    { fieldKey: 'name', target: 'full_name' },
+    { fieldKey: 'phone', target: 'phone' },
+    { fieldKey: 'email', target: 'email' },
+  ]);
+  const r = await upload(`${API}/batches`, A.token, { name: 'gone.csv', bytes: csv }, { mapping, clientToken: randomUUID(), approveRows: '[]' });
+  assert.equal(r.status, 200, r.text);
+  const rows = await prisma.sheet_import_rows.findMany({ where: { organization_id: A.orgId, lead_source_id: r.body.id }, orderBy: { row_number: 'asc' } });
+  assert.equal(rows.length, 2);
+  // The FK sets the row's lead_id to NULL; the row itself stays pending.
+  await prisma.leads.delete({ where: { id: rows[0].lead_id! } });
+  const queue = await call(`${REVIEW}?sourceId=${r.body.id}`, A.token);
+  assert.equal(queue.status, 200, queue.text);
+  assert.equal(queue.body.total, 1);
+  assert.deepEqual(queue.body.items.map((i: any) => i.rowId), [rows[1].id]);
+  const batch = (await call(`${API}/history`, A.token)).body.imports.find((b: any) => b.id === r.body.id);
+  assert.deepEqual(batch.review, { pending: 1, approved: 0, rejected: 0 });
+});
+
+test('approve on import: only the ticked rows are approved as they land; a ticked flagged row is approved too', async () => {
+  const csv =
+    'Name,Phone,Email\n' +
+    `Clean A,+15125550341,${email(341)}\n` +
+    `Clean B,+15125550342,${email(342)}\n` +
+    `Bad Email,+15125550343,not-an-email\n` + // a data warning: flagged
+    `Opted D,+15125550196,${email(344)}\n`; // matches the opted-out contact: flagged
+  const mapping = JSON.stringify([
+    { fieldKey: 'name', target: 'full_name' },
+    { fieldKey: 'phone', target: 'phone' },
+    { fieldKey: 'email', target: 'email' },
+  ]);
+  const states = async (id: string) =>
+    (await prisma.sheet_import_rows.findMany({ where: { organization_id: A.orgId, lead_source_id: id }, include: { leads: true }, orderBy: { row_number: 'asc' } })).map(
+      (x) => [x.row_number, x.review_state, x.leads!.automation_paused, x.reviewed_by === A.userId],
+    );
+
+  // Nothing said about approval: every row waits in Import Review, as with a sheet.
+  const byDefault = await upload(`${API}/batches`, A.token, { name: 'default.csv', bytes: csv }, { mapping, clientToken: randomUUID() });
+  assert.equal(byDefault.status, 200, byDefault.text);
+  assert.equal(byDefault.body.rows.imported, 4);
+  assert.deepEqual(byDefault.body.review, { pending: 4, approved: 0, rejected: 0 });
+  assert.deepEqual(byDefault.body.approval, { approved: 0, released: 0, held: [], skipped: [] });
+  assert.deepEqual(await states(byDefault.body.id), [
+    [2, 'pending', true, false],
+    [3, 'pending', true, false],
+    [4, 'pending', true, false],
+    [5, 'pending', true, false],
+  ]);
+
+  // The owner unticked Clean A and ticked Bad Email: exactly those choices are honoured. Row 99 is nobody.
+  const ticked = await upload(
+    `${API}/batches`,
+    A.token,
+    { name: 'ticked.csv', bytes: csv },
+    { mapping, clientToken: randomUUID(), approveRows: JSON.stringify([3, 4, 99]) },
+  );
+  assert.equal(ticked.status, 200, ticked.text);
+  assert.equal(ticked.body.approval.approved, 2);
+  assert.equal(ticked.body.approval.released, 2, 'a bad email with a good phone can still be dialled');
+  assert.deepEqual(await states(ticked.body.id), [
+    [2, 'pending', true, false],
+    [3, 'approved', false, true],
+    [4, 'approved', false, true],
+    [5, 'pending', true, false],
+  ]);
+  const inLeads = new Set((await call('/api/v1/leads?limit=200', A.token)).body.map((l: any) => l.id));
+  const tickedRows = await prisma.sheet_import_rows.findMany({ where: { organization_id: A.orgId, lead_source_id: ticked.body.id }, orderBy: { row_number: 'asc' } });
+  assert.ok(inLeads.has(tickedRows[1].lead_id) && inLeads.has(tickedRows[2].lead_id), 'approved rows are missing from Leads');
+  assert.ok(!inLeads.has(tickedRows[0].lead_id) && !inLeads.has(tickedRows[3].lead_id), 'a pending row is listed in Leads');
+  // Approved on the owner's behalf: the audit names them, never "system".
+  const tickedLeadIds = tickedRows.map((x) => x.lead_id!);
+  assert.equal(
+    await prisma.audit_logs.count({ where: { organization_id: A.orgId, action: 'sheet_import.approved', actor_type: 'user', actor_id: A.userId, entity_id: { in: tickedLeadIds } } }),
+    2,
+  );
+  assert.equal(await prisma.audit_logs.count({ where: { organization_id: A.orgId, action: 'sheet_import.auto_approved', entity_id: { in: tickedLeadIds } } }), 0);
+
+  // Bad approval lists are refused before anything is written.
+  for (const bad of ['{not json', JSON.stringify([1]), JSON.stringify(['2']), JSON.stringify(Array.from({ length: 10_001 }, (_, i) => i + 2))]) {
+    const res = await upload(`${API}/batches`, A.token, { name: 'bad-ticks.csv', bytes: csv }, { mapping, clientToken: randomUUID(), approveRows: bad });
+    assert.equal(res.status, 400, `${bad.slice(0, 20)}: ${res.text}`);
+  }
+  assert.equal(await prisma.lead_sources.count({ where: { organization_id: A.orgId, name: 'bad-ticks.csv' } }), 0);
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2, Upload, X } from 'lucide-react';
+import { CheckCircle2, Download, FileUp, Loader2, Upload } from 'lucide-react';
 import {
   downloadTemplate,
   fileProblem,
@@ -12,8 +12,9 @@ import {
   type ImportBatch,
 } from '../../utils/fileImportApi';
 import type { ColumnMapping } from '../../utils/googleSheetsApi';
-import { CHOICES, ISSUE_TEXT, choicesFromColumns, columnsFromChoices, type ColumnChoice } from '../../utils/sheetMapping';
+import { CHOICES, ISSUE_TEXT, approveMessage, choicesFromColumns, columnsFromChoices, type ColumnChoice } from '../../utils/sheetMapping';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
+import { PreviewRowsTable, flagged } from './PreviewRowsTable';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
@@ -67,8 +68,9 @@ const ProgressBar: React.FC<{ progress: Progress }> = ({ progress }) => {
 /**
  * Upload a CSV or Excel file of leads: choose the file (and, for a workbook,
  * the worksheet), check the server's reading of it (and fix the column mapping
- * if it guessed wrong), then import. Imported leads wait in Import Review;
- * nothing here contacts anyone.
+ * if it guessed wrong), then import. Clean rows come ticked and are approved as
+ * they land; flagged rows wait in Import Review. Nothing here contacts anyone:
+ * approval only makes a lead eligible for the outreach strategy.
  *
  * The file stays in the browser between the steps — the server parses it for
  * the preview and again for the import, and stores nothing in between.
@@ -79,6 +81,8 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
   const [sheet, setSheet] = useState<string | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [choices, setChoices] = useState<Record<string, ColumnChoice>>({});
+  /** Row numbers ticked in the preview: approved as soon as they are imported. Clean rows start ticked. */
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<null | 'limits' | 'preview' | 'import'>('limits');
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<{ message: string; details: string[] } | null>(null);
@@ -109,6 +113,8 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
       setPreview(p);
       setSheet(p.file.sheet);
       setChoices(choicesFromColumns(p.mapping.columns));
+      // Clean rows start ticked: they are approved on import. Flagged ones start unticked: they wait for review.
+      setSelected(new Set(p.rows.filter((r) => !flagged(r)).map((r) => r.rowNumber)));
       previewed.current = mappingKey(p.mapping.columns);
     } catch (e) {
       setError({ message: errorText(e), details: errorDetails(e) });
@@ -154,13 +160,25 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
     return () => clearTimeout(t);
   }, [columns, file, preview, busy, sheet, read]);
 
-  const run = async () => {
+  /**
+   * 'all': import every importable row; the ticked ones are approved as they land, the rest wait for review.
+   * 'clean': import only the rows without a flag, approved at once; flagged rows are left out entirely.
+   */
+  const run = async (mode: 'all' | 'clean') => {
     if (!file || !preview) return;
     setBusy('import');
     setProgress({ phase: 'import', fraction: 0 });
     setError(null);
     try {
-      const batch = await importFile(file, columns, token.current, sheet, (fraction) => setProgress({ phase: 'import', fraction }));
+      const batch = await importFile(
+        file,
+        columns,
+        token.current,
+        sheet,
+        mode === 'all' ? [...selected] : null,
+        mode === 'clean',
+        (fraction) => setProgress({ phase: 'import', fraction }),
+      );
       setDone(batch);
       onImported(batch);
     } catch (e) {
@@ -176,6 +194,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
     setSheet(null);
     setPreview(null);
     setChoices({});
+    setSelected(new Set());
     setError(null);
     setDone(null);
   };
@@ -184,10 +203,13 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
   const stale = preview !== null && mappingKey(columns) !== previewed.current;
   const multiSheet = (preview?.file.sheets.length ?? 0) > 1;
 
+  const cleanCount = useMemo(() => (preview?.rows ?? []).filter((r) => !flagged(r)).length, [preview]);
+  const flaggedCount = (preview?.rows.length ?? 0) - cleanCount;
+
   return (
     <SheetModal
       wide
-      title={done ? 'Imported for review' : file ? file.name : 'Import leads from a file'}
+      title={done ? 'Imported' : file ? file.name : 'Import leads from a file'}
       subtitle={
         done
           ? undefined
@@ -210,8 +232,11 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
           <div className="flex items-start gap-2 text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span>
-              {done.rows?.imported ?? 0} lead{done.rows?.imported === 1 ? '' : 's'} from {done.name} now wait in Import Review. Nobody is
-              called or texted until you approve them.
+              {done.rows?.imported ?? 0} lead{done.rows?.imported === 1 ? '' : 's'} imported from {done.name}.
+              {done.approval ? ` ${approveMessage(done.approval)}` : ''}
+              {done.review.pending > 0 && ` ${done.review.pending} wait in Import Review.`}
+              {(done.rows?.flaggedLeftOut ?? 0) > 0 &&
+                ` ${done.rows!.flaggedLeftOut} flagged row${done.rows!.flaggedLeftOut === 1 ? ' was' : 's were'} left out, as asked.`}
             </span>
           </div>
           {done.rows && (done.rows.possibleDuplicates ?? 0) > 0 && (
@@ -338,7 +363,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                     .filter(([, n]) => n)
                     .map(([code, n]) => `${n} ${(ISSUE_TEXT[code] ?? code).toLowerCase()}`)
                     .join(', ')}
-                  . Warnings never block an import; the owner sees them in Import Review.
+                  . Warnings never block an import; flagged rows wait in Import Review.
                 </p>
               )}
 
@@ -386,54 +411,21 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                 </ul>
               )}
 
-              {/* Rows */}
-              <div className="rounded-xl border border-slate-800 overflow-hidden">
-                <div className="px-3 py-2 bg-slate-950/60 text-2xs text-slate-500 flex items-center gap-2">
-                  {preview.rows.length < preview.counts.total - preview.counts.blank
-                    ? `The first ${preview.rows.length} rows, read under this mapping`
-                    : 'Every row, read under this mapping'}
-                  {(busy === 'preview' || stale) && <Loader2 className="w-3 h-3 animate-spin" />}
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  <table className="w-full text-2xs">
-                    <thead className="text-slate-500 text-left">
-                      <tr>
-                        <th className="px-3 py-1.5 font-semibold">Row</th>
-                        <th className="px-3 py-1.5 font-semibold">Name</th>
-                        <th className="px-3 py-1.5 font-semibold">Phone</th>
-                        <th className="px-3 py-1.5 font-semibold">Email</th>
-                        <th className="px-3 py-1.5 font-semibold">Import</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800">
-                      {preview.rows.map((r) => (
-                        <tr key={r.rowNumber} className={r.issue ? 'bg-rose-500/5' : ''}>
-                          <td className="px-3 py-1.5 text-slate-500 font-mono">{r.rowNumber}</td>
-                          <td className="px-3 py-1.5 text-slate-200">
-                            {[r.lead?.first_name, r.lead?.last_name].filter(Boolean).join(' ') || '—'}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-300">{r.lead?.normalized_phone ?? r.lead?.phone ?? '—'}</td>
-                          <td className="px-3 py-1.5 text-slate-300">{r.lead?.email ?? '—'}</td>
-                          <td className="px-3 py-1.5">
-                            {r.issue ? (
-                              <span className="text-rose-300 flex items-center gap-1">
-                                <X className="w-3 h-3" /> {ISSUE_TEXT[r.issue] ?? r.issue}
-                              </span>
-                            ) : r.reviewReasons.length ? (
-                              <span className="text-amber-200 flex items-center gap-1 cursor-help" title={r.reviewReasons.join('\n')}>
-                                <AlertTriangle className="w-3 h-3" /> Yes, {r.reviewReasons.length} warning
-                                {r.reviewReasons.length === 1 ? '' : 's'}
-                              </span>
-                            ) : (
-                              <span className="text-emerald-300">Yes</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {/* Rows: every row with its verdict; ticked rows are approved as they land */}
+              <PreviewRowsTable
+                rows={preview.rows}
+                selected={selected}
+                onChange={setSelected}
+                note={
+                  <>
+                    <span>
+                      Every row, read under this mapping. Clean rows are ticked: they are approved on import. Flagged rows wait in Import Review
+                      unless you tick them.
+                    </span>
+                    {(busy === 'preview' || stale) && <Loader2 className="w-3 h-3 animate-spin" />}
+                  </>
+                }
+              />
             </>
           )}
 
@@ -445,15 +437,40 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               Cancel
             </button>
             <div className="flex-1" />
-            <button type="button" className={primary} onClick={() => void run()} disabled={!canImport || stale}>
+            {preview && flaggedCount > 0 && cleanCount > 0 && (
+              <button
+                type="button"
+                className={secondary}
+                onClick={() => void run('clean')}
+                disabled={!canImport || stale}
+                title="Imports and approves only the rows without a flag; flagged rows are left out of this import entirely"
+              >
+                {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Import only the {cleanCount.toLocaleString('en-US')} clean
+              </button>
+            )}
+            <button
+              type="button"
+              className={primary}
+              onClick={() => void run('all')}
+              disabled={!canImport || stale}
+              title={
+                selected.size > 0
+                  ? 'Imports every importable row; the ticked ones are approved right away, the rest wait in Import Review'
+                  : 'Imports every importable row; all of them wait in Import Review'
+              }
+            >
               {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
               {preview
-                ? `Import ${preview.counts.importable.toLocaleString('en-US')} lead${preview.counts.importable === 1 ? '' : 's'} for review`
+                ? `Import ${preview.counts.importable.toLocaleString('en-US')} lead${preview.counts.importable === 1 ? '' : 's'}${
+                    selected.size > 0 ? ` · ${selected.size.toLocaleString('en-US')} approved now` : ' for review'
+                  }`
                 : 'Import'}
             </button>
           </div>
           <p className="text-2xs text-slate-500">
-            Imported leads wait in Import Review. Nobody is called or texted until you approve them.
+            Ticked rows are approved on import; the rest wait in Import Review. Approving makes a lead eligible for your outreach strategy; it never
+            calls or texts anyone by itself.
           </p>
         </div>
       )}

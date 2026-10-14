@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { LeadStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { approveTrackingRows } from './approval';
 import type { SessionIdentity } from './google-connections.service';
 import { leadValuesRow, type ChangedValues } from './sheet-import.service';
 import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
@@ -10,8 +11,7 @@ import type { ChangesQuery } from './schemas';
 
 export const REJECTED_REASON = 'Rejected at import review';
 
-/** Why an approved lead stays paused. Approval never overrides any of these. */
-export type HoldReason = 'DO_NOT_CONTACT' | 'NO_DIALABLE_PHONE' | 'STATUS_CHANGED' | 'HUMAN_TAKEOVER';
+export type { HoldReason } from './approval';
 
 /** Lead fields a "change" may carry, in the order they are shown. */
 const DIFF_FIELDS = [
@@ -43,66 +43,9 @@ const DIFF_FIELDS = [
 export class SheetReviewService {
   constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
 
+  /** The owner's approval. The same rules as a clean row approved on import — see approval.ts. */
   async approve(who: SessionIdentity, rowIds: string[]) {
-    const org = who.organizationId;
-    return this.prisma.$transaction(async (tx) => {
-      const decided = await tx.$queryRaw<{ id: string; lead_id: string | null }[]>`
-        UPDATE sheet_import_rows
-           SET review_state = 'approved', reviewed_by = ${who.userId}::uuid, reviewed_at = now(), updated_at = now()
-         WHERE organization_id = ${org}::uuid AND id = ANY(${rowIds}::uuid[]) AND review_state = 'pending'
-        RETURNING id, lead_id`;
-      const leadIds = decided.map((d) => d.lead_id).filter((id): id is string => !!id);
-      if (leadIds.length === 0) return { approved: 0, released: 0, held: [], skipped: notDecided(rowIds, decided) };
-
-      // The import's reason is spent; any other review reason stays visible.
-      await tx.$executeRaw`
-        UPDATE leads
-           SET review_reasons = array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON}),
-               needs_review = cardinality(array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON})) > 0,
-               updated_at = now()
-         WHERE organization_id = ${org}::uuid AND id = ANY(${leadIds}::uuid[])`;
-
-      // Lift the pause only when nothing else holds the lead back.
-      const released = await tx.$queryRaw<{ id: string }[]>`
-        UPDATE leads
-           SET automation_paused = false, updated_at = now()
-         WHERE organization_id = ${org}::uuid AND id = ANY(${leadIds}::uuid[])
-           AND automation_paused AND NOT dnc_status AND status = ${LeadStatus.NEW}
-           AND takeover_user_id IS NULL AND normalized_phone IS NOT NULL
-        RETURNING id`;
-      const releasedIds = new Set(released.map((r) => r.id));
-
-      const heldIds = leadIds.filter((id) => !releasedIds.has(id));
-      const held = heldIds.length
-        ? await tx.leads.findMany({
-            where: { organization_id: org, id: { in: heldIds } },
-            select: { id: true, dnc_status: true, status: true, takeover_user_id: true, normalized_phone: true },
-          })
-        : [];
-
-      await tx.audit_logs.createMany({
-        data: decided
-          .filter((d) => d.lead_id)
-          .map((d) => ({
-            id: newId(),
-            organization_id: org,
-            actor_type: 'user',
-            actor_id: who.userId,
-            action: 'sheet_import.approved',
-            entity_type: 'lead',
-            entity_id: d.lead_id,
-            payload: { rowId: d.id, released: releasedIds.has(d.lead_id!) },
-          })),
-      });
-
-      const rowOf = new Map(decided.map((d) => [d.lead_id, d.id]));
-      return {
-        approved: decided.length,
-        released: releasedIds.size,
-        held: held.map((l) => ({ rowId: rowOf.get(l.id)!, leadId: l.id, reason: holdReason(l) })),
-        skipped: notDecided(rowIds, decided),
-      };
-    });
+    return this.prisma.$transaction((tx) => approveTrackingRows(tx, who.organizationId, rowIds, { userId: who.userId }));
   }
 
   async reject(who: SessionIdentity, rowIds: string[]) {
@@ -258,13 +201,6 @@ export class SheetReviewService {
       return { resolved: flagged.length, skipped: rowIds.filter((id) => !flagged.some((f) => f.id === id)) };
     });
   }
-}
-
-function holdReason(l: { dnc_status: boolean; status: string; takeover_user_id: string | null; normalized_phone: string | null }): HoldReason {
-  if (l.dnc_status) return 'DO_NOT_CONTACT';
-  if (l.status !== LeadStatus.NEW) return 'STATUS_CHANGED';
-  if (l.takeover_user_id) return 'HUMAN_TAKEOVER';
-  return 'NO_DIALABLE_PHONE';
 }
 
 /** Rows asked about that were not pending (already decided) or not this organization's. */

@@ -117,7 +117,7 @@ const SourceRow: React.FC<{
           </>
         ) : (
           source.mappingStatus === 'CONFIGURED' && (
-            <button type="button" className={link} disabled={busy} onClick={() => act(() => enableSheetSource(source.id))}>
+            <button type="button" className={link} disabled={busy} onClick={() => act(() => enableSheetSource(source.id, []))}>
               Switch on
             </button>
           )

@@ -36,12 +36,13 @@ import { SheetsEnabledGuard } from './sheets-enabled.guard';
 process.env['STRATEGY_ENGINE'] = '0';
 process.env['CALENDAR_SYNC'] = '0';
 process.env['WORKER_ENABLED'] = 'false';
-delete process.env['SHEETS_SYNC'];
+// Set, not deleted: ConfigModule re-reads backend/.env, where a developer may have switched these on.
+process.env['SHEETS_SYNC'] = '0';
+process.env['SHEETS_VERSION_PROBE'] = '0';
 // The rollout flag: this suite exercises the feature switched on.
 process.env['GOOGLE_SHEETS_ENABLED'] = '1';
 // Creating an agent sends a credentials email only when SMTP is configured.
 delete process.env['SMTP_HOST'];
-delete process.env['SHEETS_VERSION_PROBE'];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -269,6 +270,8 @@ let sourceId = '';
 /** row id by the sheet's Lead ID, filled after the first import. */
 const rowIdOf = new Map<string, string>();
 const leadIdOf = new Map<string, string>();
+/** Preview rows without a flag: what the owner leaves ticked when switching the sheet on. */
+let cleanRows: number[] = [];
 
 before(async () => {
   files.set(SHEET, {
@@ -301,6 +304,9 @@ before(async () => {
 
   A = await signupOwner('a');
   B = await signupOwner('b');
+  // This process only ever syncs the sheets it made: the database is shared, and a real sheet due for its
+  // scheduled sync must never be claimed here and run against the fake Google.
+  importer.claimOnly([A.orgId, B.orgId]);
   connectionA = await googleConnection(A.orgId);
 
   // Someone who already opted out, on another record.
@@ -352,8 +358,15 @@ test('preview suggests a mapping and an identity column, and writes nothing', as
   const targets = r.body.mapping.columns.map((c: any) => `${c.fieldKey}>${c.target}`);
   for (const t of ['name>full_name', 'phone>phone', 'email>email']) assert.ok(targets.includes(t), `missing suggestion ${t}: ${targets}`);
   assert.deepEqual(r.body.identityCandidates, ['lead id']);
-  assert.equal(r.body.rows.length, 20);
+  // Every non-blank row, flagged as the import would flag it: the opt-out (96), the duplicate (97), the bad phone (98), the 4 it refuses.
+  assert.equal(r.body.rows.length, 99);
   assert.equal(r.body.rows[0].lead.normalized_phone, '+15125550101');
+  const byRow = new Map<number, any>(r.body.rows.map((x: any) => [x.rowNumber, x]));
+  assert.ok(byRow.get(97).reviewReasons.some((x: string) => /opted out/.test(x)), JSON.stringify(byRow.get(97)));
+  assert.ok(byRow.get(98).reviewReasons.some((x: string) => /Possible duplicate/.test(x)), JSON.stringify(byRow.get(98)));
+  assert.ok(byRow.get(99).reviewReasons.includes(PHONE_UNPARSED_REASON), JSON.stringify(byRow.get(99)));
+  cleanRows = r.body.rows.filter((x: any) => !x.issue && x.reviewReasons.length === 0).map((x: any) => x.rowNumber);
+  assert.equal(cleanRows.length, 92);
   assert.equal(await prisma.leads.count({ where: { organization_id: A.orgId } }), before);
   assert.equal(await prisma.sheet_import_rows.count({ where: { organization_id: A.orgId } }), 0);
 });
@@ -377,10 +390,16 @@ test('save the mapping', async () => {
   assert.equal(r.body.status, 'PAUSED');
 });
 
-test('first import: every importable row becomes a paused lead awaiting review', async () => {
-  const on = await call(`${API}/sources/${sourceId}/enable`, A.token, { method: 'POST' });
+test('first import: the rows the owner ticked are approved as they land; the rest become paused leads awaiting review', async () => {
+  const bad = await call(`${API}/sources/${sourceId}/enable`, A.token, { method: 'POST', body: { approveRows: [1] } });
+  assert.equal(bad.status, 400, 'the header row cannot be ticked');
+  const on = await call(`${API}/sources/${sourceId}/enable`, A.token, { method: 'POST', body: { approveRows: cleanRows } });
   assert.equal(on.status, 200, on.text);
-  await importer.drain();
+  // The import ran in the request: the owner sees what it did, as with an uploaded file.
+  assert.equal(on.body.status, 'ACTIVE');
+  assert.equal(on.body.firstRun.ok, true, on.text);
+  assert.equal(on.body.firstRun.imported, 95);
+  assert.deepEqual(on.body.firstRun.approval, { approved: 92, released: 92, held: [], skipped: [] });
   const { run } = await lastRun(A.token, sourceId);
   assert.equal(run.ok, true, JSON.stringify(run));
   const s = run.summary;
@@ -390,10 +409,13 @@ test('first import: every importable row becomes a paused lead awaiting review',
   assert.deepEqual(s.skipped, { NO_CONTACT: 1, NO_NAME: 1, NO_ROW_ID: 1, DUPLICATE_IN_SHEET: 1 });
   assert.equal(s.dncInherited, 1);
   assert.equal(s.possibleDuplicates, 2);
+  // The 92 ticked rows are approved as they land: 95 minus the opt-out (96), the duplicate (97) and the bad phone (98), left unticked.
+  assert.equal(s.autoApproved, 92);
+  assert.equal(s.autoReleased, 92);
   // Drive, tab metadata, header, ONE data chunk.
   assert.equal(s.googleRequests, 4);
-  // source, mappings, org, tracked rows; then the batch: contacts, two inserts.
-  assert.equal(s.dbStatements, 7);
+  // source, mappings, org, tracked rows; then the batch: contacts, two inserts, the approval.
+  assert.equal(s.dbStatements, 8);
   assert.deepEqual(
     s.errorSample.map((e: any) => `${e.row}:${e.code}`).sort(),
     ['93:NO_CONTACT', '94:NO_NAME', '95:NO_ROW_ID', '96:DUPLICATE_IN_SHEET'].sort(),
@@ -403,16 +425,26 @@ test('first import: every importable row becomes a paused lead awaiting review',
 
   const rows = await tracking(A.orgId, sourceId);
   assert.equal(rows.length, 95);
+  const FLAGGED = new Set(['EP-96', 'EP-97', 'EP-98']);
   for (const r of rows) {
     const l = r.leads!;
-    assert.equal(r.review_state, 'pending');
     assert.equal(l.status, 'new');
-    assert.equal(l.automation_paused, true, 'an imported lead is not paused');
-    assert.equal(l.review_reasons[0], IMPORT_REVIEW_REASON);
-    assert.equal(l.first_contact_at, null);
+    assert.equal(l.first_contact_at, null, 'an import must not contact anyone itself');
+    if (FLAGGED.has(l.external_lead_id!)) {
+      assert.equal(r.review_state, 'pending', `${l.external_lead_id} should wait for review`);
+      assert.equal(l.automation_paused, true, 'a flagged lead is not paused');
+      assert.equal(l.review_reasons[0], IMPORT_REVIEW_REASON);
+    } else {
+      assert.equal(r.review_state, 'approved', `${l.external_lead_id} should be approved on import`);
+      assert.ok(r.reviewed_by, 'approved on the owner\'s behalf, by a person');
+      assert.equal(l.automation_paused, false, 'a clean lead was left paused');
+      assert.ok(!l.review_reasons.includes(IMPORT_REVIEW_REASON));
+    }
     rowIdOf.set(l.external_lead_id!, r.id);
     leadIdOf.set(l.external_lead_id!, l.id);
   }
+  assert.equal(await prisma.audit_logs.count({ where: { organization_id: A.orgId, action: 'sheet_import.approved', actor_type: 'user' } }), 92);
+  assert.equal(await prisma.audit_logs.count({ where: { organization_id: A.orgId, action: 'sheet_import.auto_approved' } }), 0, 'nothing approves itself');
   const byId = new Map(rows.map((r) => [r.leads!.external_lead_id, r.leads!]));
   assert.equal(byId.get('EP-1')!.normalized_phone, '+15125550101');
   assert.equal(byId.get('EP-1')!.first_name, 'Test1');
@@ -423,22 +455,24 @@ test('first import: every importable row becomes a paused lead awaiting review',
   assert.ok(byId.get('EP-98')!.review_reasons.includes(PHONE_UNPARSED_REASON));
 });
 
-test('no imported lead is visible to the outreach watcher', async () => {
+test('only the clean rows are visible to the outreach watcher; flagged ones stay paused', async () => {
   const eligible = await prisma.leads.count({
     where: { organization_id: A.orgId, lead_source_id: sourceId, status: 'new', automation_paused: false, dnc_status: false, first_contact_at: null },
   });
-  assert.equal(eligible, 0);
+  assert.equal(eligible, 92);
+  assert.equal(await prisma.leads.count({ where: { organization_id: A.orgId, lead_source_id: sourceId, automation_paused: true } }), 3);
 });
 
 test('review queue: paginated, complete, without overlap', async () => {
-  const p1 = await call(`${API}/review?limit=50&sourceId=${sourceId}`, A.token);
+  // Only the three flagged rows wait; the clean ones were approved as they landed.
+  const p1 = await call(`${API}/review?limit=2&sourceId=${sourceId}`, A.token);
   assert.equal(p1.status, 200, p1.text);
-  assert.equal(p1.body.total, 95);
-  assert.equal(p1.body.items.length, 50);
-  const p2 = await call(`${API}/review?limit=50&sourceId=${sourceId}&cursor=${p1.body.nextCursor}`, A.token);
-  assert.equal(p2.body.items.length, 45);
+  assert.equal(p1.body.total, 3);
+  assert.equal(p1.body.items.length, 2);
+  const p2 = await call(`${API}/review?limit=2&sourceId=${sourceId}&cursor=${p1.body.nextCursor}`, A.token);
+  assert.equal(p2.body.items.length, 1);
   assert.equal(p2.body.nextCursor, null);
-  assert.equal(new Set([...p1.body.items, ...p2.body.items].map((i: any) => i.rowId)).size, 95);
+  assert.equal(new Set([...p1.body.items, ...p2.body.items].map((i: any) => i.rowId)).size, 3);
 });
 
 test('another organization sees none of it', async () => {
@@ -467,8 +501,8 @@ test('owner only: an agent of the same organization is refused everywhere, and n
     ['GET', `${API}/sources/${sourceId}/preview`],
     ['POST', `${API}/sources/${sourceId}/sync`],
     ['GET', `${API}/review`],
-    ['POST', `${API}/review/approve`, { rowIds: [rowIdOf.get('EP-4')!] }],
-    ['POST', `${API}/review/reject`, { rowIds: [rowIdOf.get('EP-4')!] }],
+    ['POST', `${API}/review/approve`, { rowIds: [rowIdOf.get('EP-96')!] }],
+    ['POST', `${API}/review/reject`, { rowIds: [rowIdOf.get('EP-96')!] }],
     ['GET', `${API}/review/changes?sourceId=${sourceId}`],
   ];
   for (const [method, path, body] of routes) {
@@ -477,7 +511,7 @@ test('owner only: an agent of the same organization is refused everywhere, and n
     const anonymous = await call(path, undefined, { method, body });
     assert.equal(anonymous.status, 401, `${method} ${path} without a token: ${anonymous.text}`);
   }
-  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-4')! } });
+  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-96')! } });
   assert.equal(row.review_state, 'pending', 'an agent decided an import');
 });
 
@@ -513,8 +547,39 @@ test('running the same import again creates nothing, and records no run', async 
   assert.equal(await prisma.sheet_import_rows.count({ where: { organization_id: A.orgId, lead_source_id: sourceId } }), 95);
 });
 
+test('a lead deleted out of band comes back on the next sync: a new lead on the same row, waiting for review again', async () => {
+  // The owner deleted two imported leads straight from the database: a clean one and a flagged one.
+  await prisma.leads.delete({ where: { id: leadIdOf.get('EP-20')! } });
+  await prisma.leads.delete({ where: { id: leadIdOf.get('EP-96')! } });
+  const orphaned = await prisma.sheet_import_rows.findMany({ where: { id: { in: [rowIdOf.get('EP-20')!, rowIdOf.get('EP-96')!] } } });
+  assert.ok(orphaned.every((r) => r.lead_id === null), 'the FK did not detach the rows');
+
+  await syncNow(A.token, sourceId);
+  const { run } = await lastRun(A.token, sourceId);
+  assert.equal(run.summary.inserted, 2);
+  assert.equal(run.summary.relinked, 2);
+  assert.equal(run.summary.autoApproved, 0, 'a sync never approves anything; the owner decides in Import Review');
+  assert.equal(await prisma.sheet_import_rows.count({ where: { organization_id: A.orgId, lead_source_id: sourceId } }), 95, 'a second tracking row was made');
+
+  const ep20 = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-20')! }, include: { leads: true } });
+  assert.ok(ep20.lead_id && ep20.lead_id !== leadIdOf.get('EP-20'), 'the row was not given a new lead');
+  assert.equal(ep20.review_state, 'pending');
+  assert.equal(ep20.leads!.automation_paused, true);
+  assert.equal(ep20.leads!.external_lead_id, 'EP-20');
+  leadIdOf.set('EP-20', ep20.lead_id!);
+  const ep96 = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-96')! }, include: { leads: true } });
+  assert.equal(ep96.review_state, 'pending');
+  assert.equal(ep96.leads!.dnc_status, true, 'the opt-out was not inherited again');
+  assert.equal(ep96.leads!.automation_paused, true);
+  leadIdOf.set('EP-96', ep96.lead_id!);
+  // The owner approves the clean one again in Import Review; the opt-out stays there, as before.
+  const again = await call(`${API}/review/approve`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-20')!] } });
+  assert.equal(again.status, 200, again.text);
+  assert.deepEqual({ approved: again.body.approved, released: again.body.released }, { approved: 1, released: 1 });
+});
+
 test('a pending row edited in the sheet refreshes its draft lead — and two workers at once run it exactly once', async () => {
-  edit((g) => (g[rowOf('EP-3')][NOTES] = 'note 3 edited'));
+  edit((g) => (g[rowOf('EP-97')][NOTES] = 'note 97 edited'));
   await prisma.lead_sources.update({ where: { id: sourceId }, data: { sync_next_at: new Date() } });
   const second = new SheetImportService(
     app.get(PrismaService),
@@ -524,13 +589,15 @@ test('a pending row edited in the sheet refreshes its draft lead — and two wor
     app.get(EventsBus),
     app.get(ConfigService),
   );
+  second.claimOnly([A.orgId, B.orgId]);
   await Promise.all([importer.drain(), second.drain()]);
   const { count, run } = await lastRun(A.token, sourceId);
-  assert.equal(count, 2, 'exactly one eventful run');
+  // The first import and the re-link run before this one; this run is the third eventful one.
+  assert.equal(count, 3, 'exactly one eventful run');
   assert.equal(run.summary.updated, 1);
   assert.equal(run.summary.inserted, 0);
-  const lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-3')! } });
-  assert.deepEqual(lead.custom_fields, { Notes: 'note 3 edited' });
+  const lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-97')! } });
+  assert.deepEqual(lead.custom_fields, { Notes: 'note 97 edited' });
   assert.equal(lead.automation_paused, true);
 });
 
@@ -548,53 +615,55 @@ test('the row identity cannot change once rows are imported', async () => {
 // =================================================================================
 
 test('approve: lifts the import pause only where nothing else holds the lead', async () => {
-  const ids = ['EP-1', 'EP-96', 'EP-98'].map((x) => rowIdOf.get(x)!);
+  // The flagged rows are the owner's to decide: the duplicate is released, the opt-out stays held.
+  const ids = ['EP-96', 'EP-97'].map((x) => rowIdOf.get(x)!);
   const r = await call(`${API}/review/approve`, A.token, { method: 'POST', body: { rowIds: ids } });
   assert.equal(r.status, 200, r.text);
-  assert.equal(r.body.approved, 3);
+  assert.equal(r.body.approved, 2);
   assert.equal(r.body.released, 1);
   const held = Object.fromEntries(r.body.held.map((h: any) => [h.rowId, h.reason]));
   assert.equal(held[rowIdOf.get('EP-96')!], 'DO_NOT_CONTACT');
-  assert.equal(held[rowIdOf.get('EP-98')!], 'NO_DIALABLE_PHONE');
 
-  const ep1 = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-1')! } });
-  assert.equal(ep1.automation_paused, false);
-  assert.equal(ep1.status, 'new');
-  assert.equal(ep1.first_contact_at, null, 'approval must not contact anyone itself');
-  assert.ok(!ep1.review_reasons.includes(IMPORT_REVIEW_REASON));
+  const ep97 = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-97')! } });
+  assert.equal(ep97.automation_paused, false);
+  assert.equal(ep97.status, 'new');
+  assert.equal(ep97.first_contact_at, null, 'approval must not contact anyone itself');
+  assert.ok(!ep97.review_reasons.includes(IMPORT_REVIEW_REASON));
   const ep96 = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-96')! } });
   assert.equal(ep96.automation_paused, true);
 
-  // Exactly the one released lead is now what the outreach watcher would select.
+  // The 92 clean rows plus the one the owner released are what the outreach watcher would select.
   const eligible = await prisma.leads.findMany({
     where: { organization_id: A.orgId, lead_source_id: sourceId, status: 'new', automation_paused: false, dnc_status: false, first_contact_at: null },
     select: { id: true },
   });
-  assert.deepEqual(eligible.map((e) => e.id), [leadIdOf.get('EP-1')]);
+  assert.equal(eligible.length, 93);
+  assert.ok(eligible.some((e) => e.id === leadIdOf.get('EP-97')));
 
+  // 92 approved on the owner's behalf as the sheet was switched on, EP-20 approved again after its re-import, plus these 2.
   const audits = await prisma.audit_logs.count({ where: { organization_id: A.orgId, action: 'sheet_import.approved' } });
-  assert.equal(audits, 3);
+  assert.equal(audits, 95);
 });
 
 test('approve is idempotent, and ignores rows of another organization', async () => {
   const again = await call(`${API}/review/approve`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-1')!] } });
   assert.equal(again.body.approved, 0);
   assert.deepEqual(again.body.skipped, [rowIdOf.get('EP-1')]);
-  const cross = await call(`${API}/review/approve`, B.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-4')!] } });
+  const cross = await call(`${API}/review/approve`, B.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-98')!] } });
   assert.equal(cross.body.approved, 0);
-  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-4')! } });
+  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-98')! } });
   assert.equal(row.review_state, 'pending');
 });
 
 test('reject: the lead closes and stays paused', async () => {
-  const r = await call(`${API}/review/reject`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-2')!] } });
+  const r = await call(`${API}/review/reject`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-98')!] } });
   assert.equal(r.status, 200, r.text);
   assert.equal(r.body.rejected, 1);
-  const lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-2')! } });
+  const lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-98')! } });
   assert.equal(lead.status, 'closed');
   assert.equal(lead.lost_reason, REJECTED_REASON);
   assert.equal(lead.automation_paused, true);
-  const twice = await call(`${API}/review/reject`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-2')!] } });
+  const twice = await call(`${API}/review/reject`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-98')!] } });
   assert.equal(twice.body.rejected, 0);
 });
 
@@ -602,19 +671,19 @@ test('the Leads list shows an import only once approved; rejected ones stay in I
   const leads = await call('/api/v1/leads?limit=200', A.token);
   assert.equal(leads.status, 200, leads.text);
   const ids = new Set(leads.body.map((l: any) => l.id));
-  assert.ok(ids.has(leadIdOf.get('EP-1')), 'an approved import is missing from Leads');
-  assert.ok(!ids.has(leadIdOf.get('EP-4')), 'a pending import is listed in Leads');
-  assert.ok(!ids.has(leadIdOf.get('EP-2')), 'a rejected import is listed in Leads');
+  assert.ok(ids.has(leadIdOf.get('EP-1')), 'a clean import approved on arrival is missing from Leads');
+  assert.ok(ids.has(leadIdOf.get('EP-97')), 'an import the owner approved is missing from Leads');
+  assert.ok(!ids.has(leadIdOf.get('EP-98')), 'a rejected import is listed in Leads');
   assert.ok(leads.body.some((l: any) => l.firstName === 'Opted'), 'a lead from another source is missing');
-  // Approved so far: EP-1, EP-96, EP-98 — plus the one lead from elsewhere.
-  assert.equal(leads.body.length, 4);
+  // Approved: 92 on arrival, plus EP-96 and EP-97 by the owner — plus the one lead from elsewhere.
+  assert.equal(leads.body.length, 95);
   const stats = await call('/api/v1/leads/stats', A.token);
-  assert.equal(stats.body.total, 4);
+  assert.equal(stats.body.total, 95);
 
   const rejected = await call(`${API}/review?state=rejected&sourceId=${sourceId}`, A.token);
   assert.equal(rejected.status, 200, rejected.text);
   assert.equal(rejected.body.total, 1);
-  assert.equal(rejected.body.items[0].rowId, rowIdOf.get('EP-2'));
+  assert.equal(rejected.body.items[0].rowId, rowIdOf.get('EP-98'));
   assert.ok(rejected.body.items[0].reviewedAt);
 });
 
@@ -676,19 +745,19 @@ test('apply: the sheet values land on the lead; its status and pause are untouch
 });
 
 test('a REJECTED row edited in the sheet is flagged too; applying it never reopens or unpauses the lead', async () => {
-  edit((g) => (g[rowOf('EP-2')][PHONE] = '512-555-0122'));
+  edit((g) => (g[rowOf('EP-98')][PHONE] = '512-555-0122'));
   await syncNow(A.token, sourceId);
   assert.equal((await lastRun(A.token, sourceId)).run.summary.flagged, 1);
-  let lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-2')! } });
-  assert.equal(lead.normalized_phone, '+15125550102', 'a rejected lead was overwritten');
+  let lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-98')! } });
+  assert.equal(lead.normalized_phone, null, 'a rejected lead was overwritten');
 
-  const r = await call(`${API}/review/changes/resolve`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-2')!], action: 'apply' } });
+  const r = await call(`${API}/review/changes/resolve`, A.token, { method: 'POST', body: { rowIds: [rowIdOf.get('EP-98')!], action: 'apply' } });
   assert.equal(r.body.resolved, 1, r.text);
-  lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-2')! } });
+  lead = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-98')! } });
   assert.equal(lead.normalized_phone, '+15125550122');
   assert.equal(lead.status, 'closed');
   assert.equal(lead.automation_paused, true);
-  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-2')! } });
+  const row = await prisma.sheet_import_rows.findUniqueOrThrow({ where: { id: rowIdOf.get('EP-98')! } });
   assert.equal(row.review_state, 'rejected');
 });
 
@@ -751,13 +820,14 @@ test('a mapping change re-baselines reviewed rows without flagging them, and ref
   assert.equal(saved.status, 200, saved.text);
   await syncNow(A.token, sourceId);
   const { run } = await lastRun(A.token, sourceId);
-  // Reviewed: EP-1, EP-96, EP-98 approved; EP-2 rejected. Only EP-1 and EP-2 had
-  // a note, so only their content (and hash) changed with the notes column gone.
-  assert.equal(run.summary.rebaselined, 2);
+  // Every row is reviewed now (approved on arrival, or decided by the owner). The ones
+  // with a note change content with the notes column gone: re-hashed, never flagged,
+  // and the leads keep what the owner approved. There is no draft left to refresh.
+  assert.ok(run.summary.rebaselined >= 85, `rebaselined ${run.summary.rebaselined}`);
   assert.equal(run.summary.flagged, 0);
-  assert.ok(run.summary.updated > 80, `drafts not refreshed: ${run.summary.updated}`);
-  const draft = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-4')! } });
-  assert.deepEqual(draft.custom_fields, {});
+  assert.equal(run.summary.updated, 0);
+  const reviewed = await prisma.leads.findUniqueOrThrow({ where: { id: leadIdOf.get('EP-4')! } });
+  assert.deepEqual(reviewed.custom_fields, { Notes: 'note 4' }, 'a reviewed lead was rewritten by a mapping change');
 });
 
 test('a REAL edit that lands together with a mapping change is still flagged, not swallowed', async () => {
@@ -775,16 +845,25 @@ test('a REAL edit that lands together with a mapping change is still flagged, no
 });
 
 test('saving the mapping again re-writes every pending draft, even one whose values did not change', async () => {
-  // A draft carrying a warning today's checks would not raise.
-  const id = leadIdOf.get('EP-6')!;
-  await prisma.leads.update({ where: { id }, data: { review_reasons: [IMPORT_REVIEW_REASON, 'stale warning'] } });
+  // A draft exists only for a flagged row: add one with a phone that cannot be parsed.
+  edit((g) => g.push(['EP-101', 'Draft Lead', '99999', email(101), '', '', '', '']));
+  await syncNow(A.token, sourceId);
+  const draftRow = await prisma.sheet_import_rows.findFirstOrThrow({
+    where: { organization_id: A.orgId, lead_source_id: sourceId, review_state: 'pending', leads: { external_lead_id: 'EP-101' } },
+  });
+  const id = draftRow.lead_id!;
+  // A warning today's checks would not raise.
+  await prisma.leads.update({ where: { id }, data: { review_reasons: [IMPORT_REVIEW_REASON, PHONE_UNPARSED_REASON, 'stale warning'] } });
   const columns = MAPPING.columns.filter((c) => c.fieldKey !== 'notes');
   assert.equal((await call(`${API}/sources/${sourceId}/mapping`, A.token, { method: 'PUT', body: { ...MAPPING, columns } })).status, 200);
   await syncNow(A.token, sourceId);
   const { run } = await lastRun(A.token, sourceId);
   assert.equal(run.summary.flagged, 0, 'a reviewed row was flagged by re-saving the same mapping');
   const lead = await prisma.leads.findUniqueOrThrow({ where: { id } });
-  assert.deepEqual(lead.review_reasons, [IMPORT_REVIEW_REASON]);
+  // Rewritten from the sheet: the import reason, then today's phone warnings — the stale one is gone.
+  assert.equal(lead.review_reasons[0], IMPORT_REVIEW_REASON);
+  assert.ok(lead.review_reasons.includes(PHONE_UNPARSED_REASON));
+  assert.ok(!lead.review_reasons.includes('stale warning'), 'a stale warning survived the re-save');
   assert.equal(lead.automation_paused, true);
 });
 
@@ -797,6 +876,7 @@ test('version probe: an unchanged Drive version skips the read; an edit, or age,
     app.get(EventsBus),
     new ConfigService({ GOOGLE_SHEETS_ENABLED: '1', SHEETS_VERSION_PROBE: '1', SHEETS_FULL_READ_MAX_AGE_MS: 21_600_000 }),
   );
+  probing.claimOnly([A.orgId, B.orgId]);
   const due = () => prisma.lead_sources.update({ where: { id: sourceId }, data: { sync_next_at: new Date() } });
 
   await due();
@@ -840,6 +920,7 @@ test('periodic sync (SHEETS_SYNC=1): a source syncs again on its own interval', 
     app.get(EventsBus),
     new ConfigService({ GOOGLE_SHEETS_ENABLED: '1', SHEETS_SYNC: '1', SHEETS_POLL_MS: 200, SHEETS_SYNC_INTERVAL_MS: 1_000 }),
   );
+  scheduled.claimOnly([A.orgId, B.orgId]);
   await prisma.lead_sources.update({ where: { id: sourceId }, data: { sync_next_at: new Date() } });
   const start = (await prisma.lead_sources.findUniqueOrThrow({ where: { id: sourceId } })).last_success_at!;
   scheduled.onModuleInit();
@@ -917,28 +998,33 @@ test('2,000 rows: a fixed handful of statements, never one per row', async () =>
     method: 'PUT',
     body: { columns: [{ fieldKey: 'name', target: 'first_name' }, { fieldKey: 'email', target: 'email' }], identity: { mode: 'column', fieldKey: 'id' } },
   });
-  await call(`${API}/sources/${id}/enable`, A.token, { method: 'POST' });
-  await importer.drain();
+  await call(`${API}/sources/${id}/enable`, A.token, { method: 'POST', body: { approveRows: allRows(2_000) } });
   const { run } = await lastRun(A.token, id);
   assert.equal(run.ok, true, JSON.stringify(run));
   assert.equal(run.summary.inserted, 2_000);
-  // 4 setup + 4 batches x (contacts + 2 inserts) = 16, whatever the row count.
-  assert.equal(run.summary.dbStatements, 16);
+  // Every row ticked: approved as it lands — but held, since no phone column is mapped and nothing can be dialled.
+  assert.equal(run.summary.autoApproved, 2_000);
+  assert.equal(run.summary.autoReleased, 0);
+  // 4 setup + 4 batches x (contacts + 2 inserts + the approval) = 20, whatever the row count.
+  assert.equal(run.summary.dbStatements, 20);
   assert.equal(run.summary.googleRequests, 4);
   // eslint-disable-next-line no-console
   console.log(`  2,000-row import: ${run.summary.durationMs}ms, ${run.summary.dbStatements} DB statements, ${run.summary.googleRequests} Google requests`);
 
-  // Approving all 2,000 is four bounded requests of constant statement count.
+  // Deciding all 2,000 again is four bounded requests of constant statement count — and a no-op: they are decided.
   const rows = await prisma.sheet_import_rows.findMany({ where: { organization_id: A.orgId, lead_source_id: id }, select: { id: true } });
   const t0 = Date.now();
   let released = 0;
+  let approved = 0;
   for (let i = 0; i < rows.length; i += 500) {
     const r = await call(`${API}/review/approve`, A.token, { method: 'POST', body: { rowIds: rows.slice(i, i + 500).map((x) => x.id) } });
     assert.equal(r.status, 200, r.text);
     released += r.body.released;
+    approved += r.body.approved;
   }
-  // No phone column mapped: approved, but held — nothing here can be dialled.
+  assert.equal(approved, 0);
   assert.equal(released, 0);
+  assert.equal(await prisma.leads.count({ where: { organization_id: A.orgId, lead_source_id: id, automation_paused: false } }), 0);
   // eslint-disable-next-line no-console
   console.log(`  approving 2,000 rows in 4 requests: ${Date.now() - t0}ms`);
 });
@@ -966,12 +1052,15 @@ function editFile(file: string, fn: (g: string[][]) => void): void {
 }
 
 /** Create, map and switch on a source for a fake file; the first import has run when this returns. */
-async function importedSource(file: string, sheetId: number, mapping: unknown): Promise<string> {
+/** Every data row of an n-row sheet ticked: approved as it lands (the header is row 1). */
+const allRows = (n: number) => Array.from({ length: n }, (_, i) => i + 2);
+
+async function importedSource(file: string, sheetId: number, mapping: unknown, approveRows: number[] = []): Promise<string> {
   const created = await call(`${API}/sources`, A.token, { method: 'POST', body: { connectionId: connectionA, spreadsheetId: file, sheetId } });
   assert.equal(created.status, 200, created.text);
   const mapped = await call(`${API}/sources/${created.body.id}/mapping`, A.token, { method: 'PUT', body: mapping });
   assert.equal(mapped.status, 200, mapped.text);
-  const on = await call(`${API}/sources/${created.body.id}/enable`, A.token, { method: 'POST' });
+  const on = await call(`${API}/sources/${created.body.id}/enable`, A.token, { method: 'POST', body: { approveRows } });
   assert.equal(on.status, 200, on.text);
   await importer.drain();
   return created.body.id;
@@ -1219,13 +1308,15 @@ test('10,000 rows (the cap): first import, an unchanged sync, and 10% edited —
   });
   let id = '';
   const first = await measured(async () => {
-    id = await importedSource(TEN_SHEET, 0, ID_MAPPING);
+    id = await importedSource(TEN_SHEET, 0, ID_MAPPING, allRows(10_000));
   });
   assert.equal(first.stats.inserted, 10_000);
+  assert.equal(first.stats.autoApproved, 10_000, 'every row ticked: approved as it lands');
+  assert.equal(first.stats.autoReleased, 0, 'no phone column: approved, but nothing can be dialled');
   // Drive + tab metadata + header + 5 data reads of 2,000 rows.
   assert.equal(first.stats.googleRequests, 8);
-  // 4 setup + 20 batches x (contacts + 2 inserts).
-  assert.equal(first.stats.dbStatements, 64);
+  // 4 setup + 20 batches x (contacts + 2 inserts + the approval).
+  assert.equal(first.stats.dbStatements, 84);
 
   const quiet = await measured(() => due(id).then(() => undefined));
   assert.equal(quiet.stats.inserted + quiet.stats.updated, 0);
@@ -1236,8 +1327,10 @@ test('10,000 rows (the cap): first import, an unchanged sync, and 10% edited —
   editFile(TEN_SHEET, (g) => {
     for (let i = 1; i <= 10_000; i += 10) g[i][1] = `${g[i][1]} edited`;
   });
+  // The rows were approved as they landed, so an edit is flagged for the owner, never written over the lead.
   const edited = await measured(() => due(id).then(() => undefined));
-  assert.equal(edited.stats.updated, 1_000);
+  assert.equal(edited.stats.flagged, 1_000);
+  assert.equal(edited.stats.updated, 0);
   assert.equal(edited.stats.inserted, 0);
   assert.ok(edited.stats.dbStatements <= 64, `10% edited: ${edited.stats.dbStatements} statements`);
 
@@ -1375,7 +1468,6 @@ test('a sheet left on ANOTHER account is not moved on reconnect; picking it agai
 
 test('remove a sheet: it stops syncing and leaves the list; its pending leads stay in Import Review', async () => {
   const pendingBefore = (await call(`${API}/review?sourceId=${hardId}`, A.token)).body.total;
-  assert.ok(pendingBefore > 0);
   const leadsBefore = await prisma.leads.count({ where: { organization_id: A.orgId, lead_source_id: hardId } });
 
   assert.equal((await call(`${API}/sources/${hardId}`, B.token, { method: 'DELETE' })).status, 404, 'another organization removed it');

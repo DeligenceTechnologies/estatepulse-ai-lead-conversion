@@ -6,7 +6,16 @@ import { newId } from '../../common/ids';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
 import type { SessionIdentity } from '../google-sheets/google-connections.service';
-import { DNC_REASON, DUPLICATE_REASON, GOOGLE_SHEETS_PROVIDER, RunStats, SheetImportService } from '../google-sheets/sheet-import.service';
+import type { ApprovalResult } from '../google-sheets/approval';
+import {
+  DNC_REASON,
+  DUPLICATE_REASON,
+  GOOGLE_SHEETS_PROVIDER,
+  RunStats,
+  SheetImportService,
+  contactFlags,
+  type Approval,
+} from '../google-sheets/sheet-import.service';
 import { SheetReviewService } from '../google-sheets/sheet-review.service';
 import {
   FILE_IMPORT_REVIEW_REASON,
@@ -35,11 +44,9 @@ export interface UploadedFileLike {
 export type ImportKind = 'google_sheets' | 'file_upload';
 
 /** Rows shown in the preview table. Counts cover every row; the table shows the first of them. */
-const PREVIEW_ROWS = 200;
+const PREVIEW_ROWS = MAX_DATA_ROWS;
 /** Row numbers and codes only, never cell values. */
 const ERROR_SAMPLE_LIMIT = 100;
-/** Phones or emails per duplicate lookup, keeping each IN list bounded. */
-const CONTACT_CHUNK = 2_000;
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
 const fail = (status: number, code: string, message: string, details?: { path: string; message: string }[]) =>
@@ -102,7 +109,7 @@ export class FileImportService {
   /** Read the file (one worksheet of it, for a workbook) and say what an import would do. Writes nothing. */
   async preview(organizationId: string, file: UploadedFileLike, columns: ColumnMapping[] | null, sheet: string | null) {
     const a = await this.analyze(organizationId, file, columns, sheet);
-    const dup = await this.duplicates(organizationId, a.candidates);
+    const dup = await contactFlags(this.prisma, organizationId, a.candidates);
     // Data warnings only (a bad email, an unparseable phone); duplicates and
     // opt-outs have their own counts, and the batch summary counts the same way.
     const withWarnings = a.candidates.filter((b) => b.reviewReasons.length > 0).length;
@@ -154,13 +161,39 @@ export class FileImportService {
    * Import the file: every importable row becomes a paused lead awaiting review.
    * `clientToken` names this upload; sending it again returns the same batch.
    */
-  async commit(who: SessionIdentity, file: UploadedFileLike, columns: ColumnMapping[], clientToken: string, sheet: string | null) {
+  async commit(
+    who: SessionIdentity,
+    file: UploadedFileLike,
+    columns: ColumnMapping[],
+    clientToken: string,
+    sheet: string | null,
+    /** Row numbers the owner left ticked in the preview: approved as they land. Empty: every row waits in Import Review. */
+    approveRows: number[],
+    /** Import only the rows without any flag, approved at once; flagged rows are left out of the import entirely. */
+    onlyClean = false,
+  ) {
     const org = who.organizationId;
     const a = await this.analyze(org, file, columns, sheet);
     if (a.problems.length > 0) throw new AppError('VALIDATION_ERROR', 'The column mapping does not fit this file', a.problems);
     if (a.candidates.length === 0) {
       throw fail(400, 'NO_IMPORTABLE_ROWS', 'No row in this file has a name and a usable phone or email, so there is nothing to import.');
     }
+    // "Clean": no data warning, no possible duplicate, no opt-out — the same flags the preview shows.
+    let toImport = a.candidates;
+    let flaggedLeftOut = 0;
+    if (onlyClean) {
+      const dup = await contactFlags(this.prisma, org, a.candidates);
+      toImport = a.candidates.filter((b) => b.reviewReasons.length === 0 && !dup.reasons.has(b.rowNumber));
+      flaggedLeftOut = a.candidates.length - toImport.length;
+      if (toImport.length === 0) throw fail(400, 'NO_CLEAN_ROWS', 'Every importable row in this file is flagged, so there is nothing to import this way.');
+    }
+    // What is approved as it lands, on the owner's behalf: the ticked rows, or everything in an only-clean import.
+    const ticked = new Set(approveRows);
+    const approvalRule: Approval = {
+      by: { userId: who.userId },
+      rule: onlyClean ? () => true : (b) => ticked.has(b.rowNumber),
+    };
+    let approval: ApprovalResult | null = null;
 
     const code = `upload-${clientToken}`;
     const select = { id: true, default_consent_status: true, last_success_at: true } as const;
@@ -218,7 +251,8 @@ export class FileImportService {
     // Not yet finished (a crash mid-way): the engine skips rows it already holds.
     if (!source.last_success_at) {
       const stats = new RunStats(0);
-      await this.importer.importRows(org, source.id, source.default_consent_status, a.candidates, stats, FILE_IMPORT_REVIEW_REASON);
+      await this.importer.importRows(org, source.id, source.default_consent_status, toImport, stats, FILE_IMPORT_REVIEW_REASON, approvalRule);
+      approval = { approved: stats.autoApproved, released: stats.autoReleased, held: stats.autoHeld as ApprovalResult['held'], skipped: [] };
       const now = new Date();
       await this.prisma.lead_sources.updateMany({
         where: { id: source.id, organization_id: org },
@@ -242,7 +276,9 @@ export class FileImportService {
               total: a.dataRows,
               blank: a.blank,
               imported: stats.inserted,
-              withWarnings: a.candidates.filter((b) => b.reviewReasons.length > 0).length,
+              withWarnings: toImport.filter((b) => b.reviewReasons.length > 0).length,
+              flaggedLeftOut,
+              approved: stats.autoApproved,
               skipped: a.skipped,
               possibleDuplicates: stats.possibleDuplicates,
               dncInherited: stats.dncInherited,
@@ -255,7 +291,7 @@ export class FileImportService {
     }
     const batch = (await this.history(org, source.id))[0];
     if (!batch) throw fail(500, 'INTERNAL', 'The import finished but could not be read back.');
-    return batch;
+    return { ...batch, approval };
   }
 
   /**
@@ -331,7 +367,8 @@ export class FileImportService {
     const [counts, audits] = await Promise.all([
       this.prisma.sheet_import_rows.groupBy({
         by: ['lead_source_id', 'review_state'],
-        where: { organization_id: organizationId, lead_source_id: { in: ids } },
+        // A row whose lead was deleted out of band has nothing left to decide: not counted, as it is not shown.
+        where: { organization_id: organizationId, lead_source_id: { in: ids }, lead_id: { not: null } },
         _count: { _all: true },
       }),
       fileIds.length
@@ -481,52 +518,6 @@ export class FileImportService {
       skipped,
       errorSample,
     };
-  }
-
-  /**
-   * For the preview: which rows share a phone or email with a lead this
-   * organization already has (pending imports included), or with an earlier row
-   * of the file — and which match someone who opted out. The import itself
-   * re-checks all of this when it writes.
-   */
-  private async duplicates(organizationId: string, candidates: BuiltRow[]) {
-    const phones = [...new Set(candidates.map((b) => b.lead!.normalized_phone).filter((p): p is string => !!p))];
-    const emails = [...new Set(candidates.map((b) => b.lead!.normalized_email).filter((e): e is string => !!e))];
-    const known = { phones: new Map<string, boolean>(), emails: new Map<string, boolean>() };
-    for (const [field, values, into] of [
-      ['normalized_phone', phones, known.phones],
-      ['normalized_email', emails, known.emails],
-    ] as const) {
-      for (let i = 0; i < values.length; i += CONTACT_CHUNK) {
-        const found = await this.prisma.leads.findMany({
-          where: { organization_id: organizationId, [field]: { in: values.slice(i, i + CONTACT_CHUNK) } },
-          select: { normalized_phone: true, normalized_email: true, dnc_status: true },
-        });
-        for (const f of found) {
-          const v = f[field];
-          if (v) into.set(v, (into.get(v) ?? false) || f.dnc_status);
-        }
-      }
-    }
-    const inFile = { phones: new Set<string>(), emails: new Set<string>() };
-    const reasons = new Map<number, string[]>();
-    let possible = 0;
-    let optedOut = 0;
-    for (const b of candidates) {
-      const p = b.lead!.normalized_phone;
-      const e = b.lead!.normalized_email;
-      const dnc = Boolean((p && known.phones.get(p)) || (e && known.emails.get(e)));
-      const duplicate = Boolean(
-        (p && (known.phones.has(p) || inFile.phones.has(p))) || (e && (known.emails.has(e) || inFile.emails.has(e))),
-      );
-      if (p) inFile.phones.add(p);
-      if (e) inFile.emails.add(e);
-      if (dnc) optedOut += 1;
-      if (duplicate) possible += 1;
-      const why = [...(dnc ? [DNC_REASON] : []), ...(duplicate ? [DUPLICATE_REASON] : [])];
-      if (why.length) reasons.set(b.rowNumber, why);
-    }
-    return { possible, optedOut, reasons };
   }
 }
 
