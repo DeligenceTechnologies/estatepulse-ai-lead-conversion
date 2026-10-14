@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link2 } from 'lucide-react';
 import { messageFor } from '../../../lib/api';
 import { openCalendlyPopup, startCalendlyConnect } from '../../../utils/calendarApi';
-import { Notice, PROVIDERS, PrimaryButton } from './ui';
+import { Notice, PROVIDERS, PrimaryButton } from '../shared/ui';
 
 export const CalendlyConnect: React.FC<{ onConnected: () => Promise<boolean>; reconnect?: boolean }> = ({
   onConnected,

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeftRight, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarClock, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import {
@@ -11,7 +11,6 @@ import {
   type OrganizationCalendarStatus,
 } from '../../../utils/calendarApi';
 import { CalComConnect } from './CalComConnect';
-import { CalendarDetails } from './CalendarDetails';
 import { CalendlyConnect } from './CalendlyConnect';
 import { ConnectFlow } from './ConnectFlow';
 import {
@@ -24,7 +23,7 @@ import {
   WORKSPACE_LABEL,
   panel,
   type NoticeTone,
-} from './ui';
+} from '../shared/ui';
 
 type Flash = { tone: NoticeTone; text: string };
 
@@ -149,7 +148,34 @@ const ConnectionSummary: React.FC<{
   );
 };
 
-export const CalendarIntegration: React.FC = () => {
+/**
+ * Where the connected calendar is put to work. Settings only connects; team
+ * availability, meeting types and members are the sidebar's Calendar pages.
+ */
+const CalendarPagesLink: React.FC<{ providerLabel: string }> = ({ providerLabel }) => {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/team-availability')}
+      className="group w-full text-left bg-emerald-500/[0.06] border border-emerald-500/25 hover:border-emerald-500/50 rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+    >
+      <span className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0">
+        <CalendarClock className="w-4 h-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-bold text-white">{providerLabel} is ready</span>
+        <span className="block text-2xs text-slate-400 mt-0.5">See availability, meetings and members under Calendar.</span>
+      </span>
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-300 shrink-0">
+        <span className="hidden sm:inline">Open Calendar</span>
+        <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </button>
+  );
+};
+
+export const ConnectCalendar: React.FC = () => {
   const { can } = useAuth();
   const canEdit = can('organization.update');
   const [params, setParams] = useSearchParams();
@@ -272,7 +298,7 @@ export const CalendarIntegration: React.FC = () => {
     );
   } else {
     body = (
-      <div className="space-y-5">
+      <div className="space-y-4">
         <ConnectionSummary
           provider={provider}
           connection={connection}
@@ -281,13 +307,7 @@ export const CalendarIntegration: React.FC = () => {
           onSwitch={() => setSwitching(true)}
           onDisconnected={afterDisconnect}
         />
-        {connection.status === 'active' && (
-          <CalendarDetails
-            key={`${provider}-${connection.connectedAt}`}
-            provider={provider}
-            personal={connection.workspaceType === 'personal'}
-          />
-        )}
+        {connection.status === 'active' && <CalendarPagesLink providerLabel={PROVIDERS[provider].label} />}
       </div>
     );
   }
@@ -302,7 +322,7 @@ export const CalendarIntegration: React.FC = () => {
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-white">Scheduling calendar</h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Connect your organization’s Calendly or Cal.com account. One calendar at a time.
+              Connect Calendly or Cal.com. One calendar at a time.
             </p>
           </div>
         </div>

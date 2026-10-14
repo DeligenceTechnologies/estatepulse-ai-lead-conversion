@@ -6,8 +6,8 @@ import type {
   BusySource,
   MemberAvailability,
   TimeRange,
-} from '../../utils/calendarApi';
-import { gradientFor } from '../team/MemberParts';
+} from '../../../utils/calendarApi';
+import { gradientFor } from '../../team/MemberParts';
 import { dayLabel, duration, hourLabel, minutesInDay, ms, overlaps, placeIn } from './time';
 
 type SegmentKind = 'free' | BusySource;
@@ -277,7 +277,7 @@ export const WeekTimeline: React.FC<{
             {members.length} member{members.length === 1 ? '' : 's'}
           </div>
           <div className="text-2xs text-slate-500">
-            Each day {hourLabel(hours[0])} – {hourLabel(hours[1])}
+            Each day {hourLabel(hours[0], true)} – {hourLabel(hours[1], true)}
           </div>
         </div>
         {report.days.map((day) => {

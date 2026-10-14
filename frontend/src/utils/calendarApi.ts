@@ -66,6 +66,14 @@ export interface CalendarMember {
   timezone: string | null;
   userId: string | null;
   userName: string | null;
+  /** Working hours in their calendar, as last synced; null when unknown. */
+  schedule: MemberSchedule | null;
+}
+
+export interface MemberSchedule {
+  timezone: string | null;
+  /** '0' = Sunday .. '6' = Saturday → 'HH:MM' spans, wall-clock in `timezone`. Missing day = off. */
+  weekly: Record<string, { from: string; to: string }[]>;
 }
 
 export type PoolingType = 'round_robin' | 'collective' | 'managed' | 'multi_pool';
@@ -77,6 +85,45 @@ export interface CalendarEventType {
   bookingUrl: string | null;
   poolingType: PoolingType | null;
   hostName: string | null;
+  /** `#rrggbb` from the provider, or null. */
+  color: string | null;
+}
+
+export type MeetingStatus = 'scheduled' | 'pending' | 'canceled';
+
+export interface MeetingPerson {
+  name: string;
+  email: string | null;
+}
+
+/** A meeting someone booked on one of the workspace's meeting types. */
+export interface BookedMeeting {
+  id: string;
+  /** Matches `CalendarEventType.id`; null when the provider did not say. */
+  eventTypeId: string | null;
+  title: string;
+  start: string;
+  end: string;
+  status: MeetingStatus;
+  /** Who booked. */
+  invitees: MeetingPerson[];
+  hosts: MeetingPerson[];
+  /** Video call link (Zoom, Meet, Teams, Cal Video…). Always http(s). */
+  meetingUrl: string | null;
+  /** Address, phone number or note when the place is not a link. */
+  location: string | null;
+  rescheduleUrl: string | null;
+  cancelUrl: string | null;
+  canceledReason: string | null;
+}
+
+export interface MeetingTypesReport {
+  eventTypes: CalendarEventType[];
+  /** Oldest first, from two weeks ago to a month ahead. */
+  meetings: BookedMeeting[];
+  meetingsWindow: { from: string; to: string };
+  /** Set when meeting types loaded but booked meetings did not. */
+  meetingsError: string | null;
 }
 
 export interface AvailabilityDay {
@@ -171,6 +218,8 @@ export const listCalendarMembers = (): Promise<CalendarMember[]> =>
 
 export interface AddedAgent {
   user: { id: string; name: string; email: string };
+  /** Their working hours were copied from their calendar, or are the organization's defaults. */
+  workingHoursFrom: CalendarProviderId | 'organization';
   credentialsEmail?: { sent: boolean; to: string; reason?: string };
 }
 
@@ -248,8 +297,8 @@ export const getCalendarAvailability = (query: AvailabilityQuery = {}): Promise<
 export const syncCalendarAvailability = (): Promise<{ outcome: 'synced' | 'busy' | 'skipped'; sync: AvailabilitySync }> =>
   apiFetch(`${ORG_CALENDAR}/availability/sync`, { method: 'POST', auth: true });
 
-export const listCalendarEventTypes = (): Promise<CalendarEventType[]> =>
-  apiFetch<CalendarEventType[]>(`${ORG_CALENDAR}/event-types`, { auth: true });
+export const getMeetingTypes = (): Promise<MeetingTypesReport> =>
+  apiFetch<MeetingTypesReport>(`${ORG_CALENDAR}/event-types`, { auth: true });
 
 // --- the agent's own calendar ------------------------------------------------
 

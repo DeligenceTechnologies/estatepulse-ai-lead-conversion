@@ -7,6 +7,7 @@ model User {
   phone          String?    @db.VarChar(50)
   password       String     @map("password")
   status         BaseStatus @default(active)
+  source         UserSource @default(web)
   timezone       String     @default("Asia/Kolkata") @db.VarChar(100)
   maxActiveLeads Int        @default(25) @map("max_active_leads")
   workingHours   Json       @default("[{\"dayOfWeek\":0,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":1,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":2,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":3,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":4,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":5,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":6,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"}]") @map("working_hours")

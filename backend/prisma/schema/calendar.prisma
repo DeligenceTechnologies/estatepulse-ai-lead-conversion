@@ -5,8 +5,13 @@ enum CalendarProvider {
   @@map("calendar_provider")
 }
 
+/// active: in use and working. error: in use, but the provider stopped
+/// accepting it (reconnect needed). inactive: saved, not in use; kept so the
+/// organization can switch back without signing in again.
+/// At most one connection per organization is in use (active or error).
 enum CalendarConnectionStatus {
   active
+  inactive
   error
 
   @@map("calendar_connection_status")
@@ -42,7 +47,6 @@ model CalendarConnection {
   orgId    String                   @map("organization_id") @db.Uuid
   provider CalendarProvider
   status   CalendarConnectionStatus @default(active)
-  isActive Boolean                  @default(true) @map("is_active")
 
   accountId     String                @map("account_id") @db.VarChar(255)
   accountEmail  String?               @map("account_email") @db.VarChar(255)
@@ -75,7 +79,7 @@ model CalendarConnection {
   blocks       CalendarTimeBlock[]
 
   @@unique([orgId, provider])
-  @@index([isActive, status, syncedAt])
+  @@index([status, syncedAt])
   @@map("calendar_connections")
 }
 

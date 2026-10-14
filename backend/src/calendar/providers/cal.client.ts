@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  BookedMeeting,
+  WeeklySchedule,
   PoolingType,
   ProviderAccount,
   SchedulingEventType,
   SchedulingMember,
   WorkspaceRole,
 } from '../calendar.types';
+import { hexColor, meetingPlace } from './meeting-location';
 import { requestJson } from './provider-http';
 
 const API_BASE = 'https://api.cal.com/v2';
@@ -14,6 +17,16 @@ const PROVIDER = 'Cal.com';
 const EVENT_TYPES_API_VERSION = '2024-06-14';
 const SLOTS_API_VERSION = '2024-09-04';
 const BOOKINGS_API_VERSION = '2024-08-13';
+const SCHEDULES_API_VERSION = '2024-06-11';
+const WEEKDAY_INDEX: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
 const BOOKINGS_PAGE_SIZE = 100;
 const WEBHOOK_TRIGGERS = ['BOOKING_CREATED', 'BOOKING_RESCHEDULED', 'BOOKING_CANCELLED', 'BOOKING_REQUESTED', 'BOOKING_REJECTED'];
 const PAGE_SIZE = 250;
@@ -58,14 +71,28 @@ interface CalEventType {
   lengthInMinutes: number;
   hidden: boolean;
   schedulingType?: string | null;
+  eventTypeColor?: { lightEventTypeColor?: string | null; darkEventTypeColor?: string | null } | null;
   hosts?: { name?: string | null }[];
 }
 
+interface CalSchedule {
+  timeZone?: string | null;
+  availability?: { days?: string[]; startTime?: string; endTime?: string }[];
+}
+
 interface CalBooking {
+  id: number;
+  uid: string;
+  title: string;
   start: string;
   end: string;
   status: string;
-  hosts?: { id: number }[];
+  eventTypeId?: number | null;
+  meetingUrl?: string | null;
+  location?: string | null;
+  cancellationReason?: string | null;
+  hosts?: { id: number; name?: string | null; email?: string | null }[];
+  attendees?: { name?: string | null; email?: string | null }[];
 }
 
 export interface CalBookingWindow {
@@ -103,6 +130,27 @@ export class CalClient {
       timezone: account.timezone,
       username: account.username,
     };
+  }
+
+  /**
+   * The API key owner's default availability schedule. Cal.com only shows a
+   * schedule to its owner, so this is the one member whose hours we can read.
+   */
+  async defaultSchedule(apiKey: string): Promise<WeeklySchedule | null> {
+    const schedule = await this.get<CalSchedule | null>(apiKey, '/schedules/default', {
+      'cal-api-version': SCHEDULES_API_VERSION,
+    });
+    if (!schedule) return null;
+    const weekly: WeeklySchedule['weekly'] = {};
+    for (const slot of schedule.availability ?? []) {
+      if (!slot.startTime || !slot.endTime) continue;
+      for (const day of slot.days ?? []) {
+        const index = WEEKDAY_INDEX[day.toLowerCase()];
+        if (index === undefined) continue;
+        (weekly[String(index)] ??= []).push({ from: slot.startTime, to: slot.endTime });
+      }
+    }
+    return { timezone: schedule.timeZone ?? null, weekly };
   }
 
   async teams(apiKey: string): Promise<CalTeam[]> {
@@ -163,22 +211,7 @@ export class CalClient {
   }
 
   async bookings(apiKey: string, start: Date, end: Date, teamId: string | null): Promise<CalBookingWindow[]> {
-    const bookings: CalBooking[] = [];
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const query = new URLSearchParams({
-        status: 'upcoming,unconfirmed',
-        afterStart: start.toISOString(),
-        beforeEnd: end.toISOString(),
-        take: String(BOOKINGS_PAGE_SIZE),
-        skip: String(page * BOOKINGS_PAGE_SIZE),
-      });
-      if (teamId) query.set('teamId', teamId);
-      const batch = await this.get<CalBooking[]>(apiKey, `/bookings?${query}`, {
-        'cal-api-version': BOOKINGS_API_VERSION,
-      });
-      bookings.push(...batch);
-      if (batch.length < BOOKINGS_PAGE_SIZE) break;
-    }
+    const bookings = await this.listBookings(apiKey, start, end, teamId, 'upcoming,unconfirmed');
     return bookings
       .filter((booking) => booking.status === 'accepted' || booking.status === 'pending')
       .map((booking) => ({
@@ -186,6 +219,38 @@ export class CalClient {
         end: Date.parse(booking.end),
         hostIds: (booking.hosts ?? []).map((host) => String(host.id)),
       }));
+  }
+
+  /** Every booking (past, upcoming, cancelled) starting between `start` and `end`, with who booked it. */
+  async scheduledMeetings(apiKey: string, start: Date, end: Date, teamId: string | null): Promise<BookedMeeting[]> {
+    const bookings = await this.listBookings(apiKey, start, end, teamId, null);
+    return bookings.map(toMeeting).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  }
+
+  private async listBookings(
+    apiKey: string,
+    start: Date,
+    end: Date,
+    teamId: string | null,
+    status: string | null,
+  ): Promise<CalBooking[]> {
+    const bookings: CalBooking[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const query = new URLSearchParams({
+        afterStart: start.toISOString(),
+        beforeEnd: end.toISOString(),
+        take: String(BOOKINGS_PAGE_SIZE),
+        skip: String(page * BOOKINGS_PAGE_SIZE),
+      });
+      if (status) query.set('status', status);
+      if (teamId) query.set('teamId', teamId);
+      const batch = await this.get<CalBooking[]>(apiKey, `/bookings?${query}`, {
+        'cal-api-version': BOOKINGS_API_VERSION,
+      });
+      bookings.push(...batch);
+      if (batch.length < BOOKINGS_PAGE_SIZE) break;
+    }
+    return bookings;
   }
 
   async createWebhook(apiKey: string, url: string, secret: string): Promise<string> {
@@ -217,6 +282,30 @@ export class CalClient {
   }
 }
 
+function toMeeting(booking: CalBooking): BookedMeeting {
+  const place = meetingPlace([booking.meetingUrl], [booking.location]);
+  const canceled = booking.status === 'cancelled' || booking.status === 'rejected';
+  const open = !canceled && Date.parse(booking.end) > Date.now();
+  return {
+    id: String(booking.id),
+    eventTypeId: booking.eventTypeId == null ? null : String(booking.eventTypeId),
+    title: booking.title,
+    start: booking.start,
+    end: booking.end,
+    status: canceled ? 'canceled' : booking.status === 'pending' ? 'pending' : 'scheduled',
+    invitees: (booking.attendees ?? []).map((attendee) => ({
+      name: attendee.name ?? attendee.email ?? 'Guest',
+      email: attendee.email ?? null,
+    })),
+    hosts: (booking.hosts ?? []).map((host) => ({ name: host.name ?? host.email ?? 'Host', email: host.email ?? null })),
+    meetingUrl: place.meetingUrl,
+    location: place.location,
+    rescheduleUrl: open ? `${BOOKING_BASE}/reschedule/${booking.uid}` : null,
+    cancelUrl: open ? `${BOOKING_BASE}/booking/${booking.uid}?cancel=true` : null,
+    canceledReason: canceled ? (booking.cancellationReason ?? null) : null,
+  };
+}
+
 function toEventTypes(eventTypes: CalEventType[], bookingBase: string | null): SchedulingEventType[] {
   return eventTypes
     .filter((eventType) => !eventType.hidden)
@@ -227,6 +316,7 @@ function toEventTypes(eventTypes: CalEventType[], bookingBase: string | null): S
       bookingUrl: bookingBase ? `${bookingBase}/${eventType.slug}` : null,
       poolingType: toPooling(eventType.schedulingType ?? null),
       hostName: eventType.hosts?.length === 1 ? (eventType.hosts[0].name ?? null) : null,
+      color: hexColor(eventType.eventTypeColor?.darkEventTypeColor ?? eventType.eventTypeColor?.lightEventTypeColor),
     }));
 }
 

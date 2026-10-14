@@ -5,68 +5,34 @@ import { Public } from '@/auth/decorators/public.decorator';
 import type { AuthContext } from '@/auth/auth.types';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
-import { CalendarAvailabilityService } from './availability/calendar-availability.service';
-import { CalendarService } from './calendar.service';
+import { CALENDAR_ROUTE } from '../calendar.types';
+import { CalendlyClient } from '../providers/calendly.client';
+import { CalendarConnectionService } from './calendar-connection.service';
 import { renderCalendlyCallbackPage, type CalendlyCallbackResult } from './calendly-callback.page';
 import { ActivateCalendarDto } from './dto/activate-calendar.dto';
-import { AddCalendarMemberDto } from './dto/add-member.dto';
-import { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { CalApiKeyDto, CalConnectDto } from './dto/cal-connect.dto';
-import { CalendlyClient } from './providers/calendly.client';
 
-@Controller('org-settings/calendar')
-export class CalendarController {
-  private readonly logger = new Logger(CalendarController.name);
+/** Connecting the organization's calendar (Settings → Calendar). Changes need "Edit organization settings". */
+@Controller(CALENDAR_ROUTE)
+export class CalendarConnectionController {
+  private readonly logger = new Logger(CalendarConnectionController.name);
 
   constructor(
-    private readonly calendarService: CalendarService,
-    private readonly availabilityService: CalendarAvailabilityService,
+    private readonly connections: CalendarConnectionService,
     private readonly calendly: CalendlyClient,
   ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
   status(@CurrentAuth() auth: AuthContext) {
-    return this.calendarService.status(auth.organizationId);
-  }
-
-  @Get('members')
-  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
-  members(@CurrentAuth() auth: AuthContext) {
-    return this.availabilityService.members(auth.organizationId);
-  }
-
-  @Get('availability')
-  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
-  availability(@CurrentAuth() auth: AuthContext, @Query() query: AvailabilityQueryDto) {
-    return this.availabilityService.report(auth.organizationId, query);
-  }
-
-  @Post('availability/sync')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
-  syncAvailability(@CurrentAuth() auth: AuthContext) {
-    return this.availabilityService.syncNow(auth.organizationId);
-  }
-
-  @Post('members/add-agent')
-  @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ, PERMISSIONS.USER_CREATE)
-  addMemberAsAgent(@CurrentAuth() auth: AuthContext, @Body() dto: AddCalendarMemberDto) {
-    return this.calendarService.addMemberAsAgent(auth.organizationId, dto.externalId);
-  }
-
-  @Get('event-types')
-  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
-  eventTypes(@CurrentAuth() auth: AuthContext) {
-    return this.calendarService.eventTypes(auth.organizationId);
+    return this.connections.status(auth.organizationId);
   }
 
   @Post('calendly/authorize')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   authorizeCalendly(@CurrentAuth() auth: AuthContext) {
-    return this.calendarService.startCalendly(auth.organizationId, auth.userId);
+    return this.connections.startCalendly(auth.organizationId, auth.userId);
   }
 
   @Public()
@@ -85,7 +51,7 @@ export class CalendarController {
       result = { ok: false, message: 'Calendly did not return an authorization code. Start again from Settings.' };
     } else {
       try {
-        await this.calendarService.completeCalendly(code, state);
+        await this.connections.completeCalendly(code, state);
         result = { ok: true, message: 'You can close this window and return to EstatePulse.' };
       } catch (failure) {
         if (failure instanceof HttpException) {
@@ -114,27 +80,27 @@ export class CalendarController {
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   calTeams(@Body() dto: CalApiKeyDto) {
-    return this.calendarService.listCalTeams(dto.apiKey);
+    return this.connections.listCalTeams(dto.apiKey);
   }
 
   @Post('cal/connect')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   connectCal(@CurrentAuth() auth: AuthContext, @Body() dto: CalConnectDto) {
-    return this.calendarService.connectCal(auth.organizationId, auth.userId, dto);
+    return this.connections.connectCal(auth.organizationId, auth.userId, dto);
   }
 
   @Post('activate')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   activate(@CurrentAuth() auth: AuthContext, @Body() dto: ActivateCalendarDto) {
-    return this.calendarService.activate(auth.organizationId, dto.provider);
+    return this.connections.activate(auth.organizationId, dto.provider);
   }
 
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   disconnect(@CurrentAuth() auth: AuthContext) {
-    return this.calendarService.disconnect(auth.organizationId);
+    return this.connections.disconnect(auth.organizationId);
   }
 }

@@ -1,3 +1,11 @@
+enum UserSource {
+  web
+  calendly
+  cal
+
+  @@map("user_source")
+}
+
 enum BaseStatus {
   active
   inactive

@@ -9,7 +9,7 @@ import {
 } from '../../../utils/calendarApi';
 import { CalComConnect } from './CalComConnect';
 import { CalendlyConnect } from './CalendlyConnect';
-import { Notice, PROVIDER_IDS, PROVIDERS, PrimaryButton, ProviderBadge, WORKSPACE_LABEL, panel } from './ui';
+import { Notice, PROVIDER_IDS, PROVIDERS, PrimaryButton, ProviderBadge, WORKSPACE_LABEL, panel } from '../shared/ui';
 
 const describe = (connection: CalendarConnection): string =>
   [connection.accountEmail ?? connection.accountName, connection.workspaceName ?? WORKSPACE_LABEL[connection.workspaceType]]

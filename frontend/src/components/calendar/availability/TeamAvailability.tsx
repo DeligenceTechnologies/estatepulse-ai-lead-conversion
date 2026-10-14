@@ -9,7 +9,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { ApiError, messageFor } from '../../lib/api';
+import { ApiError, messageFor } from '../../../lib/api';
 import {
   getCalendarAvailability,
   getOrganizationCalendar,
@@ -17,16 +17,16 @@ import {
   type AvailabilityReport,
   type MemberAvailability,
   type OrganizationCalendarStatus,
-} from '../../utils/calendarApi';
+} from '../../../utils/calendarApi';
 import {
   DayTimeline,
   SEGMENT_STYLE,
   UNAVAILABLE_SWATCH,
   WeekTimeline,
   nowState,
-} from '../availability/AvailabilityTimeline';
-import { DEFAULT_HOURS, dayLabel, ms, shiftDate, timeFormatter, todayIn, visibleHours } from '../availability/time';
-import { PROVIDERS } from '../integrations/calendar/ui';
+} from './AvailabilityTimeline';
+import { DEFAULT_HOURS, dayLabel, ms, shiftDate, timeFormatter, todayIn, visibleHours } from './time';
+import { PROVIDERS } from '../shared/ui';
 
 type Span = 1 | 7;
 type Filter = 'all' | 'free' | 'busy';
@@ -94,7 +94,12 @@ const EmptyCard: React.FC<{ icon: React.ReactNode; title: string; children: Reac
   </div>
 );
 
-export const TeamAvailabilityView: React.FC = () => {
+/**
+ * Who is free and who is busy right now, per calendar member, read from the
+ * connected Calendly or Cal.com. The Availability tab of the Scheduling page,
+ * which owns the page title.
+ */
+export const TeamAvailability: React.FC = () => {
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<OrganizationCalendarStatus | null>(null);
   const [report, setReport] = useState<AvailabilityReport | null>(null);
@@ -212,14 +217,14 @@ export const TeamAvailabilityView: React.FC = () => {
   if (forbidden) {
     body = (
       <EmptyCard icon={<AlertTriangle className="w-6 h-6 text-amber-400" />} title="No access">
-        Your role does not include viewing organization settings. Ask your organization owner if you need access.
+        Your role can’t view this page. Ask your owner for access.
       </EmptyCard>
     );
   } else if (error && !report) {
     body = (
       <EmptyCard
         icon={<AlertTriangle className="w-6 h-6 text-rose-400" />}
-        title="Availability could not be loaded"
+        title="Couldn’t load availability"
         action={
           <button
             type="button"
@@ -239,7 +244,7 @@ export const TeamAvailabilityView: React.FC = () => {
     body = (
       <EmptyCard
         icon={<CalendarClock className="w-6 h-6 text-emerald-400" />}
-        title={calendar?.connection ? 'Your calendar needs attention' : 'Connect a calendar to see availability'}
+        title={calendar?.connection ? 'Reconnect your calendar' : 'Connect a calendar'}
         action={
           <button
             type="button"
@@ -251,8 +256,8 @@ export const TeamAvailabilityView: React.FC = () => {
         }
       >
         {calendar?.connection
-          ? calendar.connection.lastError ?? 'The calendar connection stopped working. Reconnect it from Settings.'
-          : 'Link your Calendly or Cal.com account and every member’s free and busy time shows up here, live.'}
+          ? calendar.connection.lastError ?? 'The connection stopped working.'
+          : 'Connect Calendly or Cal.com to see who’s free.'}
       </EmptyCard>
     );
   } else if (!report) {
@@ -305,10 +310,10 @@ export const TeamAvailabilityView: React.FC = () => {
 
           {visible.length === 0 ? (
             <div className="px-4 py-12 text-center text-xs text-slate-400">
-              {members.length === 0 ? 'No members in the connected calendar yet.' : 'No members match this view.'}
+              {members.length === 0 ? 'No calendar members yet.' : 'No one matches this filter.'}
             </div>
           ) : (
-            <div className={`overflow-auto custom-scrollbar max-h-[calc(100vh-15rem)] min-h-[12rem] transition-opacity ${loading ? 'opacity-70' : ''}`}>
+            <div className={`overflow-auto custom-scrollbar max-h-[calc(100vh-20rem)] min-h-[12rem] transition-opacity ${loading ? 'opacity-70' : ''}`}>
               {span === 1 ? (
                 <DayTimeline report={report} members={visible} hours={hours} now={now} format={format} />
               ) : (
@@ -329,7 +334,7 @@ export const TeamAvailabilityView: React.FC = () => {
                   Syncing with {provider?.label ?? 'your calendar'}…
                 </>
               ) : report.sync.syncedAt ? (
-                `Synced ${ago(report.sync.syncedAt, now)} · updates automatically`
+                `Synced ${ago(report.sync.syncedAt, now)}`
               ) : (
                 'Waiting for the first sync'
               )}
@@ -340,74 +345,65 @@ export const TeamAvailabilityView: React.FC = () => {
   }
 
   return (
-    <div className="h-full overflow-y-auto custom-scrollbar text-slate-100">
-      <div className="px-6 py-6 max-w-7xl w-full mx-auto space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
-              <CalendarClock className="w-5 h-5 text-on-accent" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-xl font-bold text-white tracking-tight">Team Availability</h2>
-              <p className="text-xs text-slate-400 truncate">
-                {provider ? `Who is free and who is busy, live from ${provider.label}.` : 'Who is free and who is busy, live from your calendar.'}
-              </p>
+    <div className="space-y-4">
+      {connected && !forbidden && report && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-base font-bold text-white tracking-tight">{title}</div>
+            <div className="text-2xs text-slate-500">
+              {live ? `${freeNow} free · ${busyNow} busy now` : `From ${provider?.label ?? 'your calendar'}`}
             </div>
           </div>
-
-          {connected && !forbidden && (
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => move(-1)} disabled={loading || !first || !range || first <= range.minDate} aria-label={span === 1 ? 'Previous day' : 'Previous week'} className={iconButton}>
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDate(null)}
-                disabled={loading || live}
-                className="h-9 px-3 rounded-lg border border-slate-800 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Today
-              </button>
-              <button type="button" onClick={() => move(1)} disabled={loading || !first || !range || first >= range.maxDate} aria-label={span === 1 ? 'Next day' : 'Next week'} className={iconButton}>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-              <span className="min-w-[9.5rem] text-sm font-semibold text-white px-1">{title}</span>
-              <div role="radiogroup" aria-label="Range" className="inline-flex h-9 p-0.5 rounded-lg bg-slate-900 border border-slate-800">
-                {([1, 7] as const).map((value) => (
-                  <button key={value} type="button" role="radio" aria-checked={span === value} onClick={() => setSpan(value)} className={segment(span === value)}>
-                    {value === 1 ? 'Day' : 'Week'}
-                  </button>
-                ))}
-              </div>
-              <button type="button" onClick={() => void syncNow()} disabled={busySyncing} aria-label="Sync now" title={provider ? `Sync now with ${provider.label}` : 'Sync now'} className={iconButton}>
-                <RefreshCw className={`w-4 h-4 ${busySyncing ? 'animate-spin' : ''}`} />
-              </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => move(-1)} disabled={loading || !first || !range || first <= range.minDate} aria-label={span === 1 ? 'Previous day' : 'Previous week'} className={iconButton}>
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(null)}
+              disabled={loading || live}
+              className="h-9 px-3 rounded-lg border border-slate-800 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Today
+            </button>
+            <button type="button" onClick={() => move(1)} disabled={loading || !first || !range || first >= range.maxDate} aria-label={span === 1 ? 'Next day' : 'Next week'} className={iconButton}>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <div role="radiogroup" aria-label="Range" className="inline-flex h-9 p-0.5 rounded-lg bg-slate-900 border border-slate-800">
+              {([1, 7] as const).map((value) => (
+                <button key={value} type="button" role="radio" aria-checked={span === value} onClick={() => setSpan(value)} className={segment(span === value)}>
+                  {value === 1 ? 'Day' : 'Week'}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
-
-        {report?.sync.error && !busySyncing && (
-          <div role="status" className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-            <div className="text-xs text-amber-200 leading-relaxed flex-1">
-              The last sync with {provider?.label ?? 'your calendar'} failed: {report.sync.error}
-              {report.sync.syncedAt ? ` Showing data from ${ago(report.sync.syncedAt, now)}.` : ''}
-            </div>
-          </div>
-        )}
-
-        {error && report && (
-          <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
-            <div className="text-xs text-rose-200 leading-relaxed flex-1">{error}</div>
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="text-rose-300 hover:text-rose-100 cursor-pointer">
-              <X className="w-3.5 h-3.5" />
+            <button type="button" onClick={() => void syncNow()} disabled={busySyncing} aria-label="Sync now" title={provider ? `Sync now with ${provider.label}` : 'Sync now'} className={iconButton}>
+              <RefreshCw className={`w-4 h-4 ${busySyncing ? 'animate-spin' : ''}`} />
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {body}
-      </div>
+      {report?.sync.error && !busySyncing && (
+        <div role="status" className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-200 leading-relaxed flex-1">
+            Sync failed: {report.sync.error}
+            {report.sync.syncedAt ? ` Showing data from ${ago(report.sync.syncedAt, now)}.` : ''}
+          </div>
+        </div>
+      )}
+
+      {error && report && (
+        <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-rose-200 leading-relaxed flex-1">{error}</div>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="text-rose-300 hover:text-rose-100 cursor-pointer">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {body}
     </div>
   );
 };

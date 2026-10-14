@@ -14,10 +14,11 @@ import {
   RefreshCw,
   Timer,
   Trash2,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { displayName } from '../../context/AuthContext';
-import type { TeamMember } from '../../utils/usersApi';
+import { USER_SOURCE_LABEL, type TeamMember } from '../../utils/usersApi';
 import {
   DAY_SHORT,
   WEEK_ORDER,
@@ -336,6 +337,10 @@ export const MemberDrawer: React.FC<MemberDrawerProps> = ({
             <div className="divide-y divide-slate-800/70">
               <InfoRow icon={<CalendarDays className="w-3.5 h-3.5" />} label="Member since">
                 {formatDate(member.createdAt)} <span className="text-slate-500">· {timeSince(member.createdAt, now)}</span>
+              </InfoRow>
+              <InfoRow icon={<UserPlus className="w-3.5 h-3.5" />} label="Added from">
+                {USER_SOURCE_LABEL[member.source] ?? USER_SOURCE_LABEL.web}
+                {member.source !== 'web' && <span className="text-slate-500"> · calendar member</span>}
               </InfoRow>
               <InfoRow icon={<LogIn className="w-3.5 h-3.5" />} label="Last sign-in">
                 {member.lastLoginAt ? (

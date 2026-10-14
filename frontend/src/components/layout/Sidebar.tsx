@@ -5,6 +5,8 @@ import {
   PhoneCall,
   CalendarCheck,
   CalendarClock,
+  CalendarDays,
+  Contact,
   Repeat,
   UserCheck,
   Plug,
@@ -41,6 +43,18 @@ export function useOwnerNav(): NavGroup[] {
       ],
     },
     {
+      // Its own main section, right under the overview: everything read from
+      // the calendar connected once under Settings → Calendar.
+      label: 'Calendar',
+      items: can('organization.read')
+        ? [
+            { id: 'team_availability', label: 'Team Availability', icon: CalendarClock },
+            { id: 'meeting_types', label: 'Meeting Types', icon: CalendarDays },
+            { id: 'calendar_members', label: 'Calendar Members', icon: Contact },
+          ]
+        : [],
+    },
+    {
       label: 'Pipeline',
       items: [
         { id: 'leads', label: 'Leads', icon: Users, badge: leads.length },
@@ -57,9 +71,6 @@ export function useOwnerNav(): NavGroup[] {
         // only agents — hence "Team Members". The view id stays `agents` so
         // existing /agents links keep working.
         ...(can('user.read') ? [{ id: 'agents' as const, label: 'Team Members', icon: UserCheck }] : []),
-        ...(can('organization.read')
-          ? [{ id: 'team_availability' as const, label: 'Team Availability', icon: CalendarClock }]
-          : []),
         // Only for an owner who takes leads: an agent profile is what the screen
         // reads and writes, and an owner without one has no hours to set.
         ...(isOwner && agentProfileId

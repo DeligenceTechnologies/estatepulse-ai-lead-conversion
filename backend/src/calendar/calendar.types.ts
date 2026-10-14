@@ -1,5 +1,8 @@
 import type { CalendarProvider } from '@prisma/client';
 
+/** Base path of every organization calendar endpoint. */
+export const CALENDAR_ROUTE = 'org-settings/calendar';
+
 export const PROVIDER_LABEL: Record<CalendarProvider, string> = {
   calendly: 'Calendly',
   cal: 'Cal.com',
@@ -28,6 +31,8 @@ export interface SchedulingMember {
 export interface CalendarMemberView extends SchedulingMember {
   userId: string | null;
   userName: string | null;
+  /** Their working hours in the calendar, as last synced; null when unknown. */
+  schedule: WeeklySchedule | null;
 }
 
 export interface SchedulingEventType {
@@ -37,6 +42,49 @@ export interface SchedulingEventType {
   bookingUrl: string | null;
   poolingType: PoolingType | null;
   hostName: string | null;
+  /** The colour the provider shows for it, as `#rrggbb`; null when it has none. */
+  color: string | null;
+}
+
+export type MeetingStatus = 'scheduled' | 'pending' | 'canceled';
+
+export interface MeetingPerson {
+  name: string;
+  email: string | null;
+}
+
+/** A meeting someone booked on one of the workspace's event types. */
+export interface BookedMeeting {
+  id: string;
+  /** Matches `SchedulingEventType.id`; null when the provider did not say. */
+  eventTypeId: string | null;
+  title: string;
+  start: string;
+  end: string;
+  status: MeetingStatus;
+  /** Who booked (Calendly invitees, Cal.com attendees). */
+  invitees: MeetingPerson[];
+  hosts: MeetingPerson[];
+  /** The video call link (Zoom, Google Meet, Teams, Cal Video…), when there is one. */
+  meetingUrl: string | null;
+  /** Where it happens when that is not a link: an address, a phone number, or a description. */
+  location: string | null;
+  rescheduleUrl: string | null;
+  cancelUrl: string | null;
+  canceledReason: string | null;
+}
+
+export interface ScheduleInterval {
+  /** 'HH:MM', wall-clock in the schedule's timezone. */
+  from: string;
+  to: string;
+}
+
+/** Someone's recurring working hours as their calendar has them. */
+export interface WeeklySchedule {
+  timezone: string | null;
+  /** Keyed by day of week, '0' = Sunday .. '6' = Saturday; a missing or empty day is off. */
+  weekly: Record<string, ScheduleInterval[]>;
 }
 
 export interface CalendlyCredentials {

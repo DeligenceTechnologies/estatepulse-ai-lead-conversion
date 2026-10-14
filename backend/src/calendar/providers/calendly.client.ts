@@ -3,19 +3,24 @@ import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import type { BusySource } from '../calendar.types';
 import type {
+  BookedMeeting,
   PoolingType,
   ProviderAccount,
   SchedulingEventType,
   SchedulingMember,
   WorkspaceRole,
 } from '../calendar.types';
-import { requestJson } from './provider-http';
+import { hexColor, mapLimit, meetingPlace } from './meeting-location';
+import { ProviderHttpError, requestJson } from './provider-http';
 
 const AUTH_BASE = 'https://auth.calendly.com';
 const API_BASE = 'https://api.calendly.com';
 const PROVIDER = 'Calendly';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
+/** Booked meetings need one invitee call each, so cap how many a single read fetches. */
+const MAX_MEETING_PAGES = 3;
+const INVITEE_CONCURRENCY = 6;
 
 interface TokenResponse {
   access_token: string;
@@ -45,7 +50,28 @@ interface CalendlyEventType {
   duration: number;
   scheduling_url: string | null;
   pooling_type: string | null;
+  color?: string | null;
   profile: { name: string | null } | null;
+}
+
+interface CalendlyScheduledEvent {
+  uri: string;
+  name: string;
+  status: 'active' | 'canceled';
+  start_time: string;
+  end_time: string;
+  event_type: string | null;
+  location: { type: string; location?: string | null; join_url?: string | null } | null;
+  event_memberships: { user_name?: string | null; user_email?: string | null }[];
+  cancellation?: { reason?: string | null } | null;
+}
+
+interface CalendlyInvitee {
+  name: string;
+  email: string;
+  status: 'active' | 'canceled';
+  cancel_url: string | null;
+  reschedule_url: string | null;
 }
 
 interface CalendlyAvailabilitySchedule {
@@ -199,7 +225,37 @@ export class CalendlyClient {
       bookingUrl: eventType.scheduling_url,
       poolingType: toPooling(eventType.pooling_type),
       hostName: eventType.profile?.name ?? null,
+      color: hexColor(eventType.color),
     }));
+  }
+
+  /** Meetings booked in the organization between `from` and `to`, with who booked each. */
+  async scheduledMeetings(accessToken: string, organizationUri: string, from: Date, to: Date): Promise<BookedMeeting[]> {
+    const query = new URLSearchParams({
+      organization: organizationUri,
+      min_start_time: from.toISOString(),
+      max_start_time: to.toISOString(),
+      sort: 'start_time:asc',
+      count: String(PAGE_SIZE),
+    });
+    const events = await this.collect<CalendlyScheduledEvent>(
+      accessToken,
+      `${API_BASE}/scheduled_events?${query}`,
+      MAX_MEETING_PAGES,
+    );
+    return mapLimit(events, INVITEE_CONCURRENCY, async (event) =>
+      toMeeting(event, await this.invitees(accessToken, event.uri)),
+    );
+  }
+
+  private async invitees(accessToken: string, eventUri: string): Promise<CalendlyInvitee[]> {
+    try {
+      return await this.collect<CalendlyInvitee>(accessToken, `${eventUri}/invitees?count=${PAGE_SIZE}`, 1);
+    } catch (error) {
+      // One unreadable event should not hide every other meeting; a rejected token still should.
+      if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+      return [];
+    }
   }
 
   async defaultSchedule(accessToken: string, userUri: string): Promise<CalendlySchedule | null> {
@@ -279,10 +335,10 @@ export class CalendlyClient {
     return requestJson<T>(PROVIDER, url, { headers: { Authorization: `Bearer ${accessToken}` } });
   }
 
-  private async collect<T>(accessToken: string, firstPage: string): Promise<T[]> {
+  private async collect<T>(accessToken: string, firstPage: string, maxPages = MAX_PAGES): Promise<T[]> {
     const items: T[] = [];
     let next: string | null = firstPage;
-    for (let page = 0; next && page < MAX_PAGES; page++) {
+    for (let page = 0; next && page < maxPages; page++) {
       const result: Page<T> = await this.get<Page<T>>(accessToken, next);
       items.push(...result.collection);
       next = result.pagination.next_page;
@@ -290,6 +346,44 @@ export class CalendlyClient {
     return items;
   }
 }
+
+function toMeeting(event: CalendlyScheduledEvent, invitees: CalendlyInvitee[]): BookedMeeting {
+  const place = meetingPlace([event.location?.join_url], [event.location?.location]);
+  // Calendly's cancel and reschedule pages are per invitee; the first one still booked speaks for the meeting.
+  const booker = invitees.find((invitee) => invitee.status === 'active') ?? invitees[0];
+  const canceled = event.status === 'canceled';
+  const open = !canceled && Date.parse(event.end_time) > Date.now();
+  return {
+    id: event.uri,
+    eventTypeId: event.event_type,
+    title: event.name,
+    start: event.start_time,
+    end: event.end_time,
+    status: canceled ? 'canceled' : 'scheduled',
+    invitees: invitees.map(({ name, email }) => ({ name, email })),
+    hosts: event.event_memberships.map((host) => ({
+      name: host.user_name ?? host.user_email ?? 'Host',
+      email: host.user_email ?? null,
+    })),
+    meetingUrl: place.meetingUrl,
+    location: place.location ?? LOCATION_LABEL[event.location?.type ?? ''] ?? null,
+    rescheduleUrl: open ? (booker?.reschedule_url ?? null) : null,
+    cancelUrl: open ? (booker?.cancel_url ?? null) : null,
+    canceledReason: canceled ? (event.cancellation?.reason ?? null) : null,
+  };
+}
+
+/** What to say when Calendly gives a location type but no address, number or link (yet). */
+const LOCATION_LABEL: Record<string, string> = {
+  zoom: 'Zoom',
+  google_conference: 'Google Meet',
+  microsoft_teams_conference: 'Microsoft Teams',
+  webex_conference: 'Webex',
+  gotomeeting: 'GoTo Meeting',
+  outbound_call: 'Phone call',
+  inbound_call: 'Phone call',
+  ask_invitee: 'Set by invitee',
+};
 
 function toRole(role: string): WorkspaceRole {
   return role === 'owner' || role === 'admin' ? role : 'member';

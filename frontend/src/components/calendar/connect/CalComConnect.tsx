@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Check, Eye, EyeOff, KeyRound, Link2, Loader2, User, Users } from 'lucide-react';
 import { messageFor } from '../../../lib/api';
 import { connectCalCom, listCalComTeams, type CalComAccountCheck } from '../../../utils/calendarApi';
-import { Notice, PROVIDERS, PrimaryButton, panel } from './ui';
+import { Notice, PROVIDERS, PrimaryButton, panel } from '../shared/ui';
 
 type Target = 'personal' | number;
 

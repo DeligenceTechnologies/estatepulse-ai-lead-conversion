@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, CalendarCheck, CalendarClock, CheckCircle2, Info, Loader2, X } from 'lucide-react';
+import { AlertTriangle, CalendarCheck, CalendarClock, CheckCircle2, Info, Loader2, Search, X } from 'lucide-react';
 import type { CalendarProviderId, PoolingType, WorkspaceRole, WorkspaceType } from '../../../utils/calendarApi';
 
 export const PROVIDERS: Record<
@@ -161,3 +161,46 @@ export const StatusPill: React.FC<{ tone: 'neutral' | 'success' | 'warning'; spi
     </span>
   );
 };
+
+export const SearchField: React.FC<{ value: string; onChange: (value: string) => void; placeholder: string }> = ({
+  value,
+  onChange,
+  placeholder,
+}) => (
+  <div className="relative w-full sm:max-w-xs">
+    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    <input
+      type="search"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      maxLength={100}
+      className="h-9 w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-8 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 [&::-webkit-search-cancel-button]:hidden"
+    />
+    {value && (
+      <button
+        type="button"
+        onClick={() => onChange('')}
+        aria-label="Clear search"
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-slate-200 cursor-pointer"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    )}
+  </div>
+);
+
+export const Empty: React.FC<{ icon: React.ElementType; title: string; children: React.ReactNode }> = ({
+  icon: Icon,
+  title,
+  children,
+}) => (
+  <div className="flex flex-col items-center text-center px-4 py-10">
+    <span className="w-11 h-11 rounded-2xl bg-slate-950 border border-slate-800 text-slate-500 flex items-center justify-center mb-3">
+      <Icon className="w-5 h-5" />
+    </span>
+    <div className="text-xs font-bold text-slate-200">{title}</div>
+    <p className="text-2xs text-slate-500 mt-1 max-w-sm leading-relaxed">{children}</p>
+  </div>
+);

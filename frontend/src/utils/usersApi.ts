@@ -19,6 +19,15 @@ export interface RoleSummary {
   isSystem: boolean;
 }
 
+/** Where the account was created: in EstatePulse, or added from the connected Calendly / Cal.com. */
+export type UserSource = 'web' | 'calendly' | 'cal';
+
+export const USER_SOURCE_LABEL: Record<UserSource, string> = {
+  web: 'EstatePulse',
+  calendly: 'Calendly',
+  cal: 'Cal.com',
+};
+
 /** One row of GET /user. */
 export interface TeamMember {
   id: string;
@@ -28,6 +37,8 @@ export interface TeamMember {
   email: string;
   phone: string | null;
   status: UserStatus;
+  /** Set once at creation. */
+  source: UserSource;
   /** IANA time zone, e.g. "Asia/Kolkata" (the default). */
   timezone: string;
   /** How many leads routing may hand them at once; 0 = none (server default 25). */

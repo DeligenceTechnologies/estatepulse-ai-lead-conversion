@@ -1,32 +1,25 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CalendarBlockKind, CalendarProvider } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { addDays, localDate, zonedToInstant } from '@/common/utils/zoned-time';
-import {
-  PROVIDER_LABEL,
-  type BusySource,
-  type CalendarMemberView,
-  type MemberAvailabilitySource,
-  type WorkspaceRole,
-} from '../calendar.types';
-import type { AvailabilityQueryDto } from '../dto/availability-query.dto';
+import type { BusySource, MemberAvailabilitySource } from '../calendar.types';
+import { findLinkedUsers } from '../members/linked-users';
 import type { CalendlySchedule } from '../providers/calendly.client';
-import { CalendarSyncService, SYNC_HORIZON_DAYS, type SyncOutcome } from '../sync/calendar-sync.service';
+import {
+  CalendarSyncService,
+  SYNC_HORIZON_DAYS,
+  SYNC_STATUS_FIELDS,
+  syncState,
+  type SyncOutcome,
+  type SyncState,
+} from '../sync/calendar-sync.service';
 import { MIN_FREE_MS, expandSchedule, freeTime, summarize, type AvailabilitySummary, type Busy } from './availability-math';
+import type { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { clip, merge, type Interval } from './intervals';
+import { inUse } from '../connection/connection-state';
 
 const DEFAULT_TIMEZONE = 'UTC';
 const HISTORY_VIEW_DAYS = 30;
-
-const CONNECTION_FIELDS = {
-  id: true,
-  provider: true,
-  status: true,
-  lastError: true,
-  syncedAt: true,
-  syncError: true,
-  syncLeaseUntil: true,
-} as const;
 
 const MEMBER_FIELDS = {
   id: true,
@@ -58,12 +51,6 @@ export interface MemberAvailability extends MemberAvailabilitySource {
   summary: AvailabilitySummary;
 }
 
-export interface SyncState {
-  syncedAt: string | null;
-  syncing: boolean;
-  error: string | null;
-}
-
 export interface AvailabilityReport {
   provider: CalendarProvider;
   timezone: string;
@@ -84,6 +71,10 @@ interface StoredBlock {
   blockedEndsAt: Date;
 }
 
+/**
+ * Who is free and who is busy: the day/week report built from synced calendar
+ * blocks, in the organization's timezone.
+ */
 @Injectable()
 export class CalendarAvailabilityService {
   constructor(
@@ -92,7 +83,7 @@ export class CalendarAvailabilityService {
   ) {}
 
   async report(orgId: string, query: AvailabilityQueryDto): Promise<AvailabilityReport> {
-    const connection = await this.freshConnection(orgId);
+    const connection = await this.sync.freshConnection(orgId);
     const timezone = query.timezone ?? (await this.orgTimezone(orgId));
     const span = query.days ?? 1;
     const today = localDate(Date.now(), timezone);
@@ -138,7 +129,7 @@ export class CalendarAvailabilityService {
       if (list) list.push(block);
       else byMember.set(block.memberId, [block]);
     }
-    const users = await this.linkUsers(orgId, members);
+    const users = await findLinkedUsers(this.prisma, orgId, members);
 
     return {
       provider: connection.provider,
@@ -191,80 +182,20 @@ export class CalendarAvailabilityService {
     };
   }
 
-  async members(orgId: string): Promise<CalendarMemberView[]> {
-    const connection = await this.freshConnection(orgId);
-    const members = await this.prisma.calendarMember.findMany({
-      where: { connectionId: connection.id },
-      select: MEMBER_FIELDS,
-      orderBy: { name: 'asc' },
-    });
-    const users = await this.linkUsers(orgId, members);
-    return members.map((member) => {
-      const user = users.get(member.email.toLowerCase());
-      return {
-        externalId: member.externalId,
-        name: member.name,
-        email: member.email,
-        role: member.role as WorkspaceRole,
-        schedulingUrl: member.schedulingUrl,
-        timezone: member.timezone,
-        username: member.username,
-        userId: user?.id ?? null,
-        userName: user?.name ?? null,
-      };
-    });
-  }
-
   async syncNow(orgId: string): Promise<{ outcome: SyncOutcome; sync: SyncState }> {
     const outcome = await this.sync.syncNow(orgId);
     const connection = await this.prisma.calendarConnection.findFirst({
-      where: { orgId, isActive: true },
-      select: CONNECTION_FIELDS,
+      where: inUse(orgId),
+      select: SYNC_STATUS_FIELDS,
     });
     if (!connection) throw new NotFoundException('No calendar is connected.');
     return { outcome, sync: syncState(connection) };
-  }
-
-  private async freshConnection(orgId: string) {
-    const find = () =>
-      this.prisma.calendarConnection.findFirst({ where: { orgId, isActive: true }, select: CONNECTION_FIELDS });
-    const connection = await find();
-    if (!connection) throw new NotFoundException('No calendar is connected.');
-    if (connection.status === 'error') {
-      throw new ConflictException(connection.lastError ?? `${PROVIDER_LABEL[connection.provider]} needs to be reconnected.`);
-    }
-    await this.sync.ensureFresh(connection);
-    if (connection.syncedAt) return connection;
-    const synced = await find();
-    if (!synced) throw new NotFoundException('No calendar is connected.');
-    return synced;
-  }
-
-  private async linkUsers(orgId: string, members: { email: string }[]) {
-    const emails = members.map((member) => member.email).filter(Boolean);
-    const users = emails.length
-      ? await this.prisma.user.findMany({
-          where: { orgId, email: { in: emails, mode: 'insensitive' } },
-          select: { id: true, email: true, firstName: true, lastName: true },
-        })
-      : [];
-    return new Map(
-      users.map((user) => [user.email.toLowerCase(), { id: user.id, name: `${user.firstName} ${user.lastName}`.trim() }]),
-    );
   }
 
   private async orgTimezone(orgId: string): Promise<string> {
     const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } });
     return settings?.timezone ?? DEFAULT_TIMEZONE;
   }
-}
-
-function syncState(connection: { syncedAt: Date | null; syncError: string | null; syncLeaseUntil: Date | null }): SyncState {
-  return {
-    syncedAt: connection.syncedAt?.toISOString() ?? null,
-    syncing: !connection.syncError && Boolean(connection.syncLeaseUntil && connection.syncLeaseUntil.getTime() > Date.now()),
-    error: connection.syncError,
-  };
 }
 
 function toRange({ start, end }: Interval) {

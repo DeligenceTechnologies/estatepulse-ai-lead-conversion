@@ -1,7 +1,8 @@
-import type { AvailabilityDay, AvailabilityReport, TimeRange } from '../../utils/calendarApi';
+import type { AvailabilityDay, AvailabilityReport, TimeRange } from '../../../utils/calendarApi';
 
 export const DAY_MINUTES = 24 * 60;
-export const DEFAULT_HOURS: [number, number] = [8, 20];
+/** 9:00 AM – 6:00 PM with an hour either side, for a report with no working hours at all. */
+export const DEFAULT_HOURS: [number, number] = [8, 19];
 
 export const ms = (iso: string): number => Date.parse(iso);
 
@@ -35,9 +36,10 @@ export const dayLabel = (date: string, style: 'long' | 'short' | 'weekday'): str
   });
 };
 
-export const hourLabel = (hour: number): string => {
+/** `8 AM` for the axis ticks; `full` gives `8:00 AM` where there is room. */
+export const hourLabel = (hour: number, full = false): string => {
   const h = hour % 24;
-  return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
+  return `${h % 12 === 0 ? 12 : h % 12}${full ? ':00' : ''} ${h < 12 ? 'AM' : 'PM'}`;
 };
 
 export const duration = (minutes: number): string => {
@@ -59,27 +61,38 @@ export const dayOffset = (instant: number, day: AvailabilityDay): number => {
   return ((instant - start) / (ms(day.end) - start)) * DAY_MINUTES;
 };
 
-export function visibleHours(report: AvailabilityReport): [number, number] {
+/** Hours of padding shown either side of the working day, so its edges are visible. */
+const PAD_HOURS = 1;
+
+/** Earliest start and latest end, in minutes into the day, of `ranges` across the report's days. */
+function spanOf(ranges: TimeRange[], days: AvailabilityDay[]): [number, number] | null {
   let first = Infinity;
   let last = -Infinity;
-  for (const member of report.members) {
-    for (const range of [...(member.hours ?? []), ...member.free, ...member.busy]) {
-      for (const day of report.days) {
-        if (!overlaps(range, day)) continue;
-        first = Math.min(first, Math.max(0, dayOffset(ms(range.start), day)));
-        last = Math.max(last, Math.min(DAY_MINUTES, dayOffset(ms(range.end), day)));
-      }
+  for (const range of ranges) {
+    for (const day of days) {
+      if (!overlaps(range, day)) continue;
+      first = Math.min(first, Math.max(0, dayOffset(ms(range.start), day)));
+      last = Math.max(last, Math.min(DAY_MINUTES, dayOffset(ms(range.end), day)));
     }
   }
-  if (!Number.isFinite(first)) return DEFAULT_HOURS;
-  let start = Math.max(0, Math.floor(first / 60) - 1);
-  let end = Math.min(24, Math.ceil(last / 60) + 1);
-  if (end - start < 8) {
-    const grow = 8 - (end - start);
-    start = Math.max(0, start - Math.ceil(grow / 2));
-    end = Math.min(24, start + 8);
-  }
-  return [start, end];
+  return Number.isFinite(first) ? [first, last] : null;
+}
+
+/**
+ * The hours the timeline shows: the team's working day with one hour either
+ * side — working 9:00 AM – 6:00 PM shows 8:00 AM – 7:00 PM. Meetings outside
+ * that are clipped, so one late call never stretches the whole bar. Without
+ * working hours, free time stands in for them (it only falls inside working
+ * hours); with neither, the default day.
+ */
+export function visibleHours(report: AvailabilityReport): [number, number] {
+  const span =
+    spanOf(report.members.flatMap((member) => member.hours ?? []), report.days) ??
+    spanOf(report.members.flatMap((member) => member.free), report.days);
+  if (!span) return DEFAULT_HOURS;
+  const start = Math.max(0, Math.floor(span[0] / 60) - PAD_HOURS);
+  const end = Math.min(24, Math.ceil(span[1] / 60) + PAD_HOURS);
+  return end > start ? [start, end] : DEFAULT_HOURS;
 }
 
 export function placeIn(range: TimeRange, day: AvailabilityDay, hours: [number, number]) {

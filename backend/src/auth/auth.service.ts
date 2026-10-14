@@ -47,6 +47,7 @@ export class AuthService {
             ...owner,
             orgId: organization.id,
             password: passwordHash,
+            source: 'web',
             roles: { create: roleIds.map((roleId) => ({ roleId })) },
           },
         });

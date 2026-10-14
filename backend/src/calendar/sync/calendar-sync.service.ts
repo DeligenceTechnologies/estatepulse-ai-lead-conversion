@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
+  ConflictException,
   HttpException,
   Injectable,
   Logger,
@@ -15,11 +16,13 @@ import { SecretBoxService } from '@/common/service/secret-box.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { mapLimit } from '@/common/utils/map-limit';
 import { merge } from '../availability/intervals';
-import { CalendarService, type UsableConnection } from '../calendar.service';
+import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
+import { inUse } from '../connection/connection-state';
 import { PROVIDER_LABEL, type SchedulingMember } from '../calendar.types';
 import { CalClient, type CalBookingWindow } from '../providers/cal.client';
 import { CalendlyClient } from '../providers/calendly.client';
 import { ProviderHttpError } from '../providers/provider-http';
+import { SchedulingProvider } from '../providers/scheduling-provider';
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -42,6 +45,33 @@ export const SYNC_HORIZON_DAYS = 14;
 export const HISTORY_DAYS = 90;
 
 export type SyncOutcome = 'synced' | 'busy' | 'skipped';
+
+/** The columns that say which connection is active and how fresh its synced data is. */
+export const SYNC_STATUS_FIELDS = {
+  id: true,
+  provider: true,
+  status: true,
+  lastError: true,
+  syncedAt: true,
+  syncError: true,
+  syncLeaseUntil: true,
+} as const satisfies Prisma.CalendarConnectionSelect;
+
+export type SyncedConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof SYNC_STATUS_FIELDS }>;
+
+export interface SyncState {
+  syncedAt: string | null;
+  syncing: boolean;
+  error: string | null;
+}
+
+export function syncState(connection: Pick<SyncedConnection, 'syncedAt' | 'syncError' | 'syncLeaseUntil'>): SyncState {
+  return {
+    syncedAt: connection.syncedAt?.toISOString() ?? null,
+    syncing: !connection.syncError && Boolean(connection.syncLeaseUntil && connection.syncLeaseUntil.getTime() > Date.now()),
+    error: connection.syncError,
+  };
+}
 
 interface SyncedMember {
   id: string;
@@ -72,7 +102,8 @@ export class CalendarSyncService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly secrets: SecretBoxService,
-    private readonly calendar: CalendarService,
+    private readonly access: CalendarAccessService,
+    private readonly provider: SchedulingProvider,
     private readonly calendly: CalendlyClient,
     private readonly cal: CalClient,
     config: ConfigService<IntegrationEnv, true>,
@@ -89,7 +120,6 @@ export class CalendarSyncService implements OnModuleDestroy {
   async syncDue(): Promise<void> {
     const due = await this.prisma.calendarConnection.findMany({
       where: {
-        isActive: true,
         status: 'active',
         OR: [{ syncedAt: null }, { syncedAt: { lt: new Date(Date.now() - SYNC_INTERVAL_MS + 30_000) } }],
       },
@@ -108,6 +138,27 @@ export class CalendarSyncService implements OnModuleDestroy {
     if (count) this.logger.log(`Pruned ${count} calendar blocks older than ${HISTORY_DAYS} days.`);
   }
 
+  /**
+   * The organization's active, working connection, with its synced data
+   * guaranteed to exist: the first read waits for a sync, later reads refresh
+   * stale data in the background. Every screen that reads synced members or
+   * availability starts here.
+   */
+  async freshConnection(orgId: string): Promise<SyncedConnection> {
+    const find = () =>
+      this.prisma.calendarConnection.findFirst({ where: inUse(orgId), select: SYNC_STATUS_FIELDS });
+    const connection = await find();
+    if (!connection) throw new NotFoundException('No calendar is connected.');
+    if (connection.status === 'error') {
+      throw new ConflictException(connection.lastError ?? `${PROVIDER_LABEL[connection.provider]} needs to be reconnected.`);
+    }
+    await this.ensureFresh(connection);
+    if (connection.syncedAt) return connection;
+    const synced = await find();
+    if (!synced) throw new NotFoundException('No calendar is connected.');
+    return synced;
+  }
+
   async ensureFresh(connection: { id: string; syncedAt: Date | null }): Promise<void> {
     if (!connection.syncedAt) {
       await this.sync(connection.id);
@@ -120,7 +171,7 @@ export class CalendarSyncService implements OnModuleDestroy {
 
   async syncNow(orgId: string): Promise<SyncOutcome> {
     const connection = await this.prisma.calendarConnection.findFirst({
-      where: { orgId, isActive: true },
+      where: inUse(orgId),
       select: { id: true, syncedAt: true },
     });
     if (!connection) throw new NotFoundException('No calendar is connected.');
@@ -131,10 +182,12 @@ export class CalendarSyncService implements OnModuleDestroy {
   async receiveWebhook(connectionId: string, headers: Record<string, string | string[] | undefined>, body: Buffer | undefined) {
     const connection = await this.prisma.calendarConnection.findUnique({
       where: { id: connectionId },
-      select: { provider: true, webhookSecret: true },
+      select: { provider: true, status: true, webhookSecret: true },
     });
-    const secret = connection?.webhookSecret && this.secrets.enabled ? this.openSecret(connection.webhookSecret) : null;
-    if (!connection || !secret) throw new NotFoundException();
+    // A switched-off connection is not synced, so it accepts no webhooks either.
+    if (!connection || connection.status === 'inactive') throw new NotFoundException();
+    const secret = connection.webhookSecret && this.secrets.enabled ? this.openSecret(connection.webhookSecret) : null;
+    if (!secret) throw new NotFoundException();
     if (!body || !this.verifySignature(connection.provider, secret, headers, body)) {
       throw new UnauthorizedException('Invalid webhook signature');
     }
@@ -147,7 +200,6 @@ export class CalendarSyncService implements OnModuleDestroy {
     const lease = await this.prisma.calendarConnection.updateMany({
       where: {
         id: connectionId,
-        isActive: true,
         status: 'active',
         OR: [{ syncLeaseUntil: null }, { syncLeaseUntil: { lt: now } }],
       },
@@ -161,7 +213,7 @@ export class CalendarSyncService implements OnModuleDestroy {
         where: { id: connectionId },
         select: { orgId: true },
       });
-      await this.calendar.useActive(orgId, async (connection, secret) => {
+      await this.access.useActive(orgId, async (connection, secret) => {
         if (connection.id !== connectionId) return;
         await this.pull(connection, secret);
         await this.ensureWebhook(connection, secret);
@@ -213,7 +265,7 @@ export class CalendarSyncService implements OnModuleDestroy {
   private async pull(connection: UsableConnection, secret: string): Promise<void> {
     const from = (Math.floor(Date.now() / MINUTE_MS) + 1) * MINUTE_MS;
     const window: Window = { from, until: from + SYNC_HORIZON_DAYS * DAY_MS };
-    const members = await this.saveMembers(connection, await this.calendar.membersFor(connection, secret));
+    const members = await this.saveMembers(connection, await this.provider.members(connection, secret));
     const label = PROVIDER_LABEL[connection.provider];
 
     let bookings: CalBookingWindow[] = [];
@@ -291,21 +343,51 @@ export class CalendarSyncService implements OnModuleDestroy {
         ? bookings
         : bookings.filter((booking) => booking.hostIds.includes(member.externalId));
     const busy = merge(own).map(({ start, end }) => ({ kind: 'booking' as const, start, end }));
+    const schedule = await this.calOwnSchedule(apiKey, connection, member);
 
     if (!member.username) {
-      return { blocks: busy, status: 'limited', message: `${member.name} has no Cal.com username, so free time cannot be read.` };
+      return {
+        blocks: busy,
+        ...schedule,
+        status: 'limited',
+        message: `${member.name} has no Cal.com username, so free time cannot be read.`,
+      };
     }
     const eventType = await this.cal.shortestEventType(apiKey, member.username);
     if (!eventType) {
       return {
         blocks: busy,
+        ...schedule,
         status: 'limited',
         message: `${member.name} has no public meeting type in Cal.com, so free time cannot be read.`,
       };
     }
     const slots = await this.cal.slots(apiKey, eventType.id, new Date(window.from), new Date(window.until));
     const free = merge(slots).map(({ start, end }) => ({ kind: 'free' as const, start, end }));
-    return { blocks: [...free, ...busy], status: 'ok', message: null };
+    return { blocks: [...free, ...busy], ...schedule, status: 'ok', message: null };
+  }
+
+  /**
+   * Cal.com shows a working-hours schedule only to its owner, so only the API
+   * key's own member gets one; it is shown as their hours, not used for free
+   * time (Cal.com slots already account for it). Best effort: failing to read
+   * it never fails the member's sync.
+   */
+  private async calOwnSchedule(
+    apiKey: string,
+    connection: UsableConnection,
+    member: SyncedMember,
+  ): Promise<Pick<MemberPull, 'schedule'>> {
+    if (member.externalId !== connection.accountId) return {};
+    if (member.scheduleSyncedAt && Date.now() - member.scheduleSyncedAt.getTime() <= SCHEDULE_TTL_MS) return {};
+    try {
+      const schedule = await this.cal.defaultSchedule(apiKey);
+      return { schedule: (schedule ?? null) as Prisma.InputJsonValue | null };
+    } catch (error) {
+      if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+      this.logger.warn(`Cal.com schedule for member ${member.externalId} unavailable: ${(error as Error).message}`);
+      return {};
+    }
   }
 
   private async saveMembers(connection: UsableConnection, members: SchedulingMember[]): Promise<SyncedMember[]> {

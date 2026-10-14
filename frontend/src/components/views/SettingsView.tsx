@@ -35,7 +35,7 @@ import {
   type WorkingDay,
 } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
-import { CalendarIntegration } from '../integrations/calendar/CalendarIntegration';
+import { ConnectCalendar } from '../calendar/connect/ConnectCalendar';
 import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
 
@@ -43,7 +43,7 @@ type SettingsTab = 'general' | 'telnyx' | 'calendar';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
-  { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com', icon: CalendarDays },
+  { id: 'calendar', label: 'Calendar', hint: 'Connect Calendly or Cal.com', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
 ];
 
@@ -495,7 +495,7 @@ export const SettingsView: React.FC = () => {
             </div>
           )}
 
-          {tab === 'calendar' && <CalendarIntegration />}
+          {tab === 'calendar' && <ConnectCalendar />}
         </div>
       </div>
     </div>

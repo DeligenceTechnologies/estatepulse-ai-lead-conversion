@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BaseStatus, Prisma } from '@prisma/client';
+import { BaseStatus, Prisma, UserSource } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { generatePassword, hashPassword } from '@/common/utils/password';
@@ -54,7 +54,11 @@ export class UserService {
     this.loginUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/login` : undefined;
   }
 
-  async create(dto: CreateUserDto) {
+  /**
+   * `source` is decided by the caller, never by the request body: the Team
+   * page creates `web` users, adding a calendar member creates `calendly`/`cal`.
+   */
+  async create(dto: CreateUserDto, source: UserSource = UserSource.web) {
     const organization = await this.prisma.organization.findUnique({
       where: { id: dto.orgId },
       select: { id: true, name: true },
@@ -74,6 +78,7 @@ export class UserService {
             ...fields,
             ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
             password: await hashPassword(password),
+            source,
             roles: { create: roleIds.map((roleId) => ({ roleId })) },
           },
           omit: OMIT_PASSWORD,
@@ -114,6 +119,7 @@ export class UserService {
       searchFields: ['firstName', 'lastName', 'email'],
       filters: {
         status: { type: 'enum', values: Object.values(BaseStatus) },
+        source: { type: 'enum', values: Object.values(UserSource) },
         // Members holding any of the given roles.
         roleId: { type: 'uuid', multiple: true, field: 'roles.some.roleId' },
       },
