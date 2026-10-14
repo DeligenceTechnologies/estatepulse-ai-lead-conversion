@@ -509,18 +509,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
                       {/* Temperature (Hot / Warm / Cold) — no numeric score in Milestone 2 */}
                       <td className="px-4 py-3.5">
-                        {lead.temperature ? (
-                          <span
-                            className={`text-2xs font-semibold capitalize px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
-                          >
-                            {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
-                            {lead.temperature}
-                          </span>
-                        ) : (
-                          <span title="Not rated yet — the AI call rates the lead" className="text-slate-500">
-                            Not rated
-                          </span>
-                        )}
+                        <span
+                          title={lead.temperature ? undefined : 'Not classified yet — the AI call classifies the lead'}
+                          className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap ${temperatureTone(lead.temperature)}`}
+                        >
+                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
+                          {lead.temperature ?? 'Not classified'}
+                        </span>
                       </td>
 
                       {/* Budget — what they said they can spend. A value, not a call to action. */}
@@ -562,17 +557,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
                       {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
                       <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1.5 whitespace-nowrap">
-                          <span
-                            title={lead.statusReason || undefined}
-                            className={`text-2xs font-semibold px-2 py-0.5 rounded-full ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                          >
-                            {statusLabel(lead.status)}
-                          </span>
-                          {followUpReasonLabel(lead.status, lead.followUpReason) && (
-                            <span className="text-2xs text-slate-500">{followUpReasonLabel(lead.status, lead.followUpReason)}</span>
-                          )}
-                        </div>
+                        <span
+                          title={lead.statusReason || undefined}
+                          className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                        >
+                          {statusLabel(lead.status)}
+                        </span>
+                        {followUpReasonLabel(lead.status, lead.followUpReason) && (
+                          <p className="text-2xs text-slate-400 mt-1">
+                            {followUpReasonLabel(lead.status, lead.followUpReason)}
+                          </p>
+                        )}
                       </td>
 
                       {/* Actions */}
