@@ -27,9 +27,10 @@ import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '.
  *
  * The demo pipeline that used to render here came from AppContext's localStorage
  * store, and a second "Live Leads" panel sat above it. Both are gone: this table
- * shows exactly what the backend holds. The layout, the filters and the row
- * actions are unchanged, so a column with nothing behind it yet — assigned agent,
- * budget on an unqualified lead — renders an em dash instead of being dropped.
+ * shows exactly what the backend holds. A row carries only what the pipeline is
+ * worked by — who, how to reach them, how hot, who holds them, where they stand —
+ * and the dossier has the rest (budget, location, timeline, the form's answers).
+ * A fact with nothing behind it yet renders a muted dash instead of being dropped.
  *
  * Rows are mapped to `Lead` for the shared detail / pre-call modals and
  * registered with AppContext, but rendering reads the raw `LiveLead` so a null
@@ -48,16 +49,6 @@ const fullName = (l: LiveLead) =>
 const initialsOf = (name: string) => {
   const parts = name.trim().split(/\s+/);
   return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase();
-};
-
-const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
-
-const budgetRange = (l: LiveLead) => {
-  const { minBudget: lo, maxBudget: hi } = l;
-  if (lo !== null && hi !== null) return lo === hi ? thousands(lo) : `${thousands(lo)} – ${thousands(hi)}`;
-  if (lo !== null) return `${thousands(lo)}+`;
-  if (hi !== null) return `up to ${thousands(hi)}`;
-  return DASH;
 };
 
 /**
@@ -80,6 +71,23 @@ const sourceLabel = (l: LiveLead): string => {
   return s.type ?? 'webhook';
 };
 
+/**
+ * Why a row deserves a second look, as one icon's tooltip: an answer we could
+ * not store, a contact shared with other leads, a phone or email we cannot use.
+ * The row only says "look"; the dossier has the detail.
+ */
+const attentionReasons = (l: LiveLead): string[] => [
+  ...(l.needsReview ? l.reviewReasons : []),
+  // Submissions are not folded into one lead — a public form is filled in by
+  // different people — so a repeated contact is surfaced and a human decides.
+  ...(l.contactLeadCount > 1
+    ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`]
+    : []),
+  // Such a lead must never be auto-dialed.
+  ...(l.phone && !l.phoneValid ? ['Phone could not be parsed — excluded from dialing.'] : []),
+  // Stored, but never used to match this lead to another — see the email_valid guard in createLead.
+  ...(l.email && !l.emailValid ? ['Not a usable email address — excluded from matching and email outreach.'] : []),
+];
 
 const temperatureTone = (t: string | null) => {
   switch (t) {
@@ -422,15 +430,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-2xs tracking-wider border-b border-slate-800">
+            <thead className="bg-slate-950/60 text-slate-500 uppercase font-semibold text-2xs tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-4 py-3.5">Lead / Contact</th>
-                <th className="px-4 py-3.5">Temperature</th>
-                <th className="px-4 py-3.5">Target Budget & Location</th>
-                <th className="px-4 py-3.5">Timeline</th>
-                <th className="px-4 py-3.5">Assigned Agent</th>
-                <th className="px-4 py-3.5">Status</th>
-                <th className="px-4 py-3.5 text-right">Actions</th>
+                <th className="px-4 py-2.5">Lead</th>
+                <th className="px-4 py-2.5">Temperature</th>
+                <th className="px-4 py-2.5">Assigned agent</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5 text-right">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -438,184 +446,132 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                 // Skeleton rows in the table's own shape while the first fetch runs.
                 Array.from({ length: 6 }, (_, i) => (
                   <tr key={i} aria-hidden="true" className="animate-pulse">
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-3.5">
                       <div className="h-3.5 w-32 rounded bg-slate-800" />
                       <div className="h-3 w-44 rounded bg-slate-800/70 mt-2" />
                     </td>
-                    {[16, 28, 20, 24, 20, 10].map((w, j) => (
-                      <td key={j} className="px-4 py-4">
+                    {[14, 24, 28, 10].map((w, j) => (
+                      <td key={j} className="px-4 py-3.5">
                         <div className="h-3.5 rounded bg-slate-800/80" style={{ width: `${w * 4}px` }} />
                       </td>
                     ))}
                   </tr>
                 ))
               ) : filteredLeads.length > 0 ? (
-                filteredLeads.map(lead => (
-                  <tr
-                    key={lead.id}
-                    className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
-                    onClick={() => openLead(lead)}
-                  >
-                    {/* Name & Contact */}
-                    <td className="px-4 py-3.5">
-                      <div className="space-y-0.5">
-                        <div className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors flex items-center gap-2">
-                          <span>{fullName(lead)}</span>
-                          <span
-                            title={lead.source?.name ?? undefined}
-                            className="text-2xs font-medium px-1.5 rounded bg-slate-800 text-slate-400"
-                          >
-                            {sourceLabel(lead)}
+                filteredLeads.map(lead => {
+                  const attention = attentionReasons(lead);
+                  return (
+                    <tr
+                      key={lead.id}
+                      className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
+                      onClick={() => openLead(lead)}
+                    >
+                      {/* Lead: the name, then how to reach them. Anything worth a second look is
+                          one icon with the reasons on hover; the dossier has the rest (budget,
+                          location, timeline, source, the form's other answers). */}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-semibold text-slate-100 hover:text-emerald-300 transition-colors truncate">
+                            {fullName(lead)}
                           </span>
-                          {lead.contactLeadCount > 1 && (
-                            // Replaces "N submissions merged". Submissions are
-                            // no longer folded into one lead — a public form is
-                            // filled in by different people, and merging them
-                            // overwrote one prospect's answers with another's.
-                            // Repeats are surfaced instead of resolved: the
-                            // rows stay separate and a human decides.
-                            <span
-                              title={`${lead.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`}
-                              className="text-2xs text-amber-300 font-normal"
-                            >
-                              repeat contact ({lead.contactLeadCount})
-                            </span>
-                          )}
-                          {lead.needsReview && (
-                            <span
-                              title={lead.reviewReasons.join('\n')}
-                              className="text-2xs font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            >
-                              review
+                          {attention.length > 0 && (
+                            <span role="img" aria-label={attention.join(' ')} title={attention.join('\n')} className="shrink-0 cursor-help">
+                              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
                             </span>
                           )}
                         </div>
-                        {/* Only what the lead actually has. Wraps so the table fits without horizontal scroll. */}
-                        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 min-w-0">
-                          {lead.phone && (
-                            <span className="flex items-center gap-1 shrink-0">
-                              {lead.phone}
-                              {!lead.phoneValid && (
-                                // Surfaced because such a lead must never be auto-dialed.
-                                <span title="Phone could not be parsed — excluded from dialing">
-                                  <ShieldAlert className="w-3 h-3 text-amber-400" />
-                                </span>
-                              )}
+                        <div className="text-2xs text-slate-400 flex items-center gap-1.5 min-w-0 mt-0.5">
+                          {lead.phone && <span className="shrink-0">{lead.phone}</span>}
+                          {lead.phone && lead.email && (
+                            <span className="text-slate-600" aria-hidden="true">
+                              ·
                             </span>
                           )}
-                          {lead.email && (
-                            <span className="flex items-center gap-1 min-w-0">
-                              <span className="truncate max-w-[200px]">{lead.email}</span>
-                              {!lead.emailValid && (
-                                // Stored, but never used to match this lead to
-                                // another — see the email_valid guard in createLead.
-                                <span title="Not a usable address — excluded from matching and email outreach">
-                                  <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" />
-                                </span>
-                              )}
-                            </span>
-                          )}
+                          {lead.email && <span className="truncate max-w-[220px]">{lead.email}</span>}
                           {!lead.phone && !lead.email && <span className="text-slate-600">{DASH}</span>}
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Temperature (Hot / Warm / Cold) — no numeric score in Milestone 2 */}
-                    <td className="px-4 py-3.5">
-                      {lead.temperature ? (
-                        <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}>
-                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
-                          {lead.temperature}
-                        </span>
-                      ) : (
-                        <span title="Not rated yet — the AI call rates the lead" className="text-slate-500">
-                          Not rated
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Target Budget & Location */}
-                    <td className="px-4 py-3.5">
-                      <div className="space-y-0.5">
-                        <div className="text-slate-200 font-medium">
-                          {budgetRange(lead)}
-                        </div>
-                        <div className="text-xs text-slate-300 truncate max-w-[150px]">
-                          {lead.location ?? <span className="text-slate-600">{DASH}</span>}
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Timeline */}
-                    <td className="px-4 py-3.5">
-                      <span className="text-slate-200 font-medium">
-                        {humanize(lead.timeline) ?? <span className="text-slate-600">{DASH}</span>}
-                      </span>
-                    </td>
-
-                    {/* Agent — the current assignment, or honestly unassigned. */}
-                    <td className="px-4 py-3.5">
-                      {lead.assignedAgent ? (
-                        <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${new Date(lead.assignedAgent.assignedAt).toLocaleString()}`}>
-                          <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-2xs font-bold text-emerald-300 flex items-center justify-center">
-                            {initialsOf(lead.assignedAgent.name)}
-                          </div>
-                          <span className="text-slate-200 font-medium">
-                            {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-500 flex items-center justify-center">
-                            {DASH}
-                          </div>
-                          <span className="text-slate-500">Unassigned</span>
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5">
-                      <span
-                        title={lead.statusReason || undefined}
-                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-full ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                      >
-                        {statusLabel(lead.status)}
-                      </span>
-                      {followUpReasonLabel(lead.status, lead.followUpReason) && (
-                        <p className="text-2xs text-slate-400 mt-1">
-                          {followUpReasonLabel(lead.status, lead.followUpReason)}
-                        </p>
-                      )}
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-4 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        {lead.temperature === 'hot' && (
-                          <button
-                            onClick={() => setPreCallLeadId(lead.id)}
-                            title="Agent Pre-Call Briefing"
-                            className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                      {/* Temperature (Hot / Warm / Cold) — no numeric score in Milestone 2 */}
+                      <td className="px-4 py-3.5">
+                        {lead.temperature ? (
+                          <span
+                            className={`text-2xs font-semibold capitalize px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${temperatureTone(lead.temperature)}`}
                           >
-                            <Flame className="w-3.5 h-3.5 text-rose-400" />
-                          </button>
+                            {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
+                            {lead.temperature}
+                          </span>
+                        ) : (
+                          <span title="Not rated yet — the AI call rates the lead" className="text-slate-500">
+                            Not rated
+                          </span>
                         )}
+                      </td>
 
-                        <button
-                          onClick={() => openLead(lead)}
-                          title="Open Full Dossier"
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      {/* Agent — the current assignment, or honestly unassigned. */}
+                      <td className="px-4 py-3.5">
+                        {lead.assignedAgent ? (
+                          <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${new Date(lead.assignedAgent.assignedAt).toLocaleString()}`}>
+                            <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-2xs font-bold text-emerald-300 flex items-center justify-center">
+                              {initialsOf(lead.assignedAgent.name)}
+                            </div>
+                            <span className="text-slate-200 font-medium">
+                              {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-600 flex items-center justify-center">
+                              {DASH}
+                            </div>
+                            <span className="text-slate-500">Unassigned</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                          <span
+                            title={lead.statusReason || undefined}
+                            className={`text-2xs font-semibold px-2 py-0.5 rounded-full ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                          >
+                            {statusLabel(lead.status)}
+                          </span>
+                          {followUpReasonLabel(lead.status, lead.followUpReason) && (
+                            <span className="text-2xs text-slate-500">{followUpReasonLabel(lead.status, lead.followUpReason)}</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-4 py-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          {lead.temperature === 'hot' && (
+                            <button
+                              onClick={() => setPreCallLeadId(lead.id)}
+                              title="Agent Pre-Call Briefing"
+                              className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                            >
+                              <Flame className="w-3.5 h-3.5 text-rose-400" />
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => openLead(lead)}
+                            title="Open Full Dossier"
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : rows.length === 0 && !error ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center space-y-2">
+                  <td colSpan={5} className="px-4 py-12 text-center space-y-2">
                     <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
                     <div className="text-xs text-slate-400">No live leads yet.</div>
                     <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
@@ -627,7 +583,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                 </tr>
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={5} className="px-4 py-12 text-center text-slate-500">
                     No leads match the selected criteria.
                   </td>
                 </tr>
