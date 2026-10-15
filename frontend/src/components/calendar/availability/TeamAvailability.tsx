@@ -25,7 +25,7 @@ import {
   WeekTimeline,
   nowState,
 } from './AvailabilityTimeline';
-import { DAY_HOURS, dayLabel, ms, shiftDate, todayIn } from './time';
+import { DAY_HOURS, dayLabel, shiftDate, todayIn } from './time';
 import { useReloadOnSync } from '../shared/CalendarPanel';
 import { syncedAgo } from '../shared/SyncButton';
 import { PROVIDERS } from '../shared/ui';

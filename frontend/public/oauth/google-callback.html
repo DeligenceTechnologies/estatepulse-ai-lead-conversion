@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  Google redirects here after the owner answers the consent screen. This page
+  does not talk to the API. It hands {code, state} to the EstatePulse tab that
+  started the flow, which completes it with its own signed-in session. The code
+  never reaches an API URL or access log, and a code that lands in somebody
+  else's browser is useless without the session that began the authorization.
+
+  Two delivery routes, because Google's pages can sever window.opener:
+  postMessage to the opener when it still exists, and a same-origin
+  BroadcastChannel, which does not depend on it. The receiving tab ignores
+  any message whose state is not the one it is waiting for.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Google connection</title>
+<style>
+  body { margin: 0; display: grid; place-items: center; min-height: 100vh;
+         background: #020617; color: #e2e8f0;
+         font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .card { text-align: center; padding: 32px 40px; border-radius: 16px; margin: 16px;
+          background: #0f172a; border: 1px solid #1e293b; max-width: 360px; }
+  h1 { font-size: 16px; margin: 0 0 8px; color: #fff; }
+  p { margin: 0; color: #94a3b8; }
+</style>
+</head>
+<body>
+  <div class="card"><h1 id="heading">Finishing…</h1><p id="detail">Returning you to EstatePulse.</p></div>
+  <script>
+    (function () {
+      var q = new URLSearchParams(window.location.search);
+      var msg = {
+        source: 'estatepulse:google-oauth',
+        code: q.get('code'),
+        state: q.get('state'),
+        error: q.get('error')
+      };
+      // Out of the address bar and history before anything else happens.
+      try { history.replaceState(null, '', window.location.pathname); } catch (e) { /* not fatal */ }
+
+      try {
+        if (window.opener && !window.opener.closed) window.opener.postMessage(msg, window.location.origin);
+      } catch (e) { /* severed or cross-origin opener; the channel below still works */ }
+      try {
+        if ('BroadcastChannel' in window) {
+          var channel = new BroadcastChannel('estatepulse:google-oauth');
+          channel.postMessage(msg);
+          channel.close();
+        }
+      } catch (e) { /* very old browser: the opener route above is all there is */ }
+
+      document.getElementById('heading').textContent = msg.error ? 'Google connection cancelled' : 'Almost done';
+      document.getElementById('detail').textContent = 'You can close this window and return to EstatePulse.';
+      setTimeout(function () { window.close(); }, 400);
+    })();
+  </script>
+</body>
+</html>

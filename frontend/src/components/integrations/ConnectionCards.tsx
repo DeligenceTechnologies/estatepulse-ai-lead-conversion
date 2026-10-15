@@ -20,6 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { IntegrationCard } from './IntegrationCard';
 
 /**
@@ -170,8 +171,16 @@ export const ConnectionCards: React.FC = () => {
   const [connect, setConnect] = useState<ConnectKind | null>(null);
 
   const load = useCallback(async () => {
+    // Both are asked for at once: neither needs the other's answer, and asking
+    // for the accounts only after the sources had arrived kept this screen
+    // waiting through two round trips in a row. The answers are still applied
+    // in the same order. The catch only keeps an early failure from being
+    // reported as unhandled while the sources are pending — it is handled below.
+    const sourcesRequest = api.listLeadSources();
+    const connectionsRequest = providersApi.connections();
+    connectionsRequest.catch(() => undefined);
     try {
-      setSources(await api.listLeadSources());
+      setSources(await sourcesRequest);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -180,7 +189,7 @@ export const ConnectionCards: React.FC = () => {
     // An account with no form connected yet is still a connection, and the card
     // has to say so or "Connect Tally" reads as "your key didn't save".
     try {
-      setConnections(await providersApi.connections());
+      setConnections(await connectionsRequest);
     } catch {
       setConnections([]);
     }
@@ -263,10 +272,9 @@ export const ConnectionCards: React.FC = () => {
    * in, because two identical "Loading connections…" spinners tell you only
    * that something is happening — not which connection is still unknown.
    *
-   * The cards render throughout rather than being replaced by a spinner: the
-   * grid used to disappear entirely while lead sources loaded, which kept
-   * TelnyxCard — it loads itself — from mounting until they had arrived, so its
-   * request started after theirs finished instead of alongside.
+   * The cards render throughout rather than being replaced by a spinner, so
+   * TelnyxCard (which loads itself) mounts at once and its request runs
+   * alongside the lead-source one instead of after it.
    */
   const LoadingBody: React.FC<{ what: string }> = ({ what }) => (
     <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 flex items-center gap-2">
@@ -304,6 +312,8 @@ export const ConnectionCards: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings. */}
+        <GoogleSheetsCard />
+
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard
           icon={

@@ -16,6 +16,7 @@ import { isTimeZone } from '@/common/utils/zoned-time';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { mapLimit } from '@/common/utils/map-limit';
+import { EngineService } from '@/telnyx/engine.service';
 import { merge } from '../availability/intervals';
 import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
 import { inUse } from '../connection/connection-state';
@@ -105,6 +106,15 @@ interface SavedSchedule {
   timezone: string | null;
 }
 
+interface MeetingLink {
+  leadId: string | null;
+  hostUserId: string | null;
+  viaLink: boolean;
+  newlyBooked: boolean;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface Window {
   from: number;
   until: number;
@@ -125,9 +135,12 @@ export class CalendarSyncService implements OnModuleDestroy {
     private readonly provider: SchedulingProvider,
     private readonly calendly: CalendlyClient,
     private readonly cal: CalClient,
+    private readonly engine: EngineService,
     config: ConfigService<IntegrationEnv, true>,
   ) {
-    this.webhookBase = config.get('CALENDAR_WEBHOOK_BASE_URL', { infer: true })?.replace(/\/+$/, '');
+    this.webhookBase = (
+      config.get('CALENDAR_WEBHOOK_BASE_URL', { infer: true }) || config.get('PUBLIC_API_URL', { infer: true })
+    )?.replace(/\/+$/, '');
   }
 
   onModuleDestroy(): void {
@@ -385,14 +398,28 @@ export class CalendarSyncService implements OnModuleDestroy {
     const unique = [...new Map(meetings.map((meeting) => [meeting.id, withHostZones(meeting, zones)])).values()].filter(
       validMeeting,
     );
+    const links = await this.meetingLinks(connection, unique);
+    const booked = new Set<string>();
     for (let index = 0; index < unique.length; index += MEETING_WRITE_BATCH) {
       await this.prisma.$transaction(
         unique.slice(index, index + MEETING_WRITE_BATCH).map((meeting) => {
           const data = meetingRow(meeting, syncedAt);
+          const link = links.get(data.externalId);
+          if (link?.leadId && link.newlyBooked) booked.add(link.leadId);
+          const linked = {
+            ...(link?.leadId ? { leadId: link.leadId } : {}),
+            ...(link?.hostUserId ? { hostUserId: link.hostUserId } : {}),
+          };
           return this.prisma.calendarMeeting.upsert({
             where: { connectionId_externalId: { connectionId: connection.id, externalId: data.externalId } },
-            create: { orgId: connection.orgId, connectionId: connection.id, ...data },
-            update: data,
+            create: {
+              orgId: connection.orgId,
+              connectionId: connection.id,
+              ...data,
+              ...linked,
+              ...(link?.viaLink ? { bookedVia: 'booking_link' } : {}),
+            },
+            update: { ...data, ...linked },
           });
         }),
       );
@@ -401,6 +428,75 @@ export class CalendarSyncService implements OnModuleDestroy {
       where: { id: connection.id },
       data: { meetingsSyncedAt: syncedAt, meetingsError: null },
     });
+    for (const leadId of booked) {
+      await this.engine
+        .appointmentBooked(connection.orgId, leadId)
+        .catch((error) => this.logger.warn(`appointment booked for lead ${leadId}: ${(error as Error).message}`));
+    }
+  }
+
+  /**
+   * Which lead and which teammate each meeting belongs to: the lead id the
+   * booking link carried, else the lead with the invitee's email; the host by
+   * email. A link already made is kept. A meeting is newly booked for its lead
+   * when it is upcoming and was not already scheduled for that lead.
+   */
+  private async meetingLinks(connection: UsableConnection, meetings: BookedMeeting[]): Promise<Map<string, MeetingLink>> {
+    const orgId = connection.orgId;
+    const externalIds = meetings.map((m) => m.id.slice(0, 500));
+    const existing = new Map(
+      (
+        await this.prisma.calendarMeeting.findMany({
+          where: { connectionId: connection.id, externalId: { in: externalIds } },
+          select: { externalId: true, leadId: true, hostUserId: true, status: true },
+        })
+      ).map((row) => [row.externalId, row]),
+    );
+
+    const refs = [...new Set(meetings.map((m) => m.leadRef).filter((ref): ref is string => !!ref && UUID.test(ref)))];
+    const emailOf = (list: BookedMeeting['invitees']) =>
+      list.map((p) => p.email?.trim().toLowerCase()).filter((e): e is string => !!e);
+    const inviteeEmails = [...new Set(meetings.flatMap((m) => emailOf(m.invitees)))];
+    const hostEmails = [...new Set(meetings.flatMap((m) => emailOf(m.hosts)))];
+
+    const [refLeads, emailLeads, hosts] = await Promise.all([
+      refs.length ? this.prisma.lead.findMany({ where: { orgId, id: { in: refs } }, select: { id: true } }) : [],
+      inviteeEmails.length
+        ? this.prisma.lead.findMany({
+            where: { orgId, normalizedEmail: { in: inviteeEmails } },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, normalizedEmail: true },
+          })
+        : [],
+      hostEmails.length
+        ? this.prisma.user.findMany({
+            where: { orgId, email: { in: hostEmails, mode: 'insensitive' } },
+            select: { id: true, email: true },
+          })
+        : [],
+    ]);
+    const leadIds = new Set(refLeads.map((l) => l.id));
+    const leadByEmail = new Map<string, string>();
+    for (const lead of emailLeads) {
+      if (lead.normalizedEmail && !leadByEmail.has(lead.normalizedEmail)) leadByEmail.set(lead.normalizedEmail, lead.id);
+    }
+    const userByEmail = new Map(hosts.map((u) => [u.email.toLowerCase(), u.id]));
+
+    const now = Date.now();
+    const links = new Map<string, MeetingLink>();
+    for (const meeting of meetings) {
+      const externalId = meeting.id.slice(0, 500);
+      const prior = existing.get(externalId);
+      const viaLink = !!meeting.leadRef && leadIds.has(meeting.leadRef);
+      const leadId =
+        prior?.leadId ??
+        (viaLink ? meeting.leadRef! : (emailOf(meeting.invitees).map((e) => leadByEmail.get(e)).find(Boolean) ?? null));
+      const hostUserId = prior?.hostUserId ?? emailOf(meeting.hosts).map((e) => userByEmail.get(e)).find(Boolean) ?? null;
+      const upcoming = meeting.status === 'scheduled' && new Date(meeting.end).getTime() > now;
+      const newlyBooked = !!leadId && upcoming && (!prior || prior.leadId !== leadId || prior.status !== 'scheduled');
+      links.set(externalId, { leadId, hostUserId, viaLink: viaLink && !prior, newlyBooked });
+    }
+    return links;
   }
 
   /** Each calendar member's working timezone by email, for hosts the provider gives no timezone for. */

@@ -2,7 +2,7 @@ import React from 'react';
 import { Eye, Loader2, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import { displayName, initialsFor } from '../../context/AuthContext';
 import type { TeamMember, UserStatus } from '../../utils/usersApi';
-import { DAY_SHORT, isWorkingNow } from '../../utils/workingHours';
+import { DAY_SHORT } from '../../utils/workingHours';
 import { formatDate as formatDay, formatDateTime } from '../../lib/datetime';
 
 /**
@@ -48,10 +48,6 @@ export const lastSeen = (iso: string | null, now = new Date()): string => {
   const since = timeSince(iso, now);
   return since === 'today' ? 'today' : `${since} ago`;
 };
-
-/** Whether the member is on shift right now, in their own timezone. Inactive members never are. */
-export const onShift = (member: TeamMember, now: Date): boolean =>
-  member.status === 'active' && isWorkingNow(member.workingHours, member.timezone, now);
 
 export const Avatar: React.FC<{ member: TeamMember; size?: 'md' | 'lg'; working?: boolean }> = ({
   member,
@@ -109,18 +105,6 @@ export const StatusBadge: React.FC<{ status: UserStatus }> = ({ status }) => (
   >
     <span className="w-1.5 h-1.5 rounded-full bg-current" />
     {status}
-  </span>
-);
-
-/** "Working now" / "Off now", with today's hours. */
-export const ShiftChip: React.FC<{ member: TeamMember; working: boolean }> = ({ member, working }) => (
-  <span
-    className={`inline-flex items-center gap-1 text-2xs font-semibold px-1.5 py-0.5 rounded-md whitespace-nowrap ${
-      working ? 'bg-emerald-500/10 text-emerald-300' : 'bg-slate-800 text-slate-400'
-    }`}
-  >
-    <span className={`w-1.5 h-1.5 rounded-full ${working ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-    {working ? 'Working now' : member.status === 'inactive' ? 'Inactive' : 'Off now'}
   </span>
 );
 

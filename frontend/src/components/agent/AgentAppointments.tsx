@@ -21,11 +21,8 @@ function statusTone(status: string): string {
 }
 
 /**
- * The agent's own appointments.
- *
- * Replaces the placeholder this screen used to be. It is a real list from a
- * real table now, so when it is empty that is a fact about the calendar rather
- * than a fact about the feature — and the empty state says which.
+ * The agent's own appointments. An empty list is a fact about the calendar,
+ * and the empty state says so.
  */
 export const AgentAppointments: React.FC = () => {
   const [rows, setRows] = useState<Appointment[] | null>(null);

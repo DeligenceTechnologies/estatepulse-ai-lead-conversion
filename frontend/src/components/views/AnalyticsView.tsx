@@ -1,18 +1,14 @@
 import React, { useState } from 'react';
 import { 
-  BarChart3, 
   TrendingUp, 
   Clock, 
-  DollarSign, 
   Flame, 
   CheckCircle2, 
-  Users, 
   Calculator,
   PieChart,
   FileText,
   Download,
   Sparkles,
-  Layers,
   ArrowDownToLine
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -22,7 +18,7 @@ import { generateMonthlyPerformancePDF, ReportConfig, ReportData } from '../../u
 export const AnalyticsView: React.FC = () => {
   const { leads, appointments, calls, orgSettings, addAuditLog } = useApp();
 
-  // ROI Calculator state (PRD Section 47)
+  // ROI Calculator state
   const [monthlyLeads, setMonthlyLeads] = useState(250);
   const [avgCommission, setAvgCommission] = useState(12500);
   const [closeRate, setCloseRate] = useState(3.5); // % of qualified leads closed
@@ -87,7 +83,7 @@ export const AnalyticsView: React.FC = () => {
           if (s.name.includes('Google')) return l.source === 'google';
           return false;
         });
-        const qualCount = sourceLeads.filter(l => l.status === 'qualified' || l.status === 'appointment_booked').length;
+        const qualCount = sourceLeads.filter(l => l.status === 'interested' || l.status === 'appointment_booked').length;
         const qualPct = sourceLeads.length > 0 ? Math.round((qualCount / sourceLeads.length) * 100) : 71;
 
         return {
@@ -426,7 +422,7 @@ export const AnalyticsView: React.FC = () => {
 
       </div>
 
-      {/* Interactive ROI Calculator (PRD Section 47) */}
+      {/* Interactive ROI Calculator */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-900/90 to-emerald-950/40 border border-emerald-500/30 rounded-2xl p-6 space-y-6 shadow-2xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

@@ -1,7 +1,9 @@
 import { Global, Module, Provider, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 
+import { AuditService } from '@/audit/audit.service';
 import { MailService } from '@/common/service/mail.service';
+import { RedisService } from '@/common/service/redis.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { UserService } from '@/user/user.service';
 import {PrismaService, TENANT_PRISMA, type GuardedPrisma} from '@/common/prisma/prisma.service';
@@ -10,8 +12,10 @@ import { TenantContextInterceptor } from '@/common/prisma/tenant-context';
 const SERVICES: Provider[] = [
   PrismaService,
   MailService,
+  RedisService,
   SecretBoxService,
   UserService,
+  AuditService,
 ];
 
 const TENANT_PRISMA_PROVIDER: Provider = {

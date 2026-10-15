@@ -14,7 +14,6 @@ import {
   restorableSession,
   setToken,
 } from './api';
-import { IDLE_TIMEOUT_MS, clearActivity, markActivity, readActivity } from './idle';
 import { pump } from './liveEvents';
 
 /**
@@ -25,7 +24,6 @@ import { pump } from './liveEvents';
  * test needs a key-value store and an event target, and a jsdom dependency to
  * supply them would be the larger half of this file.
  */
-const ACTIVITY_KEY = 'ep_last_activity';
 const store = new Map<string, string>();
 
 const stubStorage = (): void => {
@@ -235,60 +233,17 @@ describe('lib/liveEvents pump', () => {
   });
 });
 
-/**
- * The boot check AuthProvider makes before it spends the refresh cookie: is
- * there a session, and has the idle deadline passed while the app was closed?
- */
+/** The boot check AuthProvider makes before it spends the refresh cookie. */
 describe('lib/api restorableSession', () => {
-  beforeEach(() => rememberSession(false));
-
-  it('restores a session whose last activity is inside the idle window', () => {
-    const at = Date.now() - 29 * 60_000;
-    markActivity(at);
-
-    expect(restorableSession()).toBe(true);
-    // Booting is not by itself 30 more minutes: one of them is still left.
-    expect(readActivity()).toBe(at);
-  });
-
-  it('drops and revokes a session whose last activity is outside the idle window', async () => {
-    const fetchMock = stubFetch(() => json(200, { success: true }));
-    markActivity(Date.now() - (IDLE_TIMEOUT_MS + 1));
-
-    expect(restorableSession()).toBe(false);
-    await vi.waitFor(() => expect(hasStoredSession()).toBe(false));
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/auth/logout'))).toBe(true);
-    expect(readActivity()).toBeNull();
-  });
-
-  it('never idles out a "keep me signed in" session', () => {
-    rememberSession(true);
-    markActivity(Date.now() - 10 * IDLE_TIMEOUT_MS);
+  it('restores a stored session', () => {
+    rememberSession(false);
 
     expect(restorableSession()).toBe(true);
   });
 
-  it.each([
-    ['not-a-number', 'unparseable'],
-    ['0', 'out of range'],
-  ])('treats %o in storage as no stamp rather than an expired one', (raw) => {
-    store.set(ACTIVITY_KEY, raw);
-
-    expect(restorableSession()).toBe(true);
-    expect(readActivity()).not.toBeNull();
-  });
-
-  it('initialises the stamp for a session without one', () => {
-    clearActivity();
-
-    expect(restorableSession()).toBe(true);
-    expect(readActivity()).not.toBeNull();
-  });
-
-  it('reports nothing to restore when there is no session, without writing a stamp', () => {
+  it('reports nothing to restore when there is no session', () => {
     clearToken();
 
     expect(restorableSession()).toBe(false);
-    expect(readActivity()).toBeNull();
   });
 });

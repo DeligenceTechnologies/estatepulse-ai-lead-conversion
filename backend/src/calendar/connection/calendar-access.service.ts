@@ -36,6 +36,7 @@ export const USAGE_FIELDS = {
   tokenExpiresAt: true,
   lastError: true,
   webhookId: true,
+  scope: true,
 } as const satisfies Prisma.CalendarConnectionSelect;
 
 export type UsableConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof USAGE_FIELDS }>;
@@ -212,7 +213,11 @@ export class CalendarAccessService {
         const credentials: CalendlyCredentials = { accessToken: grant.accessToken, refreshToken: grant.refreshToken };
         await tx.calendarConnection.updateMany({
           where: { id: connection.id },
-          data: { credentials: this.secrets.seal(JSON.stringify(credentials)), tokenExpiresAt: grant.expiresAt },
+          data: {
+            credentials: this.secrets.seal(JSON.stringify(credentials)),
+            tokenExpiresAt: grant.expiresAt,
+            ...(grant.scope ? { scope: grant.scope } : {}),
+          },
         });
         return grant.accessToken;
       },

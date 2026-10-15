@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Logger, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Request, Response } from 'express';
@@ -80,13 +81,19 @@ export class CalendarConnectionController {
       this.logger.warn(`Calendly connection failed: ${error ? `${error} ` : ''}${result.message}`);
     }
 
+    const scriptNonce = randomBytes(16).toString('base64');
     res
       .status(HttpStatus.OK)
+      .setHeader(
+        'Content-Security-Policy',
+        `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; frame-ancestors 'none'; base-uri 'none'`,
+      )
+      .setHeader('Cross-Origin-Opener-Policy', 'unsafe-none')
       .setHeader('Cache-Control', 'no-store')
       .setHeader('Referrer-Policy', 'no-referrer')
       .setHeader('X-Frame-Options', 'DENY')
       .type('html')
-      .send(renderCalendlyCallbackPage(result, this.calendly.appUrl));
+      .send(renderCalendlyCallbackPage(result, this.calendly.appUrl, scriptNonce));
   }
 
   @Post('cal/teams')

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Zap, Copy, Check, Terminal, Play, CheckCircle2 } from 'lucide-react';
+import { X, Zap, Copy, Check, Play, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 interface WebhookSimulatorModalProps {

@@ -8,6 +8,19 @@ import { AuthModule } from './auth/auth.module';
 import { RoleModule } from './role/role.module';
 import { OrgSettingModule } from './org-setting/org-setting.module';
 import { CalendarModule } from './calendar/calendar.module';
+import { EventsModule } from './events/events.module';
+import { LeadModule } from './lead/lead.module';
+import { AgentModule } from './agent/agent.module';
+import { IngestModule } from './ingest/ingest.module';
+import { IntegrationModule } from './integration/integration.module';
+import { LeadSourceModule } from './lead-source/lead-source.module';
+import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
+import { FileImportModule } from './file-import/file-import.module';
+import { TelnyxModule } from './telnyx/telnyx.module';
+import { FollowupModule } from './followup/followup.module';
+import { HistoryModule } from './history/history.module';
+import { HealthController } from './health.controller';
+import {QueueModule} from "@/queue/queue.module";
 
 @Module({
   imports: [
@@ -20,6 +33,19 @@ import { CalendarModule } from './calendar/calendar.module';
     RoleModule,
     OrgSettingModule,
     CalendarModule,
+    EventsModule,
+    LeadModule,
+    AgentModule,
+    IntegrationModule,
+    IngestModule,
+    LeadSourceModule,
+    GoogleSheetsModule,
+    FileImportModule,
+    TelnyxModule,
+    FollowupModule,
+    HistoryModule,
+    QueueModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

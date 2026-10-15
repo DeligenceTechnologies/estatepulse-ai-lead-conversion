@@ -24,22 +24,25 @@ export class SecretBoxService {
     return this.key !== undefined;
   }
 
-  seal(plaintext: string): string {
+  /** `aad` binds the ciphertext to the row it belongs to; pass the same value to `open`. */
+  seal(plaintext: string, aad?: string): string {
     const key = this.requireKey();
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv(ALGORITHM, key, iv);
+    if (aad) cipher.setAAD(Buffer.from(aad, 'utf8'));
     const data = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const parts = [iv, cipher.getAuthTag(), data].map((part) => part.toString('base64url'));
     return [VERSION, ...parts].join('.');
   }
 
-  open(sealed: string): string {
+  open(sealed: string, aad?: string): string {
     const key = this.requireKey();
     const [version, iv, tag, data] = sealed.split('.');
     if (version !== VERSION || !iv || !tag || data === undefined) {
       throw new Error('Unrecognised sealed secret');
     }
     const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(iv, 'base64url'));
+    if (aad) decipher.setAAD(Buffer.from(aad, 'utf8'));
     decipher.setAuthTag(Buffer.from(tag, 'base64url'));
     return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
   }

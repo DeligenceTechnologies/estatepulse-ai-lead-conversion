@@ -1,0 +1,189 @@
+model LeadSource {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  orgId            String             @map("organization_id") @db.Uuid
+  name             String             @db.VarChar(100)
+  code             String             @db.VarChar(50)
+  provider         LeadSourceProvider @default(WEBHOOK)
+  connectionMethod ConnectionMethod   @default(MANUAL) @map("connection_method")
+  integrationId    String?            @map("integration_id") @db.Uuid
+  isActive         Boolean            @default(true) @map("is_active")
+  archivedAt       DateTime?          @map("archived_at") @db.Timestamptz(6)
+
+  defaultConsentStatus ConsentStatus @default(pending) @map("default_consent_status")
+  ingestStatus         IngestStatus? @map("ingest_status")
+  mappingStatus        MappingStatus? @map("mapping_status")
+  mappingVersion       Int            @default(0) @map("mapping_version")
+  schemaFingerprint    String?        @map("schema_fingerprint") @db.VarChar(64)
+  prebuiltAt           DateTime?      @map("prebuilt_at") @db.Timestamptz(6)
+
+  externalFormId   String? @map("external_form_id") @db.VarChar(255)
+  externalFormName String? @map("external_form_name") @db.VarChar(255)
+
+  ingestTokenHash   String? @unique @map("ingest_token_hash") @db.VarChar(64)
+  ingestTokenPrefix String? @map("ingest_token_prefix") @db.VarChar(32)
+  ingestTokenEnc    String? @map("ingest_token_enc")
+
+  requireSignature         Boolean   @default(false) @map("require_signature")
+  signingSecretEnc         String?   @map("signing_secret_enc")
+  signingSecretLast4       String?   @map("signing_secret_last4") @db.VarChar(8)
+  signingSecretSetAt       DateTime? @map("signing_secret_set_at") @db.Timestamptz(6)
+  previousSecretEnc        String?   @map("previous_secret_enc")
+  previousSecretValidUntil DateTime? @map("previous_secret_valid_until") @db.Timestamptz(6)
+
+  externalWebhookId  String?             @map("external_webhook_id") @db.VarChar(255)
+  remoteState        RemoteWebhookState? @map("remote_state")
+  remoteSyncedAt     DateTime?           @map("remote_synced_at") @db.Timestamptz(6)
+  remoteErrorCode    String?             @map("remote_error_code") @db.VarChar(50)
+  remoteErrorMessage String?             @map("remote_error_message")
+
+  syncNextAt        DateTime? @map("sync_next_at") @db.Timestamptz(6)
+  syncLockedAt      DateTime? @map("sync_locked_at") @db.Timestamptz(6)
+  syncLockedBy      String?   @map("sync_locked_by") @db.VarChar(100)
+  syncRemoteVersion String?   @map("sync_remote_version") @db.VarChar(64)
+  syncFailures      Int       @default(0) @map("sync_failures")
+  syncRowKeyField   String?   @map("sync_row_key_field") @db.VarChar(255)
+  syncFallbackAckAt DateTime? @map("sync_fallback_ack_at") @db.Timestamptz(6)
+  syncFallbackAckBy String?   @map("sync_fallback_ack_by") @db.Uuid
+
+  lastEventAt   DateTime? @map("last_event_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+  lastFailureAt DateTime? @map("last_failure_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  integration     Integration?             @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+  fields          LeadSourceField[]
+  mappings        LeadSourceFieldMapping[]
+  ingestEvents    IngestEvent[]
+  leads           Lead[]
+  sheetImportRows SheetImportRow[]
+
+  @@unique([orgId, code])
+  @@index([orgId])
+  @@map("lead_sources")
+}
+
+model LeadSourceField {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  orgId         String      @map("organization_id") @db.Uuid
+  leadSourceId  String      @map("lead_source_id") @db.Uuid
+  fieldKey      String      @map("field_key") @db.VarChar(255)
+  label         String
+  fieldType     String      @map("field_type") @db.VarChar(50)
+  options       Json?
+  sampleValues  Json        @default("[]") @map("sample_values")
+  status        FieldStatus @default(NEW)
+  missingStreak Int         @default(0) @map("missing_streak")
+  firstSeenAt   DateTime    @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime    @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  leadSource LeadSource @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([leadSourceId, fieldKey])
+  @@index([orgId])
+  @@map("lead_source_fields")
+}
+
+model LeadSourceFieldMapping {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  orgId          String        @map("organization_id") @db.Uuid
+  leadSourceId   String        @map("lead_source_id") @db.Uuid
+  sourceFieldKey String        @map("source_field_key") @db.VarChar(255)
+  targetField    String        @map("target_field") @db.VarChar(100)
+  transform      Json          @default("{\"kind\": \"passthrough\"}")
+  isActive       Boolean       @default(true) @map("is_active")
+  confidence     Float?
+  origin         MappingOrigin @default(USER)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  leadSource LeadSource @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([leadSourceId, sourceFieldKey, targetField])
+  @@index([leadSourceId, isActive])
+  @@map("lead_source_field_mappings")
+}
+
+/// One delivery from a form provider, and the submission it became.
+model IngestEvent {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  orgId        String  @map("organization_id") @db.Uuid
+  leadSourceId String  @map("lead_source_id") @db.Uuid
+  leadId       String? @map("lead_id") @db.Uuid
+
+  provider             LeadSourceProvider
+  eventType            String?            @map("event_type") @db.VarChar(100)
+  dedupeKey            String             @map("dedupe_key") @db.VarChar(128)
+  providerEventId      String?            @map("provider_event_id") @db.VarChar(255)
+  providerSubmissionId String?            @map("provider_submission_id") @db.VarChar(255)
+  providerRespondentId String?            @map("provider_respondent_id") @db.VarChar(255)
+  providerFormId       String?            @map("provider_form_id") @db.VarChar(255)
+  providerCreatedAt    DateTime?          @map("provider_created_at") @db.Timestamptz(6)
+
+  rawBody            String?         @map("raw_body")
+  payload            Json
+  payloadHash        String          @map("payload_hash") @db.VarChar(64)
+  headers            Json?
+  contentLength      Int?            @map("content_length")
+  signatureState     SignatureState  @map("signature_state")
+  usedPreviousSecret Boolean         @default(false) @map("used_previous_secret")
+
+  queueState    QueueState       @map("queue_state")
+  availableAt   DateTime         @default(now()) @map("available_at") @db.Timestamptz(6)
+  attempts      Int              @default(0)
+  lockedAt      DateTime?        @map("locked_at") @db.Timestamptz(6)
+  lockedBy      String?          @map("locked_by") @db.VarChar(100)
+  outcome       DeliveryOutcome?
+  outcomeReason String?          @map("outcome_reason") @db.VarChar(100)
+  errorMessage  String?          @map("error_message")
+  processingMs  Int?             @map("processing_ms")
+  mappingTrace  Json?            @map("mapping_trace")
+
+  normalizedAnswers Json?    @map("normalized_answers")
+  mappedValues      Json?    @map("mapped_values")
+  unmappedKeys      String[] @default([]) @map("unmapped_keys")
+  warnings          Json     @default("[]")
+
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource   LeadSource   @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@unique([leadSourceId, dedupeKey])
+  @@index([leadSourceId, receivedAt(sort: Desc)])
+  @@index([orgId, receivedAt(sort: Desc)])
+  @@index([leadId])
+  @@map("ingest_events")
+}
+
+/// A Google Sheets or file row we have imported, keyed by a stable identity.
+model SheetImportRow {
+  id                   String      @id @default(uuid(7)) @db.Uuid
+  orgId                String      @map("organization_id") @db.Uuid
+  leadSourceId         String      @map("lead_source_id") @db.Uuid
+  rowKey               String      @map("row_key") @db.VarChar(64)
+  leadId               String?     @map("lead_id") @db.Uuid
+  contentHash          String      @map("content_hash") @db.VarChar(64)
+  rowNumber            Int         @map("row_number")
+  reviewState          ReviewState @default(pending) @map("review_state")
+  reviewedBy           String?     @map("reviewed_by") @db.Uuid
+  reviewedAt           DateTime?   @map("reviewed_at") @db.Timestamptz(6)
+  changedAfterReviewAt DateTime?   @map("changed_after_review_at") @db.Timestamptz(6)
+  changedValues        Json?       @map("changed_values")
+  missingSince         DateTime?   @map("missing_since") @db.Timestamptz(6)
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource   LeadSource   @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  reviewer     User?        @relation(fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@unique([leadSourceId, rowKey])
+  @@index([leadId])
+  @@map("sheet_import_rows")
+}

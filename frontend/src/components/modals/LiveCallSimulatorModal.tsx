@@ -2,22 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Phone, 
   PhoneOff, 
-  Mic, 
-  MicOff, 
   Volume2, 
   VolumeX, 
   Sparkles, 
   ShieldCheck, 
   Calendar, 
   CheckCircle2, 
-  Clock, 
-  Send,
-  Building2,
-  Flame,
-  ArrowRight
+  Send
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { TranscriptTurn, CallRecord } from '../../types';
+import { TranscriptTurn } from '../../types';
 
 export const LiveCallSimulatorModal: React.FC = () => {
   const {
@@ -27,14 +21,12 @@ export const LiveCallSimulatorModal: React.FC = () => {
     orgSettings,
     agents,
     bookAppointment,
-    simulateHotQualification,
-    updateLead
+    simulateHotQualification
   } = useApp();
 
   const [callDuration, setCallDuration] = useState(0);
   const [callStatus, setCallStatus] = useState<'ringing' | 'connected' | 'completed'>('ringing');
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [micActive, setMicActive] = useState(false);
   const [userInput, setUserInput] = useState('');
   
   // Real-time extracted data during call
@@ -382,7 +374,7 @@ export const LiveCallSimulatorModal: React.FC = () => {
               </div>
             </div>
 
-            {/* Extracted Structured Data Badges (PRD Section 25) */}
+            {/* Extracted Structured Data Badges */}
             <div className="space-y-2.5">
               <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />

@@ -8,9 +8,23 @@ export interface SendMailInput {
   subject: string;
   html: string;
   text?: string;
+  /** Makes a retried send of the same message a no-op where the provider supports it (Resend). */
+  idempotencyKey?: string;
 }
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
+const SEND_TIMEOUT_MS = 30_000;
+
+/** A send that failed. `permanent` means retrying the same message cannot succeed (bad address, rejected content, bad credentials). */
+export class MailDeliveryError extends Error {
+  constructor(
+    message: string,
+    readonly permanent: boolean,
+  ) {
+    super(message);
+    this.name = 'MailDeliveryError';
+  }
+}
 
 @Injectable()
 export class MailService {
@@ -34,6 +48,10 @@ export class MailService {
         port,
         secure: config.get('SMTP_SECURE', { infer: true }) || port === 465,
         ...(user && pass ? { auth: { user, pass } } : {}),
+        pool: true,
+        connectionTimeout: SEND_TIMEOUT_MS,
+        greetingTimeout: SEND_TIMEOUT_MS,
+        socketTimeout: SEND_TIMEOUT_MS,
       });
     }
 
@@ -64,34 +82,48 @@ export class MailService {
       throw new Error('SMTP transport is not initialised');
     }
 
-    await this.smtpTransport.sendMail({
-      from: this.from,
-      to: mail.to,
-      subject: mail.subject,
-      html: mail.html,
-      text: mail.text,
-    });
-  }
-
-  private async sendWithResend(mail: SendMailInput): Promise<void> {
-    const response = await fetch(RESEND_API_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    try {
+      await this.smtpTransport.sendMail({
         from: this.from,
         to: mail.to,
         subject: mail.subject,
         html: mail.html,
         text: mail.text,
-      }),
-    });
+      });
+    } catch (error) {
+      const { message, responseCode, code } = error as { message: string; responseCode?: number; code?: string };
+      const permanent = (responseCode !== undefined && responseCode >= 500) || code === 'EENVELOPE' || code === 'EAUTH';
+      throw new MailDeliveryError(`SMTP failed: ${message}`, permanent);
+    }
+  }
+
+  private async sendWithResend(mail: SendMailInput): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(RESEND_API_URL, {
+        method: 'POST',
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        headers: {
+          Authorization: `Bearer ${this.resendApiKey}`,
+          'Content-Type': 'application/json',
+          ...(mail.idempotencyKey ? { 'Idempotency-Key': mail.idempotencyKey } : {}),
+        },
+        body: JSON.stringify({
+          from: this.from,
+          to: mail.to,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+        }),
+      });
+    } catch (error) {
+      throw new MailDeliveryError(`Resend unreachable: ${(error as Error).message}`, false);
+    }
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Resend failed with ${response.status}: ${body}`);
+      const body = (await response.text()).slice(0, 500);
+      const permanent = response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429;
+      throw new MailDeliveryError(`Resend failed with ${response.status}: ${body}`, permanent);
     }
   }
 }

@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronRight,
+  FileUp,
   Flame,
   Plus,
   Radio,
   RefreshCw,
   Search,
   ShieldAlert,
-  Users,
   Webhook,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -16,20 +17,17 @@ import { useApp } from '../../context/AppContext';
 import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
+import { fileImportEnabled } from '../../utils/fileImportApi';
+import { FileImportModal } from '../imports/FileImportModal';
 import { useLiveQuery } from '../../lib/useLiveQuery';
-import { messageFor } from '../../lib/api';
-import { Lead, LeadStatus, LeadTemperature } from '../../types';
-import { LEAD_STATUSES, STATUS_LABELS, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
+import { Lead, LeadTemperature } from '../../types';
+import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
 import { formatDateTime } from '../../lib/datetime';
 
 /**
- * Lead pipeline — live rows only.
- *
- * The demo pipeline that used to render here came from AppContext's localStorage
- * store, and a second "Live Leads" panel sat above it. Both are gone: this table
- * shows exactly what the backend holds. The layout, the filters and the row
- * actions are unchanged, so a column with nothing behind it yet — assigned agent,
- * budget on an unqualified lead — renders an em dash instead of being dropped.
+ * Lead pipeline — exactly what the backend holds. A column with nothing behind
+ * it yet (assigned agent, budget on an unqualified lead) renders an em dash
+ * instead of being dropped.
  *
  * Rows are mapped to `Lead` for the shared detail / pre-call modals and
  * registered with AppContext, but rendering reads the raw `LiveLead` so a null
@@ -74,7 +72,9 @@ const budgetRange = (l: LiveLead) => {
 const sourceLabel = (l: LiveLead): string => {
   const s = l.source;
   if (!s) return 'manual';
-  if ((s.connectionMethod ?? '').toUpperCase() === 'API' && s.provider) return s.provider.toLowerCase();
+  // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
+  const method = (s.connectionMethod ?? '').toUpperCase();
+  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
   return s.type ?? 'webhook';
 };
 
@@ -113,7 +113,8 @@ const toLead = (l: LiveLead): Lead => ({
   // nothing branches on this value; it is displayed and nothing more.
   source: sourceLabel(l) as Lead['source'],
   sourceId: l.source?.id,
-  status: normalizeStatus(l.status, l.dncStatus),
+  status: normalizeStatus(l.status),
+  followUpReason: l.followUpReason,
   leadType: 'buyer',
   preferredLocation: l.location ?? '',
   budgetMin: l.minBudget ?? 0,
@@ -136,6 +137,9 @@ const toLead = (l: LiveLead): Lead => ({
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
 const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 
+/** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
+const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
+
 interface LeadsViewProps {
   onOpenNewLead: () => void;
 }
@@ -144,6 +148,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { agentProfileId, role } = useAuth();
   const isOwner = role === 'owner';
+  // "Add leads": a file import (owner only, where the server has it switched on). One lead at a time comes later.
+  const [canImport, setCanImport] = useState(false);
+  const [addMenu, setAddMenu] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  useEffect(() => {
+    if (isOwner) void fileImportEnabled().then(setCanImport);
+  }, [isOwner]);
   const {
     setSelectedLeadId,
     setPreCallLeadId,
@@ -168,16 +179,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
     return { leads, stats };
   }, []);
 
-  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(load);
-
   // The push path. The backend knows the moment a submission becomes a lead, so
-  // this screen is told rather than asked to guess. The poll above stays as the
-  // fallback and, finding nothing to report, backs off to its ceiling — the two
-  // together cost far less than the old 5-second interval did alone.
-  const { connected } = useLiveEvents(
-    useCallback((e) => {
-      if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
-    }, [invalidate]),
+  // this screen is told rather than asked to guess. Subscribed before the query
+  // because the query's cadence depends on whether the stream is up. The handler
+  // only runs after render, by when `invalidate` below exists, and useLiveEvents
+  // reads it through a ref, so an inline handler costs no reconnect.
+  const { connected } = useLiveEvents((e) => {
+    if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
+  });
+
+  // Stream up: it reports every change as it happens, so the poll is only a
+  // safety net — once a minute, and an event or a return to the tab refetches
+  // without dropping back to 5-second polling. Stream down: the default
+  // 5-second poll backing off to a minute, the reliability fallback as before.
+  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(
+    load,
+    connected ? STREAM_UP_CADENCE : undefined,
   );
 
   // This tab's own assignments refetch at once, stream or no stream.
@@ -189,22 +206,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
   const rows = data?.leads ?? [];
   const stats: LeadStats | null = data?.stats ?? null;
-
-  const [savingStatus, setSavingStatus] = useState<string | null>(null);
-  const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null);
-
-  const changeStatus = async (id: string, status: LeadStatus): Promise<void> => {
-    setSavingStatus(id);
-    setStatusError(null);
-    try {
-      await leadsApi.setStatus(id, status);
-      invalidate();
-    } catch (e) {
-      setStatusError({ id, message: messageFor(e) });
-    } finally {
-      setSavingStatus(null);
-    }
-  };
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -314,13 +315,70 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          {/* <button
-            onClick={onOpenNewLead}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add New Lead</span>
-          </button> */}
+          {canImport && (
+            <div
+              className="relative"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAddMenu(false);
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setAddMenu((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={addMenu}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add leads</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              {addMenu && (
+                <div
+                  role="menu"
+                  className="absolute right-0 mt-1 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-1 z-20 text-xs"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAddMenu(false);
+                      setImportOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
+                  >
+                    <FileUp className="w-3.5 h-3.5 text-sky-300" />
+                    <span>
+                      Import from CSV / Excel
+                      <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled
+                    title="Adding a single lead by hand is not available yet"
+                    className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center gap-2 cursor-default"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>
+                      Add one lead
+                      <span className="block text-2xs text-slate-600">Soon</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {importOpen && (
+            <FileImportModal
+              onClose={() => setImportOpen(false)}
+              onImported={() => {
+                // Approved leads appear here; the rest are on Import Review.
+                refresh();
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -421,7 +479,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
       </div>
 
-      {/* Leads Table (PRD Section 37) */}
+      {/* Leads Table */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
@@ -493,8 +551,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                             </span>
                           )}
                         </div>
-                        {/* One contact line: only what the lead actually has. */}
-                        <div className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                        {/* Only what the lead actually has. Wraps so the table fits without horizontal scroll. */}
+                        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 min-w-0">
                           {lead.phone && (
                             <span className="flex items-center gap-1 shrink-0">
                               {lead.phone}
@@ -506,7 +564,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                               )}
                             </span>
                           )}
-                          {lead.phone && lead.email && <span className="text-slate-600">·</span>}
                           {lead.email && (
                             <span className="flex items-center gap-1 min-w-0">
                               <span className="truncate max-w-[200px]">{lead.email}</span>
@@ -575,34 +632,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                       )}
                     </td>
 
-                    {/* Status — hover shows why (e.g. a failed/unanswered call) */}
-                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      {isOwner ? (
-                        // Owner-only: the API refuses anyone else. The only way
-                        // into 'closed', and the correction path for automation.
-                        <select
-                          value={normalizeStatus(lead.status, lead.dncStatus)}
-                          disabled={savingStatus === lead.id}
-                          onChange={(e) => void changeStatus(lead.id, e.target.value as LeadStatus)}
-                          title={lead.statusReason || 'Change status'}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase cursor-pointer focus:outline-none disabled:opacity-50 ${statusTone(lead.status)}`}
-                        >
-                          {LEAD_STATUSES.map((s) => (
-                            <option key={s} value={s} className="bg-slate-900 text-slate-200 normal-case">
-                              {STATUS_LABELS[s]}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span
-                          title={lead.statusReason || undefined}
-                          className={`text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
-                        >
-                          {statusLabel(lead.status)}
-                        </span>
-                      )}
-                      {statusError?.id === lead.id && (
-                        <p className="text-2xs text-rose-400 mt-1">{statusError.message}</p>
+                    {/* Status — read-only pill; hover shows why (e.g. a failed/unanswered call) */}
+                    <td className="px-4 py-3.5">
+                      <span
+                        title={lead.statusReason || undefined}
+                        className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                      >
+                        {statusLabel(lead.status)}
+                      </span>
+                      {followUpReasonLabel(lead.status, lead.followUpReason) && (
+                        <p className="text-2xs text-slate-400 mt-1">
+                          {followUpReasonLabel(lead.status, lead.followUpReason)}
+                        </p>
                       )}
                     </td>
 

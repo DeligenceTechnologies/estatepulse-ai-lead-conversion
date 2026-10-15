@@ -6,13 +6,9 @@ import { IntegrationCard } from './IntegrationCard';
 import { ProviderConnect } from './ProviderConnect';
 
 /**
- * Telnyx — the account the AI agent places calls and sends SMS from.
- *
- * Connecting it used to happen on AI Agent & Qualification Rules, which meant
- * the screen for writing the prompt opened on a credentials form until someone
- * filled it in. Connecting is setup, so it belongs on the page that owns setup,
- * in the same card as every other connection. AI settings now reads the status
- * and points here when there is nothing connected yet.
+ * Telnyx — the account the AI agent places calls and sends SMS from. Connecting
+ * is setup, so it lives here beside every other connection; AI settings only
+ * reads the status and points here when nothing is connected yet.
  */
 
 /** One labelled fact about the live connection. */

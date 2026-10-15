@@ -94,6 +94,7 @@ interface CalBooking {
   cancellationReason?: string | null;
   hosts?: { id: number; name?: string | null; email?: string | null; timeZone?: string | null }[];
   attendees?: { name?: string | null; email?: string | null; timeZone?: string | null }[];
+  metadata?: { leadId?: unknown } | null;
 }
 
 export interface CalBookingWindow {
@@ -189,6 +190,12 @@ export class CalClient {
 
   async personalEventTypes(apiKey: string, username: string | null): Promise<SchedulingEventType[]> {
     return toEventTypes(await this.userEventTypes(apiKey, username), username ? `${BOOKING_BASE}/${username}` : null);
+  }
+
+  /** A member's own event types, bookable with them alone. */
+  async memberEventTypes(apiKey: string, username: string): Promise<SchedulingEventType[]> {
+    const own = (await this.userEventTypes(apiKey, username)).filter((eventType) => !eventType.schedulingType);
+    return toEventTypes(own, `${BOOKING_BASE}/${username}`);
   }
 
   async shortestEventType(apiKey: string, username: string): Promise<CalBookableEventType | null> {
@@ -314,6 +321,7 @@ function toMeeting(booking: CalBooking): BookedMeeting {
     rescheduleUrl: open ? `${BOOKING_BASE}/reschedule/${booking.uid}` : null,
     cancelUrl: open ? `${BOOKING_BASE}/booking/${booking.uid}?cancel=true` : null,
     canceledReason: canceled ? (booking.cancellationReason ?? null) : null,
+    leadRef: typeof booking.metadata?.leadId === 'string' ? booking.metadata.leadId : null,
   };
 }
 

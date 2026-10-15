@@ -1,0 +1,52 @@
+/// A nurture sequence. `steps` is the ordered list of
+/// { actionType, delayMinutes, messageTemplate, voicePrompt, maxAttempts }.
+model Sequence {
+  id          String            @id @default(uuid(7)) @db.Uuid
+  orgId       String            @map("organization_id") @db.Uuid
+  code        String            @db.VarChar(50)
+  name        String            @db.VarChar(100)
+  description String?
+  status      SequenceStatus    @default(active)
+  steps       Json              @default("[]")
+  triggers    SequenceTrigger[] @default([])
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  enrollments  SequenceEnrollment[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+  @@map("sequences")
+}
+
+model SequenceEnrollment {
+  id               String           @id @default(uuid(7)) @db.Uuid
+  orgId            String           @map("organization_id") @db.Uuid
+  leadId           String           @map("lead_id") @db.Uuid
+  sequenceId       String           @map("sequence_id") @db.Uuid
+  currentStep      Int              @default(1) @map("current_step")
+  status           EnrollmentStatus @default(active)
+  nextActionAt     DateTime?        @map("next_action_at") @db.Timestamptz(6)
+  attempts         Int              @default(0)
+  lastError        String?          @map("last_error")
+  lockedBy         String?          @map("locked_by") @db.VarChar(100)
+  lockedAt         DateTime?        @map("locked_at") @db.Timestamptz(6)
+  enrolledBy       EnrolledBy       @default(auto) @map("enrolled_by")
+  enrolledByUserId String?          @map("enrolled_by_user_id") @db.Uuid
+  enrolledAt       DateTime         @default(now()) @map("enrolled_at") @db.Timestamptz(6)
+  completedAt      DateTime?        @map("completed_at") @db.Timestamptz(6)
+  stoppedAt        DateTime?        @map("stopped_at") @db.Timestamptz(6)
+  stoppedReason    String?          @map("stopped_reason") @db.VarChar(100)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sequence     Sequence     @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  enrolledByUser User?      @relation(fields: [enrolledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, leadId])
+  @@index([sequenceId])
+  @@index([status, nextActionAt])
+  @@map("sequence_enrollments")
+}

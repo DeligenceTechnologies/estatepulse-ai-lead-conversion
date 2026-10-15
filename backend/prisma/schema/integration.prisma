@@ -1,0 +1,30 @@
+/// An organization's account with an outside service: Telnyx (voice/SMS),
+/// Tally (forms) or Google (Sheets). Credentials are sealed with SecretBox.
+model Integration {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  orgId             String              @map("organization_id") @db.Uuid
+  provider          IntegrationProvider
+  status            IntegrationStatus   @default(active)
+  label             String?             @db.VarChar(255)
+  credentials       String
+  credentialHash    String?             @map("credential_hash") @db.VarChar(64)
+  credentialPreview String?             @map("credential_preview") @db.VarChar(64)
+  externalAccountId String?             @map("external_account_id") @db.VarChar(255)
+  accountEmail      String?             @map("account_email") @db.VarChar(255)
+  accountName       String?             @map("account_name") @db.VarChar(255)
+  phoneNumber       String?             @map("phone_number") @db.VarChar(50)
+  config            Json                @default("{}")
+  lastVerifiedAt    DateTime?           @map("last_verified_at") @db.Timestamptz(6)
+  lastErrorAt       DateTime?           @map("last_error_at") @db.Timestamptz(6)
+  lastErrorCode     String?             @map("last_error_code") @db.VarChar(50)
+  revokedAt         DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSources  LeadSource[]
+
+  @@index([orgId, provider, status])
+  @@index([provider, phoneNumber])
+  @@map("integrations")
+}

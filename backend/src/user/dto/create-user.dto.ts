@@ -1,11 +1,9 @@
-import { BaseStatus } from '@prisma/client';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
   ArrayUnique,
   IsArray,
   IsEmail,
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -20,6 +18,7 @@ import { Transform } from 'class-transformer';
 import { IsWeeklySchedule, type WorkingDayDto } from '@/common/utils/working-hours';
 
 export class CreateUserDto {
+  @IsOptional()
   @IsUUID()
   orgId!: string;
 

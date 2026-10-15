@@ -1,32 +1,21 @@
-/**
- * Core Data Models & Schema for EstatePulse AI
- * Matches Supabase PostgreSQL Schema & n8n workflow events (PRD Section 17 & 25)
- * 
- * BACKEND INTEGRATION HOOKS:
- * - Supabase tables: `leads`, `conversations`, `messages`, `calls`, `qualifications`, `lead_scores`, `appointments`, `followup_sequences`, `integrations`, `audit_logs`
- * - n8n Webhooks: `WF-01` to `WF-19`
- * - Voice Provider: Retell AI / Vapi
- * - SMS Provider: Twilio
- * - CRM: Follow Up Boss / GoHighLevel / Custom Webhooks
- */
+/** Shared front-end data models: the shapes the views and the demo store use. */
 
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
 
-/** The 13 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
+/** The 9 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
 export type LeadStatus =
   | 'new'
   | 'contacting'
-  | 'contacted'
-  | 'engaged'
-  | 'qualified'
+  | 'follow_up'
+  | 'interested'
   | 'appointment_requested'
   | 'appointment_booked'
-  | 'follow_up'
-  | 'nurture'
   | 'not_interested'
-  | 'dnc'
-  | 'invalid'
-  | 'closed';
+  | 'closed'
+  | 'invalid';
+
+/** Why a follow_up lead is parked (leads.follow_up_reason). Only set for follow_up. */
+export type FollowUpReason = 'no_answer' | 'not_ready' | 'callback_requested' | 'needs_time' | 'other';
 
 export type LeadSource = 
   | 'website'
@@ -37,6 +26,10 @@ export type LeadSource =
   // A form we connected through the provider's own API, as opposed to a
   // webhook URL the customer pasted somewhere we cannot see.
   | 'tally'
+  // Imported from a connected Google spreadsheet (provider GOOGLE_SHEETS).
+  | 'google sheets'
+  // Imported from an uploaded CSV / XLSX (provider FILE_UPLOAD).
+  | 'file upload'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';
@@ -98,6 +91,7 @@ export interface Lead {
   source: LeadSource;
   sourceId?: string;
   status: LeadStatus;
+  followUpReason?: FollowUpReason | null;
   leadType: 'buyer' | 'seller';
   preferredLocation: string;
   budgetMin: number;

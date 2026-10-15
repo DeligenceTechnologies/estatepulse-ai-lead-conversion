@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, Clock, RotateCw, Search, XCircle } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import {
   listConversations,
@@ -57,7 +56,6 @@ const DeliveryMark: React.FC<{ m: MessageRow }> = ({ m }) => {
 };
 
 export const ConversationsView: React.FC = () => {
-  const { setSelectedLeadId } = useApp();
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

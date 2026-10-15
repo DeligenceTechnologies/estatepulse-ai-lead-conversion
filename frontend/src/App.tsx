@@ -17,6 +17,7 @@ import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
 import { LeadSourcesView } from './components/views/LeadSourcesView';
+import { ImportReviewView } from './components/views/ImportReviewView';
 import { AppointmentsView } from './components/views/AppointmentsView';
 import { CallsView } from './components/views/CallsView';
 import { ConversationsView } from './components/views/ConversationsView';
@@ -58,6 +59,7 @@ const AppContent: React.FC = () => {
           <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
         )}
         {activeView === 'lead_sources' && <LeadSourcesView />}
+        {activeView === 'import_review' && <ImportReviewView />}
         {activeView === 'ai_settings' && <AISettingsView />}
         {activeView === 'settings' && <SettingsView />}
         {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}

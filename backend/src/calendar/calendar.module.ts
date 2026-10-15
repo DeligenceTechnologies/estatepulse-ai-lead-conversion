@@ -1,4 +1,14 @@
 import { Module } from '@nestjs/common';
+import { LeadModule } from '@/lead/lead.module';
+import { TelnyxModule } from '@/telnyx/telnyx.module';
+import { AppointmentsController } from './appointments/appointments.controller';
+import { AppointmentsService } from './appointments/appointments.service';
+import { InCallBookingSettingsController, InCallBookingToolController } from './booking/in-call-booking.controller';
+import { InCallBookingSettingsService } from './booking/in-call-booking-settings.service';
+import { InCallBookingService } from './booking/in-call-booking.service';
+import { LeadBookingController } from './booking/lead-booking.controller';
+import { LeadBookingService } from './booking/lead-booking.service';
+import { ToolAuthService } from './booking/tool-auth.service';
 import { CalendarAvailabilityController } from './availability/calendar-availability.controller';
 import { CalendarAvailabilityService } from './availability/calendar-availability.service';
 import { CalendarAccessService } from './connection/calendar-access.service';
@@ -15,12 +25,17 @@ import { CalendarSyncService } from './sync/calendar-sync.service';
 import { CalendarWebhookController } from './sync/calendar-webhook.controller';
 
 @Module({
+  imports: [TelnyxModule, LeadModule],
   controllers: [
     CalendarConnectionController,
     CalendarMembersController,
     MeetingTypesController,
     CalendarAvailabilityController,
     CalendarWebhookController,
+    AppointmentsController,
+    LeadBookingController,
+    InCallBookingSettingsController,
+    InCallBookingToolController,
   ],
   providers: [
     CalendlyClient,
@@ -32,6 +47,12 @@ import { CalendarWebhookController } from './sync/calendar-webhook.controller';
     CalendarMembersService,
     MeetingTypesService,
     CalendarAvailabilityService,
+    AppointmentsService,
+    LeadBookingService,
+    InCallBookingSettingsService,
+    InCallBookingService,
+    ToolAuthService,
   ],
+  exports: [AppointmentsService],
 })
 export class CalendarModule {}

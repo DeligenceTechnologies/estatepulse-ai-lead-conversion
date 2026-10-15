@@ -10,6 +10,16 @@ model Organization {
   roles               Role[]
   settings            OrganizationSetting?
   calendarConnections CalendarConnection[]
+  leads               Lead[]
+  leadSources         LeadSource[]
+  integrations        Integration[]
+  ingestEvents        IngestEvent[]
+  messages            Message[]
+  calls               Call[]
+  sequences           Sequence[]
+  enrollments         SequenceEnrollment[]
+  sheetImportRows     SheetImportRow[]
+  auditLogs           AuditLog[]
 
   @@map("organizations")
 }
@@ -20,6 +30,14 @@ model OrganizationSetting {
 
   timezone     String @default("Asia/Kolkata") @db.VarChar(100)
   workingHours Json   @default("[{\"dayOfWeek\":0,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":1,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":2,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":3,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":4,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":5,\"isAvailable\":true,\"startTime\":\"09:00\",\"endTime\":\"18:00\"},{\"dayOfWeek\":6,\"isAvailable\":false,\"startTime\":\"09:00\",\"endTime\":\"18:00\"}]") @map("working_hours")
+
+  defaultRegion         String @default("US") @map("default_region") @db.VarChar(2)
+  callRecordingEnabled  Boolean @default(true) @map("call_recording_enabled")
+  callRecordingAnnounce Boolean @default(true) @map("call_recording_announce")
+  leadHotThreshold      Int     @default(75) @map("lead_hot_threshold")
+  leadWarmThreshold     Int     @default(45) @map("lead_warm_threshold")
+  outreachStrategy      Json?   @map("outreach_strategy")
+  inCallBooking         Json?   @map("in_call_booking")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)

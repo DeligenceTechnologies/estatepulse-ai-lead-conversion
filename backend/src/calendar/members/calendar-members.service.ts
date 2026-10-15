@@ -132,8 +132,7 @@ export class CalendarMembersService {
       user: { id: created.id, name: `${created.firstName} ${created.lastName}`.trim(), email: created.email },
       /** Where their working hours came from, so the UI can say so. */
       workingHoursFrom: calendarHours ? provider : 'organization',
-      // TODO => production me uncomment
-      // credentialsEmail: created.credentialsEmail,
+      credentialsEmail: created.credentialsEmail,
     };
   }
 

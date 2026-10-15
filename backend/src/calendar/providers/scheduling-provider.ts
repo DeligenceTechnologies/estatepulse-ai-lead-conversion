@@ -36,6 +36,12 @@ export class SchedulingProvider {
     return this.cal.teamEventTypes(secret, workspace.workspaceId, workspace.workspaceSlug);
   }
 
+  /** The event types a member hosts alone, by their provider id (Calendly user URI) and username (Cal.com). */
+  memberEventTypes(workspace: WorkspaceRef, secret: string, member: { externalId: string; username: string | null }): Promise<SchedulingEventType[]> {
+    if (workspace.provider === 'calendly') return this.calendly.memberEventTypes(secret, member.externalId);
+    return member.username ? this.cal.memberEventTypes(secret, member.username) : Promise.resolve([]);
+  }
+
   /**
    * A member's working hours as their calendar has them, or null when the
    * provider does not let us read them: Calendly shows every member's

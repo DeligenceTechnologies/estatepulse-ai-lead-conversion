@@ -39,6 +39,7 @@ enum CalendarMeetingStatus {
   scheduled
   pending
   canceled
+  rescheduled
 
   @@map("calendar_meeting_status")
 }
@@ -68,6 +69,7 @@ model CalendarConnection {
 
   credentials    String    @map("credentials")
   tokenExpiresAt DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  scope          String?   @db.VarChar(1000)
   lastError      String?   @map("last_error") @db.VarChar(500)
   connectedById  String?   @map("connected_by_id") @db.Uuid
   connectedAt    DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
@@ -174,13 +176,20 @@ model CalendarMeeting {
   rescheduleUrl  String?               @map("reschedule_url") @db.VarChar(2000)
   cancelUrl      String?               @map("cancel_url") @db.VarChar(2000)
   canceledReason String?               @map("canceled_reason") @db.VarChar(1000)
+  leadId         String?               @map("lead_id") @db.Uuid
+  hostUserId     String?               @map("host_user_id") @db.Uuid
+  bookedVia      String?               @map("booked_via") @db.VarChar(30)
   syncedAt       DateTime              @default(now()) @map("synced_at") @db.Timestamptz(6)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  lead       Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  hostUser   User?              @relation(fields: [hostUserId], references: [id], onDelete: SetNull)
 
+  @@index([leadId])
+  @@index([hostUserId, startsAt])
   @@unique([connectionId, externalId])
   @@index([connectionId, startsAt])
   @@index([endsAt])

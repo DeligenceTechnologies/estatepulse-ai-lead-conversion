@@ -14,8 +14,8 @@ export class UserController {
 
   @Post()
   @RequirePermissions(PERMISSIONS.USER_CREATE)
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.userService.create(createUserDto);
+  create(@Body() createUserDto: CreateUserDto, @CurrentAuth() auth: AuthContext) {
+    return this.userService.create({ ...createUserDto, orgId: auth.organizationId });
   }
 
   @Get()
@@ -26,19 +26,19 @@ export class UserController {
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.USER_READ)
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext) {
+    return this.userService.findOne(id, auth.organizationId);
   }
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.USER_UPDATE)
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.update(id, updateUserDto);
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserDto: UpdateUserDto, @CurrentAuth() auth: AuthContext) {
+    return this.userService.update(id, auth.organizationId, updateUserDto);
   }
 
   @Delete(':id')
   @RequirePermissions(PERMISSIONS.USER_DELETE)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.remove(id);
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext) {
+    return this.userService.remove(id, auth.organizationId);
   }
 }

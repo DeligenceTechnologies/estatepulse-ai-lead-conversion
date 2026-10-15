@@ -27,7 +27,6 @@ export const DEFAULT_WORKING_HOURS: WorkingDay[] = [0, 1, 2, 3, 4, 5, 6].map((da
 /** Monday first, the way a working week reads. */
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
-export const DAY_LETTER = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;
 
 /** Seven days, Sunday first, whatever the server sent (missing days fall back to the default). */
 export function normalizeWeek(days: readonly WorkingDay[] | null | undefined): WorkingDay[] {

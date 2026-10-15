@@ -5,6 +5,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { generatePassword, hashPassword } from '@/common/utils/password';
 import { MailService } from '@/common/service/mail.service';
+import { EmailQueue } from '@/queue/email/email.queue';
 import type { AppEnv } from '@/common/utils/interface';
 import { paginate } from '@/common/pagination/paginate';
 import type { ListQuery } from '@/common/pagination/pagination.types';
@@ -22,7 +23,6 @@ const WITH_ROLES = {
   },
 } as const;
 
-/** `roles: [{ role }]` from Prisma becomes `roles: [role]` in every response. */
 type RoleSummary = { id: string; name: string; isSystem: boolean };
 function flattenRoles<U extends { roles: { role: RoleSummary }[] }>(
   user: U,
@@ -30,13 +30,11 @@ function flattenRoles<U extends { roles: { role: RoleSummary }[] }>(
   return { ...user, roles: user.roles.map(({ role }) => role) };
 }
 
-/** Holding the system role makes a user an owner. */
 const OWNER_FILTER = { roles: { some: { role: { isSystem: true } } } } satisfies Prisma.UserWhereInput;
 
 export interface CredentialsEmailResult {
   sent: boolean;
   to: string;
-  /** Present only when `sent` is false. */
   reason?: string;
 }
 
@@ -48,16 +46,13 @@ export class UserService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
+    private readonly emailQueue: EmailQueue,
     config: ConfigService<AppEnv, true>,
   ) {
     const appUrl = config.get('APP_URL', { infer: true });
     this.loginUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/login` : undefined;
   }
 
-  /**
-   * `source` is decided by the caller, never by the request body: the Team
-   * page creates `web` users, adding a calendar member creates `calendly`/`cal`.
-   */
   async create(dto: CreateUserDto, source: UserSource = UserSource.web) {
     const organization = await this.prisma.organization.findUnique({
       where: { id: dto.orgId },
@@ -89,26 +84,29 @@ export class UserService {
       rethrowPrismaError(error, 'User');
     }
 
-    // const credentialsEmail = await this.sendCredentials({
-    //   firstName: user.firstName,
-    //   organizationName: organization.name,
-    //   roleName: user.roles.map((role) => role.name).join(', '),
-    //   email: user.email,
-    //   password,
-    // });
+    const credentialsEmail = await this.queueCredentials(user.id, {
+      firstName: user.firstName,
+      organizationName: organization.name,
+      roleName: user.roles.map((role) => role.name).join(', '),
+      email: user.email,
+      password,
+    });
 
-    return { ...user };
+    return { ...user, credentialsEmail };
   }
 
-  private async sendCredentials(input: Omit<WelcomeEmailInput, 'loginUrl'>): Promise<CredentialsEmailResult> {
+  private async queueCredentials(userId: string, input: Omit<WelcomeEmailInput, 'loginUrl'>): Promise<CredentialsEmailResult> {
     if (!this.mail.enabled) {
       return { sent: false, to: input.email, reason: 'Email is not configured on the server' };
     }
     try {
-      await this.mail.send({ to: input.email, ...welcomeEmail({ ...input, loginUrl: this.loginUrl }) });
+      await this.emailQueue.enqueue(
+        { kind: 'user.welcome', to: input.email, ...welcomeEmail({ ...input, loginUrl: this.loginUrl }) },
+        { dedupeKey: `user.welcome:${userId}`, sensitive: true },
+      );
       return { sent: true, to: input.email };
     } catch (error) {
-      this.logger.error(`Could not send credentials to ${input.email}: ${(error as Error).message}`);
+      this.logger.error(`Could not queue credentials for user ${userId}: ${(error as Error).message}`);
       return { sent: false, to: input.email, reason: 'The email could not be sent' };
     }
   }
@@ -131,19 +129,15 @@ export class UserService {
     });
   }
 
-  async findOne(id: string) {
-    try {
-      return flattenRoles(
-        await this.prisma.user.findUniqueOrThrow({ where: { id }, omit: OMIT_PASSWORD, include: WITH_ROLES }),
-      );
-    } catch (error) {
-      rethrowPrismaError(error, 'User');
-    }
+  async findOne(id: string, orgId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id, orgId }, omit: OMIT_PASSWORD, include: WITH_ROLES });
+    if (!user) throw new NotFoundException('User not found');
+    return flattenRoles(user);
   }
 
-  async update(id: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto) {
-    const current = await this.prisma.user.findUnique({
-      where: { id },
+  async update(id: string, orgId: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto) {
+    const current = await this.prisma.user.findFirst({
+      where: { id, orgId },
       select: { orgId: true, status: true, roles: { select: { role: { select: { isSystem: true } } } } },
     });
     if (!current) throw new NotFoundException('User not found');
@@ -175,12 +169,13 @@ export class UserService {
     }
   }
 
-  async remove(id: string) {
-    const current = await this.prisma.user.findUnique({
-      where: { id },
+  async remove(id: string, orgId: string) {
+    const current = await this.prisma.user.findFirst({
+      where: { id, orgId },
       select: { orgId: true, status: true, roles: { select: { role: { select: { isSystem: true } } } } },
     });
-    if (current?.roles.some(({ role }) => role.isSystem) && current.status === 'active') {
+    if (!current) throw new NotFoundException('User not found');
+    if (current.roles.some(({ role }) => role.isSystem) && current.status === 'active') {
       await this.assertAnotherOwner(id, current.orgId);
     }
 

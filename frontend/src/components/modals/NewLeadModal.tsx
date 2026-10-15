@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, UserPlus, Sparkles, Building2, Phone, Mail, DollarSign, MapPin } from 'lucide-react';
+import { X, UserPlus, Sparkles, Phone, Mail, DollarSign, MapPin } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { LeadSource } from '../../types';
 
@@ -9,7 +9,7 @@ interface NewLeadModalProps {
 }
 
 export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) => {
-  const { createLead, setSelectedLeadId, startLiveCallSimulation } = useApp();
+  const { createLead, setSelectedLeadId } = useApp();
 
   const [firstName, setFirstName] = useState('Jessica');
   const [lastName, setLastName] = useState('Taylor');
@@ -19,7 +19,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
   const [budgetMin, setBudgetMin] = useState(550000);
   const [budgetMax, setBudgetMax] = useState(700000);
   const [source, setSource] = useState<LeadSource>('facebook');
-  const [timeline, setTimeline] = useState('1-3 months');
+  const timeline = '1-3 months';
   const [autoDispatch, setAutoDispatch] = useState(true);
 
   if (!isOpen) return null;

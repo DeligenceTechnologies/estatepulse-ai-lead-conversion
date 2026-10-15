@@ -6,7 +6,6 @@ import {
   api,
   clearToken,
   getToken,
-  isKeepSignedIn,
   refreshAccessToken,
   rememberSession,
   restorableSession,
@@ -20,7 +19,6 @@ import {
   type RegisterInput,
   type Role,
 } from '../lib/api';
-import { startIdleWatch } from '../lib/idle';
 import { setDisplayTimeZone } from '../lib/datetime';
 
 type AuthStatus = 'loading' | 'authed' | 'anon';
@@ -76,7 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Computed synchronously on the very first render. With no stored session
    * there is nothing to restore, so the answer is 'anon' immediately — no
    * fetch, no spinner, and no flash of the login page for a user who is signed
-   * in. A session the idle deadline has already outlived is not restorable.
+   * in.
    */
   const [status, setStatus] = useState<AuthStatus>(() => (restorableSession() ? 'loading' : 'anon'));
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -187,7 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * The Sign out button. Goes to /login directly so RequireAuth never records
    * the current page as `from`: a deliberate sign-out starts the next session
-   * on the dashboard. An idle timeout or an expired session still goes through
+   * on the dashboard. An expired session still goes through
    * RequireAuth, so signing back in returns to the page that was interrupted.
    */
   const logout = (): void => {
@@ -212,16 +210,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setExplicitLogout(true);
     navigate('/login', { replace: true });
   };
-
-  /**
-   * Idle timeout: 30 minutes without input ends a session, unless the user
-   * chose "keep me signed in" at login. Signing in flips status to 'authed'
-   * and starts a fresh watch; signing out tears it down.
-   */
-  useEffect(
-    () => (isKeepSignedIn() ? undefined : startIdleWatch(status, () => endSession('idle'))),
-    [status, endSession],
-  );
 
   const retryRestore = (): void => setRestoreNonce((n) => n + 1);
 

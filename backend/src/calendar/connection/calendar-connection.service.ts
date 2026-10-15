@@ -67,6 +67,7 @@ interface NewConnection {
   workspaceRole: WorkspaceRole;
   credentials: CalendlyCredentials | CalCredentials;
   tokenExpiresAt: Date | null;
+  scope: string | null;
 }
 
 /**
@@ -164,6 +165,7 @@ export class CalendarConnectionService implements OnModuleInit {
         workspaceRole: this.requireAdmin('calendly', role),
         credentials: { accessToken: grant.accessToken, refreshToken: grant.refreshToken },
         tokenExpiresAt: grant.expiresAt,
+        scope: grant.scope,
       });
     } catch (error) {
       // Never leave a grant behind that we did not store.
@@ -196,6 +198,7 @@ export class CalendarConnectionService implements OnModuleInit {
       accountName: account.name,
       credentials: { apiKey },
       tokenExpiresAt: null,
+      scope: null,
     };
 
     if (teamId === undefined || teamId === null) {

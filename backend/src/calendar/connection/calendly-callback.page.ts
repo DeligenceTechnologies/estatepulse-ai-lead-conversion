@@ -5,7 +5,7 @@ export interface CalendlyCallbackResult {
 
 const MESSAGE_SOURCE = 'estatepulse:calendly';
 
-export function renderCalendlyCallbackPage(result: CalendlyCallbackResult, appUrl?: string): string {
+export function renderCalendlyCallbackPage(result: CalendlyCallbackResult, appUrl?: string, nonce?: string): string {
   const appOrigin = originOf(appUrl);
   const fallback = appUrl
     ? `${appUrl.replace(/\/+$/, '')}/settings?${new URLSearchParams({ tab: 'calendar', calendar: result.ok ? 'connected' : 'failed' })}`
@@ -35,11 +35,13 @@ export function renderCalendlyCallbackPage(result: CalendlyCallbackResult, appUr
 <main>
   <h1>${result.ok ? 'Calendly connected' : 'Calendly was not connected'}</h1>
   <p>${escapeHtml(result.message)}</p>
-  ${result.ok ? '' : '<button type="button" onclick="window.close()">Close</button>'}
+  ${result.ok ? '' : '<button type="button" id="close">Close</button>'}
 </main>
-<script>
+<script${nonce ? ` nonce="${nonce}"` : ''}>
   (function () {
     var data = ${payload};
+    var close = document.getElementById('close');
+    if (close) close.addEventListener('click', function () { window.close(); });
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage(data.message, data.targetOrigin);
       if (data.message.ok) window.close();

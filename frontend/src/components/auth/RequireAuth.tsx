@@ -18,7 +18,7 @@ export const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children 
   if (status === 'anon') {
     // A deliberate sign-out must not record `from` — the next login should
     // land on the dashboard, not the page the user was on when they logged out.
-    // Idle timeouts and expired sessions never set explicitLogout, so they
+    // Expired sessions never set explicitLogout, so they
     // still redirect back to the interrupted page.
     if (explicitLogout) {
       return <Navigate to="/login" replace />;

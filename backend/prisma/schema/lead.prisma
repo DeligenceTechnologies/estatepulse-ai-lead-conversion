@@ -1,0 +1,146 @@
+model Lead {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  orgId        String  @map("organization_id") @db.Uuid
+  leadSourceId String? @map("lead_source_id") @db.Uuid
+
+  firstName       String? @map("first_name") @db.VarChar(100)
+  lastName        String? @map("last_name") @db.VarChar(100)
+  email           String? @db.VarChar(255)
+  phone           String? @db.VarChar(50)
+  normalizedEmail String? @map("normalized_email") @db.VarChar(255)
+  normalizedPhone String? @map("normalized_phone") @db.VarChar(50)
+  emailValid      Boolean @default(false) @map("email_valid")
+  phoneValid      Boolean @default(false) @map("phone_valid")
+  externalLeadId  String? @map("external_lead_id") @db.VarChar(255)
+
+  status          LeadStatus       @default(new)
+  followUpReason  FollowUpReason?  @map("follow_up_reason")
+  temperature     LeadTemperature?
+  score           Decimal?         @db.Decimal(5, 2)
+  aiSummary       String?          @map("ai_summary")
+  lostReason      String?          @map("lost_reason") @db.VarChar(255)
+
+  buyingIntent    String?  @map("buying_intent") @db.VarChar(100)
+  timeline        String?  @db.VarChar(100)
+  minBudget       Decimal? @map("min_budget") @db.Decimal(12, 2)
+  maxBudget       Decimal? @map("max_budget") @db.Decimal(12, 2)
+  financingStatus String?  @map("financing_status") @db.VarChar(100)
+  location        String?  @db.VarChar(255)
+  bedrooms        Int?
+  motivation      String?
+  customFields    Json     @default("{}") @map("custom_fields")
+
+  consentStatus    ConsentStatus @default(pending) @map("consent_status")
+  consentSource    String?       @map("consent_source") @db.VarChar(50)
+  consentAt        DateTime?     @map("consent_at") @db.Timestamptz(6)
+  dncStatus        Boolean       @default(false) @map("dnc_status")
+  automationPaused Boolean       @default(false) @map("automation_paused")
+  needsReview      Boolean       @default(false) @map("needs_review")
+  reviewReasons    String[]      @default([]) @map("review_reasons")
+
+  assignedToId   String?         @map("assigned_to_id") @db.Uuid
+  assignedAt     DateTime?       @map("assigned_at") @db.Timestamptz(6)
+  assignmentType AssignmentType? @map("assignment_type")
+
+  firstContactAt   DateTime? @map("first_contact_at") @db.Timestamptz(6)
+  firstResponseAt  DateTime? @map("first_response_at") @db.Timestamptz(6)
+  lastContactAt    DateTime? @map("last_contact_at") @db.Timestamptz(6)
+  submissionCount  Int       @default(1) @map("submission_count")
+  lastSubmissionAt DateTime? @map("last_submission_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource      LeadSource?          @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
+  assignedTo      User?                @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages        Message[]
+  calls           Call[]
+  enrollments     SequenceEnrollment[]
+  ingestEvents    IngestEvent[]
+  sheetImportRows SheetImportRow[]
+  meetings        CalendarMeeting[]
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([orgId, status])
+  @@index([orgId, temperature])
+  @@index([orgId, normalizedPhone])
+  @@index([orgId, normalizedEmail])
+  @@index([orgId, assignedToId])
+  @@index([leadSourceId])
+  @@map("leads")
+}
+
+model Message {
+  id                String           @id @default(uuid(7)) @db.Uuid
+  orgId             String           @map("organization_id") @db.Uuid
+  leadId            String           @map("lead_id") @db.Uuid
+  direction         MessageDirection
+  channel           String           @default("sms") @db.VarChar(20)
+  senderType        MessageSender    @map("sender_type")
+  senderUserId      String?          @map("sender_user_id") @db.Uuid
+  body              String
+  providerMessageId String?          @map("provider_message_id") @db.VarChar(255)
+  deliveryStatus    DeliveryStatus   @default(pending) @map("delivery_status")
+  sentAt            DateTime?        @map("sent_at") @db.Timestamptz(6)
+  deliveredAt       DateTime?        @map("delivered_at") @db.Timestamptz(6)
+  failedAt          DateTime?        @map("failed_at") @db.Timestamptz(6)
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  senderUser   User?        @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, leadId, createdAt])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([providerMessageId])
+  @@map("messages")
+}
+
+model Call {
+  id               String     @id @default(uuid(7)) @db.Uuid
+  orgId            String     @map("organization_id") @db.Uuid
+  leadId           String     @map("lead_id") @db.Uuid
+  provider         String     @default("telnyx") @db.VarChar(30)
+  providerCallId   String?    @map("provider_call_id") @db.VarChar(255)
+  direction        String     @default("outbound") @db.VarChar(10)
+  status           CallStatus @default(queued)
+  startedAt        DateTime?  @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime?  @map("ended_at") @db.Timestamptz(6)
+  durationSeconds  Int?       @map("duration_seconds")
+  recordingUrl     String?    @map("recording_url")
+  transcript       String?
+  aiSummary        String?    @map("ai_summary")
+  extractedIntel   Json?      @map("extracted_intel")
+  handoffRequested Boolean    @default(false) @map("handoff_requested")
+  dncDetected      Boolean    @default(false) @map("dnc_detected")
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([leadId, createdAt(sort: Desc)])
+  @@index([providerCallId])
+  @@map("calls")
+}
+
+model AuditLog {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  orgId      String?   @map("organization_id") @db.Uuid
+  actorType  ActorType @map("actor_type")
+  actorId    String?   @map("actor_id") @db.Uuid
+  action     String    @db.VarChar(100)
+  entityType String    @map("entity_type") @db.VarChar(50)
+  entityId   String?   @map("entity_id") @db.Uuid
+  payload    Json?
+  durationMs Int?      @map("duration_ms")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

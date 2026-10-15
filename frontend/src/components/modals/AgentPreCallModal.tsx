@@ -2,19 +2,14 @@ import React from 'react';
 import { 
   Flame, 
   Phone, 
-  Calendar, 
   MapPin, 
   DollarSign, 
   Clock, 
   Home, 
-  CheckCircle2, 
   X, 
   Sparkles, 
-  UserCheck, 
   ArrowRight,
-  ExternalLink,
-  ShieldCheck,
-  AlertCircle
+  ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -80,7 +75,7 @@ export const AgentPreCallModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Core Briefing Content (PRD Section 41 Exact Specifications) */}
+        {/* Core Briefing Content */}
         <div className="p-6 space-y-6">
           
           {/* Key Facts 4-Grid */}

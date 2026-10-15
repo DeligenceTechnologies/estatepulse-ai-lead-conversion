@@ -3,9 +3,6 @@ import {
   Sliders,
   Sparkles,
   ShieldCheck,
-  Clock,
-  MapPin,
-  Check,
   AlertTriangle,
   Building2,
   CheckCircle2,
@@ -200,9 +197,8 @@ export const AISettingsView: React.FC = () => {
       aiAgentName: aiName,
       aiTone: tone,
       aiSystemPrompt: systemPrompt,
-      // businessHours is no longer written from here. Contact hours live in
-      // strategy.guardrails, which is what both schedulers read, and
-      // ContactWindowCard saves them on its own.
+      // Contact hours are not written here: they live in strategy.guardrails,
+      // which both schedulers read, and ContactWindowCard saves them.
     });
 
     // 2) Deploy prompt + tone + voice + call behavior to the live AI voice agent.

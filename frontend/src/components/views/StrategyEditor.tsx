@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, MessageSquare, Phone, Save, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Loader2, AlertTriangle, MessageSquare, Phone, Save, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { Strategy, StrategyStep, getStrategy, saveStrategy, emptyStep } from '../../utils/strategiesApi';
 
 // Single editable strategy: the voice + SMS sequence for new leads.

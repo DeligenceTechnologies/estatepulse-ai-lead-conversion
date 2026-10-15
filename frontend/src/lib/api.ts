@@ -19,8 +19,6 @@
  * token with the others over a BroadcastChannel.
  */
 
-import { IDLE_TIMEOUT_MS, clearActivity, markActivity, readActivity } from './idle';
-
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 /** Present while a session may be restorable; holds the "keep me signed in" choice. */
@@ -251,7 +249,7 @@ let accessTokenExpiresAt = 0;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Why the last session ended, for the login page to explain. Read once. */
-export type SessionEndReason = 'expired' | 'security' | 'password_changed' | 'signed_out_everywhere' | 'idle';
+export type SessionEndReason = 'expired' | 'security' | 'password_changed' | 'signed_out_everywhere';
 let endReason: SessionEndReason | null = null;
 
 export const consumeSessionEndReason = (): SessionEndReason | null => {
@@ -318,16 +316,12 @@ function scheduleRefresh(): void {
   refreshTimer = setTimeout(() => void refreshAccessToken().catch(() => {}), wait);
 }
 
-/**
- * Starts the in-memory session with a token from login or register. Signing in
- * is activity, so it also starts the idle deadline.
- */
+/** Starts the in-memory session with a token from login or register. */
 export const setToken = (token: string, expiresAt?: string | Date): void => {
   adoptToken(token, expiresAt);
-  markActivity();
 };
 
-/** Records that a session exists in this browser, and whether it should outlive the idle timeout. */
+/** Records that a session exists in this browser, and whether "keep me signed in" was chosen. */
 export const rememberSession = (keepSignedIn: boolean): void => {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ keepSignedIn }));
@@ -350,9 +344,6 @@ function readSession(): { keepSignedIn: boolean } | null {
 
 export const hasStoredSession = (): boolean => readSession() !== null;
 
-/** "Keep me signed in" sessions are exempt from the idle timeout. */
-export const isKeepSignedIn = (): boolean => readSession()?.keepSignedIn === true;
-
 function dropSession(reason: SessionEndReason | null, announce: boolean): void {
   const hadSession = accessToken !== null || hasStoredSession();
   accessToken = null;
@@ -363,8 +354,6 @@ function dropSession(reason: SessionEndReason | null, announce: boolean): void {
   } catch {
     /* nothing to clear */
   }
-  // The idle deadline belongs to the session, so it goes with it.
-  clearActivity();
   if (reason) endReason = reason;
   if (announce && hadSession) broadcast({ type: 'ended', reason });
   // React holds the session in state and nothing re-reads storage until a
@@ -381,38 +370,10 @@ function dropSession(reason: SessionEndReason | null, announce: boolean): void {
 export const clearToken = (reason: SessionEndReason | null = null): void => dropSession(reason, true);
 
 /**
- * Whether a session restore should be attempted on boot. A session that is not
- * "keep me signed in" and has outlived the idle deadline is not restored: it is
- * revoked server-side (best effort) and dropped.
- *
- * A missing activity stamp is initialised rather than treated as expired.
+ * Whether a session restore should be attempted on boot. The session lasts
+ * until its token expires; there is no idle timeout.
  */
-export const restorableSession = (): boolean => {
-  if (!hasStoredSession()) return false;
-  if (isKeepSignedIn()) return true;
-
-  const activity = readActivity();
-  if (activity === null) {
-    markActivity();
-    return true;
-  }
-  if (Date.now() - activity < IDLE_TIMEOUT_MS) return true;
-
-  void revokeStoredSession('idle');
-  return false;
-};
-
-/** Revokes the cookie's session on the server, then drops it locally. */
-async function revokeStoredSession(reason: SessionEndReason): Promise<void> {
-  try {
-    const token = accessToken ?? (await refreshAccessToken());
-    await api.logout(token);
-  } catch {
-    /* already gone, or offline: the session still expires on its own */
-  } finally {
-    clearToken(reason);
-  }
-}
+export const restorableSession = (): boolean => hasStoredSession();
 
 // --- Refresh -----------------------------------------------------------------
 
@@ -592,17 +553,40 @@ export async function apiFetch<T>(
 }
 
 /**
- * No form asks for a timezone - the device already knows it. An environment
- * without ICU data returns '' here, and JSON.stringify drops the undefined key,
- * so the request simply omits it and the backend fallback stands.
+ * A multipart upload on the session, with upload progress — which fetch cannot
+ * report, so this one call uses XMLHttpRequest. Same envelope, same session
+ * handling as apiFetch. `onProgress` gets the fraction sent so far, 0 to 1.
  */
-export const localTimeZone = (): string | undefined => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
-  } catch {
-    return undefined;
-  }
-};
+export function apiUpload<T>(path: string, body: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/api${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onerror = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onabort = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* fall through to the generic error below */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as T);
+        return;
+      }
+      const envelope = (payload as { error?: { code?: string; message?: string; details?: ErrorDetail[] } } | null)?.error;
+      const code = (envelope?.code ?? 'INTERNAL') as ErrorCode;
+      endSessionIfUnauthenticated(xhr.status, code);
+      reject(new ApiError(code, envelope?.message ?? MESSAGES[code] ?? MESSAGES.INTERNAL, xhr.status, envelope?.details));
+    };
+    xhr.send(body);
+  });
+}
 
 export const api = {
   /** Creates the organization (with Owner and Agent roles) and signs its owner in. */

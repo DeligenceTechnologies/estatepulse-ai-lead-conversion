@@ -14,6 +14,7 @@ import {
   Message,
 } from '../types';
 import { apiFetch, getToken } from '../lib/api';
+import { LEADS_CHANGED_EVENT } from '../api/client';
 import {
   INITIAL_ORG_SETTINGS,
   INITIAL_AGENTS,
@@ -42,6 +43,8 @@ const APP_VIEWS = [
   // Live-backend screen. Its data comes from the real API, NOT from this
   // context — see src/api/client.ts. Only the view id lives here.
   'lead_sources',
+  // Leads imported from Google Sheets waiting for the owner. Live API.
+  'import_review',
   // An owner who also takes leads: their own working hours and calendar
   // status, the same screen an agent sees. Live API, like lead_sources.
   'my_availability',
@@ -78,11 +81,9 @@ export const viewForPath = (pathname: string): AppView | null => {
   return (APP_VIEWS as readonly string[]).includes(id) ? (id as AppView) : null;
 };
 
-// Unlocked alongside the call/message history and nurture work: 'calls',
-// 'conversations' and 'followups' now read the real API through
-// utils/historyApi.ts and utils/sequencesApi.ts. The `calls`, `conversations`
-// and `followupSequences` values still on this context are the demo store and
-// are no longer what those three screens render.
+// The `calls`, `conversations` and `followupSequences` values on this context
+// are the demo store; the Calls, Conversations and Follow-ups screens read the
+// real API through utils/historyApi.ts and utils/sequencesApi.ts instead.
 
 /**
  * Sections that are navigable but not built yet. Lives beside AppView so the
@@ -163,7 +164,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_ORG_SETTINGS;
   });
 
-  const [agents, setAgents] = useState<Agent[]>(() => {
+  const [agents] = useState<Agent[]>(() => {
     const saved = localStorage.getItem('ep_agents');
     return saved ? JSON.parse(saved) : INITIAL_AGENTS;
   });
@@ -178,7 +179,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_CONVERSATIONS;
   });
 
-  const [calls, setCalls] = useState<CallRecord[]>(() => {
+  const [calls] = useState<CallRecord[]>(() => {
     const saved = localStorage.getItem('ep_calls');
     return saved ? JSON.parse(saved) : INITIAL_CALLS;
   });
@@ -188,12 +189,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_APPOINTMENTS;
   });
 
-  const [followupSequences, setFollowupSequences] = useState<FollowupSequence[]>(() => {
+  const [followupSequences] = useState<FollowupSequence[]>(() => {
     const saved = localStorage.getItem('ep_sequences');
     return saved ? JSON.parse(saved) : INITIAL_FOLLOWUP_SEQUENCES;
   });
 
-  const [integrations, setIntegrations] = useState<IntegrationStatus[]>(() => {
+  const [integrations] = useState<IntegrationStatus[]>(() => {
     const saved = localStorage.getItem('ep_integrations');
     return saved ? JSON.parse(saved) : INITIAL_INTEGRATIONS;
   });
@@ -228,12 +229,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [location.pathname]);
 
-  // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
+  // Load the logged-in organization's REAL leads from the backend (replaces the mock seed),
+  // and again whenever a screen reports the list changed (an assignment, an approved import).
   useEffect(() => {
     if (!getToken()) return;
-    apiFetch<{ leads: Lead[] }>('/leads', { auth: true })
-      .then((d) => { if (Array.isArray(d.leads)) setLeads(d.leads); })
-      .catch(() => { /* backend unreachable — keep whatever is cached */ });
+    const load = () =>
+      apiFetch<{ leads: Lead[] }>('/leads', { auth: true })
+        .then((d) => { if (Array.isArray(d.leads)) setLeads(d.leads); })
+        .catch(() => { /* backend unreachable — keep whatever is cached */ });
+    void load();
+    window.addEventListener(LEADS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, load);
   }, []);
 
   // Persistence to local storage
@@ -279,15 +285,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('Organization Settings Updated', 'system', orgSettings.id, 'Updated AI name, business hours, or communication rules', 'Agent');
   };
 
-  /**
-   * BACKEND INTEGRATION HOOK:
-   * When deploying to production:
-   * 1. Call Supabase: `await supabase.from('leads').insert(...)`
-   * 2. Trigger n8n Workflow WF-01 (Lead Intake): `await fetch(N8N_WEBHOOK_URL_LEAD_INTAKE, { method: 'POST', body: JSON.stringify(lead) })`
-   * 3. Workflow WF-05 will dispatch the Retell AI call or Twilio SMS according to communication strategy.
-   */
+  /** Adds a lead to the demo store, assigned to a random available agent. */
   const createLead = (leadInput: Partial<Lead>, triggerAutoWorkflow: boolean = true): Lead => {
-    // Round-robin assign agent
     const availableAgents = agents.filter(a => a.status === 'available');
     const assignedAgent = availableAgents.length > 0 
       ? availableAgents[Math.floor(Math.random() * availableAgents.length)]
@@ -388,7 +387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           `WF-04: Sent introductory SMS & queued outbound voice call (Response time: 14s).`,
           'AI (Alex)'
         );
-        setLeads(current => current.map(l => l.id === newLead.id ? { ...l, status: 'contacted', lastContactedAt: 'Just now' } : l));
+        setLeads(current => current.map(l => l.id === newLead.id ? { ...l, status: 'contacting', lastContactedAt: 'Just now' } : l));
       }, 1200);
     }
 
@@ -409,12 +408,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
-  /**
-   * BACKEND INTEGRATION HOOK:
-   * When sending an SMS in production:
-   * `await twilioClient.messages.create({ from: TWILIO_PHONE, to: lead.phone, body: content })`
-   * Listen to status callbacks via `POST /api/webhooks/twilio`
-   */
   const sendSmsMessage = (leadId: string, content: string, sender: 'agent' | 'lead' | 'ai' = 'agent') => {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
@@ -468,7 +461,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           aiReply = "Fantastic! Would 10:00 AM or 2:30 PM tomorrow work best for a 15-minute introductory consult with our team lead?";
         } else if (lower.includes('stop') || lower.includes('unsubscribe') || lower.includes('dnc')) {
           aiReply = "You have been unsubscribed and added to our Do-Not-Contact list. No further automated messages will be sent.";
-          updateLead(leadId, { dncStatus: true, automationPaused: true, status: 'dnc' });
+          updateLead(leadId, { dncStatus: true, automationPaused: true, status: 'not_interested' });
           addAuditLog('DNC / STOP Request Processed', 'system', leadId, 'Lead requested STOP. Automated messaging permanently disabled.', 'System (n8n)');
         }
 
@@ -500,14 +493,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  /**
-   * BACKEND INTEGRATION HOOK:
-   * When booking an appointment:
-   * 1. Call Calendly/Google Calendar API: create event with meeting link
-   * 2. Update Follow Up Boss / GoHighLevel CRM task: `await fubClient.post('/appointments', ...)`
-   * 3. Send email confirmation to agent and lead
-   * 4. Pause automated cold/no-answer followups
-   */
   const bookAppointment = (apptData: Omit<Appointment, 'id' | 'createdAt'>): Appointment => {
     const newAppt: Appointment = {
       ...apptData,
@@ -569,7 +554,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const takeOverConversation = (leadId: string) => {
     toggleAutomation(leadId);
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'engaged' } : l));
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: 'contacting' } : l));
     addAuditLog(
       'Human Agent Takeover',
       'lead',
@@ -581,14 +566,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * Simulates immediate conversion into a HOT lead with 87+ score,
-   * extracted qualification data, and pre-call readiness (PRD Section 26 & 41)
+   * extracted qualification data, and pre-call readiness.
    */
   const simulateHotQualification = (leadId: string) => {
     setLeads(prev => prev.map(l => {
       if (l.id === leadId) {
         const updated: Lead = {
           ...l,
-          status: 'qualified',
+          status: 'interested',
           score: 89,
           temperature: 'hot',
           timeline: '1-3 months',
@@ -634,10 +619,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('Lead Scored: 89 (HOT 🔥)', 'lead', leadId, 'AI extracted complete buyer profile. Transferred to Hot Leads queue.', 'AI (Alex)');
   };
 
-  /**
-   * BACKEND INTEGRATION HOOK:
-   * Used to test generic POST /api/webhooks/leads (PRD Section 66)
-   */
+  /** Feeds a sample payload through the demo store, as POST /api/webhooks/leads would. */
   const triggerWebhookTest = (payload: any): Lead => {
     const lead = createLead({
       firstName: payload.first_name || 'Webhook',

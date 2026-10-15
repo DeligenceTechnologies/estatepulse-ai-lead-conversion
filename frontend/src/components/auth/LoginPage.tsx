@@ -10,7 +10,6 @@ interface FromState {
 
 const END_REASON_NOTICES: Record<SessionEndReason, string> = {
   expired: 'Your session has expired. Please sign in again.',
-  idle: 'You were signed out after 30 minutes of inactivity.',
   security: 'For your security you were signed out on all devices. Please sign in again.',
   password_changed: 'Your password was changed. Sign in with your new password.',
   signed_out_everywhere: 'You have been signed out on all devices.',

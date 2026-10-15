@@ -41,8 +41,8 @@ const NavRow: React.FC<{ item: NavItem; active: boolean; collapsed: boolean; onC
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       aria-current={active ? 'page' : undefined}
-      className={`relative w-full flex items-center rounded-xl text-sm transition-all duration-200 cursor-pointer gap-2.5 px-2.5 py-2.5 ${
-        collapsed ? 'lg:justify-center lg:gap-0 lg:px-0 lg:h-11' : ''
+      className={`relative w-full flex items-center rounded-xl text-sm transition-all duration-200 cursor-pointer gap-2.5 px-2.5 py-2 ${
+        collapsed ? 'lg:justify-center lg:gap-0 lg:px-0 lg:h-10' : ''
       } ${
         active
           ? 'bg-emerald-500/10 text-emerald-300 font-bold ring-1 ring-inset ring-emerald-500/25'
@@ -137,7 +137,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
       {/* Links */}
       <nav aria-label="Main" className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-2 py-3">
         {groups.map((group, gi) => (
-          <div key={group.label ?? gi} className={gi === 0 ? '' : 'mt-4'}>
+          <div key={group.label ?? gi} className={gi === 0 ? '' : 'mt-5'}>
             {group.label && (
               <>
                 <p
@@ -150,7 +150,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                 {collapsed && <div aria-hidden className="hidden lg:block mx-3 mb-2 border-t border-slate-800" />}
               </>
             )}
-            <ul className="flex flex-col gap-1 list-none">
+            <ul className="flex flex-col gap-0.5 list-none">
               {group.items.map((item) => (
                 <li key={item.id}>
                   <NavRow

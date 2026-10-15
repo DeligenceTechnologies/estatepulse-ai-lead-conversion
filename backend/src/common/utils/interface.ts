@@ -32,5 +32,42 @@ export interface IntegrationEnv {
   CALENDLY_CLIENT_ID?: string;
   CALENDLY_CLIENT_SECRET?: string;
   CALENDLY_REDIRECT_URI?: string;
+  CALENDLY_SCOPES?: string;
   CALENDAR_WEBHOOK_BASE_URL?: string;
+  PUBLIC_API_URL?: string;
+  ALLOW_INSECURE_INGEST_URL: boolean;
+  INGEST_MAX_BODY_BYTES: number;
+  TALLY_API_BASE_URL: string;
+  PROVIDER_HTTP_TIMEOUT_MS: number;
+  WORKER_ENABLED: boolean;
+  WORKER_POLL_INTERVAL_MS: number;
+  WORKER_MAX_POLL_INTERVAL_MS: number;
+  WORKER_BATCH_SIZE: number;
+  WORKER_STUCK_AFTER_MS: number;
+  STRATEGY_ENGINE: boolean;
+  ENGINE_POLL_MS: number;
+  STRATEGY_STALE_MS: number;
+  FOLLOWUP_POLL_MS: number;
+  FOLLOWUP_BATCH_SIZE: number;
+  FOLLOWUP_STUCK_AFTER_MS: number;
+  GOOGLE_SHEETS_ENABLED: boolean;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI?: string;
+  GOOGLE_PICKER_API_KEY?: string;
+  GOOGLE_APP_ID?: string;
+  SHEETS_SYNC: boolean;
+  SHEETS_POLL_MS: number;
+  SHEETS_SYNC_INTERVAL_MS: number;
+  SHEETS_VERSION_PROBE: boolean;
+  SHEETS_FULL_READ_MAX_AGE_MS: number;
+  FILE_IMPORT_ENABLED: boolean;
+  FILE_IMPORT_MAX_BYTES: number;
+  NODE_ENV: 'development' | 'test' | 'production';
+}
+
+export interface QueueEnv {
+  REDIS_URL: string;
+  EMAIL_WORKER_ENABLED: boolean;
+  EMAIL_WORKER_CONCURRENCY: number;
 }

@@ -19,8 +19,8 @@ import { TelnyxAccounts } from './TelnyxAccounts';
  *
  * An org can keep several Telnyx accounts on file and switch between them, so
  * this panel edits *the account in use* and lists the rest below. Adding is a
- * separate act from editing on purpose — connecting a second key used to
- * overwrite the first, which is a silent way to lose an account.
+ * separate act from editing on purpose, so a second key never silently
+ * overwrites the first.
  */
 export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => void }> = ({ status, onChange }) => {
   const [apiKey, setApiKey] = useState('');

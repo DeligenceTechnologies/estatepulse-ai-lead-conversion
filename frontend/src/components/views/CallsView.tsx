@@ -10,7 +10,6 @@ import {
   Sparkles,
   Volume2,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listMembers, type OrganizationMember } from '../../utils/agentsApi';
 import {
@@ -36,9 +35,7 @@ const dayEndIso = (date: string): string | undefined => {
 /**
  * Call history for the office.
  *
- * This screen used to render `mockData` out of localStorage, complete with a
- * fake waveform and a hardcoded "Provider: Retell" badge. Everything here is
- * now the real `voice_calls` table: the recording and transcript arrive from
+ * Rows come from the `voice_calls` table: the recording and transcript arrive from
  * the Telnyx webhooks (call.recording.saved / .transcription.saved), and what
  * a caller may see is decided server-side by role.
  *
@@ -111,7 +108,6 @@ const RecordingPlayer: React.FC<{ url: string }> = ({ url }) => {
 };
 
 export const CallsView: React.FC = () => {
-  const { setSelectedLeadId } = useApp();
 
   const [q, setQ] = useState('');
   // Applied separately from `q` so the list is not refetched on every keystroke.

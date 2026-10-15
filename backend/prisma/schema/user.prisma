@@ -23,6 +23,11 @@ model User {
   sessions     UserSession[]
 
   calendarConnections CalendarConnection[]
+  assignedLeads       Lead[]               @relation("LeadAssignee")
+  sentMessages        Message[]
+  enrollments         SequenceEnrollment[]
+  reviewedImportRows  SheetImportRow[]
+  hostedMeetings      CalendarMeeting[]
 
   @@index([orgId])
   @@map("users")

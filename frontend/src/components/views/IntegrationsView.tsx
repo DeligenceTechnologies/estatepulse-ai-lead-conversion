@@ -7,13 +7,9 @@ interface IntegrationsViewProps {
 }
 
 /**
- * Connections, and only connections.
- *
- * This page used to carry a live lead-source list with per-source lead counts,
- * delivery detail and a second webhook-token manager, on top of a grid of demo
- * integration cards. All of that either duplicated Lead Sources — the screen
- * that actually reports what came in — or described nothing real. What is left
- * is the two ways a lead source can exist: we install the webhook, or you do.
+ * Connections, and only connections — what came in is reported on Lead
+ * Sources. A lead source exists one of two ways: we install the webhook, or
+ * you do.
  */
 export const IntegrationsView: React.FC<IntegrationsViewProps> = ({ onOpenWebhookTester }) => (
   <div className="p-6 space-y-6 max-w-5xl mx-auto text-slate-100">

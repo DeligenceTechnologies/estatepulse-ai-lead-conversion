@@ -14,8 +14,7 @@ import {
 /**
  * Build one tool for the AI agent.
  *
- * This is the screen that used to be a link to the provider's console. The
- * shapes below are the provider's own tool schemas rendered as a form, so what
+ * The shapes below are the provider's own tool schemas rendered as a form, so what
  * is typed here is what is sent — there is no intermediate representation to
  * drift out of step with the API.
  *

@@ -46,7 +46,7 @@ export interface SchedulingEventType {
   color: string | null;
 }
 
-export type MeetingStatus = 'scheduled' | 'pending' | 'canceled';
+export type MeetingStatus = 'scheduled' | 'pending' | 'canceled' | 'rescheduled';
 
 export interface MeetingPerson {
   name: string;
@@ -76,6 +76,8 @@ export interface BookedMeeting {
   rescheduleUrl: string | null;
   cancelUrl: string | null;
   canceledReason: string | null;
+  /** The EstatePulse lead id the booking link carried, when it was booked from one. */
+  leadRef?: string | null;
 }
 
 export interface ScheduleInterval {

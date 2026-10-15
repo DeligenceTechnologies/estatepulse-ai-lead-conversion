@@ -172,19 +172,6 @@ export interface Appointment {
   createdAt: string;
 }
 
-export interface AgentCalendar {
-  agentId: string;
-  agentName: string;
-  /**
-   * The scheduling member this agent is, for whichever provider is connected,
-   * or null when they are not on it.
-   */
-  schedulingUserId: string | null;
-  schedulingUrl: string | null;
-  availability: Availability;
-  upcoming: Appointment[];
-}
-
 // --- the organization's scheduling account ----------------------------------
 
 const ORG_CALENDAR = '/org-settings/calendar';
@@ -350,10 +337,6 @@ export const listAppointments = (params?: {
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return apiFetch<Appointment[]>(`/appointments${suffix}`, { auth: true });
 };
-
-/** Takes the member's `users.id`, the same id `PATCH /agents/:userId` uses. */
-export const getAgentCalendar = (userId: string): Promise<AgentCalendar> =>
-  apiFetch<AgentCalendar>(`/agents/${userId}/calendar`, { auth: true });
 
 // --- shared helpers ----------------------------------------------------------
 

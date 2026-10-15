@@ -13,7 +13,6 @@ import {
 import {
   api,
   leadsApi,
-  type LeadSourceConfig,
   type LiveLead,
   type WebhookDelivery,
 } from '../../api/client';

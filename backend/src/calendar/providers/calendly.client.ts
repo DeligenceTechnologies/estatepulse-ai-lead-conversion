@@ -10,6 +10,7 @@ import type {
   SchedulingMember,
   WorkspaceRole,
 } from '../calendar.types';
+import { LEAD_BOOKING_UTM_SOURCE } from '../booking/lead-booking-link';
 import { hexColor, mapLimit, meetingPlace } from './meeting-location';
 import { ProviderHttpError, requestJson } from './provider-http';
 
@@ -29,6 +30,7 @@ interface TokenResponse {
   expires_in: number;
   owner: string;
   organization: string;
+  scope?: string;
 }
 
 interface CalendlyUser {
@@ -74,6 +76,31 @@ interface CalendlyInvitee {
   status: 'active' | 'canceled';
   cancel_url: string | null;
   reschedule_url: string | null;
+  rescheduled?: boolean;
+  tracking?: { utm_source?: string | null; utm_content?: string | null } | null;
+}
+
+export interface CalendlyEventTypeDetail {
+  uri: string;
+  name: string;
+  duration: number;
+  locations: { kind: string; location?: string | null }[] | null;
+}
+
+export interface CalendlyBookedInvitee {
+  uri: string;
+  event: string;
+  cancel_url: string | null;
+  reschedule_url: string | null;
+}
+
+export interface CalendlyBookedEvent {
+  uri: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  location: { join_url?: string | null; location?: string | null } | null;
+  event_memberships: { user: string; user_name?: string | null; user_email?: string | null }[];
 }
 
 interface CalendlyAvailabilitySchedule {
@@ -129,6 +156,8 @@ export interface CalendlyGrant {
   expiresAt: Date;
   userUri: string;
   organizationUri: string;
+  /** Scopes the token holds; null when Calendly did not say (an app with full access). */
+  scope: string | null;
 }
 
 @Injectable()
@@ -137,6 +166,7 @@ export class CalendlyClient {
   private readonly clientId?: string;
   private readonly clientSecret?: string;
   private readonly redirectUri?: string;
+  private readonly scopes: string | null;
   readonly appUrl?: string;
 
   constructor(config: ConfigService<IntegrationEnv, true>) {
@@ -144,6 +174,7 @@ export class CalendlyClient {
     this.clientSecret = config.get('CALENDLY_CLIENT_SECRET', { infer: true });
     this.redirectUri = config.get('CALENDLY_REDIRECT_URI', { infer: true });
     this.appUrl = config.get('APP_URL', { infer: true });
+    this.scopes = config.get('CALENDLY_SCOPES', { infer: true })?.trim().split(/\s+/).join(' ') || null;
   }
 
   get missingConfig(): string[] {
@@ -168,6 +199,7 @@ export class CalendlyClient {
       response_type: 'code',
       redirect_uri: this.redirectUri ?? '',
       state,
+      ...(this.scopes ? { scope: this.scopes } : {}),
     });
     return `${AUTH_BASE}/oauth/authorize?${params}`;
   }
@@ -300,6 +332,64 @@ export class CalendlyClient {
     });
   }
 
+  /** A member's own (one-on-one) event types: the ones a lead assigned to them can book with them alone. */
+  async memberEventTypes(accessToken: string, userUri: string): Promise<SchedulingEventType[]> {
+    const eventTypes = await this.collect<CalendlyEventType & { profile: { type?: string; owner?: string; name: string | null } | null }>(
+      accessToken,
+      `${API_BASE}/event_types?${new URLSearchParams({ user: userUri, active: 'true', count: String(PAGE_SIZE) })}`,
+    );
+    return eventTypes
+      .filter((eventType) => eventType.profile?.type === 'User' && eventType.profile.owner === userUri && !eventType.pooling_type)
+      .map((eventType) => ({
+        id: eventType.uri,
+        name: eventType.name,
+        durationMinutes: eventType.duration,
+        bookingUrl: eventType.scheduling_url,
+        poolingType: null,
+        hostName: eventType.profile?.name ?? null,
+        color: hexColor(eventType.color),
+      }));
+  }
+
+  async eventType(accessToken: string, eventTypeUri: string): Promise<CalendlyEventTypeDetail> {
+    const { resource } = await this.get<{ resource: CalendlyEventTypeDetail }>(accessToken, eventTypeUri);
+    return resource;
+  }
+
+  /** Open start times for an event type. Calendly answers at most seven days per request. */
+  async availableTimes(accessToken: string, eventTypeUri: string, start: Date, end: Date): Promise<Date[]> {
+    const query = new URLSearchParams({ event_type: eventTypeUri, start_time: start.toISOString(), end_time: end.toISOString() });
+    const { collection } = await this.get<{ collection: { status: string; start_time: string }[] }>(
+      accessToken,
+      `${API_BASE}/event_type_available_times?${query}`,
+    );
+    return collection.filter((t) => t.status === 'available').map((t) => new Date(t.start_time));
+  }
+
+  /** Books a time on the invitee's behalf (Calendly's scheduling API). A taken slot answers 409. */
+  async createInvitee(
+    accessToken: string,
+    body: {
+      event_type: string;
+      start_time: string;
+      invitee: { name: string; email: string; timezone: string };
+      location?: { kind: string; location?: string };
+      tracking?: { utm_source: string; utm_content: string };
+    },
+  ): Promise<CalendlyBookedInvitee> {
+    const { resource } = await requestJson<{ resource: CalendlyBookedInvitee }>(PROVIDER, `${API_BASE}/invitees`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return resource;
+  }
+
+  async scheduledEvent(accessToken: string, eventUri: string): Promise<CalendlyBookedEvent> {
+    const { resource } = await this.get<{ resource: CalendlyBookedEvent }>(accessToken, eventUri);
+    return resource;
+  }
+
   async createWebhook(accessToken: string, organizationUri: string, url: string, signingKey: string): Promise<string> {
     const { resource } = await requestJson<{ resource: { uri: string } }>(PROVIDER, `${API_BASE}/webhook_subscriptions`, {
       method: 'POST',
@@ -331,6 +421,7 @@ export class CalendlyClient {
       expiresAt: new Date(Date.now() + body.expires_in * 1000),
       userUri: body.owner,
       organizationUri: body.organization,
+      scope: body.scope ?? null,
     };
   }
 
@@ -367,7 +458,7 @@ function toMeeting(event: CalendlyScheduledEvent, invitees: CalendlyInvitee[]): 
     end: event.end_time,
     // Calendly does not say; the sync fills it from the host's calendar member.
     timezone: null,
-    status: canceled ? 'canceled' : 'scheduled',
+    status: canceled ? (invitees.some((i) => i.rescheduled) ? 'rescheduled' : 'canceled') : 'scheduled',
     invitees: invitees.map(({ name, email, timezone }) => ({ name, email, timezone: timezone ?? null })),
     hosts: event.event_memberships.map((host) => ({
       name: host.user_name ?? host.user_email ?? 'Host',
@@ -379,6 +470,7 @@ function toMeeting(event: CalendlyScheduledEvent, invitees: CalendlyInvitee[]): 
     rescheduleUrl: open ? (booker?.reschedule_url ?? null) : null,
     cancelUrl: open ? (booker?.cancel_url ?? null) : null,
     canceledReason: canceled ? (event.cancellation?.reason ?? null) : null,
+    leadRef: invitees.find((i) => i.tracking?.utm_source === LEAD_BOOKING_UTM_SOURCE)?.tracking?.utm_content ?? null,
   };
 }
 

@@ -368,7 +368,7 @@ export function generateMonthlyPerformancePDF(data: ReportData): void {
   // Check if we need a new page for Section 4 and 5
   checkPageBreak(50);
 
-  // SECTION 4: BROKERAGE ROI & REVENUE FORECAST (PRD Section 47)
+  // SECTION 4: BROKERAGE ROI & REVENUE FORECAST
   if (data.config.includeRoiModel) {
     checkPageBreak(48);
     doc.setFont('helvetica', 'bold');

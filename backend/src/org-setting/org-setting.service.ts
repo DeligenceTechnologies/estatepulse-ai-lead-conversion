@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
-import { DEFAULT_ROLES } from '@/role/permissions';
+import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 
 const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, updatedAt: true } as const;
@@ -45,10 +45,7 @@ export class OrgSettingService {
         where: { id: userId, orgId, roles: { some: { role: { isSystem: true } } } },
         select: { id: true },
       }),
-      this.prisma.role.findFirst({
-        where: { orgId, isSystem: false, name: { equals: DEFAULT_ROLES.AGENT.name, mode: 'insensitive' } },
-        select: { id: true },
-      }),
+      this.prisma.role.findFirst({ where: { orgId, ...AGENT_ROLE_WHERE }, select: { id: true } }),
     ]);
     if (!owner) {
       throw new ForbiddenException('Only an owner can take leads from this setting');

@@ -104,25 +104,6 @@ export const SourceStatusPill: React.FC<{ source: LeadSourceConfig }> = ({ sourc
   );
 };
 
-/** Secondary, detail-only — two pills per list row is noise. */
-export const MappingPill: React.FC<{ status: string | null }> = ({ status }) => {
-  const s = norm(status);
-  if (s === 'CONFIGURED') {
-    return <span className={`${PILL} bg-emerald-500/15 text-emerald-300 border-emerald-500/30`}>mapping ready</span>;
-  }
-  if (s === 'NEEDS_REVIEW') {
-    return (
-      <span
-        className={`${PILL} bg-amber-500/20 text-amber-300 border-amber-500/40`}
-        title="Mapped automatically and already live — confirm the guesses when you get a chance."
-      >
-        mapping needs review
-      </span>
-    );
-  }
-  return <span className={`${PILL} bg-slate-800 text-slate-400 border-slate-700`}>no mapping yet</span>;
-};
-
 /** How this source was connected — the thing that decides what we can repair. */
 export const ConnectionPill: React.FC<{ source: LeadSourceConfig }> = ({ source }) => {
   if (norm(source.connectionMethod) !== 'API') {

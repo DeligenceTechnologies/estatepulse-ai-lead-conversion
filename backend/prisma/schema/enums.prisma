@@ -12,3 +12,255 @@ enum BaseStatus {
 
   @@map("base_status")
 }
+
+enum LeadStatus {
+  new
+  contacting
+  follow_up
+  interested
+  appointment_requested
+  appointment_booked
+  not_interested
+  closed
+  invalid
+
+  @@map("lead_status")
+}
+
+enum FollowUpReason {
+  no_answer
+  not_ready
+  callback_requested
+  needs_time
+  other
+
+  @@map("follow_up_reason")
+}
+
+enum LeadTemperature {
+  hot
+  warm
+  cold
+
+  @@map("lead_temperature")
+}
+
+enum ConsentStatus {
+  granted
+  revoked
+  pending
+
+  @@map("consent_status")
+}
+
+enum AssignmentType {
+  manual
+  ai
+
+  @@map("assignment_type")
+}
+
+enum ActorType {
+  user
+  ai
+  system
+  webhook
+
+  @@map("actor_type")
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+
+  @@map("message_direction")
+}
+
+enum MessageSender {
+  ai
+  lead
+  user
+
+  @@map("message_sender")
+}
+
+enum DeliveryStatus {
+  pending
+  sent
+  delivered
+  failed
+
+  @@map("delivery_status")
+}
+
+enum CallStatus {
+  queued
+  ringing
+  in_progress
+  completed
+  no_answer
+  failed
+
+  @@map("call_status")
+}
+
+enum IntegrationProvider {
+  telnyx
+  tally
+  google
+
+  @@map("integration_provider")
+}
+
+enum IntegrationStatus {
+  active
+  inactive
+  invalid
+  revoked
+
+  @@map("integration_status")
+}
+
+enum LeadSourceProvider {
+  WEBHOOK
+  TALLY
+  GOOGLE_SHEETS
+  FILE_UPLOAD
+
+  @@map("lead_source_provider")
+}
+
+enum ConnectionMethod {
+  MANUAL
+  API
+  SYNC
+  UPLOAD
+
+  @@map("lead_source_connection_method")
+}
+
+enum IngestStatus {
+  AWAITING_FIRST_EVENT
+  NEEDS_MAPPING
+  ACTIVE
+  PAUSED
+  IMPORTING
+  COMPLETED
+  REMOVED
+
+  @@map("lead_source_ingest_status")
+}
+
+enum MappingStatus {
+  UNCONFIGURED
+  NEEDS_REVIEW
+  CONFIGURED
+
+  @@map("lead_source_mapping_status")
+}
+
+enum RemoteWebhookState {
+  PENDING
+  INSTALLED
+  DRIFTED
+  UNINSTALLED
+  ORPHANED
+  ERROR
+
+  @@map("remote_webhook_state")
+}
+
+enum FieldStatus {
+  NEW
+  ACTIVE
+  MISSING
+
+  @@map("lead_source_field_status")
+}
+
+enum MappingOrigin {
+  HEURISTIC
+  USER
+  IMPORTED
+  PREBUILT
+
+  @@map("mapping_origin")
+}
+
+enum QueueState {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  DEAD_LETTER
+
+  @@map("ingest_queue_state")
+}
+
+enum DeliveryOutcome {
+  PROCESSED
+  PROCESSED_WITH_WARNINGS
+  DUPLICATE
+  NEEDS_MAPPING
+  NEEDS_IDENTITY
+  QUARANTINED_SIGNATURE
+  INVALID_PAYLOAD
+  ERROR
+
+  @@map("ingest_outcome")
+}
+
+enum SignatureState {
+  VALID
+  INVALID
+  MISSING
+  NOT_CONFIGURED
+
+  @@map("signature_state")
+}
+
+enum ReviewState {
+  pending
+  approved
+  rejected
+
+  @@map("import_review_state")
+}
+
+enum SequenceStatus {
+  active
+  inactive
+  archived
+
+  @@map("sequence_status")
+}
+
+enum SequenceTrigger {
+  qualified_hot
+  qualified_warm
+  qualified_cold
+  follow_up_no_answer
+  follow_up_not_ready
+  follow_up_callback_requested
+  follow_up_needs_time
+  follow_up_other
+
+  @@map("sequence_trigger")
+}
+
+enum EnrollmentStatus {
+  active
+  paused
+  completed
+  stopped
+
+  @@map("enrollment_status")
+}
+
+enum EnrolledBy {
+  auto
+  manual
+  bulk
+
+  @@map("enrolled_by")
+}
