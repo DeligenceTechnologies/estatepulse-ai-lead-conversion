@@ -245,6 +245,21 @@ export class TelnyxController {
     return { numbers: await this.numbers.listOwned(orgId) };
   }
 
+  /**
+   * Verify a key and list the numbers it owns, so the From Number can be picked
+   * rather than typed. With no key in the body the stored one is used.
+   */
+  @Post('numbers/lookup')
+  @HttpCode(HttpStatus.OK)
+  async lookup(@OrgId() orgId: string, @Body() body: any) {
+    const apiKey = body?.apiKey;
+    if (apiKey === undefined || apiKey === '') return { numbers: await this.numbers.listOwned(orgId) };
+    if (typeof apiKey !== 'string' || !/^KEY/.test(apiKey.trim())) {
+      throw new AppError('VALIDATION_ERROR', 'A valid Telnyx API key (starts with "KEY") is required.');
+    }
+    return { numbers: await this.numbers.listOwnedForKey(apiKey.trim()) };
+  }
+
   @Post('numbers/buy')
   @HttpCode(HttpStatus.CREATED)
   async buy(@OrgId() orgId: string, @Body() body: any) {
