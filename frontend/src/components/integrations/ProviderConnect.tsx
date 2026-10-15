@@ -13,6 +13,8 @@ import {
   disconnectTelnyx,
 } from '../../utils/assistantApi';
 import { TelnyxAccounts } from './TelnyxAccounts';
+import { useApp } from '../../context/AppContext';
+import { FromNumberSelect } from './FromNumberSelect';
 
 /**
  * Bring-Your-Own-Telnyx: enter credentials, then create or attach an assistant.
@@ -36,6 +38,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   const [messagingProfileId, setMessagingProfileId] = useState('');
   const [assistantId, setAssistantId] = useState('');
   const [assistantName, setAssistantName] = useState('');
+  const { setActiveView } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -194,7 +197,13 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
 
           <div>
             <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-rose-400 font-normal">* required</span></label>
-            <input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+12025550123" className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 ${fromNumber.trim() ? 'border-slate-800' : 'border-rose-900/60'}`} />
+            <FromNumberSelect
+              apiKey={apiKey}
+              useStored={status.connected}
+              storedKeyId={status.accountId}
+              value={fromNumber}
+              onChange={setFromNumber}
+            />
             <p className="text-2xs text-slate-500 mt-1">The Telnyx number calls are placed from. Required to dial leads.</p>
           </div>
         </div>
@@ -329,11 +338,12 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                   placeholder="API key (KEY0123…)"
                   className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono focus:outline-none focus:border-emerald-500"
                 />
-                <input
+                <FromNumberSelect
+                  apiKey={newApiKey}
+                  useStored={false}
                   value={newFrom}
-                  onChange={(e) => setNewFrom(e.target.value)}
-                  placeholder="From number (+1…)"
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono focus:outline-none focus:border-emerald-500"
+                  onChange={setNewFrom}
+                  compact
                 />
               </div>
 
@@ -391,7 +401,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
               placeholder="Assistant name (e.g. Austin Home Advisors)"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs mb-2 focus:outline-none focus:border-emerald-500"
             />
-            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName))} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
+            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName).then(() => setActiveView('ai_settings')))} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               Create assistant
             </button>

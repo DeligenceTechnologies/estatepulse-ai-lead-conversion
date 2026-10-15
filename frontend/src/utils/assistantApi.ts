@@ -285,6 +285,9 @@ export function searchNumbers(params: { country?: string; area?: string; feature
 }
 export const listOwnedNumbers = () =>
   apiFetch<{ numbers: OwnedNumber[] }>('/telnyx/numbers/owned', { auth: true }).then((d) => d.numbers);
+/** Verifies `apiKey` (or the stored key when omitted) and lists the numbers it owns. */
+export const lookupOwnedNumbers = (apiKey?: string) =>
+  apiFetch<{ numbers: OwnedNumber[] }>('/telnyx/numbers/lookup', { method: 'POST', body: apiKey ? { apiKey } : {}, auth: true }).then((d) => d.numbers);
 export const buyNumber = (phone_number: string) =>
   apiFetch<any>('/telnyx/numbers/buy', { method: 'POST', body: { phone_number }, auth: true });
 export const assignNumber = (phone_number: string) =>

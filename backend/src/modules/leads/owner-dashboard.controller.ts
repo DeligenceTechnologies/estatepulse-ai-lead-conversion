@@ -98,7 +98,7 @@ export class OwnerDashboardController {
                   group by status) c) as calls_by_status,
         (select count(*)::int from appointments
           where organization_id = ${org}::uuid and start_at >= ${nowDate}
-            and status in ('scheduled','rescheduled')) as upcoming_appointments,
+            and status = 'scheduled') as upcoming_appointments,
         (select json_agg(json_build_object('source_id', g.lead_source_id, 'name', src.name, 'count', g.n)
                          order by g.n desc, src.name)
            from (select lead_source_id, count(*)::int as n from l

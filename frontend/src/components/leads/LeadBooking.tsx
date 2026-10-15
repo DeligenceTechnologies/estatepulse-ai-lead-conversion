@@ -55,7 +55,8 @@ const upcoming = (rows: Appointment[] | null | undefined): Appointment | null =>
   (rows ?? [])
     .filter(
       (a) =>
-        a.status === "scheduled" && new Date(a.endTime).getTime() >= Date.now(),
+        (a.status === "scheduled" || a.status === "rescheduled") &&
+        new Date(a.endTime).getTime() >= Date.now(),
     )
     .sort(
       (a, b) =>

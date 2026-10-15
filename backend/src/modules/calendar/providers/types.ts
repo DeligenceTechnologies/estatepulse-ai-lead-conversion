@@ -111,6 +111,8 @@ export interface NormalizedAttendee {
    * booking.
    */
   rescheduled: boolean;
+  /** On the NEW half of a reschedule: the externalId of the booking it replaced. */
+  rescheduledFrom: string | null;
   /** Provider reference, kept in appointments.metadata for support questions. */
   externalId: string | null;
   /**
