@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, PenLine, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { apiFetch } from '../../lib/api';
 import { errorDetails, errorText } from '../sheets/SheetModal';
@@ -158,8 +159,10 @@ export const AddLeadModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
       });
       window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       // Nothing to warn about: done. Otherwise the owner reads what to know before anyone calls.
-      if (created.contacting && created.warnings.length === 0) onClose();
-      else setResult(created);
+      if (created.contacting && created.warnings.length === 0) {
+        toast.success('Lead added — outreach is starting.');
+        onClose();
+      } else setResult(created);
     } catch (err) {
       setError({ message: errorText(err), details: errorDetails(err) });
     } finally {

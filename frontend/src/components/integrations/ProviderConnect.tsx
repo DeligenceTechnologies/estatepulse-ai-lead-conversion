@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { KeyRound, Loader2, AlertTriangle, Sparkles, Link2, CheckCircle2, Pencil, ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   TelnyxStatus,
   TelnyxCredentials,
@@ -40,7 +41,6 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   const [assistantName, setAssistantName] = useState('');
   const { setActiveView } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   // The shelf of saved accounts, and the separate form for putting a new one on it.
   const [accounts, setAccounts] = useState<TelnyxAccount[]>([]);
@@ -63,14 +63,14 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
     loadAccounts();
   };
 
-  const run = async (key: string, fn: () => Promise<any>) => {
+  const run = async (key: string, fn: () => Promise<any>, done?: string) => {
     setBusy(key);
-    setError(null);
     try {
       await fn();
       refresh();
+      if (done) toast.success(done);
     } catch (e: any) {
-      setError(e.message);
+      toast.error(e.message);
     } finally {
       setBusy(null);
     }
@@ -101,19 +101,13 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
         </p>
       </div>
 
-      {error && (
-        <div className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
-          <AlertTriangle className="w-3.5 h-3.5" /> {error}
-        </div>
-      )}
-
       {status.hasIntegration && !status.connected && (
         <div className="flex items-center justify-between gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
           <span className="text-slate-300">You have a saved connection that's currently disconnected.</span>
           <button
             type="button"
             disabled={busy !== null}
-            onClick={() => run('reconnect', () => reconnectTelnyx())}
+            onClick={() => run('reconnect', () => reconnectTelnyx(), 'Telnyx reconnected.')}
             className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5"
           >
             {busy === 'reconnect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
@@ -131,7 +125,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             <button
               type="button"
               disabled={busy !== null}
-              onClick={() => run('disconnect', () => disconnectTelnyx())}
+              onClick={() => run('disconnect', () => disconnectTelnyx(), 'Telnyx disconnected.')}
               className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold disabled:opacity-50"
             >
               {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
@@ -287,6 +281,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                 if (advanced && connectionId.trim()) payload.connectionId = connectionId.trim();
                 if (advanced && messagingProfileId.trim()) payload.messagingProfileId = messagingProfileId.trim();
                 return saveTelnyxCredentials(payload).then((r) => {
+                  toast.success('Telnyx settings saved.');
                   setApiKey('');
                   setReplacingKey(false);
                   return r;
@@ -361,6 +356,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                       setNewApiKey('');
                       setNewFrom('');
                       setAdding(false);
+                      toast.success('Telnyx account added.');
                       return r;
                     }),
                   )
@@ -401,7 +397,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
               placeholder="Assistant name (e.g. Austin Home Advisors)"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs mb-2 focus:outline-none focus:border-emerald-500"
             />
-            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName).then(() => setActiveView('ai_settings')))} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
+            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName).then(() => setActiveView('ai_settings')), 'AI assistant created.')} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               Create assistant
             </button>
@@ -413,7 +409,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             <p className="text-xs text-slate-400 mt-1 mb-2">Already built one in Telnyx? Paste its ID.</p>
             <div className="flex items-center gap-2">
               <input value={assistantId} onChange={(e) => setAssistantId(e.target.value)} placeholder="assistant-…" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500" />
-              <button type="button" disabled={busy !== null || !assistantId} onClick={() => run('attach', () => attachAssistant(assistantId.trim()))} className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold">
+              <button type="button" disabled={busy !== null || !assistantId} onClick={() => run('attach', () => attachAssistant(assistantId.trim()), 'AI assistant attached.')} className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold">
                 {busy === 'attach' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Attach'}
               </button>
             </div>

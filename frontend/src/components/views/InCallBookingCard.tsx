@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CalendarCheck, CheckCircle2, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import {
   disableInCallBooking,
@@ -33,11 +34,12 @@ export const InCallBookingCard: React.FC = () => {
 
   const run = async (fn: () => Promise<InCallBookingStatus>) => {
     setBusy(true);
-    setError(null);
     try {
-      apply(await fn());
+      const s = await fn();
+      apply(s);
+      toast.success(s.enabled ? 'In-call booking is on.' : 'In-call booking is off.');
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setBusy(false);
     }

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, FileSpreadsheet, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import {
@@ -60,17 +61,16 @@ const SourceRow: React.FC<{
   onChanged: () => void;
 }> = ({ source, onMap, onRuns, onReview, onChanged }) => {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const st = statusOf(source);
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true);
-    setError(null);
     try {
       await fn();
       onChanged();
+      toast.success(done);
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -101,23 +101,22 @@ const SourceRow: React.FC<{
           <span>{source.lastErrorMessage}</span>
         </div>
       )}
-      {error && <div className="text-2xs text-rose-300">{error}</div>}
       <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
         <button type="button" className={link} onClick={onMap} disabled={busy}>
           {source.mappingStatus === 'CONFIGURED' ? 'Edit mapping' : 'Map columns'}
         </button>
         {source.status === 'ACTIVE' ? (
           <>
-            <button type="button" className={link} disabled={busy} onClick={() => act(() => syncSheetSource(source.id))}>
+            <button type="button" className={link} disabled={busy} onClick={() => act(() => syncSheetSource(source.id), 'Sync requested.')}>
               Sync now
             </button>
-            <button type="button" className={link} disabled={busy} onClick={() => act(() => pauseSheetSource(source.id))}>
+            <button type="button" className={link} disabled={busy} onClick={() => act(() => pauseSheetSource(source.id), 'Sheet paused.')}>
               Pause
             </button>
           </>
         ) : (
           source.mappingStatus === 'CONFIGURED' && (
-            <button type="button" className={link} disabled={busy} onClick={() => act(() => enableSheetSource(source.id, []))}>
+            <button type="button" className={link} disabled={busy} onClick={() => act(() => enableSheetSource(source.id, []), 'Sheet switched on.')}>
               Switch on
             </button>
           )
@@ -142,7 +141,7 @@ const SourceRow: React.FC<{
               type="button"
               className="font-bold text-rose-300 hover:text-rose-200 cursor-pointer disabled:opacity-40"
               disabled={busy}
-              onClick={() => act(() => removeSheetSource(source.id))}
+              onClick={() => act(() => removeSheetSource(source.id), 'Sheet removed.')}
             >
               Remove sheet
             </button>
@@ -236,14 +235,14 @@ export const GoogleSheetsCard: React.FC = () => {
       pending.current?.abort();
       return;
     }
-    setError(null);
     setBusy('connect');
     const ac = new AbortController();
     pending.current = ac;
     try {
       setConnection(await connectGoogle(ac.signal));
+      toast.success('Google connected.');
     } catch (e) {
-      if (!ac.signal.aborted) setError(errorText(e));
+      if (!ac.signal.aborted) toast.error(errorText(e));
     } finally {
       pending.current = null;
       setBusy(null);
@@ -253,16 +252,15 @@ export const GoogleSheetsCard: React.FC = () => {
   const addSheet = async () => {
     if (!config || !connection) return;
     if (!pickerReady()) {
-      setError('Google’s picker is still loading. Try again in a moment.');
+      toast.warn('Google’s picker is still loading. Try again in a moment.');
       return;
     }
-    setError(null);
     setBusy('pick');
     try {
       const id = await pickSpreadsheet(config, connection.accountEmail);
       if (id) setPicked(id);
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -279,8 +277,9 @@ export const GoogleSheetsCard: React.FC = () => {
       await disconnectGoogle(connection.id);
       setArmed(false);
       await load();
+      toast.success('Google disconnected.');
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }

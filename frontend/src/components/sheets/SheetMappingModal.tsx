@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import {
   enableSheetSource,
@@ -92,6 +93,7 @@ export const SheetMappingModal: React.FC<{
         identity: identity.mode === 'column' ? identity : { mode: 'fallback', acknowledged: true },
       });
       setSaved(source);
+      toast.success('Mapping saved.');
       onChanged(source);
       await load();
     } catch (e) {
@@ -111,7 +113,7 @@ export const SheetMappingModal: React.FC<{
       if ((source.firstRun?.approval.approved ?? 0) > 0) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       setDone(source);
     } catch (e) {
-      setError({ message: errorText(e), details: [] });
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -295,11 +297,6 @@ export const SheetMappingModal: React.FC<{
                 <li key={p}>{p}</li>
               ))}
             </ul>
-          )}
-          {saved && (
-            <div className="flex items-center gap-1.5 text-xs text-emerald-300">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Mapping saved.
-            </div>
           )}
           <div className="flex flex-col sm:flex-row gap-2">
             <button

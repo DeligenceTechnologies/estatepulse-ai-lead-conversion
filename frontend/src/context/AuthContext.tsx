@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import {
   ApiError,
   SESSION_ENDED_EVENT,
@@ -14,7 +15,7 @@ import {
   type Role,
   type TeamSize,
 } from '../lib/api';
-import { startIdleWatch } from '../lib/idle';
+import { IDLE_TIMEOUT_MS, startIdleWatch } from '../lib/idle';
 
 type AuthStatus = 'loading' | 'authed' | 'anon';
 
@@ -70,6 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [restoreNonce, setRestoreNonce] = useState(0);
   const [explicitLogout, setExplicitLogout] = useState(false);
   const navigate = useNavigate();
+  // Whether a session is live right now, readable from mount-once handlers.
+  const live = useRef(false);
 
   const applySession = (data: MeResponse): void => {
     setUser(data.user);
@@ -78,6 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAgentProfileId(data.agentProfileId);
     setRestoreError(null);
     setStatus('authed');
+    live.current = true;
   };
 
   const reset = (): void => {
@@ -86,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRole(null);
     setAgentProfileId(null);
     setStatus('anon');
+    live.current = false;
   };
 
   useEffect(() => {
@@ -109,6 +114,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // retry, and do not strand the user on a spinner.
         if (err instanceof ApiError && err.code === 'NETWORK') {
           setRestoreError('Cannot reach the server.');
+          toast.error('Cannot reach the server.', { toastId: 'restore-network' });
           reset();
           return;
         }
@@ -134,7 +140,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Mount-once: the handler only calls setState setters, which are stable.
    */
   useEffect(() => {
-    const onSessionEnded = (): void => reset();
+    const onSessionEnded = (): void => {
+      // Only a session that was live is worth a word: the best-effort logout
+      // call in endSession can 401 too, after reset() has already run.
+      if (live.current) toast.warn('Your session ended. Sign in again.', { toastId: 'session-ended' });
+      reset();
+    };
     window.addEventListener(SESSION_ENDED_EVENT, onSessionEnded);
     return () => window.removeEventListener(SESSION_ENDED_EVENT, onSessionEnded);
   }, []);
@@ -148,6 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(session.token);
     setExplicitLogout(false);
     applySession(session);
+    toast.success(`Welcome back, ${displayName(session.user)}.`);
   };
 
   const signup: AuthContextType['signup'] = async (input) => {
@@ -155,6 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(session.token);
     setExplicitLogout(false);
     applySession(session);
+    toast.success('Workspace created. You are its owner.');
   };
 
   const refreshSession: AuthContextType['refreshSession'] = async () => {
@@ -162,6 +175,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const endSession = (): void => {
+    // Deliberate end: clearToken fires SESSION_ENDED_EVENT synchronously, and
+    // that handler must not announce "your session ended" for a sign-out.
+    live.current = false;
     // Revoke server-side first: apiFetch reads the token synchronously, before
     // the clearToken below removes it. Best-effort - if the call fails the
     // session still dies on its own idle timeout.
@@ -181,6 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     endSession();
     setExplicitLogout(true);
     navigate('/login', { replace: true });
+    toast.info('Signed out.');
   };
 
   /**
@@ -191,7 +208,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * A 401 on it ends the session through apiFetch like any other call.
    */
   useEffect(
-    () => startIdleWatch(status, endSession, () => void api.heartbeat().catch(() => {})),
+    () =>
+      startIdleWatch(
+        status,
+        () => {
+          endSession();
+          toast.warn(`Signed out after ${IDLE_TIMEOUT_MS / 60_000} minutes of inactivity.`);
+        },
+        () => void api.heartbeat().catch(() => {}),
+      ),
     [status],
   );
 

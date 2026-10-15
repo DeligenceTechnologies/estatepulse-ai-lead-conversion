@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, KeyRound, Loader2, X } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ApiError, api, type LeadSourceWithSecret } from '../../api/client';
 import { CopyField } from './CopyField';
 
@@ -19,7 +20,6 @@ export const ManualWebhookPanel: React.FC<{
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<LeadSourceWithSecret | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!name.trim() || creating) return;
@@ -27,10 +27,9 @@ export const ManualWebhookPanel: React.FC<{
     try {
       const source = await api.createLeadSource(name.trim());
       setCreated(source);
-      setError(null);
       onCreated(source.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      toast.error(e instanceof ApiError ? e.message : String(e));
     } finally {
       setCreating(false);
     }
@@ -86,13 +85,6 @@ export const ManualWebhookPanel: React.FC<{
         we never ask for an API key, and we hold no credential for your account. The trade-off is
         that we cannot repair, pause or remove the webhook for you later.
       </p>
-
-      {error && (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-rose-200 leading-relaxed">{error}</div>
-        </div>
-      )}
 
       <div className="space-y-1">
         <div className="text-xs text-slate-400 font-medium">Name this lead source</div>
