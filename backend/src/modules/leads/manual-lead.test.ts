@@ -162,7 +162,7 @@ test('owner adds a lead with a dialable phone: saved new, outreach on, under the
   assert.equal(lead.automation_paused, false);
   assert.equal(lead.dnc_status, false);
   assert.equal(lead.needs_review, false);
-  assert.equal(lead.temperature, null);
+  assert.equal(lead.temperature, 'cold');
 
   const source = await prisma.lead_sources.findFirst({ where: { organization_id: ownerA.orgId, code: MANUAL_SOURCE_CODE } });
   assert.ok(source);
