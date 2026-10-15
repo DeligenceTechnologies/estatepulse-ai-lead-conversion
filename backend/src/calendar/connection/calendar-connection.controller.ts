@@ -1,13 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Logger, Post, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Logger, Post, Query, Req, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { CookieOptions, Request, Response } from 'express';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { Public } from '@/auth/decorators/public.decorator';
 import type { AuthContext } from '@/auth/auth.types';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
-import { CALENDAR_ROUTE } from '../calendar.types';
+import type { AuthEnv } from '@/common/utils/interface';
+import { CALENDAR_ROUTE, CALENDLY_OAUTH_COOKIE } from '../calendar.types';
 import { CalendlyClient } from '../providers/calendly.client';
-import { CalendarConnectionService } from './calendar-connection.service';
+import { CalendarConnectionService, OAUTH_STATE_TTL_MS } from './calendar-connection.service';
 import { renderCalendlyCallbackPage, type CalendlyCallbackResult } from './calendly-callback.page';
 import { ActivateCalendarDto } from './dto/activate-calendar.dto';
 import { CalApiKeyDto, CalConnectDto } from './dto/cal-connect.dto';
@@ -16,11 +18,15 @@ import { CalApiKeyDto, CalConnectDto } from './dto/cal-connect.dto';
 @Controller(CALENDAR_ROUTE)
 export class CalendarConnectionController {
   private readonly logger = new Logger(CalendarConnectionController.name);
+  private readonly cookieSecure: boolean;
 
   constructor(
     private readonly connections: CalendarConnectionService,
     private readonly calendly: CalendlyClient,
-  ) {}
+    config: ConfigService<AuthEnv, true>,
+  ) {
+    this.cookieSecure = config.get('COOKIE_SECURE', { infer: true });
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
@@ -31,8 +37,10 @@ export class CalendarConnectionController {
   @Post('calendly/authorize')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
-  authorizeCalendly(@CurrentAuth() auth: AuthContext) {
-    return this.connections.startCalendly(auth.organizationId, auth.userId);
+  authorizeCalendly(@CurrentAuth() auth: AuthContext, @Res({ passthrough: true }) res: Response) {
+    const { authorizeUrl, nonce } = this.connections.startCalendly(auth.organizationId, auth.userId);
+    res.cookie(CALENDLY_OAUTH_COOKIE, nonce, { ...this.oauthCookieOptions(), maxAge: OAUTH_STATE_TTL_MS });
+    return { authorizeUrl };
   }
 
   @Public()
@@ -42,8 +50,13 @@ export class CalendarConnectionController {
     @Query('state') state: string | undefined,
     @Query('error') error: string | undefined,
     @Query('error_description') errorDescription: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
+    const nonce = (req.cookies as Record<string, string> | undefined)?.[CALENDLY_OAUTH_COOKIE];
+    // One sign-in per cookie: whatever happens next, it cannot be replayed.
+    res.clearCookie(CALENDLY_OAUTH_COOKIE, this.oauthCookieOptions());
+
     let result: CalendlyCallbackResult;
     if (error) {
       result = { ok: false, message: errorDescription || 'Calendly access was not granted.' };
@@ -51,7 +64,7 @@ export class CalendarConnectionController {
       result = { ok: false, message: 'Calendly did not return an authorization code. Start again from Settings.' };
     } else {
       try {
-        await this.connections.completeCalendly(code, state);
+        await this.connections.completeCalendly(code, state, nonce);
         result = { ok: true, message: 'You can close this window and return to EstatePulse.' };
       } catch (failure) {
         if (failure instanceof HttpException) {
@@ -102,5 +115,15 @@ export class CalendarConnectionController {
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   disconnect(@CurrentAuth() auth: AuthContext) {
     return this.connections.disconnect(auth.organizationId);
+  }
+
+  /** Sent back on Calendly's redirect (a top-level navigation), so Lax is enough locally; cross-site needs None. */
+  private oauthCookieOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: this.cookieSecure ? 'none' : 'lax',
+      path: '/',
+    };
   }
 }

@@ -542,11 +542,14 @@ export async function apiFetch<T>(
     auth?: boolean;
     /** Use this token instead of the session's (sign-out with a captured token). */
     token?: string | null;
+    /** Send and accept cookies cross-origin (the Calendly sign-in sets one). */
+    withCookies?: boolean;
   } = {},
 ): Promise<T> {
   const { method = 'GET', body, auth = false } = options;
   // Only /auth needs the refresh cookie; everything else authenticates by header.
-  const credentials: RequestCredentials = path.startsWith('/auth/') ? 'include' : 'same-origin';
+  const credentials: RequestCredentials =
+    options.withCookies || path.startsWith('/auth/') ? 'include' : 'same-origin';
 
   const send = async (token: string | null): Promise<Response> => {
     const headers: Record<string, string> = {};

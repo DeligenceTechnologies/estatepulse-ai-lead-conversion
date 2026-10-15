@@ -30,6 +30,8 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 const SYNC_INTERVAL_MS = 5 * MINUTE_MS;
 const STALE_AFTER_MS = 10 * MINUTE_MS;
 const LEASE_MS = 4 * MINUTE_MS;
+/** A long sync (a big team, a rate-limited provider) keeps its lease by renewing it this often. */
+const LEASE_RENEW_MS = MINUTE_MS;
 const FAILURE_BACKOFF_MS = 2 * MINUTE_MS;
 const MANUAL_COOLDOWN_MS = 30_000;
 const WEBHOOK_RETRY_MS = DAY_MS;
@@ -113,6 +115,8 @@ export class CalendarSyncService implements OnModuleDestroy {
   private readonly logger = new Logger(CalendarSyncService.name);
   private readonly webhookBase?: string;
   private readonly pending = new Map<string, NodeJS.Timeout>();
+  /** The 5-minute cron can outlast its interval; a second run would only fight the first for leases. */
+  private cronRunning = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -133,6 +137,16 @@ export class CalendarSyncService implements OnModuleDestroy {
 
   @Cron(CronExpression.EVERY_5_MINUTES, { name: 'calendar-availability-sync' })
   async syncDue(): Promise<void> {
+    if (this.cronRunning) return;
+    this.cronRunning = true;
+    try {
+      await this.syncDueBatch();
+    } finally {
+      this.cronRunning = false;
+    }
+  }
+
+  private async syncDueBatch(): Promise<void> {
     const due = await this.prisma.calendarConnection.findMany({
       where: {
         status: 'active',
@@ -226,6 +240,14 @@ export class CalendarSyncService implements OnModuleDestroy {
     });
     if (lease.count === 0) return 'busy';
 
+    let renewing: Promise<unknown> = Promise.resolve();
+    const heartbeat = setInterval(() => {
+      renewing = this.prisma.calendarConnection
+        .updateMany({ where: { id: connectionId }, data: { syncLeaseUntil: new Date(Date.now() + LEASE_MS) } })
+        .catch(() => undefined);
+    }, LEASE_RENEW_MS);
+    heartbeat.unref();
+
     let retryAfter: Date | null = null;
     try {
       const { orgId } = await this.prisma.calendarConnection.findUniqueOrThrow({
@@ -258,6 +280,9 @@ export class CalendarSyncService implements OnModuleDestroy {
       });
       throw error;
     } finally {
+      clearInterval(heartbeat);
+      // A renewal still in flight must land before the lease is released, not after.
+      await renewing;
       await this.prisma.calendarConnection.updateMany({
         where: { id: connectionId },
         data: { syncLeaseUntil: retryAfter },
@@ -669,6 +694,7 @@ function dedupe<T extends { start: number; end: number; source: string }>(entrie
 }
 
 function memberError(label: string, name: string, status: number): string {
+  if (status === 429) return `${label} is limiting requests, so ${name}'s availability will be retried shortly.`;
   if (status === 403) return `${label} does not share ${name}'s availability with this connection.`;
   if (status === 404) return `${label} could not find ${name}'s calendar.`;
   return `${name}'s availability could not be loaded from ${label}. It will be retried shortly.`;

@@ -49,10 +49,10 @@ const APP_VIEWS = [
   'roles',
   // Live API, the Calendar pages, all read from the Calendly or Cal.com
   // connected once under Settings → Calendar: every member's free and busy
-  // time, the meetings leads can book, and the workspace's members.
+  // time, and the meetings booked (with the events leads can book). Its
+  // members are seen from Team Members.
   'team_availability',
-  'meeting_types',
-  'calendar_members',
+  'meetings',
   // Live API: org_settings (timezone, business hours) plus the Telnyx and
   // calendar connections, one tab each.
   'settings',
@@ -62,8 +62,19 @@ export type AppView = (typeof APP_VIEWS)[number];
 
 /** `lead_sources` <-> `/lead-sources`. The URL is the one source of truth for the active view. */
 export const pathForView = (view: AppView): string => '/' + view.replace(/_/g, '-');
+/** Old URLs that still open their page after a rename (bookmarks, shared links). */
+const RENAMED_VIEWS: Record<string, AppView> = {
+  meeting_types: 'meetings',
+  // Calendar members moved into Team Members (its "Calendar members" drawer).
+  calendar_members: 'agents',
+};
+
+const viewId = (pathname: string): string => pathname.replace(/^\/+|\/+$/g, '').replace(/-/g, '_');
+const isRenamedPath = (pathname: string): boolean => Object.hasOwn(RENAMED_VIEWS, viewId(pathname));
+
 export const viewForPath = (pathname: string): AppView | null => {
-  const id = pathname.replace(/^\/+|\/+$/g, '').replace(/-/g, '_');
+  const id = viewId(pathname);
+  if (Object.hasOwn(RENAMED_VIEWS, id)) return RENAMED_VIEWS[id];
   return (APP_VIEWS as readonly string[]).includes(id) ? (id as AppView) : null;
 };
 
@@ -209,8 +220,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [externalLeads, setExternalLeads] = useState<Record<string, Lead>>({});
 
   useEffect(() => {
-    if (!viewForPath(location.pathname)) {
+    const view = viewForPath(location.pathname);
+    if (!view) {
       navigate(pathForView('dashboard'), { replace: true });
+    } else if (isRenamedPath(location.pathname)) {
+      navigate({ pathname: pathForView(view), search: location.search }, { replace: true });
     }
   }, [location.pathname]);
 

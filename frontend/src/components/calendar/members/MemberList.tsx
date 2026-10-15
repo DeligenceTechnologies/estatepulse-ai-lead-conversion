@@ -2,7 +2,6 @@ import React from 'react';
 import { Check, ExternalLink, Loader2, UserPlus } from 'lucide-react';
 import type { CalendarMember } from '../../../utils/calendarApi';
 import { ROLE_LABEL } from '../shared/ui';
-import { summarizeSchedule } from './schedule';
 
 const initials = (name: string): string =>
   name
@@ -40,46 +39,7 @@ const localTime = (timezone: string | null, now: Date): string | null => {
 };
 
 const GRID =
-  'grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_5.5rem_13rem_8.5rem] lg:grid-cols-[minmax(0,1fr)_5.5rem_13rem_8rem_8.5rem] items-center gap-x-4';
-
-const MAX_LINES = 2;
-
-/** Their working hours from the calendar, merged into a line or two; the full week on hover. */
-const WorkingHours: React.FC<{ member: CalendarMember; compact?: boolean }> = ({ member, compact }) => {
-  if (!member.schedule) {
-    return compact ? null : (
-      <span className="text-xs text-slate-500" title="Their calendar has not shared working hours">
-        Not set
-      </span>
-    );
-  }
-  const lines = summarizeSchedule(member.schedule);
-  if (!lines.length) {
-    return <span className="text-xs text-slate-500">No working days</span>;
-  }
-  const full = lines.map((line) => `${line.days}: ${line.hours}`).join('\n');
-  const tz = member.schedule.timezone && member.schedule.timezone !== member.timezone ? member.schedule.timezone : null;
-  const shown = compact ? lines.slice(0, 1) : lines.slice(0, MAX_LINES);
-  const more = lines.length - shown.length;
-
-  return (
-    <div className={`min-w-0 leading-5 ${compact ? 'text-2xs' : 'text-xs'}`} title={tz ? `${full}\n(${tz})` : full}>
-      {shown.map((line) => (
-        <div key={line.days} className="truncate">
-          <span className="font-semibold text-slate-200">{line.days}</span>{' '}
-          <span className="text-slate-400 tabular-nums">{line.hours}</span>
-        </div>
-      ))}
-      {(more > 0 || (tz && !compact)) && (
-        <div className="text-2xs text-slate-500 truncate">
-          {more > 0 && `+${more} more`}
-          {more > 0 && tz && !compact && ' · '}
-          {!compact && tz?.replace(/_/g, ' ')}
-        </div>
-      )}
-    </div>
-  );
-};
+  'grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_6rem_10rem_8.5rem] items-center gap-x-4';
 
 /** People in the connected calendar, with who is already on the team and a one-click add for the rest. */
 export const MemberList: React.FC<{
@@ -97,8 +57,7 @@ export const MemberList: React.FC<{
       >
         <span>Member</span>
         <span>Role</span>
-        <span>Working hours</span>
-        <span className="hidden lg:block">Local time</span>
+        <span>Local time</span>
         <span className="text-right">Team</span>
       </div>
 
@@ -106,7 +65,6 @@ export const MemberList: React.FC<{
         {items.map((member) => {
           const onTeam = Boolean(member.userId);
           const busy = adding === member.externalId;
-          // Their hours are in the schedule's zone, so that is their working clock.
           const zone = member.schedule?.timezone || member.timezone;
           const time = localTime(zone, now);
           const linkedAs = member.userName && member.userName !== member.name ? member.userName : null;
@@ -142,9 +100,6 @@ export const MemberList: React.FC<{
                     {member.email || <span className="text-slate-500">No email</span>}
                     {linkedAs && <span className="text-slate-500"> · {linkedAs} here</span>}
                   </div>
-                  <div className="md:hidden mt-0.5">
-                    <WorkingHours member={member} compact />
-                  </div>
                 </div>
               </div>
 
@@ -158,11 +113,7 @@ export const MemberList: React.FC<{
                 </span>
               </span>
 
-              <div className="hidden md:block min-w-0">
-                <WorkingHours member={member} />
-              </div>
-
-              <span className="hidden lg:block min-w-0 text-xs text-slate-300 tabular-nums truncate" title={zone ?? undefined}>
+              <span className="hidden md:block min-w-0 text-xs text-slate-300 tabular-nums truncate" title={zone ?? undefined}>
                 {time ? (
                   <>
                     {time}

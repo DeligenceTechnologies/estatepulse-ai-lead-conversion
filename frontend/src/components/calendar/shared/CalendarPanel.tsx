@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { messageFor } from '../../../lib/api';
 
 type Resource<T> = { data: T | null; error: string | null; loading: boolean };
@@ -28,18 +28,25 @@ export const useProviderData = <T,>(fetcher: () => Promise<T>): Resource<T> & { 
   return { ...state, reload };
 };
 
-/** The card each Calendar page sits in: a title row with count and refresh, then the content. */
+/** Runs `reload` each time the page's Sync button finishes (not on mount: the page loads itself). */
+export const useReloadOnSync = (syncVersion: number, reload: () => unknown): void => {
+  const latest = useRef(reload);
+  latest.current = reload;
+  useEffect(() => {
+    if (syncVersion > 0) void latest.current();
+  }, [syncVersion]);
+};
+
+/** The card each Calendar page sits in: a title row with count, then the content. Syncing lives in the page header. */
 export const PanelCard: React.FC<{
   icon: React.ElementType;
   title: string;
   hint: string;
   count: number | undefined;
   loading: boolean;
-  providerLabel: string;
-  onRefresh: () => void;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ icon: Icon, title, hint, count, loading, providerLabel, onRefresh, toolbar, children }) => (
+}> = ({ icon: Icon, title, hint, count, loading, toolbar, children }) => (
   <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden">
     <header className="px-4 sm:px-5 py-4 border-b border-slate-800 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -55,21 +62,11 @@ export const PanelCard: React.FC<{
                   {count}
                 </span>
               )}
+              {loading && <Loader2 className="w-3.5 h-3.5 text-slate-500 animate-spin" aria-label="Loading" />}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">{hint}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          aria-label={`Refresh from ${providerLabel}`}
-          title={`Refresh from ${providerLabel}`}
-          className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-300 border border-slate-700 hover:border-slate-600 hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Refresh</span>
-        </button>
       </div>
       {toolbar}
     </header>

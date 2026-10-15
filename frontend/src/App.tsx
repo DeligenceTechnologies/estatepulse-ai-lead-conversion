@@ -52,8 +52,7 @@ const AppContent: React.FC = () => {
         {activeView === 'agents' && <AgentsView />}
         {activeView === 'roles' && <RolesView />}
         {activeView === 'team_availability' && <CalendarView section="availability" />}
-        {activeView === 'meeting_types' && <CalendarView section="meetings" />}
-        {activeView === 'calendar_members' && <CalendarView section="members" />}
+        {activeView === 'meetings' && <CalendarView section="meetings" />}
         {activeView === 'my_availability' && <AgentAvailability />}
         {activeView === 'integrations' && (
           <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />

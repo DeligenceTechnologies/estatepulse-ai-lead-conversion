@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarClock, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import {
@@ -55,6 +55,7 @@ const ConnectionSummary: React.FC<{
   onSwitch: () => void;
   onDisconnected: () => Promise<void>;
 }> = ({ provider, connection, canEdit, onReconnected, onSwitch, onDisconnected }) => {
+  const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,66 +111,54 @@ const ConnectionSummary: React.FC<{
         </div>
       )}
 
-      {canEdit && (
+      {(canEdit || !broken) && (
         <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800">
-          <SecondaryButton onClick={onSwitch} disabled={disconnecting} icon={<ArrowLeftRight className="w-3.5 h-3.5" />}>
-            Change calendar
-          </SecondaryButton>
-          {confirming ? (
+          {canEdit && (
             <>
-              <span className="text-2xs text-slate-400">Disconnect {label}?</span>
-              <SecondaryButton
-                danger
-                onClick={() => void disconnect()}
-                disabled={disconnecting}
-                icon={<Unlink className="w-3.5 h-3.5" />}
-              >
-                {disconnecting ? 'Disconnecting…' : 'Yes, disconnect'}
+              <SecondaryButton onClick={onSwitch} disabled={disconnecting} icon={<ArrowLeftRight className="w-3.5 h-3.5" />}>
+                Change calendar
               </SecondaryButton>
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                disabled={disconnecting}
-                className="h-8 px-2 text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                Cancel
-              </button>
+              {confirming ? (
+                <>
+                  <span className="text-2xs text-slate-400">Disconnect {label}?</span>
+                  <SecondaryButton
+                    danger
+                    onClick={() => void disconnect()}
+                    disabled={disconnecting}
+                    icon={<Unlink className="w-3.5 h-3.5" />}
+                  >
+                    {disconnecting ? 'Disconnecting…' : 'Yes, disconnect'}
+                  </SecondaryButton>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    disabled={disconnecting}
+                    className="h-8 px-2 text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <SecondaryButton onClick={() => setConfirming(true)} icon={<Unlink className="w-3.5 h-3.5" />}>
+                  Disconnect
+                </SecondaryButton>
+              )}
             </>
-          ) : (
-            <SecondaryButton onClick={() => setConfirming(true)} icon={<Unlink className="w-3.5 h-3.5" />}>
-              Disconnect
-            </SecondaryButton>
+          )}
+          {/* Settings only connects; availability and meetings live under Calendar in the sidebar. */}
+          {!broken && !confirming && (
+            <button
+              type="button"
+              onClick={() => navigate('/team-availability')}
+              className="group ml-auto h-8 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-on-accent inline-flex items-center gap-1.5 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            >
+              Open Calendar
+              <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+            </button>
           )}
         </div>
       )}
     </div>
-  );
-};
-
-/**
- * Where the connected calendar is put to work. Settings only connects; team
- * availability, meeting types and members are the sidebar's Calendar pages.
- */
-const CalendarPagesLink: React.FC<{ providerLabel: string }> = ({ providerLabel }) => {
-  const navigate = useNavigate();
-  return (
-    <button
-      type="button"
-      onClick={() => navigate('/team-availability')}
-      className="group w-full text-left bg-emerald-500/[0.06] border border-emerald-500/25 hover:border-emerald-500/50 rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
-    >
-      <span className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0">
-        <CalendarClock className="w-4 h-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-xs font-bold text-white">{providerLabel} is ready</span>
-        <span className="block text-2xs text-slate-400 mt-0.5">See availability, meetings and members under Calendar.</span>
-      </span>
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-300 shrink-0">
-        <span className="hidden sm:inline">Open Calendar</span>
-        <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
-      </span>
-    </button>
   );
 };
 
@@ -305,7 +294,6 @@ export const ConnectCalendar: React.FC = () => {
           onSwitch={() => setSwitching(true)}
           onDisconnected={afterDisconnect}
         />
-        {connection.status === 'active' && <CalendarPagesLink providerLabel={PROVIDERS[provider].label} />}
       </div>
     );
   }

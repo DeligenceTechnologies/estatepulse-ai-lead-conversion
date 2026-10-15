@@ -104,7 +104,12 @@ export interface CalendlyOAuthState {
   orgId: string;
   userId: string;
   expiresAt: number;
+  /** sha256 of the nonce kept in the starting browser's cookie, so only that browser can finish the sign-in. */
+  nonceHash: string;
 }
+
+/** HttpOnly cookie that ties a Calendly sign-in to the browser that started it. */
+export const CALENDLY_OAUTH_COOKIE = 'calendly_oauth';
 
 export type BusySource = 'booking' | 'hold' | 'calendar';
 

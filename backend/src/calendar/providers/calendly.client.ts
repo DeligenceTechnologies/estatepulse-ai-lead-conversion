@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import type { BusySource } from '../calendar.types';
@@ -17,10 +17,11 @@ const AUTH_BASE = 'https://auth.calendly.com';
 const API_BASE = 'https://api.calendly.com';
 const PROVIDER = 'Calendly';
 const PAGE_SIZE = 100;
-const MAX_PAGES = 10;
-/** Booked meetings need one invitee call each, so cap how many a single read fetches. */
-const MAX_MEETING_PAGES = 3;
-const INVITEE_CONCURRENCY = 6;
+/** Members and event types: up to 5,000 each. Past that the rest is skipped (and logged), not failed. */
+const MAX_PAGES = 50;
+/** Booked meetings need one invitee call each, so cap how many a single read fetches (1,000). */
+const MAX_MEETING_PAGES = 10;
+const INVITEE_CONCURRENCY = 4;
 
 interface TokenResponse {
   access_token: string;
@@ -132,6 +133,7 @@ export interface CalendlyGrant {
 
 @Injectable()
 export class CalendlyClient {
+  private readonly logger = new Logger(CalendlyClient.name);
   private readonly clientId?: string;
   private readonly clientSecret?: string;
   private readonly redirectUri?: string;
@@ -341,8 +343,11 @@ export class CalendlyClient {
     let next: string | null = firstPage;
     for (let page = 0; next && page < maxPages; page++) {
       const result: Page<T> = await this.get<Page<T>>(accessToken, next);
-      items.push(...result.collection);
-      next = result.pagination.next_page;
+      items.push(...(result.collection ?? []));
+      next = result.pagination?.next_page ?? null;
+    }
+    if (next) {
+      this.logger.warn(`Calendly returned more than ${items.length} items for ${new URL(firstPage).pathname}; the rest were skipped.`);
     }
     return items;
   }

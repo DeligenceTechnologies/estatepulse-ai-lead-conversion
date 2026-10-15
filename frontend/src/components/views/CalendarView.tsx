@@ -1,21 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, ChevronRight, ShieldAlert, Users } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarDays, ChevronRight, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ApiError, messageFor } from '../../lib/api';
 import { getOrganizationCalendar, type CalendarProviderId, type OrganizationCalendarStatus } from '../../utils/calendarApi';
 import { TeamAvailability } from '../calendar/availability/TeamAvailability';
-import { MeetingTypes } from '../calendar/meeting-types/MeetingTypes';
-import { CalendarMembers } from '../calendar/members/CalendarMembers';
+import { Meetings } from '../calendar/meetings/Meetings';
+import { SyncButton } from '../calendar/shared/SyncButton';
 import { PROVIDERS } from '../calendar/shared/ui';
 
-export type CalendarSection = 'availability' | 'meetings' | 'members';
+export type CalendarSection = 'availability' | 'meetings';
 
 /** One sidebar entry each, under Calendar. The page carries the full title. */
 const SECTIONS: Record<CalendarSection, { title: string; subtitle: string; icon: React.ElementType }> = {
   availability: { title: 'Team Availability', subtitle: 'See who’s free and who’s busy.', icon: CalendarClock },
-  meetings: { title: 'Meeting Types', subtitle: 'Booking links, and who booked them.', icon: CalendarDays },
-  members: { title: 'Calendar Members', subtitle: 'Add calendar members to your team.', icon: Users },
+  meetings: { title: 'Meetings', subtitle: 'Every booked meeting: who, when and how to join.', icon: CalendarDays },
 };
 
 const Skeleton: React.FC = () => (
@@ -42,7 +41,7 @@ const EmptyState: React.FC<{ icon: React.ReactNode; title: string; children: Rea
 /** Which calendar is connected: just its name. Opens Settings → Calendar for anyone who may change it. */
 const ConnectedCalendar: React.FC<{ provider: CalendarProviderId; onOpen?: () => void }> = ({ provider, onOpen }) => {
   const { label, icon: Icon, tone } = PROVIDERS[provider];
-  const shell = 'h-10 pl-1.5 pr-3.5 rounded-full bg-slate-900 border border-slate-800 inline-flex items-center gap-2 shrink-0 self-start md:self-auto';
+  const shell = 'h-10 pl-1.5 pr-3.5 rounded-full bg-slate-900 border border-slate-800 inline-flex items-center gap-2 shrink-0';
   const content = (
     <>
       <span className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${tone}`}>
@@ -72,8 +71,8 @@ const primaryButton =
   'h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400';
 
 /**
- * The Calendar pages — Team Availability, Meeting Types, Calendar Members —
- * each its own sidebar entry, all read from the Calendly or Cal.com account
+ * The Calendar pages — Team Availability and Meetings — each its own
+ * sidebar entry, all read from the Calendly or Cal.com account
  * connected once under Settings → Calendar.
  */
 export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }) => {
@@ -83,6 +82,8 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
   const [status, setStatus] = useState<OrganizationCalendarStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  /** Bumped by the Sync button; each page reloads its data when it changes. */
+  const [syncVersion, setSyncVersion] = useState(0);
 
   const load = useCallback(async () => {
     setError(null);
@@ -157,11 +158,9 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
     const key = connection!.connectedAt;
     body =
       section === 'availability' ? (
-        <TeamAvailability key={key} />
-      ) : section === 'meetings' ? (
-        <MeetingTypes key={key} provider={provider!} />
+        <TeamAvailability key={key} syncVersion={syncVersion} />
       ) : (
-        <CalendarMembers key={key} provider={provider!} />
+        <Meetings key={key} provider={provider!} syncVersion={syncVersion} />
       );
   }
 
@@ -179,7 +178,16 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
             </div>
           </div>
 
-          {provider && connected && <ConnectedCalendar provider={provider} onOpen={canConnect ? openCalendarSettings : undefined} />}
+          {provider && connected && (
+            <div className="flex items-center gap-2 self-start md:self-auto min-w-0">
+              <SyncButton
+                providerLabel={PROVIDERS[provider].label}
+                initialSyncedAt={connection?.syncedAt ?? null}
+                onSynced={() => setSyncVersion((version) => version + 1)}
+              />
+              <ConnectedCalendar provider={provider} onOpen={canConnect ? openCalendarSettings : undefined} />
+            </div>
+          )}
         </div>
 
         {body}

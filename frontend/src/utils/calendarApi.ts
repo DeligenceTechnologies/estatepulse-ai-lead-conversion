@@ -14,6 +14,8 @@ export interface CalendarConnection {
   workspaceName: string | null;
   workspaceRole: WorkspaceRole | null;
   connectedAt: string;
+  /** When its data was last synced from the provider; null before the first sync. */
+  syncedAt?: string | null;
   lastError: string | null;
 }
 
@@ -191,7 +193,12 @@ export const getOrganizationCalendar = (): Promise<OrganizationCalendarStatus> =
   apiFetch<OrganizationCalendarStatus>(ORG_CALENDAR, { auth: true });
 
 export const startCalendlyConnect = (): Promise<{ authorizeUrl: string }> =>
-  apiFetch<{ authorizeUrl: string }>(`${ORG_CALENDAR}/calendly/authorize`, { method: 'POST', auth: true });
+  apiFetch<{ authorizeUrl: string }>(`${ORG_CALENDAR}/calendly/authorize`, {
+    method: 'POST',
+    auth: true,
+    // The response sets the cookie that lets only this browser finish the sign-in.
+    withCookies: true,
+  });
 
 export interface CalComAccountCheck {
   account: { email: string | null; name: string | null; username: string | null };

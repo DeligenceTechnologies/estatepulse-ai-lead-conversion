@@ -6,7 +6,6 @@ import {
   CalendarCheck,
   CalendarClock,
   CalendarDays,
-  Contact,
   Repeat,
   UserCheck,
   Plug,
@@ -24,10 +23,10 @@ import type { NavGroup, NavItem } from './DashboardSidebar';
 type OwnerNavItem = NavItem & { id: AppView };
 
 /**
- * The owner app's navigation, ordered by how often each page is used: the
- * overview first, then the daily lead work, then the team, and one-time
- * settings last. Within a group the most-used page leads. Short labels — the
- * page itself carries the full title. DashboardSidebar renders it.
+ * The owner app's navigation: the overview first, then the team, the
+ * calendar and the daily lead work, and one-time settings last. Within a
+ * group the most-used page leads. Short labels — the page itself carries the
+ * full title. DashboardSidebar renders it.
  */
 export function useOwnerNav(): NavGroup[] {
   const { leads } = useApp();
@@ -43,28 +42,6 @@ export function useOwnerNav(): NavGroup[] {
       ],
     },
     {
-      // Its own main section, right under the overview: everything read from
-      // the calendar connected once under Settings → Calendar.
-      label: 'Calendar',
-      items: can('organization.read')
-        ? [
-            { id: 'team_availability', label: 'Team Availability', icon: CalendarClock },
-            { id: 'meeting_types', label: 'Meeting Types', icon: CalendarDays },
-            { id: 'calendar_members', label: 'Calendar Members', icon: Contact },
-          ]
-        : [],
-    },
-    {
-      label: 'Pipeline',
-      items: [
-        { id: 'leads', label: 'Leads', icon: Users, badge: leads.length },
-        { id: 'appointments', label: 'Appointments', icon: CalendarCheck },
-        { id: 'conversations', label: 'Conversations', icon: MessageSquare },
-        { id: 'calls', label: 'AI Calls', icon: PhoneCall },
-        { id: 'followups', label: 'Follow-ups', icon: Repeat },
-      ],
-    },
-    {
       label: 'Team',
       items: [
         // Every user in the organization (owners, agents, custom roles), not
@@ -77,6 +54,27 @@ export function useOwnerNav(): NavGroup[] {
           ? [{ id: 'my_availability' as const, label: 'My Availability', icon: Clock }]
           : []),
         ...(can('role.read') ? [{ id: 'roles' as const, label: 'Roles & Permissions', icon: ShieldCheck }] : []),
+      ],
+    },
+    {
+      // Everything read from the calendar connected once under Settings →
+      // Calendar. Its members are added from Team Members.
+      label: 'Calendar',
+      items: can('organization.read')
+        ? [
+            { id: 'team_availability', label: 'Team Availability', icon: CalendarClock },
+            { id: 'meetings', label: 'Meetings', icon: CalendarDays },
+          ]
+        : [],
+    },
+    {
+      label: 'Pipeline',
+      items: [
+        { id: 'leads', label: 'Leads', icon: Users, badge: leads.length },
+        { id: 'appointments', label: 'Appointments', icon: CalendarCheck },
+        { id: 'conversations', label: 'Conversations', icon: MessageSquare },
+        { id: 'calls', label: 'AI Calls', icon: PhoneCall },
+        { id: 'followups', label: 'Follow-ups', icon: Repeat },
       ],
     },
     {

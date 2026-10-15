@@ -3,7 +3,7 @@ import { Search, Users } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import { addCalendarMemberAsAgent, listCalendarMembers, type CalendarMember, type CalendarProviderId } from '../../../utils/calendarApi';
-import { PanelCard, RowSkeleton, useProviderData } from '../shared/CalendarPanel';
+import { RowSkeleton, useProviderData, useReloadOnSync } from '../shared/CalendarPanel';
 import { Empty, Notice, PROVIDERS, SearchField, type NoticeTone } from '../shared/ui';
 import { MemberList } from './MemberList';
 
@@ -13,33 +13,22 @@ type Filter = 'all' | 'unlinked' | 'linked';
 const byNextAction = (a: CalendarMember, b: CalendarMember) =>
   Number(Boolean(a.userId)) - Number(Boolean(b.userId)) || a.name.localeCompare(b.name);
 
-const Coverage: React.FC<{ linked: number; total: number }> = ({ linked, total }) => {
-  const percent = total ? Math.round((linked / total) * 100) : 0;
-  return (
-    <div className="flex items-center gap-2.5 shrink-0" title={`${percent}% of calendar members are on your team`}>
-      <div
-        className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden"
-        role="progressbar"
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Calendar members on your team"
-      >
-        <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style={{ width: `${percent}%` }} />
-      </div>
-      <span className="text-2xs text-slate-400 tabular-nums whitespace-nowrap">
-        <span className="font-semibold text-slate-200">{linked}</span>/{total} on team
-      </span>
-    </div>
-  );
-};
-
-/** Everyone in the connected organization or team, and whether each one is an agent here yet. */
-export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ provider }) => {
+/**
+ * Everyone in the connected organization or team, and whether each one is a
+ * team member here yet, with a one-click add. Shown in the Team Members page's
+ * Calendar members drawer.
+ */
+export const CalendarMembers: React.FC<{
+  provider: CalendarProviderId;
+  syncVersion: number;
+  /** Someone was just added to the team, so the team list behind can reload. */
+  onAdded?: () => void;
+}> = ({ provider, syncVersion, onAdded }) => {
   const label = PROVIDERS[provider].label;
   const { can } = useAuth();
   const canAdd = can('user.create');
   const { data, error, loading, reload } = useProviderData(listCalendarMembers);
+  useReloadOnSync(syncVersion, reload);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [adding, setAdding] = useState<string | null>(null);
@@ -63,18 +52,14 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
     setAdding(member.externalId);
     setNotice(null);
     try {
-      const { user, credentialsEmail, workingHoursFrom } = await addCalendarMemberAsAgent(member.externalId);
-      const hours =
-        workingHoursFrom === 'organization'
-          ? ' Working hours are your organization’s defaults.'
-          : ` Working hours and timezone were copied from ${PROVIDERS[workingHoursFrom]?.label ?? label}.`;
+      const { user, credentialsEmail } = await addCalendarMemberAsAgent(member.externalId);
       setNotice(
         !credentialsEmail || credentialsEmail.sent
           ? {
               tone: 'success',
               text: credentialsEmail
-                ? `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.${hours}`
-                : `${user.name} is now an agent.${hours}`,
+                ? `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.`
+                : `${user.name} is now an agent.`,
             }
           : {
               tone: 'warning',
@@ -83,6 +68,7 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
               }. Set a password for them from Team.`,
             },
       );
+      onAdded?.();
       await reload();
     } catch (e) {
       setNotice({ tone: 'error', text: messageFor(e) });
@@ -92,7 +78,7 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
   };
 
   const toolbar = data && data.length > 0 && (
-    <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
       <SearchField value={search} onChange={setSearch} placeholder="Search name or email" />
       <div role="radiogroup" aria-label="Show" className="inline-flex h-9 p-0.5 rounded-lg bg-slate-950 border border-slate-800 w-fit">
         {(
@@ -117,23 +103,12 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
           </button>
         ))}
       </div>
-      <div className="lg:ml-auto">
-        <Coverage linked={linked} total={members.length} />
-      </div>
     </div>
   );
 
   return (
-    <PanelCard
-      icon={Users}
-      title="Calendar members"
-      hint={`Live from ${label}. Add someone to give them an agent login.`}
-      count={data?.length}
-      loading={loading}
-      providerLabel={label}
-      onRefresh={() => void reload()}
-      toolbar={toolbar}
-    >
+    <div className="space-y-4">
+      {toolbar}
       <div className="space-y-3">
         {notice && (
           <Notice tone={notice.tone} onDismiss={() => setNotice(null)}>
@@ -146,7 +121,7 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
           <RowSkeleton />
         ) : data.length === 0 ? (
           <Empty icon={Users} title="No members yet">
-            Invite your agents in {label}, then refresh.
+            Invite your agents in {label}, then press Sync.
           </Empty>
         ) : visible.length === 0 ? (
           search.trim() ? (
@@ -163,9 +138,11 @@ export const CalendarMembers: React.FC<{ provider: CalendarProviderId }> = ({ pr
             </Empty>
           )
         ) : (
-          <MemberList items={visible} canAdd={canAdd} adding={adding} onAdd={(member) => void add(member)} />
+          <div className={`transition-opacity ${loading ? 'opacity-70' : ''}`}>
+            <MemberList items={visible} canAdd={canAdd} adding={adding} onAdd={(member) => void add(member)} />
+          </div>
         )}
       </div>
-    </PanelCard>
+    </div>
   );
 };

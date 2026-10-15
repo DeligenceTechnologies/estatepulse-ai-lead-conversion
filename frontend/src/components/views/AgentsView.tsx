@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   CircleDot,
+  Contact,
   CalendarArrowDown,
   CalendarArrowUp,
   LayoutGrid,
@@ -27,6 +28,7 @@ import {
 } from '../../utils/usersApi';
 import { FilterDropdown } from '../common/FilterDropdown';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
+import { CalendarMembersDrawer } from '../calendar/members/CalendarMembersDrawer';
 import { MemberFormModal } from '../modals/MemberFormModal';
 import { MemberDrawer } from '../team/MemberDrawer';
 import { getOrgSettings, type OrgSettings } from '../../utils/orgSettingsApi';
@@ -127,6 +129,9 @@ export const AgentsView: React.FC = () => {
   /** The member whose details panel is open. */
   const [openId, setOpenId] = useState<string | null>(null);
   const closeDetails = useCallback(() => setOpenId(null), []);
+  /** The second view of people: everyone in the connected calendar, to add to the team. */
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
   // Any change to what is being asked for starts again from page one.
   useEffect(() => setPage(1), [debouncedSearch, roleFilter, statusFilter, sortOrder, pageSize]);
@@ -301,17 +306,31 @@ export const AgentsView: React.FC = () => {
               </p>
             </div>
           </div>
-          {canCreate && (
-            <button
-              onClick={() => setForm('new')}
-              disabled={roles.length === 0}
-              title={roles.length === 0 ? 'Roles could not be loaded' : undefined}
-              className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <Plus className="w-4 h-4" />
-              Add Member
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {can('organization.read') && (
+              <button
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                aria-haspopup="dialog"
+                title="Everyone in your connected Calendly or Cal.com, to add to the team"
+                className="h-9 px-3.5 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:border-slate-600 hover:text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+              >
+                <Contact className="w-4 h-4" />
+                Calendar members
+              </button>
+            )}
+            {canCreate && (
+              <button
+                onClick={() => setForm('new')}
+                disabled={roles.length === 0}
+                title={roles.length === 0 ? 'Roles could not be loaded' : undefined}
+                className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4" />
+                Add Member
+              </button>
+            )}
+          </div>
         </div>
 
         {!forbidden && (
@@ -556,6 +575,8 @@ export const AgentsView: React.FC = () => {
           onClose={form ? noop : closeDetails}
         />
       )}
+
+      {calendarOpen && <CalendarMembersDrawer onAdded={() => void load()} onClose={closeCalendar} />}
 
       {form && orgId && (
         <MemberFormModal

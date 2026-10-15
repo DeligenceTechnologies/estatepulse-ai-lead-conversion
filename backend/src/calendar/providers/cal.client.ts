@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type {
   BookedMeeting,
   WeeklySchedule,
@@ -30,7 +30,8 @@ const WEEKDAY_INDEX: Record<string, number> = {
 const BOOKINGS_PAGE_SIZE = 100;
 const WEBHOOK_TRIGGERS = ['BOOKING_CREATED', 'BOOKING_RESCHEDULED', 'BOOKING_CANCELLED', 'BOOKING_REQUESTED', 'BOOKING_REJECTED'];
 const PAGE_SIZE = 250;
-const MAX_PAGES = 10;
+/** Up to 12,500 members and 5,000 bookings per read. Past that the rest is skipped (and logged), not failed. */
+const MAX_PAGES = 50;
 
 interface Envelope<T> {
   status: string;
@@ -108,6 +109,7 @@ export interface CalBookableEventType {
 
 @Injectable()
 export class CalClient {
+  private readonly logger = new Logger(CalClient.name);
   async me(apiKey: string): Promise<CalAccount> {
     const me = await this.get<CalMe>(apiKey, '/me');
     return {
@@ -162,9 +164,10 @@ export class CalClient {
     const memberships: CalMembership[] = [];
     for (let page = 0; page < MAX_PAGES; page++) {
       const query = new URLSearchParams({ take: String(PAGE_SIZE), skip: String(page * PAGE_SIZE) });
-      const batch = await this.get<CalMembership[]>(apiKey, `/teams/${teamId}/memberships?${query}`);
+      const batch = (await this.get<CalMembership[] | null>(apiKey, `/teams/${teamId}/memberships?${query}`)) ?? [];
       memberships.push(...batch);
       if (batch.length < PAGE_SIZE) break;
+      if (page === MAX_PAGES - 1) this.logger.warn(`Cal.com team ${teamId} has more than ${memberships.length} members; the rest were skipped.`);
     }
     return memberships
       .filter((membership) => membership.accepted)
@@ -244,11 +247,13 @@ export class CalClient {
       });
       if (status) query.set('status', status);
       if (teamId) query.set('teamId', teamId);
-      const batch = await this.get<CalBooking[]>(apiKey, `/bookings?${query}`, {
-        'cal-api-version': BOOKINGS_API_VERSION,
-      });
+      const batch =
+        (await this.get<CalBooking[] | null>(apiKey, `/bookings?${query}`, {
+          'cal-api-version': BOOKINGS_API_VERSION,
+        })) ?? [];
       bookings.push(...batch);
       if (batch.length < BOOKINGS_PAGE_SIZE) break;
+      if (page === MAX_PAGES - 1) this.logger.warn(`Cal.com returned more than ${bookings.length} bookings; the rest were skipped.`);
     }
     return bookings;
   }

@@ -175,9 +175,9 @@ export const MeetingsPanel: React.FC<{
   filters: MeetingFilters;
   onFiltersChange: (filters: MeetingFilters) => void;
   loading: boolean;
-  providerLabel: string;
-  onRefresh: () => void;
-}> = ({ meetings, window: span, eventTypes, colors, error, now, filters, onFiltersChange, loading, providerLabel, onRefresh }) => {
+  /** Buttons beside the filter, e.g. Events. */
+  actions?: React.ReactNode;
+}> = ({ meetings, window: span, eventTypes, colors, error, now, filters, onFiltersChange, loading, actions }) => {
   const [range, setRange] = useState<Range>({ id: 'upcoming' });
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -205,7 +205,10 @@ export const MeetingsPanel: React.FC<{
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <SearchField value={query} onChange={setQuery} placeholder="Search meetings, people or email" />
-        <FilterMenu eventTypes={eventTypes} colors={colors} value={filters} onChange={onFiltersChange} />
+        <div className="flex items-center gap-2">
+          <FilterMenu eventTypes={eventTypes} colors={colors} value={filters} onChange={onFiltersChange} />
+          {actions}
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <DayPicker
@@ -238,8 +241,6 @@ export const MeetingsPanel: React.FC<{
       hint="Who booked, when, and the link to join."
       count={undefined}
       loading={loading}
-      providerLabel={providerLabel}
-      onRefresh={onRefresh}
       toolbar={toolbar}
     >
       <div className="space-y-6">

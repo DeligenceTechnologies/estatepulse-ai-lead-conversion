@@ -16,6 +16,9 @@ import { SchedulingProvider } from '../providers/scheduling-provider';
 import { inUse } from './connection-state';
 
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
+/** The refresh holds a row lock across one Calendly call (15s timeout, never retried). */
+const REFRESH_LOCK_WAIT_MS = 10_000;
+const REFRESH_LOCK_TIMEOUT_MS = 30_000;
 
 export const CALENDAR_UNAVAILABLE = 'Calendar connections are not available yet. Please contact support.';
 
@@ -181,24 +184,40 @@ export class CalendarAccessService {
     return pending;
   }
 
+  /**
+   * Calendly refresh tokens are single-use, so two servers refreshing the same
+   * connection at once would leave one holding a dead token. The row lock makes
+   * every other server wait, then see the new credentials and retry with them.
+   */
   private async refreshCalendly(connection: UsableConnection, refreshToken: string): Promise<string> {
-    let grant: CalendlyGrant;
-    try {
-      grant = await this.calendly.refresh(refreshToken);
-    } catch (error) {
-      // Calendly answers a dead refresh token with 400; treat it as a rejected credential.
-      if (error instanceof ProviderHttpError && error.status === 400) {
-        throw new ProviderHttpError(error.provider, 401, error.message);
-      }
-      throw error;
-    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        const [row] = await tx.$queryRaw<{ credentials: string }[]>`
+          SELECT credentials FROM calendar_connections WHERE id = ${connection.id}::uuid FOR UPDATE`;
+        if (!row || row.credentials !== connection.credentials) {
+          throw new CredentialsChanged('The calendar connection changed. Try again.');
+        }
 
-    const credentials: CalendlyCredentials = { accessToken: grant.accessToken, refreshToken: grant.refreshToken };
-    await this.prisma.calendarConnection.updateMany({
-      where: { id: connection.id, credentials: connection.credentials },
-      data: { credentials: this.secrets.seal(JSON.stringify(credentials)), tokenExpiresAt: grant.expiresAt },
-    });
-    return grant.accessToken;
+        let grant: CalendlyGrant;
+        try {
+          grant = await this.calendly.refresh(refreshToken);
+        } catch (error) {
+          // Calendly answers a dead refresh token with 400; treat it as a rejected credential.
+          if (error instanceof ProviderHttpError && error.status === 400) {
+            throw new ProviderHttpError(error.provider, 401, error.message);
+          }
+          throw error;
+        }
+
+        const credentials: CalendlyCredentials = { accessToken: grant.accessToken, refreshToken: grant.refreshToken };
+        await tx.calendarConnection.updateMany({
+          where: { id: connection.id },
+          data: { credentials: this.secrets.seal(JSON.stringify(credentials)), tokenExpiresAt: grant.expiresAt },
+        });
+        return grant.accessToken;
+      },
+      { maxWait: REFRESH_LOCK_WAIT_MS, timeout: REFRESH_LOCK_TIMEOUT_MS },
+    );
   }
 
   private requireCredentials<T>(sealed: string): T {

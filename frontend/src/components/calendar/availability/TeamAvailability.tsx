@@ -13,7 +13,6 @@ import { ApiError, messageFor } from '../../../lib/api';
 import {
   getCalendarAvailability,
   getOrganizationCalendar,
-  syncCalendarAvailability,
   type AvailabilityReport,
   type MemberAvailability,
   type OrganizationCalendarStatus,
@@ -27,6 +26,8 @@ import {
   nowState,
 } from './AvailabilityTimeline';
 import { DAY_HOURS, dayLabel, ms, shiftDate, todayIn } from './time';
+import { useReloadOnSync } from '../shared/CalendarPanel';
+import { syncedAgo } from '../shared/SyncButton';
 import { PROVIDERS } from '../shared/ui';
 import { displayTimeZone } from '../../../lib/datetime';
 
@@ -36,14 +37,6 @@ type Filter = 'all' | 'free' | 'busy';
 const NOW_TICK_MS = 30_000;
 const AUTO_REFRESH_MS = 60_000;
 const SYNCING_POLL_MS = 5_000;
-
-const ago = (iso: string, now: number): string => {
-  const minutes = Math.max(0, Math.round((now - ms(iso)) / 60_000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  return `${hours} hr${hours === 1 ? '' : 's'} ago`;
-};
 
 const segment = (active: boolean) =>
   `h-8 px-3 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
@@ -105,7 +98,7 @@ const EmptyCard: React.FC<{ icon: React.ReactNode; title: string; children: Reac
  * connected Calendly or Cal.com. The Availability tab of the Scheduling page,
  * which owns the page title.
  */
-export const TeamAvailability: React.FC = () => {
+export const TeamAvailability: React.FC<{ syncVersion: number }> = ({ syncVersion }) => {
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<OrganizationCalendarStatus | null>(null);
   const [report, setReport] = useState<AvailabilityReport | null>(null);
@@ -117,7 +110,6 @@ export const TeamAvailability: React.FC = () => {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [now, setNow] = useState(() => Date.now());
-  const [syncing, setSyncing] = useState(false);
   const request = useRef(0);
 
   const connected = Boolean(calendar?.connection && calendar.connection.status === 'active');
@@ -154,6 +146,7 @@ export const TeamAvailability: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+  useReloadOnSync(syncVersion, load);
 
   const serverSyncing = Boolean(report?.sync.syncing);
 
@@ -170,18 +163,6 @@ export const TeamAvailability: React.FC = () => {
       window.clearInterval(poll);
     };
   }, [load, serverSyncing]);
-
-  const syncNow = async (): Promise<void> => {
-    setSyncing(true);
-    try {
-      await syncCalendarAvailability();
-    } catch (e) {
-      setError(messageFor(e));
-    } finally {
-      setSyncing(false);
-    }
-    await load();
-  };
 
   const today = todayIn(displayTimeZone());
   const first = report?.dates[0] ?? null;
@@ -208,7 +189,7 @@ export const TeamAvailability: React.FC = () => {
     if (next > range.maxDate) next = range.maxDate;
     setDate(next === today ? null : next);
   };
-  const busySyncing = syncing || serverSyncing;
+  const busySyncing = serverSyncing;
 
   const title = report
     ? span === 1
@@ -232,7 +213,7 @@ export const TeamAvailability: React.FC = () => {
         action={
           <button
             type="button"
-            onClick={() => void syncNow()}
+            onClick={() => void load()}
             className="h-9 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-100 cursor-pointer transition-colors"
           >
             Try again
@@ -337,9 +318,7 @@ export const TeamAvailability: React.FC = () => {
                   <RefreshCw className="w-3 h-3 animate-spin" />
                   Syncing with {provider?.label ?? 'your calendar'}…
                 </>
-              ) : report.sync.syncedAt ? (
-                `Synced ${ago(report.sync.syncedAt, now)}`
-              ) : (
+              ) : report.sync.syncedAt ? null : (
                 'Waiting for the first sync'
               )}
             </span>
@@ -380,9 +359,6 @@ export const TeamAvailability: React.FC = () => {
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => void syncNow()} disabled={busySyncing} aria-label="Sync now" title={provider ? `Sync now with ${provider.label}` : 'Sync now'} className={iconButton}>
-              <RefreshCw className={`w-4 h-4 ${busySyncing ? 'animate-spin' : ''}`} />
-            </button>
           </div>
         </div>
       )}
@@ -392,7 +368,7 @@ export const TeamAvailability: React.FC = () => {
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <div className="text-xs text-amber-200 leading-relaxed flex-1">
             Sync failed: {report.sync.error}
-            {report.sync.syncedAt ? ` Showing data from ${ago(report.sync.syncedAt, now)}.` : ''}
+            {report.sync.syncedAt ? ` Showing data from ${syncedAgo(report.sync.syncedAt, now)}.` : ''}
           </div>
         </div>
       )}

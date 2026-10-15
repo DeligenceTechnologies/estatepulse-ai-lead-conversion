@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   BadGatewayException,
   BadRequestException,
@@ -32,7 +33,7 @@ import {
 import { connectionHealth, inUse } from './connection-state';
 import type { CalConnectDto } from './dto/cal-connect.dto';
 
-const OAUTH_STATE_TTL_MS = 10 * 60_000;
+export const OAUTH_STATE_TTL_MS = 10 * 60_000;
 const ADMIN_ROLES: readonly WorkspaceRole[] = ['owner', 'admin'];
 const PROVIDERS: readonly CalendarProvider[] = ['calendly', 'cal'];
 const CAL_KEY_REJECTED = 'Cal.com did not accept this API key.';
@@ -49,6 +50,7 @@ const SUMMARY_FIELDS = {
   workspaceRole: true,
   lastError: true,
   connectedAt: true,
+  syncedAt: true,
 } as const satisfies Prisma.CalendarConnectionSelect;
 
 type ConnectionSummary = Prisma.CalendarConnectionGetPayload<{ select: typeof SUMMARY_FIELDS }>;
@@ -118,15 +120,27 @@ export class CalendarConnectionService implements OnModuleInit {
 
   // --- Calendly (OAuth) -------------------------------------------------------
 
+  /** The URL to send the person to, and the nonce the caller must keep in their browser's cookie. */
   startCalendly(orgId: string, userId: string) {
     this.assertCanConnect('calendly');
-    const state: CalendlyOAuthState = { orgId, userId, expiresAt: Date.now() + OAUTH_STATE_TTL_MS };
-    return { authorizeUrl: this.calendly.authorizeUrl(this.secrets.seal(JSON.stringify(state))) };
+    const nonce = randomBytes(32).toString('base64url');
+    const state: CalendlyOAuthState = {
+      orgId,
+      userId,
+      expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
+      nonceHash: sha256(nonce),
+    };
+    return { authorizeUrl: this.calendly.authorizeUrl(this.secrets.seal(JSON.stringify(state))), nonce };
   }
 
-  async completeCalendly(code: string, sealedState: string): Promise<void> {
+  async completeCalendly(code: string, sealedState: string, nonce: string | undefined): Promise<void> {
     this.assertCanConnect('calendly');
-    const { orgId, userId } = this.readState(sealedState);
+    const { orgId, userId } = this.readState(sealedState, nonce);
+    // The person who started may have been removed from the organization since.
+    const user = await this.prisma.user.findFirst({ where: { id: userId, orgId }, select: { id: true } });
+    if (!user) {
+      throw new ForbiddenException('You are no longer a member of this organization.');
+    }
     const grant = await this.callProvider(() => this.calendly.exchangeCode(code), CALENDLY_REJECTED);
 
     try {
@@ -299,13 +313,18 @@ export class CalendarConnectionService implements OnModuleInit {
     return role;
   }
 
-  private readState(sealed: string): CalendlyOAuthState {
+  private readState(sealed: string, nonce: string | undefined): CalendlyOAuthState {
     const state = this.access.unseal<CalendlyOAuthState>(sealed);
-    if (!state?.orgId || !state.userId || typeof state.expiresAt !== 'number') {
+    if (!state?.orgId || !state.userId || typeof state.expiresAt !== 'number' || typeof state.nonceHash !== 'string') {
       throw new BadRequestException('This Calendly sign-in link is not valid. Start again from Settings.');
     }
     if (state.expiresAt < Date.now()) {
       throw new BadRequestException('This Calendly sign-in link has expired. Start again from Settings.');
+    }
+    // Finishing needs the cookie set when this sign-in started, so a link
+    // started by someone else cannot attach your Calendly to their organization.
+    if (!nonce || !safeEqual(sha256(nonce), state.nonceHash)) {
+      throw new BadRequestException('Finish connecting Calendly in the same browser you started in. Start again from Settings.');
     }
     return state;
   }
@@ -390,6 +409,16 @@ export class CalendarConnectionService implements OnModuleInit {
   }
 }
 
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('base64url');
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 function toView(connection: ConnectionSummary) {
   return {
     status: connectionHealth(connection),
@@ -399,6 +428,7 @@ function toView(connection: ConnectionSummary) {
     workspaceName: connection.workspaceName,
     workspaceRole: connection.workspaceRole,
     connectedAt: connection.connectedAt,
+    syncedAt: connection.syncedAt,
     lastError: connection.lastError,
   };
 }
