@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronRight,
+  FileUp,
   Flame,
   Plus,
   Radio,
@@ -16,6 +18,8 @@ import { useApp } from '../../context/AppContext';
 import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
+import { fileImportEnabled } from '../../utils/fileImportApi';
+import { FileImportModal } from '../imports/FileImportModal';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
 import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
@@ -148,6 +152,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { agentProfileId, role } = useAuth();
   const isOwner = role === 'owner';
+  // "Add leads": a file import (owner only, where the server has it switched on). One lead at a time comes later.
+  const [canImport, setCanImport] = useState(false);
+  const [addMenu, setAddMenu] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  useEffect(() => {
+    if (isOwner) void fileImportEnabled().then(setCanImport);
+  }, [isOwner]);
   const {
     setSelectedLeadId,
     setPreCallLeadId,
@@ -308,13 +319,70 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          {/* <button
-            onClick={onOpenNewLead}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add New Lead</span>
-          </button> */}
+          {canImport && (
+            <div
+              className="relative"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAddMenu(false);
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setAddMenu((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={addMenu}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add leads</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              {addMenu && (
+                <div
+                  role="menu"
+                  className="absolute right-0 mt-1 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-1 z-20 text-xs"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAddMenu(false);
+                      setImportOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
+                  >
+                    <FileUp className="w-3.5 h-3.5 text-sky-300" />
+                    <span>
+                      Import from CSV / Excel
+                      <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled
+                    title="Adding a single lead by hand is not available yet"
+                    className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center gap-2 cursor-default"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>
+                      Add one lead
+                      <span className="block text-2xs text-slate-600">Soon</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {importOpen && (
+            <FileImportModal
+              onClose={() => setImportOpen(false)}
+              onImported={() => {
+                // Approved leads appear here; the rest are on Import Review.
+                refresh();
+              }}
+            />
+          )}
         </div>
       </div>
 

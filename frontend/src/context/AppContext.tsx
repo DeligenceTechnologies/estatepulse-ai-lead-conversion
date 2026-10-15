@@ -14,6 +14,7 @@ import {
   Message,
 } from '../types';
 import { apiFetch, getToken } from '../lib/api';
+import { LEADS_CHANGED_EVENT } from '../api/client';
 import {
   INITIAL_ORG_SETTINGS,
   INITIAL_AGENTS,
@@ -224,12 +225,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [location.pathname, location.search]);
 
-  // Load the logged-in organization's REAL leads from the backend (replaces the mock seed).
+  // Load the logged-in organization's REAL leads from the backend (replaces the mock seed),
+  // and again whenever a screen reports the list changed (an assignment, an approved import).
   useEffect(() => {
     if (!getToken()) return;
-    apiFetch<{ leads: Lead[] }>('/leads', { auth: true })
-      .then((d) => { if (Array.isArray(d.leads)) setLeads(d.leads); })
-      .catch(() => { /* backend unreachable — keep whatever is cached */ });
+    const load = () =>
+      apiFetch<{ leads: Lead[] }>('/leads', { auth: true })
+        .then((d) => { if (Array.isArray(d.leads)) setLeads(d.leads); })
+        .catch(() => { /* backend unreachable — keep whatever is cached */ });
+    void load();
+    window.addEventListener(LEADS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, load);
   }, []);
 
   // Persistence to local storage

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
+import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { importHistory, type ImportBatch } from '../../utils/fileImportApi';
 import {
@@ -25,6 +26,9 @@ import { errorText } from '../sheets/SheetModal';
 const IMPORT_REASONS = ['Imported from Google Sheets — awaiting owner approval', 'Imported from a file — awaiting owner approval'];
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
+
+/** Nothing an owner would want a second look at: no warning, no opt-out, still in the sheet. Ticked on arrival. */
+const clean = (i: ReviewItem): boolean => !i.missing && !i.lead?.dncStatus && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
 type Tab = 'pending' | 'rejected' | 'changes';
 type Notice = { tone: 'ok' | 'error'; text: string } | null;
@@ -115,7 +119,8 @@ export const ImportReviewView: React.FC = () => {
         setItems(page.items);
         setCursor(page.nextCursor);
         setTotals((t) => ({ ...t, [tab]: page.total }));
-        setSelected((s) => new Set([...s].filter((id) => page.items.some((i) => i.rowId === id))));
+        // Clean rows start ticked, so one click approves them; the owner unticks what should wait.
+        setSelected(new Set(tab === 'pending' ? page.items.filter(clean).map((i) => i.rowId) : []));
       } else {
         const src = sourceId && list.some((s) => s.id === sourceId) ? sourceId : list.length === 1 ? list[0].id : '';
         const found = src ? await sheetChanges(src) : [];
@@ -158,6 +163,7 @@ export const ImportReviewView: React.FC = () => {
     try {
       const page = await reviewQueue({ state: tab === 'rejected' ? 'rejected' : 'pending', source, sourceId, cursor, limit: 50 });
       setItems((xs) => [...xs, ...page.items]);
+      if (tab === 'pending') setSelected((s) => new Set([...s, ...page.items.filter(clean).map((i) => i.rowId)]));
       setCursor(page.nextCursor);
     } catch (e) {
       setError(errorText(e));
@@ -286,6 +292,8 @@ export const ImportReviewView: React.FC = () => {
         });
       }
       setSelected(new Set());
+      // Approved leads join the Leads list: tell the shell, so its count follows.
+      if (what === 'approve') window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       await load();
     } catch (e) {
       setNotice({ tone: 'error', text: errorText(e) });
@@ -315,7 +323,7 @@ export const ImportReviewView: React.FC = () => {
           <p className="text-xs text-slate-400">
             Leads from your{' '}
             {features.sheets && features.files ? 'Google Sheets and uploaded files' : features.files ? 'uploaded files' : 'Google Sheets'} wait
-            here. Nobody is called or texted until you approve them.
+            here. Rows without a warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

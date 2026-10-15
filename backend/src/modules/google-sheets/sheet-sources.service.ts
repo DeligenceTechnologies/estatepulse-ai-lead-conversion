@@ -5,11 +5,12 @@ import { newId } from '../../common/ids';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { GOOGLE_PROVIDER, GoogleConnectionsService, type SessionIdentity } from './google-connections.service';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
-import { GOOGLE_SHEETS_PROVIDER, SYNC_CONNECTION, SheetImportService } from './sheet-import.service';
+import { GOOGLE_SHEETS_PROVIDER, READ_CHUNK_ROWS, SYNC_CONNECTION, SheetImportService, contactFlags, type RunStats } from './sheet-import.service';
 import {
   FILE_UPLOAD_PROVIDER,
   FULL_NAME_TARGET,
   MAX_COLUMNS,
+  MAX_DATA_ROWS,
   analyzeHeaders,
   buildRow,
   expandMapping,
@@ -22,10 +23,10 @@ import {
   type SheetHeader,
   type StoredMapping,
 } from './sheet-rows';
-import type { CreateSourceBody, ReviewQuery, SaveMappingBody } from './schemas';
+import type { CreateSourceBody, EnableBody, ReviewQuery, SaveMappingBody } from './schemas';
 
-/** Rows shown in a preview. Read live, never stored. */
-const PREVIEW_ROWS = 20;
+/** Rows the mapping and identity suggestions read: a sample of the first ones, as the heuristics expect (a blank row further down must not unsuggest an ID column). */
+const SUGGEST_ROWS = 20;
 
 const fail = (status: number, code: string, message: string) => new HttpException({ error: { code, message } }, status);
 
@@ -70,6 +71,14 @@ export interface SheetSourceDTO {
   lastErrorMessage: string | null;
   pendingReview: number;
   createdAt: Date;
+}
+
+/** What "Start importing" did there and then: the first run, with the owner's ticks approved as they landed. */
+export interface FirstRun {
+  /** False: the run failed, and the source's lastErrorMessage says why. */
+  ok: boolean;
+  imported: number;
+  approval: { approved: number; released: number; held: RunStats['autoHeld']; skipped: string[] };
 }
 
 /**
@@ -211,9 +220,10 @@ export class SheetSourcesService {
   }
 
   /**
-   * The header row and the first rows, as the import would see them under the
-   * saved mapping — or under suggested ones before anything is saved. Read live
-   * from Google; nothing is written.
+   * The header row and every data row, as the import would see them under the
+   * saved mapping — or under suggested ones before anything is saved — with the
+   * flags the import would give them, so the owner can tick what to approve.
+   * Read live from Google; nothing is written.
    */
   async preview(organizationId: string, sourceId: string) {
     const source = await this.mustFind(organizationId, sourceId);
@@ -224,16 +234,28 @@ export class SheetSourcesService {
     ]);
     const region = org?.default_region ?? 'US';
 
-    const { tab, grid } = await this.connections.withAccessToken(organizationId, source.provider_credential_id ?? '', async (token) => {
+    const { tab, headerCells, data } = await this.connections.withAccessToken(organizationId, source.provider_credential_id ?? '', async (token) => {
       const meta = await this.google.spreadsheet(token, spreadsheetId);
       const t = (meta.sheets ?? []).map((s) => s.properties).find((p) => p.sheetId === sheetId);
       if (!t) throw fail(404, 'TAB_MISSING', 'The connected tab no longer exists in the spreadsheet.');
       const columns = Math.min(t.gridProperties?.columnCount ?? MAX_COLUMNS, MAX_COLUMNS);
-      return { tab: t, grid: await this.google.readGrid(token, spreadsheetId, sheetId, PREVIEW_ROWS + 1, columns, 0) };
+      const rowCount = t.gridProperties?.rowCount ?? 0;
+      const [headerCells = []] = await this.google.readGrid(token, spreadsheetId, sheetId, 1, columns, 0);
+      // Every data row, in the import's chunks (readTab); a chunk's trailing blank rows are not returned, so rows are numbered per chunk.
+      const data: { rowNumber: number; cells: string[] }[] = [];
+      let nonBlank = 0;
+      for (let start = 1; start < rowCount && nonBlank <= MAX_DATA_ROWS; start += READ_CHUNK_ROWS) {
+        const chunk = await this.google.readGrid(token, spreadsheetId, sheetId, Math.min(READ_CHUNK_ROWS, rowCount - start), columns, start);
+        chunk.forEach((cells, i) => {
+          if (cells.some((c) => c.trim())) nonBlank += 1;
+          data.push({ rowNumber: start + i + 1, cells });
+        });
+      }
+      return { tab: t, headerCells, data };
     });
 
-    const headers = analyzeHeaders(grid[0] ?? []);
-    const sample = grid.slice(1);
+    const headers = analyzeHeaders(headerCells);
+    const sample = data.slice(0, SUGGEST_ROWS).map((r) => r.cells);
     const columns: ColumnMapping[] = saved ? toColumns(saved) : suggestColumns(headers, sample, region);
     const candidates = identityCandidates(headers, sample);
     const identity: Identity = sourceIdentity(source) ?? (candidates[0] ? { mode: 'column', fieldKey: candidates[0] } : { mode: 'fallback' });
@@ -248,18 +270,26 @@ export class SheetSourcesService {
       region,
     };
     const seen = new Set<string>();
-    const rows = sample.map((cells, i) => {
-      const built = buildRow(cells, i + 2, ctx);
-      const duplicate = Boolean(built.key && seen.has(built.key));
-      if (built.key) seen.add(built.key);
-      return {
-        rowNumber: built.rowNumber,
-        blank: built.blank,
-        issue: built.issue ?? (duplicate ? 'DUPLICATE_IN_SHEET' : null),
-        lead: built.lead ?? null,
-        reviewReasons: built.reviewReasons,
-      };
-    });
+    const verdicts = data
+      .map(({ rowNumber, cells }) => {
+        const built = buildRow(cells, rowNumber, ctx);
+        const duplicate = Boolean(built.key && seen.has(built.key));
+        if (built.key) seen.add(built.key);
+        return { built, issue: built.issue ?? (duplicate ? 'DUPLICATE_IN_SHEET' : null) };
+      })
+      .filter((v) => !v.built.blank);
+    // The flags the import gives: a possible duplicate, an opt-out — the rows the owner should look at before ticking.
+    const flags = await contactFlags(
+      this.prisma,
+      organizationId,
+      verdicts.filter((v) => !v.issue && v.built.lead).map((v) => v.built),
+    );
+    const rows = verdicts.map(({ built, issue }) => ({
+      rowNumber: built.rowNumber,
+      issue,
+      lead: built.lead ?? null,
+      reviewReasons: [...(flags.reasons.get(built.rowNumber) ?? []), ...built.reviewReasons],
+    }));
 
     return {
       source: await this.dto(organizationId, source),
@@ -363,8 +393,13 @@ export class SheetSourcesService {
     return this.dto(org, await this.mustFind(org, sourceId));
   }
 
-  /** Switch on: queue an import now. Refused unless it can actually run. */
-  async enable(who: SessionIdentity, sourceId: string): Promise<SheetSourceDTO> {
+  /**
+   * Switch on, and run the first import here and now: the rows the owner ticked
+   * in the preview are approved as they land, the rest wait in Import Review —
+   * as an uploaded file does. Refused unless it can actually run. Every later
+   * sync approves nothing.
+   */
+  async enable(who: SessionIdentity, sourceId: string, body: EnableBody): Promise<SheetSourceDTO & { firstRun: FirstRun | null }> {
     const org = who.organizationId;
     const source = await this.mustFind(org, sourceId);
     if (source.mapping_status !== 'CONFIGURED' || !sourceIdentity(source)) {
@@ -398,9 +433,21 @@ export class SheetSourcesService {
         updated_at: new Date(),
       },
     });
-    await this.audit(who, 'sheet_source.enabled', sourceId, {});
-    this.importer.nudge();
-    return this.dto(org, await this.mustFind(org, sourceId));
+    const ticked = new Set(body.approveRows ?? []);
+    await this.audit(who, 'sheet_source.enabled', sourceId, { ticked: ticked.size });
+    const run = await this.importer.runNow(org, sourceId, { rule: (b) => ticked.has(b.rowNumber), by: { userId: who.userId } });
+    // A sweep got there first: it runs the import, and every row waits in Import Review.
+    if (!run) this.importer.nudge();
+    return {
+      ...(await this.dto(org, await this.mustFind(org, sourceId))),
+      firstRun: run
+        ? {
+            ok: run.ok,
+            imported: run.stats.inserted,
+            approval: { approved: run.stats.autoApproved, released: run.stats.autoReleased, held: run.stats.autoHeld, skipped: [] },
+          }
+        : null,
+    };
   }
 
   async pause(who: SessionIdentity, sourceId: string): Promise<SheetSourceDTO> {
@@ -482,6 +529,8 @@ export class SheetSourcesService {
     const scope = {
       organization_id: organizationId,
       review_state: q.state,
+      // A row whose lead was deleted out of band has nothing left to decide: not shown, not counted.
+      lead_id: { not: null },
       ...(q.sourceId ? { lead_source_id: q.sourceId } : {}),
       ...(q.source === 'all' ? {} : { lead_sources: { provider: q.source === 'file_upload' ? FILE_UPLOAD_PROVIDER : GOOGLE_SHEETS_PROVIDER } }),
     };

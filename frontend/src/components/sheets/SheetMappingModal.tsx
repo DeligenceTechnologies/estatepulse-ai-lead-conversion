@@ -1,32 +1,39 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
+import { LEADS_CHANGED_EVENT } from '../../api/client';
 import {
   enableSheetSource,
   previewSheetSource,
   saveSheetMapping,
+  type FirstRun,
   type Identity,
   type SheetPreview,
   type SheetSource,
 } from '../../utils/googleSheetsApi';
 import {
   CHOICES,
-  ISSUE_TEXT,
+  approveMessage,
   choicesFromColumns,
   columnsFromChoices,
   draftProblems,
   type ColumnChoice,
 } from '../../utils/sheetMapping';
+import { PreviewRowsTable, flagged } from '../imports/PreviewRowsTable';
 import { SheetError, SheetModal, errorDetails, errorText } from './SheetModal';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
 
 /**
- * Map a sheet's columns to lead fields, and choose how its rows are recognised.
+ * Map a sheet's columns to lead fields, choose how its rows are recognised,
+ * and switch the sheet on.
  *
- * The preview table is the server's reading of the first rows under the mapping
- * as last saved (or as suggested, before the first save) — so it shows exactly
- * what an import would do, including which rows it would refuse and why.
+ * The preview table is the server's reading of every row under the mapping as
+ * last saved (or as suggested, before the first save) — so it shows exactly
+ * what an import would do, including which rows it would refuse and why. As
+ * with an uploaded file, clean rows come ticked: switching the sheet on imports
+ * every row and approves the ticked ones as they land; the rest wait in Import
+ * Review, as do the rows later syncs find. Nothing here contacts anyone.
  */
 export const SheetMappingModal: React.FC<{
   sourceId: string;
@@ -38,9 +45,12 @@ export const SheetMappingModal: React.FC<{
   const [choices, setChoices] = useState<Record<string, ColumnChoice>>({});
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [ack, setAck] = useState(false);
+  /** Row numbers ticked in the preview: approved as soon as they are imported. Clean rows start ticked. */
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [error, setError] = useState<{ message: string; details: string[] } | null>(null);
   const [busy, setBusy] = useState<null | 'load' | 'save' | 'enable'>('load');
   const [saved, setSaved] = useState<SheetSource | null>(null);
+  const [done, setDone] = useState<(SheetSource & { firstRun: FirstRun | null }) | null>(null);
 
   const load = useCallback(async () => {
     setBusy('load');
@@ -50,6 +60,8 @@ export const SheetMappingModal: React.FC<{
       setChoices(choicesFromColumns(p.mapping.columns));
       setIdentity(p.mapping.identity);
       setAck(p.source.identity?.mode === 'fallback');
+      // Clean rows start ticked: they are approved on import. Flagged ones start unticked: they wait for review.
+      setSelected(new Set(p.rows.filter((r) => !flagged(r)).map((r) => r.rowNumber)));
       setError(null);
     } catch (e) {
       setError({ message: errorText(e), details: [] });
@@ -93,33 +105,77 @@ export const SheetMappingModal: React.FC<{
     setBusy('enable');
     setError(null);
     try {
-      const source = await enableSheetSource(sourceId);
+      const source = await enableSheetSource(sourceId, [...selected]);
       onChanged(source);
-      onClose();
+      // Approved leads join the Leads list: tell the shell, so its count follows.
+      if ((source.firstRun?.approval.approved ?? 0) > 0) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+      setDone(source);
     } catch (e) {
       setError({ message: errorText(e), details: [] });
+    } finally {
       setBusy(null);
     }
   };
 
   const status = saved?.status ?? preview?.source.status;
+  /** Ticks only mean something when the sheet is about to be switched on. */
+  const ticking = status !== 'ACTIVE';
+  const rows = preview?.rows ?? [];
+  const importable = useMemo(() => rows.filter((r) => !r.issue), [rows]);
+
+  const firstRun = done?.firstRun ?? null;
+  const pending = firstRun ? firstRun.imported - firstRun.approval.approved : 0;
 
   return (
     <SheetModal
       wide
-      title={preview?.source.name ?? 'Loading the sheet…'}
-      subtitle={preview ? `Tab “${preview.tab.title}” · first ${preview.rows.length} rows shown` : undefined}
+      title={done ? 'Imported' : (preview?.source.name ?? 'Loading the sheet…')}
+      subtitle={done ? done.name : preview ? `Tab “${preview.tab.title}” · ${rows.length.toLocaleString('en-US')} rows` : undefined}
       icon={<SlidersHorizontal className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />}
       onClose={onClose}
     >
       {busy === 'load' && !preview && (
         <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading the header row and the first rows…
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading the header row and every row…
         </div>
       )}
       {error && <SheetError message={error.message} details={error.details} />}
 
-      {preview && (
+      {/* Switched on: what the first import did */}
+      {done && (
+        <div className="space-y-3">
+          {firstRun === null ? (
+            <div className="text-xs text-slate-300">
+              The sheet is on, and its first import is queued. Its rows will wait in Import Review for you to approve.
+            </div>
+          ) : firstRun.ok ? (
+            <div className="flex items-start gap-2 text-xs text-slate-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                {firstRun.imported.toLocaleString('en-US')} lead{firstRun.imported === 1 ? '' : 's'} imported from {done.name}.
+                {firstRun.approval.approved > 0 ? ` ${approveMessage(firstRun.approval)}` : ''}
+                {pending > 0 && ` ${pending.toLocaleString('en-US')} wait in Import Review.`}
+              </span>
+            </div>
+          ) : (
+            <SheetError message="The sheet is on, but its first import failed." details={done.lastErrorMessage ? [done.lastErrorMessage] : []} />
+          )}
+          <p className="text-2xs text-slate-500">
+            The sheet now syncs on its own. Rows it adds later wait in Import Review; nobody is called or texted until you approve them.
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!done && preview && (
         <>
           {preview.problems.length > 0 && preview.mapping.saved && (
             <SheetError
@@ -218,51 +274,19 @@ export const SheetMappingModal: React.FC<{
             <p className="text-2xs text-slate-500">This choice is locked once rows have been imported.</p>
           </div>
 
-          {/* What an import would do */}
-          <div className="rounded-xl border border-slate-800 overflow-hidden">
-            <div className="px-3 py-2 bg-slate-950/60 text-2xs text-slate-500">
-              {preview.mapping.saved ? 'Preview under the saved mapping' : 'Preview under the suggested mapping'} — save to
-              apply your changes here.
-            </div>
-            <div className="max-h-56 overflow-y-auto">
-              <table className="w-full text-2xs">
-                <thead className="text-slate-500 text-left">
-                  <tr>
-                    <th className="px-3 py-1.5 font-semibold">Row</th>
-                    <th className="px-3 py-1.5 font-semibold">Name</th>
-                    <th className="px-3 py-1.5 font-semibold">Phone</th>
-                    <th className="px-3 py-1.5 font-semibold">Email</th>
-                    <th className="px-3 py-1.5 font-semibold">Import</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {preview.rows
-                    .filter((r) => !r.blank)
-                    .map((r) => (
-                      <tr key={r.rowNumber}>
-                        <td className="px-3 py-1.5 text-slate-500 font-mono">{r.rowNumber}</td>
-                        <td className="px-3 py-1.5 text-slate-200">
-                          {[r.lead?.first_name, r.lead?.last_name].filter(Boolean).join(' ') || '—'}
-                        </td>
-                        <td className="px-3 py-1.5 text-slate-300">{r.lead?.normalized_phone ?? r.lead?.phone ?? '—'}</td>
-                        <td className="px-3 py-1.5 text-slate-300">{r.lead?.email ?? '—'}</td>
-                        <td className="px-3 py-1.5">
-                          {r.issue ? (
-                            <span className="text-amber-300">{ISSUE_TEXT[r.issue] ?? r.issue}</span>
-                          ) : r.reviewReasons.length ? (
-                            <span className="text-amber-200" title={r.reviewReasons.join('\n')}>
-                              Yes, with a warning
-                            </span>
-                          ) : (
-                            <span className="text-emerald-300">Yes</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* Rows: every row with its verdict; ticked rows are approved as they land */}
+          <PreviewRowsTable
+            rows={rows}
+            selected={ticking ? selected : null}
+            onChange={setSelected}
+            note={
+              <span>
+                {preview.mapping.saved ? 'Every row under the saved mapping' : 'Every row under the suggested mapping'} — save to apply your
+                changes here.
+                {ticking && ' Clean rows are ticked: they are approved on import. Flagged rows wait in Import Review unless you tick them.'}
+              </span>
+            }
+          />
 
           {/* Save / switch on */}
           {problems.length > 0 && (
@@ -287,20 +311,31 @@ export const SheetMappingModal: React.FC<{
               {busy === 'save' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Save mapping
             </button>
-            {saved && status !== 'ACTIVE' && (
+            {saved && ticking && (
               <button
                 type="button"
                 onClick={enable}
                 disabled={busy !== null}
+                title={
+                  selected.size > 0
+                    ? 'Imports every importable row; the ticked ones are approved right away, the rest wait in Import Review'
+                    : 'Imports every importable row; all of them wait in Import Review'
+                }
                 className="flex-1 px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
               >
                 {busy === 'enable' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Start importing
+                {busy === 'enable'
+                  ? 'Importing…'
+                  : `Import ${importable.length.toLocaleString('en-US')} lead${importable.length === 1 ? '' : 's'}${
+                      selected.size > 0 ? ` · ${selected.size.toLocaleString('en-US')} approved now` : ' for review'
+                    }`}
               </button>
             )}
           </div>
           <p className="text-2xs text-slate-500">
-            Imported leads wait in Import Review. Nobody is called or texted until you approve them.
+            {ticking
+              ? 'Ticked rows are approved on import; the rest wait in Import Review, as do rows the sheet gains later. Approving makes a lead eligible for your outreach strategy; it never calls or texts anyone by itself.'
+              : 'Rows this sheet gains wait in Import Review. Nobody is called or texted until you approve them.'}
           </p>
         </>
       )}
