@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { AppError, zodDetails } from '../../common/errors';
 import { OwnerGuard } from '../../common/guards/owner.guard';
 import { SessionGuard, type SessionRequest } from '../../common/guards/session.guard';
-import { mappingColumnsSchema } from '../google-sheets/schemas';
+import { approveRowsSchema, mappingColumnsSchema } from '../google-sheets/schemas';
 import type { ColumnMapping } from '../google-sheets/sheet-rows';
 import { FileImportEnabledGuard } from '../google-sheets/sheets-enabled.guard';
 import { FileImportService, type UploadedFileLike } from './file-import.service';
@@ -28,7 +28,7 @@ import { FileImportService, type UploadedFileLike } from './file-import.service'
  * ponytail: memory storage; a 20 MB ceiling is far above any lead file.
  */
 const UPLOAD_CEILING_BYTES = 20 * 1024 * 1024;
-const upload = () => FileInterceptor('file', { limits: { fileSize: UPLOAD_CEILING_BYTES, files: 1, fields: 4, fieldSize: 64 * 1024 } });
+const upload = () => FileInterceptor('file', { limits: { fileSize: UPLOAD_CEILING_BYTES, files: 1, fields: 4, fieldSize: 256 * 1024 } });
 
 /** Multipart fields arrive as strings; the mapping is JSON inside one of them. */
 const sheetField = z.string().trim().min(1).max(255).optional();
@@ -40,7 +40,34 @@ const previewFields = z.object({
   /** The worksheet of an .xlsx to read; the first one when absent. */
   sheet: sheetField,
 });
-const commitFields = z.object({ mapping: z.string().max(64 * 1024), clientToken: z.string().uuid(), sheet: sheetField });
+const commitFields = z.object({
+  mapping: z.string().max(64 * 1024),
+  clientToken: z.string().uuid(),
+  sheet: sheetField,
+  /**
+   * JSON array of row numbers to approve as they are imported (the rows the
+   * owner left ticked in the preview). Absent or empty: every row waits in Import Review.
+   */
+  approveRows: z
+    .string()
+    .max(200 * 1024)
+    .optional(),
+  /** '1': import only the rows without any flag, approved at once; flagged rows are left out of the import entirely. */
+  onlyClean: z.enum(['1']).optional(),
+});
+
+function parseApproveRows(raw: string | undefined): number[] {
+  if (raw === undefined) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new AppError('VALIDATION_ERROR', 'Invalid approval', [{ path: 'approveRows', message: 'The rows to approve are not valid JSON' }]);
+  }
+  const parsed = approveRowsSchema.safeParse(json);
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid approval', zodDetails(parsed.error));
+  return parsed.data;
+}
 
 function parseMapping(raw: string | undefined): ColumnMapping[] | null {
   if (raw === undefined) return null;
@@ -101,6 +128,8 @@ export class FileImportController {
       parseMapping(f.mapping)!,
       f.clientToken,
       f.sheet ?? null,
+      parseApproveRows(f.approveRows),
+      f.onlyClean === '1',
     );
   }
 

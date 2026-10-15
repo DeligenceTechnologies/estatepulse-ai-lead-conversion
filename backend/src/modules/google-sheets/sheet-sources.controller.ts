@@ -3,7 +3,7 @@ import { OwnerGuard } from '../../common/guards/owner.guard';
 import { SessionGuard, type SessionRequest } from '../../common/guards/session.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import type { SessionIdentity } from './google-connections.service';
-import { createSourceSchema, saveMappingSchema, type CreateSourceBody, type SaveMappingBody } from './schemas';
+import { createSourceSchema, enableSchema, saveMappingSchema, type CreateSourceBody, type EnableBody, type SaveMappingBody } from './schemas';
 import { SheetSourcesService } from './sheet-sources.service';
 import { SheetsEnabledGuard } from './sheets-enabled.guard';
 
@@ -46,10 +46,15 @@ export class SheetSourcesController {
     return this.sources.saveMapping(identity(req), id, body);
   }
 
+  /** Switches the sheet on and runs its first import in this request; `approveRows` are approved as they land. */
   @Post('sources/:id/enable')
   @HttpCode(200)
-  enable(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
-    return this.sources.enable(identity(req), id);
+  enable(
+    @Req() req: SessionRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(enableSchema, 'Invalid approval')) body: EnableBody,
+  ) {
+    return this.sources.enable(identity(req), id, body);
   }
 
   @Post('sources/:id/pause')

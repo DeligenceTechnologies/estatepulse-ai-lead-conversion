@@ -64,9 +64,13 @@ export interface ImportBatch {
     skipped?: Partial<Record<RowIssue, number>>;
     possibleDuplicates?: number;
     dncInherited?: number;
+    /** "Only clean" imports: flagged rows that were not imported at all. */
+    flaggedLeftOut?: number;
   } | null;
   errorSample: { row: number; code: RowIssue }[];
   review: { pending: number; approved: number; rejected: number };
+  /** On an import: what happened to the rows approved as they landed. Null on a retry that imported nothing. */
+  approval?: { approved: number; released: number; held: { rowId: string; leadId: string; reason: string }[]; skipped: string[] } | null;
 }
 
 /** How far an upload has got, 0 to 1. */
@@ -111,11 +115,21 @@ export const importFile = (
   columns: ColumnMapping[],
   clientToken: string,
   sheet: string | null,
+  /** Row numbers to approve as they are imported (the ticked ones); the rest wait in Import Review. */
+  approveRows: number[] | null,
+  /** Import only the rows without any flag, approved at once; flagged rows are left out entirely. */
+  onlyClean: boolean,
   onProgress?: Progress,
 ): Promise<ImportBatch> =>
   apiUpload<ImportBatch>(
     `${BASE}/batches`,
-    form(file, { mapping: JSON.stringify(columns), clientToken, sheet: sheet ?? undefined }),
+    form(file, {
+      mapping: JSON.stringify(columns),
+      clientToken,
+      sheet: sheet ?? undefined,
+      approveRows: !onlyClean && approveRows ? JSON.stringify(approveRows) : undefined,
+      onlyClean: onlyClean ? '1' : undefined,
+    }),
     onProgress,
   );
 

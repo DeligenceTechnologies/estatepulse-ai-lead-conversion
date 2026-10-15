@@ -63,6 +63,16 @@ const rowIds = z
   .max(500)
   .refine((ids) => new Set(ids).size === ids.length, 'Row ids must be unique');
 
+/** Sheet row numbers (the header is row 1) to approve as they are imported: the rows the owner left ticked. */
+export const approveRowsSchema = z
+  .array(z.number().int().min(2).max(10_001))
+  .max(10_000)
+  .transform((rows) => [...new Set(rows)]);
+
+/** Switching a sheet on. Absent or empty: every imported row waits in Import Review. */
+export const enableSchema = z.object({ approveRows: approveRowsSchema.optional() }).default({});
+export type EnableBody = z.infer<typeof enableSchema>;
+
 export const decideSchema = z.object({ rowIds });
 export type DecideBody = z.infer<typeof decideSchema>;
 

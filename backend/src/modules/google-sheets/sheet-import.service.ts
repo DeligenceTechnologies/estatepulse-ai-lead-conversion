@@ -7,6 +7,7 @@ import { newId } from '../../common/ids';
 import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
 import { GoogleConnectionsService } from './google-connections.service';
+import { approveTrackingRows } from './approval';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
 import { sheetsEnabled } from './sheets-enabled.guard';
 import {
@@ -28,12 +29,20 @@ export const GOOGLE_SHEETS_PROVIDER = 'GOOGLE_SHEETS';
 export const SYNC_CONNECTION = 'SYNC';
 
 export const DNC_REASON = 'This contact previously opted out — imported as do-not-contact';
+
+/** Which fresh rows an import approves as they land, and on whose behalf. */
+export interface Approval {
+  rule: (row: BuiltRow) => boolean;
+  by: { userId: string };
+}
 export const DUPLICATE_REASON = 'Possible duplicate: another lead has the same phone or email';
 
 /** Rows per Google read: comfortably under Sheets' recommended response size. */
-const READ_CHUNK_ROWS = 2_000;
+export const READ_CHUNK_ROWS = 2_000;
 /** Rows per database batch: one contact check and one write transaction. */
 const DB_BATCH = 500;
+/** Phones or emails per contact lookup, keeping each IN list bounded. */
+const CONTACT_CHUNK = 2_000;
 /** A lease older than this is presumed dead (process killed mid-run) and may be taken over. */
 const LEASE_STUCK_SECONDS = 600;
 /** Row numbers and codes only, never cell values. */
@@ -103,6 +112,12 @@ export class RunStats {
   reappeared = 0;
   dncInherited = 0;
   possibleDuplicates = 0;
+  /** Fresh rows approved as they landed — the ones the owner ticked when switching the sheet on — and how many were released. */
+  autoApproved = 0;
+  autoReleased = 0;
+  autoHeld: { rowId: string; leadId: string; reason: string }[] = [];
+  /** Tracked rows whose lead had been deleted out of band: imported again, onto a new lead. */
+  relinked = 0;
   /** Drive version unchanged: the sheet was not read at all. */
   probeSkipped = false;
   skipped: Partial<Record<RowIssue, number>> = {};
@@ -139,6 +154,9 @@ export class RunStats {
       skipped: this.skipped,
       dncInherited: this.dncInherited,
       possibleDuplicates: this.possibleDuplicates,
+      autoApproved: this.autoApproved,
+      autoReleased: this.autoReleased,
+      relinked: this.relinked,
       probeSkipped: this.probeSkipped,
       googleRequests: this.googleRequests,
       dbStatements: this.dbStatements,
@@ -205,6 +223,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
   private again = false;
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
+  /** Extra predicate on the claim; empty in production. See claimOnly. */
+  private claimFilter: Prisma.Sql = Prisma.empty;
 
   constructor(
     // Unguarded on purpose, for the claim and the lease release only: "which
@@ -260,6 +280,16 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Restrict claims to these organizations. For test harnesses that share a
+   * database with real sources: a due sheet of someone else's must never be run
+   * against a fake Google. Production never calls this — the sweep is
+   * cross-tenant by design.
+   */
+  claimOnly(organizationIds: string[]): void {
+    this.claimFilter = Prisma.sql`AND organization_id = ANY(${organizationIds}::uuid[])`;
+  }
+
+  /**
    * Process every due source, one at a time. A call while a drain is running
    * joins it, and that drain looks again before finishing — so a source made
    * due mid-run is never left waiting, and the promise means "all caught up".
@@ -293,8 +323,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** The most overdue source first: fairness across organizations is queue order. */
-  private async claim(): Promise<Claimed | null> {
+  /** The most overdue source first: fairness across organizations is queue order. `only`: that one source, or nothing. */
+  private async claim(only: { organizationId: string; sourceId: string } | null = null): Promise<Claimed | null> {
     const rows = await this.unscoped.$queryRaw<Claimed[]>`
       WITH due AS (
         SELECT id FROM lead_sources
@@ -304,6 +334,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
            AND ingest_status = 'ACTIVE'
            AND sync_next_at <= now()
            AND (sync_locked_at IS NULL OR sync_locked_at < now() - make_interval(secs => ${LEASE_STUCK_SECONDS}))
+           ${this.claimFilter}
+           ${only ? Prisma.sql`AND id = ${only.sourceId}::uuid AND organization_id = ${only.organizationId}::uuid` : Prisma.empty}
          ORDER BY sync_next_at, id
          FOR UPDATE SKIP LOCKED
          LIMIT 1
@@ -317,23 +349,39 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     return rows[0] ?? null;
   }
 
-  private async run(c: Claimed): Promise<void> {
+  private async run(c: Claimed, approve: Approval | null = null): Promise<{ ok: boolean; stats: RunStats }> {
     const started = Date.now();
     const claimedAt = new Date();
     const stats = new RunStats(c.delay_ms);
     try {
-      const result = await this.importOnce(c.organization_id, c.id, stats);
+      const result = await this.importOnce(c.organization_id, c.id, stats, approve);
       await this.finishOk(c, claimedAt, stats, started, result);
+      return { ok: true, stats };
     } catch (e) {
       await this.finishFailed(c, claimedAt, stats, started, e);
+      return { ok: false, stats };
     }
+  }
+
+  /**
+   * Run one source now, in the caller's request, approving the fresh rows
+   * `approve` picks as they land — the owner's "Start importing", whose ticks
+   * only this run knows. The sweep's lease applies, so a sweep that already
+   * holds the source (or a source that is not due) gives null: the caller
+   * queues it instead, and its rows wait in Import Review. Every other run —
+   * scheduled, "Sync now", a retry — approves nothing.
+   */
+  async runNow(organizationId: string, sourceId: string, approve: Approval): Promise<{ ok: boolean; stats: RunStats } | null> {
+    if (!sheetsEnabled(this.config) || this.stopped) return null;
+    const claimed = await this.claim({ organizationId, sourceId });
+    return claimed ? this.run(claimed, approve) : null;
   }
 
   // -------------------------------------------------------------------------
   // One run
   // -------------------------------------------------------------------------
 
-  private async importOnce(organizationId: string, sourceId: string, stats: RunStats): Promise<RunResult> {
+  private async importOnce(organizationId: string, sourceId: string, stats: RunStats, approve: Approval | null): Promise<RunResult> {
     stats.dbStatements += 1;
     const source = await this.prisma.lead_sources.findFirst({
       where: { id: sourceId, organization_id: organizationId, provider: GOOGLE_SHEETS_PROVIDER, connection_method: SYNC_CONNECTION },
@@ -381,6 +429,13 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
     const region = org?.default_region ?? 'US';
 
+    // A tracked row whose lead was deleted out of band is imported again — which
+    // only a full read can do, so the version probe must not skip one while any exist.
+    let orphans = 0;
+    if (this.config.get<string>('SHEETS_VERSION_PROBE') === '1') {
+      stats.dbStatements += 1;
+      orphans = await this.prisma.sheet_import_rows.count({ where: { organization_id: organizationId, lead_source_id: sourceId, lead_id: null } });
+    }
     const sheet = await this.readTab(
       organizationId,
       source.provider_credential_id,
@@ -389,7 +444,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       mappings,
       identity,
       stats,
-      rebaseline ? null : lastVersion || null,
+      rebaseline || orphans > 0 ? null : lastVersion || null,
       source.remote_synced_at,
     );
     const versionToken = sheet.version === null ? null : `${sheet.version}:${source.mapping_version}`;
@@ -464,6 +519,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         runEmails,
         stats,
         IMPORT_REVIEW_REASON,
+        approve,
       );
     }
 
@@ -595,6 +651,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     rows: BuiltRow[],
     stats: RunStats,
     importReason: string,
+    /** Rows to approve as they land; null approves nothing. */
+    approve: Approval | null,
   ): Promise<void> {
     stats.dbStatements += 1;
     const tracked = (await this.prisma.sheet_import_rows.findMany({
@@ -615,7 +673,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const runPhones = new Set<string>();
     const runEmails = new Set<string>();
     for (let i = 0; i < rows.length; i += DB_BATCH) {
-      await this.persistBatch(organizationId, sourceId, defaultConsent, rows.slice(i, i + DB_BATCH), known, null, runPhones, runEmails, stats, importReason);
+      await this.persistBatch(organizationId, sourceId, defaultConsent, rows.slice(i, i + DB_BATCH), known, null, runPhones, runEmails, stats, importReason, approve);
     }
   }
 
@@ -637,6 +695,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     stats: RunStats,
     /** The review reason every new lead starts with — which import it came from. */
     importReason: string,
+    /** Which fresh rows to approve as they land, if any. */
+    approve: Approval | null,
     retried = false,
   ): Promise<void> {
     const fresh: BuiltRow[] = [];
@@ -645,9 +705,13 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const rebase: { row: BuiltRow; tracked: Tracked; hadFlag: boolean }[] = [];
     const rowUpdates: { id: string; hash: string; rowNumber: number; set: ChangedValues | null; clear: boolean; requirePending: boolean }[] = [];
 
+    // Tracking rows whose lead was deleted out of band (lead_id NULL): the row is
+    // imported again onto a new lead, re-using its tracking row.
+    const relink = new Map<string, string>();
     for (const b of batch) {
       const t = known.get(b.key!);
-      if (!t) {
+      if (!t || t.lead_id === null) {
+        if (t) relink.set(b.key!, t.id);
         fresh.push(b);
         continue;
       }
@@ -757,6 +821,8 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
 
     const leads: Prisma.leadsCreateManyInput[] = [];
     const tracking: Prisma.sheet_import_rowsCreateManyInput[] = [];
+    const relinks: Prisma.Sql[] = [];
+    const toApprove: string[] = [];
     let dncCount = 0;
     let dupCount = 0;
     for (const b of fresh) {
@@ -779,8 +845,15 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         dnc_status: dnc,
         consent_status: defaultConsent,
       });
+      const existing = relink.get(b.key!);
+      const trackingId = existing ?? newId();
+      if (approve?.rule(b)) toApprove.push(trackingId);
+      if (existing) {
+        relinks.push(Prisma.sql`(${existing}::uuid, ${leadId}::uuid, ${b.hash!}::varchar, ${b.rowNumber}::int)`);
+        continue;
+      }
       tracking.push({
-        id: newId(),
+        id: trackingId,
         organization_id: organizationId,
         lead_source_id: sourceId,
         row_key: b.key!,
@@ -811,8 +884,17 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     }
 
     const statements: Prisma.PrismaPromise<unknown>[] = [];
-    if (leads.length) {
-      statements.push(this.prisma.leads.createMany({ data: leads }), this.prisma.sheet_import_rows.createMany({ data: tracking }));
+    if (leads.length) statements.push(this.prisma.leads.createMany({ data: leads }));
+    if (tracking.length) statements.push(this.prisma.sheet_import_rows.createMany({ data: tracking }));
+    if (relinks.length) {
+      // Back to an undecided draft on its new lead: the old decision was about a lead that no longer exists.
+      statements.push(this.prisma.$executeRaw`
+        UPDATE sheet_import_rows AS r
+           SET lead_id = v.lead_id, content_hash = v.hash, row_number = v.row_number,
+               review_state = 'pending', reviewed_by = NULL, reviewed_at = NULL,
+               changed_after_review_at = NULL, changed_values = NULL, missing_since = NULL, updated_at = now()
+          FROM (VALUES ${Prisma.join(relinks)}) AS v(id, lead_id, hash, row_number)
+         WHERE r.id = v.id AND r.organization_id = ${organizationId}::uuid AND r.lead_id IS NULL`);
     }
     if (refreshValues.length) {
       // Re-checks review_state at write time: a row approved meanwhile keeps
@@ -863,15 +945,27 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           where: { organization_id: organizationId, lead_source_id: sourceId, row_key: { in: batch.map((b) => b.key!) } },
         });
         for (const t of again) known.set(t.row_key, t as Tracked);
-        return this.persistBatch(organizationId, sourceId, defaultConsent, batch, known, rebaseline, runPhones, runEmails, stats, importReason, true);
+        return this.persistBatch(organizationId, sourceId, defaultConsent, batch, known, rebaseline, runPhones, runEmails, stats, importReason, approve, true);
       }
       throw err;
     }
     stats.inserted += fresh.length;
+    stats.relinked += relinks.length;
     stats.updated += refreshValues.length;
     stats.flagged += flag.length;
     stats.dncInherited += dncCount;
     stats.possibleDuplicates += dupCount;
+
+    // The rows the owner ticked are approved as they land — the same rules as
+    // the owner's click in Import Review. Everything else waits there.
+    if (toApprove.length > 0 && approve) {
+      const by = approve.by;
+      stats.dbStatements += 1;
+      const r = await this.prisma.$transaction((tx) => approveTrackingRows(tx, organizationId, toApprove, by));
+      stats.autoApproved += r.approved;
+      stats.autoReleased += r.released;
+      stats.autoHeld.push(...r.held);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -906,7 +1000,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       stats.probeSkipped
         ? `sheet sync ${c.id}: unchanged (Drive version), not read — ${durationMs}ms`
-        : `sheet sync ${c.id}: ${stats.inserted} imported, ${stats.updated} refreshed, ${stats.flagged} flagged, ` +
+        : `sheet sync ${c.id}: ${stats.inserted} imported (${stats.autoApproved} approved), ${stats.updated} refreshed, ${stats.flagged} flagged, ` +
             `${stats.unchanged} unchanged, ${stats.missingMarked} missing, ` +
             `${Object.values(stats.skipped).reduce((a, b) => a + (b ?? 0), 0)} skipped in ${durationMs}ms ` +
             `(${stats.googleRequests} Google, ${stats.dbStatements} DB)`,
@@ -961,6 +1055,52 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       },
     });
   }
+}
+
+/**
+ * For a preview: which rows share a phone or email with a lead this
+ * organization already has (pending imports included), or with an earlier row
+ * of the same sheet or file — and which match someone who opted out. The import
+ * itself re-checks all of this when it writes.
+ */
+export async function contactFlags(prisma: GuardedPrisma, organizationId: string, candidates: BuiltRow[]) {
+  const phones = [...new Set(candidates.map((b) => b.lead!.normalized_phone).filter((p): p is string => !!p))];
+  const emails = [...new Set(candidates.map((b) => b.lead!.normalized_email).filter((e): e is string => !!e))];
+  const known = { phones: new Map<string, boolean>(), emails: new Map<string, boolean>() };
+  for (const [field, values, into] of [
+    ['normalized_phone', phones, known.phones],
+    ['normalized_email', emails, known.emails],
+  ] as const) {
+    for (let i = 0; i < values.length; i += CONTACT_CHUNK) {
+      const found = await prisma.leads.findMany({
+        where: { organization_id: organizationId, [field]: { in: values.slice(i, i + CONTACT_CHUNK) } },
+        select: { normalized_phone: true, normalized_email: true, dnc_status: true },
+      });
+      for (const f of found) {
+        const v = f[field];
+        if (v) into.set(v, (into.get(v) ?? false) || f.dnc_status);
+      }
+    }
+  }
+  const inFile = { phones: new Set<string>(), emails: new Set<string>() };
+  const reasons = new Map<number, string[]>();
+  let possible = 0;
+  let optedOut = 0;
+  for (const b of candidates) {
+    const p = b.lead!.normalized_phone;
+    const e = b.lead!.normalized_email;
+    const dnc = Boolean((p && known.phones.get(p)) || (e && known.emails.get(e)));
+    const duplicate = Boolean(
+      (p && (known.phones.has(p) || inFile.phones.has(p))) || (e && (known.emails.has(e) || inFile.emails.has(e))),
+    );
+    if (p) inFile.phones.add(p);
+    if (e) inFile.emails.add(e);
+    if (dnc) optedOut += 1;
+    if (duplicate) possible += 1;
+    const why = [...(dnc ? [DNC_REASON] : []), ...(duplicate ? [DUPLICATE_REASON] : [])];
+    if (why.length) reasons.set(b.rowNumber, why);
+  }
+  return { possible, optedOut, reasons };
 }
 
 /** The lead columns a sheet row fills. Shared by insert, refresh and "apply change". */

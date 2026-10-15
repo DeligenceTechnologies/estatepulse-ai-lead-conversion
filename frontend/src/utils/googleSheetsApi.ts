@@ -141,7 +141,8 @@ export interface SheetPreview {
   mapping: { saved: boolean; columns: ColumnMapping[]; identity: Identity };
   identityCandidates: string[];
   problems: { path: string; message: string }[];
-  rows: { rowNumber: number; blank: boolean; issue: string | null; lead: PreviewLead | null; reviewReasons: string[] }[];
+  /** Every non-blank row, with the flags the import would give it (a warning, a possible duplicate, an opt-out). */
+  rows: { rowNumber: number; issue: string | null; lead: PreviewLead | null; reviewReasons: string[] }[];
 }
 
 export interface RunSummary {
@@ -187,8 +188,17 @@ export const saveSheetMapping = (
   body: { columns: ColumnMapping[]; identity: { mode: 'column'; fieldKey: string } | { mode: 'fallback'; acknowledged: true } },
 ): Promise<SheetSource> => apiFetch<SheetSource>(`${BASE}/sources/${id}/mapping`, { method: 'PUT', auth: true, body });
 
-export const enableSheetSource = (id: string): Promise<SheetSource> =>
-  apiFetch<SheetSource>(`${BASE}/sources/${id}/enable`, { method: 'POST', auth: true });
+/** What "Start importing" did there and then: the first run, with the ticked rows approved as they landed. */
+export interface FirstRun {
+  /** False: the run failed, and the source's lastErrorMessage says why. */
+  ok: boolean;
+  imported: number;
+  approval: ApproveResult;
+}
+
+/** Switch the sheet on and run its first import now; `approveRows` (sheet row numbers) are approved as they land. */
+export const enableSheetSource = (id: string, approveRows: number[]): Promise<SheetSource & { firstRun: FirstRun | null }> =>
+  apiFetch<SheetSource & { firstRun: FirstRun | null }>(`${BASE}/sources/${id}/enable`, { method: 'POST', auth: true, body: { approveRows } });
 
 export const pauseSheetSource = (id: string): Promise<SheetSource> =>
   apiFetch<SheetSource>(`${BASE}/sources/${id}/pause`, { method: 'POST', auth: true });
