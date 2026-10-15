@@ -181,7 +181,9 @@ export class CalendarSyncService {
     // ...except a row still missing its join link: a conferencing link can be
     // generated just after booking, after an in-call booking wrote the row.
     const linkArrived = !existing?.meeting_url && !!booking.meetingUrl;
-    if (existing && existingMeta.externalUpdatedAt === booking.externalUpdatedAt && !linkArrived) return;
+    // ...or a row synced before rescheduledFrom was recorded (read once more).
+    const chainKnown = 'rescheduledFrom' in existingMeta;
+    if (existing && existingMeta.externalUpdatedAt === booking.externalUpdatedAt && !linkArrived && chainKnown) return;
 
     // Before the attendee request, not after: a booking hosted by somebody who
     // is not on our roster can never become a row, so paying for a second call
@@ -195,7 +197,21 @@ export class CalendarSyncService {
     const attendee = booking.attendee ?? (await this.providers.get(conn.provider).fetchAttendee(conn, booking));
     if (!attendee) return;
 
-    const leadId = existing?.lead_id ?? (await this.matchLead(conn.organization_id, attendee));
+    // A reschedule's replacement keeps the lead of the booking it replaced,
+    // whether or not the new invitee would still match one on its own.
+    const replaced =
+      !existing && attendee.rescheduledFrom
+        ? await this.prisma.appointments.findFirst({
+            where: {
+              organization_id: conn.organization_id,
+              provider: conn.provider,
+              external_event_id: attendee.rescheduledFrom,
+            },
+            select: { lead_id: true },
+          })
+        : null;
+    const leadId =
+      existing?.lead_id ?? replaced?.lead_id ?? (await this.matchLead(conn.organization_id, attendee));
     if (!leadId) {
       // No lead, no row. Deliberately silent in the data, counted in the result
       // so "Sync now" can say how many were skipped and why.
@@ -213,6 +229,7 @@ export class CalendarSyncService {
       cancelUrl: attendee.cancelUrl,
       rescheduleUrl: attendee.rescheduleUrl,
       canceledReason: booking.canceledReason,
+      rescheduledFrom: attendee.rescheduledFrom,
     };
 
     const shared = {

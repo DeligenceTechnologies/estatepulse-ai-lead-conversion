@@ -88,6 +88,8 @@ export class AppointmentsService {
         left join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = a.organization_id
        where a.organization_id = ${organizationId}::uuid
          and a.start_at >= ${from}::timestamptz and a.start_at <= ${to}::timestamptz
+         -- 'rescheduled' is the slot a meeting moved away from; the meeting is its replacement row.
+         and a.status <> 'rescheduled'
          ${q.status ? Prisma.sql`and a.status = ${q.status}` : Prisma.empty}
          ${q.agentId ? Prisma.sql`and a.agent_id = ${q.agentId}::uuid` : Prisma.empty}
          ${q.leadId ? Prisma.sql`and a.lead_id = ${q.leadId}::uuid` : Prisma.empty}
@@ -159,10 +161,10 @@ export class AppointmentsService {
        where a.organization_id = ${organizationId}::uuid
          and a.agent_id = ${agentId}::uuid
          and a.start_at >= ${new Date()}::timestamptz
-         -- Verbatim from appointments_status_check, and the same pair
-         -- agent-me.controller.ts counts as "upcoming": the two must agree or
-         -- the agent's badge and the owner's list disagree about the same day.
-         and a.status in ('scheduled', 'rescheduled')
+         -- The same rule agent-me.controller.ts counts as "upcoming": the two
+         -- must agree or the agent's badge and the owner's list disagree about
+         -- the same day. 'rescheduled' is a slot the meeting moved away from.
+         and a.status = 'scheduled'
        order by a.start_at asc
        limit 50
     `;
@@ -239,6 +241,7 @@ export class AppointmentsService {
             from appointments a
             left join agent_profiles ap on ap.id = a.agent_id and ap.organization_id = a.organization_id
            where a.organization_id = l.organization_id and a.lead_id = l.id
+             and a.status <> 'rescheduled'
            order by a.start_at desc
            limit 50
         ) a on true
@@ -304,7 +307,8 @@ export class AppointmentsService {
       externalEventId: r.external_event_id,
       startTime: r.start_at.toISOString(),
       endTime: r.end_at.toISOString(),
-      status: r.status,
+      // The meeting a reschedule moved here reads as rescheduled (its old slot is not listed).
+      status: r.status === 'scheduled' && meta.rescheduledFrom ? 'rescheduled' : r.status,
       appointmentType: (meta.eventTypeName as string | null) ?? null,
       meetingUrl: r.meeting_url,
       notes: r.notes,
