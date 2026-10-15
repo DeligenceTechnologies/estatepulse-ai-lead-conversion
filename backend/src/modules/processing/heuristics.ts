@@ -36,14 +36,18 @@ function typeCompatible(target: CanonicalKey, providerType: string): boolean {
   const spec = CANONICAL_FIELDS[target];
   if (spec.providerTypes?.includes(providerType)) return true;
 
-  const choice = ['DROPDOWN', 'MULTIPLE_CHOICE', 'CHECKBOXES', 'MULTI_SELECT'].includes(providerType);
+  // Tally's vocabulary is upper-case, Typeform's lower-case; they never collide.
+  const choice = [
+    'DROPDOWN', 'MULTIPLE_CHOICE', 'CHECKBOXES', 'MULTI_SELECT',
+    'dropdown', 'multiple_choice', 'picture_choice',
+  ].includes(providerType);
   if (choice) {
     // A choice field can only feed an enum, a boolean, or free text.
     return ['timeline', 'buying_intent', 'financing_status', 'consent_status', 'location', 'bedrooms',
             'min_budget', 'max_budget', 'motivation'].includes(target);
   }
-  if (providerType === 'INPUT_EMAIL') return target === 'email';
-  if (providerType === 'INPUT_PHONE_NUMBER') return target === 'phone';
+  if (providerType === 'INPUT_EMAIL' || providerType === 'email') return target === 'email';
+  if (providerType === 'INPUT_PHONE_NUMBER' || providerType === 'phone_number') return target === 'phone';
   return true;
 }
 

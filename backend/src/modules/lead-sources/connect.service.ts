@@ -203,7 +203,7 @@ export class ConnectService implements OnApplicationBootstrap {
     const id = newId();
     const token = generateIngestToken('live');
     const secret = generateSigningSecret();
-    const url = this.leadSources.ingestUrl(token.token);
+    const url = this.leadSources.ingestUrl(token.token, cred.provider);
 
     // --- 1. our row first. See the ordering argument at the top. ------------
     try {
@@ -558,7 +558,7 @@ export class ConnectService implements OnApplicationBootstrap {
     const credential: ProviderCredential = { apiKey: cred.apiKey };
 
     const token = this.secretBox.decrypt(row.ingest_token_enc!, ingestTokenAad(organizationId, row.id));
-    const url = this.leadSources.ingestUrl(token);
+    const url = this.leadSources.ingestUrl(token, cred.provider);
 
     let remote;
     try {
@@ -672,7 +672,7 @@ export class ConnectService implements OnApplicationBootstrap {
         { apiKey: cred.apiKey },
         {
           externalFormId: row.external_form_id,
-          url: this.leadSources.ingestUrl(token),
+          url: this.leadSources.ingestUrl(token, cred.provider),
           signingSecret: adapter.capabilities.supportsSigningSecret ? secret : null,
           externalRef: row.id,
         },

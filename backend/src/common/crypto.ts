@@ -177,3 +177,13 @@ export function verifyTallySignature(rawBody: Buffer, secret: string, headerValu
   if (provided.length !== expected.length) return false;
   return timingSafeEqual(provided, expected);
 }
+
+/**
+ * Verify Typeform's `Typeform-Signature` header: `sha256=` followed by the same
+ * base64(HMAC-SHA256(secret, rawBody)) Tally sends. Everything above about raw
+ * bytes and replay applies unchanged.
+ */
+export function verifyTypeformSignature(rawBody: Buffer, secret: string, headerValue: string): boolean {
+  const value = headerValue.startsWith('sha256=') ? headerValue.slice('sha256='.length) : headerValue;
+  return verifyTallySignature(rawBody, secret, value);
+}
