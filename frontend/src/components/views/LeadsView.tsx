@@ -3,8 +3,10 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  FileSpreadsheet,
   FileUp,
   Flame,
+  PenLine,
   Plus,
   Radio,
   RefreshCw,
@@ -14,6 +16,7 @@ import {
   Sun,
   Users,
   Webhook,
+  type LucideIcon,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
@@ -22,6 +25,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { FileImportModal } from '../imports/FileImportModal';
+import { AddLeadModal } from '../leads/AddLeadModal';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
 import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
@@ -85,6 +89,30 @@ const sourceLabel = (l: LiveLead): string => {
   const method = (s.connectionMethod ?? '').toUpperCase();
   if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
   return s.type ?? 'webhook';
+};
+
+/**
+ * The channel as a glyph, so a column of sources is told apart at a glance
+ * without a colour per source: colour in this table already means urgency
+ * (temperature) and lifecycle (status), and a third rainbow would drown both.
+ * Same icons the rest of the app uses for each channel (Lead Sources, the
+ * Google Sheets card, the file import).
+ */
+const sourceIcon = (l: LiveLead): LucideIcon => {
+  const s = l.source;
+  if (!s) return PenLine;
+  switch ((s.connectionMethod ?? '').toUpperCase()) {
+    case 'MANUAL':
+      return PenLine;
+    case 'API':
+      return Radio;
+    case 'SYNC':
+      return FileSpreadsheet;
+    case 'UPLOAD':
+      return FileUp;
+    default:
+      return Webhook;
+  }
 };
 
 /**
@@ -174,10 +202,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { agentProfileId, role } = useAuth();
   const isOwner = role === 'owner';
-  // "Add leads": a file import (owner only, where the server has it switched on). One lead at a time comes later.
+  // "Add leads" (owner only): one lead typed in by hand, or a file import where the server has it switched on.
   const [canImport, setCanImport] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   useEffect(() => {
     if (isOwner) void fileImportEnabled().then(setCanImport);
   }, [isOwner]);
@@ -341,7 +370,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          {canImport && (
+          {isOwner && (
             <div
               className="relative"
               onBlur={(e) => {
@@ -369,33 +398,38 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     role="menuitem"
                     onClick={() => {
                       setAddMenu(false);
-                      setImportOpen(true);
+                      setAddOpen(true);
                     }}
                     className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
                   >
-                    <FileUp className="w-3.5 h-3.5 text-sky-300" />
+                    <PenLine className="w-3.5 h-3.5 text-emerald-300" />
                     <span>
-                      Import from CSV / Excel
-                      <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
+                      Add a lead
+                      <span className="block text-2xs text-slate-500">Type in one person's details</span>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled
-                    title="Adding a single lead by hand is not available yet"
-                    className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center gap-2 cursor-default"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>
-                      Add one lead
-                      <span className="block text-2xs text-slate-600">Soon</span>
-                    </span>
-                  </button>
+                  {canImport && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddMenu(false);
+                        setImportOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
+                    >
+                      <FileUp className="w-3.5 h-3.5 text-sky-300" />
+                      <span>
+                        Import from CSV / Excel
+                        <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
+                      </span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           )}
+          {addOpen && <AddLeadModal onClose={() => setAddOpen(false)} />}
           {importOpen && (
             <FileImportModal
               onClose={() => setImportOpen(false)}
@@ -597,9 +631,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
 
                       {/* Source — where the lead actually came from (see sourceLabel); the form's own name on hover. */}
                       <td className="px-4 py-3.5">
-                        <span title={lead.source?.name ?? undefined} className="text-slate-400 capitalize whitespace-nowrap">
-                          {sourceLabel(lead)}
-                        </span>
+                        {(() => {
+                          const SourceIcon = sourceIcon(lead);
+                          return (
+                            <span title={lead.source?.name ?? undefined} className="inline-flex items-center gap-1.5 text-slate-200 font-medium capitalize whitespace-nowrap">
+                              <SourceIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              {sourceLabel(lead)}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Agent — the current assignment, or honestly unassigned. */}
