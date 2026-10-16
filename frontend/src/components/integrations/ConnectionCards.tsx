@@ -8,8 +8,8 @@ import {
   Plus,
   Settings2,
   Webhook,
-  X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   ApiError,
   api,
@@ -59,7 +59,7 @@ const CopyButton: React.FC<{ value: string; title: string }> = ({ value, title }
           setDone(true);
           setTimeout(() => setDone(false), 1500);
         } catch {
-          /* clipboard blocked — the URL is still on Lead Sources to select by hand */
+          toast.error('Could not copy — select the URL on Lead Sources instead.');
         }
       }}
       className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
@@ -168,7 +168,6 @@ export const ConnectionCards: React.FC = () => {
   const [sources, setSources] = useState<LeadSourceConfig[] | null>(null);
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
@@ -212,18 +211,18 @@ export const ConnectionCards: React.FC = () => {
     try {
       if (mode === 'resync') {
         const r = await providersApi.resync(source.id);
-        setNotice(
+        toast.success(
           `Re-sync: ${r.remoteState.toLowerCase()}${
             r.removedDuplicates ? `, removed ${r.removedDuplicates} duplicate webhook(s)` : ''
           }.`,
         );
       } else {
         await providersApi.reinstall(source.id);
-        setNotice('Webhook reinstalled with the same URL and secret — nothing else to change.');
+        toast.success('Webhook reinstalled with the same URL and secret — nothing else to change.');
       }
       await load();
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : String(e));
+      toast.error(e instanceof ApiError ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -238,16 +237,14 @@ export const ConnectionCards: React.FC = () => {
     setBusy(true);
     try {
       const r = await providersApi.disconnectForm(source.id);
-      setNotice(
-        r.warning ??
-          (norm(source.connectionMethod) === 'API'
-            ? 'Disconnected, and the webhook was removed from your form. Leads already received are untouched.'
-            : 'Disconnected. Remove the webhook in your form tool too, or it keeps firing at a dead URL.'),
-      );
+      if (r.warning) toast.warn(r.warning);
+      else if (norm(source.connectionMethod) === 'API')
+        toast.success('Disconnected, and the webhook was removed from your form. Leads already received are untouched.');
+      else toast.warn('Disconnected. Remove the webhook in your form tool too, or it keeps firing at a dead URL.');
       setConfirmDisconnect(null);
       await load();
     } catch (e) {
-      setNotice(
+      toast.error(
         e instanceof ApiError
           ? `${e.message} You can remove it in your form tool and disconnect again.`
           : String(e),
@@ -297,20 +294,6 @@ export const ConnectionCards: React.FC = () => {
             <div className="font-semibold text-rose-100">Can't reach the backend</div>
             {error}
           </div>
-        </div>
-      )}
-
-      {notice && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-amber-200 leading-relaxed flex-1">{notice}</div>
-          <button
-            type="button"
-            onClick={() => setNotice(null)}
-            className="p-1 rounded-lg text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
         </div>
       )}
 

@@ -14,8 +14,11 @@ import {
   UserPlus,
   XCircle,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { confirmToast } from '../../lib/toast';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { messageFor } from '../../lib/api';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { EnrollLeadsModal } from '../modals/EnrollLeadsModal';
 import { SequenceEditorModal } from '../modals/SequenceEditorModal';
@@ -114,22 +117,28 @@ export const FollowUpsView: React.FC = () => {
     const warning = live
       ? `Archive "${seq.name}"? ${live} lead${live === 1 ? '' : 's'} will stop receiving it.`
       : `Archive "${seq.name}"?`;
-    if (!window.confirm(warning)) return;
+    if (!(await confirmToast(warning, 'Archive'))) return;
     setBusyId(seq.id);
     try {
       await archiveSequence(seq.id);
+      toast.success(`Archived "${seq.name}".`);
       refreshAll();
+    } catch (e) {
+      toast.error(messageFor(e));
     } finally {
       setBusyId(null);
     }
   };
 
   const onRemove = async (e: Enrollment) => {
-    if (!window.confirm(`Remove ${e.leadName} from ${e.sequenceName}?`)) return;
+    if (!(await confirmToast(`Remove ${e.leadName} from ${e.sequenceName}?`, 'Remove'))) return;
     setBusyId(e.id);
     try {
       await stopEnrollment(e.id);
+      toast.success(`Removed ${e.leadName} from ${e.sequenceName}.`);
       refreshAll();
+    } catch (err) {
+      toast.error(messageFor(err));
     } finally {
       setBusyId(null);
     }

@@ -88,7 +88,7 @@ export class ApiError extends Error {
  */
 const MESSAGES: Record<ErrorCode, string> = {
   VALIDATION_ERROR: 'Please check the highlighted fields and try again.',
-  INVALID_CREDENTIALS: 'That email and password combination is not correct.',
+  INVALID_CREDENTIALS: 'Incorrect email or password.',
   UNAUTHENTICATED: 'Please sign in to continue.',
   TOKEN_EXPIRED: 'Your session has expired. Please sign in again.',
   EMAIL_TAKEN: 'An account with that email already exists.',

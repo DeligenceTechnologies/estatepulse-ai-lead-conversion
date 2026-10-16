@@ -459,7 +459,7 @@ model leads {
   /// Why a follow_up lead is parked; meaningful only while status = 'follow_up'.
   follow_up_reason         String?                @db.VarChar(30)
   score                    Decimal?               @db.Decimal(5, 2)
-  temperature              String?                @db.VarChar(10)
+  temperature              String?                @default("cold") @db.VarChar(10)
   buying_intent            String?                @db.VarChar(100)
   timeline                 String?                @db.VarChar(100)
   min_budget               Decimal?               @db.Decimal(12, 2)

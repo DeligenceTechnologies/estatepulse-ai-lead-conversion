@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FileSpreadsheet, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   createSheetSource,
   inspectSpreadsheet,
@@ -41,11 +42,10 @@ export const SheetTabPickerModal: React.FC<{
   const create = async () => {
     if (tabId === null) return;
     setBusy(true);
-    setError(null);
     try {
       onCreated(await createSheetSource({ connectionId, spreadsheetId, sheetId: tabId }));
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(false);
     }

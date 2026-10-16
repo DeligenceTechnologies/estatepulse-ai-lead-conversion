@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Zap, Copy, Check, Terminal, Play, CheckCircle2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 
 interface WebhookSimulatorModalProps {
@@ -92,7 +93,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
   -d '${rawJson.replace(/\n/g, '').replace(/\s+/g, ' ')}'`;
 
   const handleCopyCurl = () => {
-    navigator.clipboard.writeText(curlCommand);
+    navigator.clipboard.writeText(curlCommand).catch(() => toast.error('Could not copy — select the text instead.'));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

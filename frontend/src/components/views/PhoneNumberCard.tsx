@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Phone, Search, Loader2, AlertTriangle, CheckCircle2, ShoppingCart } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   TelnyxStatus,
   AvailableNumber,
@@ -21,12 +22,11 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
   const [owned, setOwned] = useState<OwnedNumber[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
 
   const features = [wantVoice ? 'voice' : '', wantSms ? 'sms' : ''].filter(Boolean).join(',');
 
   const search = async () => {
-    setBusy('search'); setError(null); setNote(null);
+    setBusy('search'); setError(null);
     try {
       setAvailable(await searchNumbers({ country: 'US', area: area || undefined, features, limit: 10 }));
     } catch (e: any) { setError(e.message); } finally { setBusy(null); }
@@ -38,27 +38,27 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
   };
 
   const buyAndUse = async (n: AvailableNumber) => {
-    setBusy(n.phone_number); setError(null); setNote(null);
+    setBusy(n.phone_number); setError(null);
     try {
       await buyNumber(n.phone_number);
-      setNote(`Purchased ${n.phone_number} — assigning to your assistant…`);
+      toast.info(`Purchased ${n.phone_number} — assigning to your assistant…`);
       await assignNumber(n.phone_number);
       onChange();
-      setNote(`${n.phone_number} is now your active number.`);
+      toast.success(`${n.phone_number} is now your active number.`);
       setAvailable((a) => (a ? a.filter((x) => x.phone_number !== n.phone_number) : a));
-    } catch (e: any) { setError(e.message); } finally { setBusy(null); }
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   };
 
   const useOwned = async (n: OwnedNumber) => {
-    setBusy(n.phone_number); setError(null); setNote(null);
-    try { await assignNumber(n.phone_number); onChange(); setNote(`${n.phone_number} is now your active number.`); }
-    catch (e: any) { setError(e.message); } finally { setBusy(null); }
+    setBusy(n.phone_number); setError(null);
+    try { await assignNumber(n.phone_number); onChange(); toast.success(`${n.phone_number} is now your active number.`); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   };
 
   const disconnect = async (phone: string) => {
-    setBusy(phone); setError(null); setNote(null);
-    try { await unassignNumber(phone); onChange(); setNote(`${phone} disconnected.`); }
-    catch (e: any) { setError(e.message); } finally { setBusy(null); }
+    setBusy(phone); setError(null);
+    try { await unassignNumber(phone); onChange(); toast.success(`${phone} disconnected.`); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   };
 
   const cost = (n: AvailableNumber) => {
@@ -90,7 +90,6 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
       </div>
 
       {error && <div className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {error}</div>}
-      {note && <div className="flex items-center gap-1.5 text-xs text-emerald-300"><CheckCircle2 className="w-3.5 h-3.5" /> {note}</div>}
 
       {tab === 'search' && (
         <div className="space-y-3">

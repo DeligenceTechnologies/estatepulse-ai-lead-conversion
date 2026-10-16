@@ -5,6 +5,8 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { LeadAssignmentController } from './lead-assignment.controller';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { LeadsController } from './leads.controller';
+import { ManualLeadController } from './manual-lead.controller';
+import { ManualLeadService } from './manual-lead.service';
 import { OwnerDashboardController } from './owner-dashboard.controller';
 
 /**
@@ -13,8 +15,8 @@ import { OwnerDashboardController } from './owner-dashboard.controller';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [LeadsController, LeadAssignmentController, OwnerDashboardController],
-  providers: [LeadAssignmentService, OwnerGuard],
+  controllers: [LeadsController, LeadAssignmentController, ManualLeadController, OwnerDashboardController],
+  providers: [LeadAssignmentService, ManualLeadService, OwnerGuard],
   // In-call booking (CalendarModule) assigns the lead to the agent Calendly picked.
   exports: [LeadAssignmentService],
 })

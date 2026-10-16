@@ -3,10 +3,10 @@ import {
   AlertTriangle,
   CalendarCheck,
   CalendarX,
-  CheckCircle2,
   ExternalLink,
   Loader2,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { ApiError, messageFor } from '../../lib/api';
 import {
@@ -66,7 +66,6 @@ export const AgentAvailability: React.FC = () => {
   const [days, setDays] = useState<AvailabilityDay[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -97,12 +96,11 @@ export const AgentAvailability: React.FC = () => {
 
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
-    setError(null);
     try {
       await fn();
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? messageFor(e) : String(e));
+      toast.error(e instanceof ApiError ? messageFor(e) : String(e));
     } finally {
       setBusy(null);
     }
@@ -114,7 +112,7 @@ export const AgentAvailability: React.FC = () => {
   const saveHours = () =>
     run('hours', async () => {
       await saveMyAvailability(days);
-      setSavedAt(Date.now());
+      toast.success('Availability saved.');
     });
 
   const dirty =
@@ -256,11 +254,6 @@ export const AgentAvailability: React.FC = () => {
               .
             </p>
           </div>
-          {savedAt && !dirty && (
-            <span className="text-xs text-emerald-300 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Saved
-            </span>
-          )}
         </div>
 
         <div className="space-y-1.5">

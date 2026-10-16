@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, Search, UserPlus, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import {
   enrollLeads,
@@ -97,7 +98,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
       setResult(await enrollLeads(sequence.id, body));
       onEnrolled();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setBusy(false);
     }

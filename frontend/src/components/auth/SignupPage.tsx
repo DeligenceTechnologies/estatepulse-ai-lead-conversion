@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor, type TeamSize } from '../../lib/api';
 import { AuthLayout, Field, FormError, SubmitButton } from './AuthLayout';
@@ -38,7 +39,7 @@ export const SignupPage: React.FC = () => {
       await signup({ email, password, firstName, lastName, organizationName, teamSize });
       navigate('/', { replace: true });
     } catch (err) {
-      setError(messageFor(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }
