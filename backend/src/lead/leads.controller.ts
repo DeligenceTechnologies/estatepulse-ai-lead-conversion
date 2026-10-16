@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { AssignmentType, LeadStatus } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -6,9 +6,11 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssignLeadDto } from './dto/assign-lead.dto';
+import { CreateLeadDto } from './dto/create-lead.dto';
 import { ListLeadsQuery } from './dto/list-leads.query';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
+import { ManualLeadService } from './manual-lead.service';
 
 const LEAD_FIELDS = {
   id: true,
@@ -52,7 +54,15 @@ export class LeadsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly assignments: LeadAssignmentService,
+    private readonly manualLeads: ManualLeadService,
   ) {}
+
+  /** One lead added by hand. Same pipeline as a form submission, without a lead source. */
+  @Post()
+  @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
+  create(@CurrentAuth() auth: AuthContext, @Body() body: CreateLeadDto) {
+    return this.manualLeads.create(auth.organizationId, auth.userId, body);
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.LEAD_READ)

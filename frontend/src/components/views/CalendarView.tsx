@@ -1,20 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, ChevronRight, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronRight, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ApiError, messageFor } from '../../lib/api';
 import { getOrganizationCalendar, type CalendarProviderId, type OrganizationCalendarStatus } from '../../utils/calendarApi';
 import { TeamAvailability } from '../calendar/availability/TeamAvailability';
-import { Meetings } from '../calendar/meetings/Meetings';
 import { SyncButton } from '../calendar/shared/SyncButton';
 import { PROVIDERS } from '../calendar/shared/ui';
 
-export type CalendarSection = 'availability' | 'meetings';
+export type CalendarSection = 'availability';
 
 /** One sidebar entry each, under Calendar. The page carries the full title. */
 const SECTIONS: Record<CalendarSection, { title: string; subtitle: string; icon: React.ElementType }> = {
   availability: { title: 'Team Availability', subtitle: 'See who’s free and who’s busy.', icon: CalendarClock },
-  meetings: { title: 'Meetings', subtitle: 'Every booked meeting: who, when and how to join.', icon: CalendarDays },
 };
 
 const Skeleton: React.FC = () => (
@@ -71,9 +69,9 @@ const primaryButton =
   'h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400';
 
 /**
- * The Calendar pages — Team Availability and Meetings — each its own
- * sidebar entry, all read from the Calendly or Cal.com account
- * connected once under Settings → Calendar.
+ * The Calendar pages — Team Availability — each its own sidebar entry, all
+ * read from the Calendly or Cal.com account connected once under
+ * Settings → Calendar (which also lists the booked meetings).
  */
 export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }) => {
   const navigate = useNavigate();
@@ -156,12 +154,7 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
   } else {
     // Keyed by connection so switching calendars never shows the old provider's rows.
     const key = connection!.connectedAt;
-    body =
-      section === 'availability' ? (
-        <TeamAvailability key={key} syncVersion={syncVersion} />
-      ) : (
-        <Meetings key={key} provider={provider!} syncVersion={syncVersion} />
-      );
+    body = <TeamAvailability key={key} syncVersion={syncVersion} />;
   }
 
   return (

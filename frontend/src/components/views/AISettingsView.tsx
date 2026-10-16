@@ -376,14 +376,14 @@ export const AISettingsView: React.FC = () => {
               {status.connected ? (
                 <>
                   Your Telnyx credentials are saved, but there is no assistant to configure. Create
-                  or attach one on{' '}
-                  <span className="text-slate-200">Integrations &amp; Webhooks</span>, then come back
+                  or attach one under{' '}
+                  <span className="text-slate-200">Settings → Telnyx</span>, then come back
                   to write its prompt and tone.
                 </>
               ) : (
                 <>
-                  Please connect your Telnyx account from the{' '}
-                  <span className="text-slate-200">Integrations &amp; Webhooks</span> page. Prompt,
+                  Please connect your Telnyx account under{' '}
+                  <span className="text-slate-200">Settings → Telnyx</span>. Prompt,
                   tone and voice settings are written straight to the live agent, so there is nothing
                   to edit until it exists.
                 </>

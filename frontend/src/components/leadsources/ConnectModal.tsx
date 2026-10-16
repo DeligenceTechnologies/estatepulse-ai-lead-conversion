@@ -6,7 +6,7 @@ import { ManualWebhookPanel, PanelClose } from './ManualWebhookPanel';
 /**
  * The one place a lead source gets connected.
  *
- * It lives on Integrations & Webhooks, not on Lead Sources: connecting is a
+ * It lives on Lead Integrations, not on Lead Sources: connecting is a
  * setup act you do once, while Lead Sources is a monitoring screen you come back
  * to. Mixing them meant the screen you check daily was dominated by buttons you
  * press twice a year.

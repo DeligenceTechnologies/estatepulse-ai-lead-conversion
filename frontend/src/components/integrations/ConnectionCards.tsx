@@ -24,7 +24,7 @@ import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { IntegrationCard } from './IntegrationCard';
 
 /**
- * Integrations & Webhooks: every connection the account has, one card each.
+ * Lead Integrations: every connection the account has, one card each.
  *
  * This screen answers one question — what is connected, and how do I connect
  * another — so it shows connections and nothing else. Everything about what a
@@ -321,8 +321,8 @@ export const ConnectionCards: React.FC = () => {
               <Link2 className="w-5 h-5" />
             </div>
           }
-          title="Tally"
-          blurb="Pick a form — we install the webhook for you"
+          title="Tally Forms"
+          blurb="Connect your Tally account and pick forms — we set up the webhook for you"
           connected={tallySources.length > 0 || connections.length > 0}
           loading={loading}
           accent="border-emerald-500/40"
@@ -367,13 +367,13 @@ export const ConnectionCards: React.FC = () => {
               <Webhook className="w-5 h-5" />
             </div>
           }
-          title="Webhook"
-          blurb="A URL and signing secret you paste in yourself"
+          title="Website & Other Forms"
+          blurb="Your website, Zapier, Make or any tool that can send a webhook"
           connected={webhookSources.length > 0}
           loading={loading}
           accent="border-amber-500/40"
           action={{
-            label: webhookSources.length > 0 ? 'Add webhook' : 'Create a webhook',
+            label: webhookSources.length > 0 ? 'Add another' : 'Get webhook URL',
             icon: <Plus className="w-4 h-4" />,
             onClick: () => setConnect('WEBHOOK'),
             className: 'bg-slate-800 hover:bg-slate-700 text-slate-100',

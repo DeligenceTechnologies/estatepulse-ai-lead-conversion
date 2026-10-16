@@ -576,7 +576,7 @@ export class CalendarSyncService implements OnModuleDestroy {
         blocks: busy,
         ...(schedule !== undefined ? { schedule } : {}),
         status: 'limited',
-        message: `${member.name} has no public meeting type in Cal.com, so free time cannot be read.`,
+        message: null,
       };
     }
     const slots = await this.cal.slots(apiKey, eventType.id, new Date(window.from), new Date(window.until));

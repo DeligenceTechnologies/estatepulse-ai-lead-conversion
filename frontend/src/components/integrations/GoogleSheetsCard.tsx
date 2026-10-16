@@ -316,7 +316,7 @@ export const GoogleSheetsCard: React.FC = () => {
           </div>
         }
         title="Google Sheets"
-        blurb="Import leads from your spreadsheets, reviewed before anyone is contacted"
+        blurb="Import leads from a spreadsheet — you review them before anyone is contacted"
         connected={live}
         loading={loading}
         accent="border-green-500/40"

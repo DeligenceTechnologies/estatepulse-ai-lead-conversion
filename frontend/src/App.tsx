@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React from 'react';
+import { Navigate } from 'react-router-dom';
 import { AppProvider, useApp, type AppView } from './context/AppContext';
 import { useOwnerNav } from './components/layout/Sidebar';
 import { AppShell } from './components/layout/AppShell';
@@ -31,21 +32,16 @@ import { AgentAvailability } from './components/agent/AgentAvailability';
 import { LeadDetailModal } from './components/modals/LeadDetailModal';
 import { AgentPreCallModal } from './components/modals/AgentPreCallModal';
 import { LiveCallSimulatorModal } from './components/modals/LiveCallSimulatorModal';
-import { NewLeadModal } from './components/modals/NewLeadModal';
-import { WebhookSimulatorModal } from './components/modals/WebhookSimulatorModal';
 
 const AppContent: React.FC = () => {
   const { activeView, setActiveView } = useApp();
   const navGroups = useOwnerNav();
 
-  const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
-  const [isWebhookTesterOpen, setIsWebhookTesterOpen] = useState(false);
-
   return (
     <>
       <AppShell groups={navGroups} activeId={activeView} onNavigate={(id) => setActiveView(id as AppView)}>
         {activeView === 'dashboard' && <DashboardView />}
-        {activeView === 'leads' && <LeadsView onOpenNewLead={() => setIsNewLeadOpen(true)} />}
+        {activeView === 'leads' && <LeadsView />}
         {activeView === 'conversations' && <ConversationsView />}
         {activeView === 'calls' && <CallsView />}
         {activeView === 'appointments' && <AppointmentsView />}
@@ -53,11 +49,10 @@ const AppContent: React.FC = () => {
         {activeView === 'agents' && <AgentsView />}
         {activeView === 'roles' && <RolesView />}
         {activeView === 'team_availability' && <CalendarView section="availability" />}
-        {activeView === 'meetings' && <CalendarView section="meetings" />}
+        {/* Meetings moved into Settings → Calendar; old links still land there. */}
+        {activeView === 'meetings' && <Navigate to="/settings?tab=calendar" replace />}
         {activeView === 'my_availability' && <AgentAvailability />}
-        {activeView === 'integrations' && (
-          <IntegrationsView onOpenWebhookTester={() => setIsWebhookTesterOpen(true)} />
-        )}
+        {activeView === 'integrations' && <IntegrationsView />}
         {activeView === 'lead_sources' && <LeadSourcesView />}
         {activeView === 'import_review' && <ImportReviewView />}
         {activeView === 'ai_settings' && <AISettingsView />}
@@ -69,14 +64,6 @@ const AppContent: React.FC = () => {
       <LeadDetailModal />
       <AgentPreCallModal />
       <LiveCallSimulatorModal />
-      <NewLeadModal 
-        isOpen={isNewLeadOpen} 
-        onClose={() => setIsNewLeadOpen(false)} 
-      />
-      <WebhookSimulatorModal 
-        isOpen={isWebhookTesterOpen} 
-        onClose={() => setIsWebhookTesterOpen(false)} 
-      />
     </>
   );
 };

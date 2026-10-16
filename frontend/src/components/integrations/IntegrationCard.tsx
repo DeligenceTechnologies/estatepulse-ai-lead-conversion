@@ -2,7 +2,7 @@ import React from 'react';
 import { Check, Loader2 } from 'lucide-react';
 
 /**
- * The shell every card on Integrations & Webhooks is built from.
+ * The shell every card on Lead Integrations is built from.
  *
  * It lived inside ConnectionCards while the page only had lead sources on it.
  * The Telnyx connection moved here from AI Agent settings and needs the same

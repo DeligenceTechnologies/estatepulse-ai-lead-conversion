@@ -25,6 +25,8 @@ import {
   type NoticeTone,
 } from '../shared/ui';
 import { formatDate } from '../../../lib/datetime';
+import { Meetings } from '../meetings/Meetings';
+import { SyncButton } from '../shared/SyncButton';
 
 type Flash = { tone: NoticeTone; text: string };
 
@@ -171,6 +173,8 @@ export const ConnectCalendar: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [switching, setSwitching] = useState(false);
+  /** Bumped by the Sync button; Meetings reloads when it changes. */
+  const [syncVersion, setSyncVersion] = useState(0);
   const statusRef = useRef(status);
   statusRef.current = status;
 
@@ -298,32 +302,52 @@ export const ConnectCalendar: React.FC = () => {
     );
   }
 
-  return (
-    <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden">
-      <header className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-800">
-        <div className="flex items-start gap-3 min-w-0">
-          <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-            <CalendarDays className="w-4 h-4" />
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-bold text-white">Scheduling calendar</h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Connect Calendly or Cal.com. One calendar at a time.
-            </p>
-          </div>
-        </div>
-        {pill}
-      </header>
+  // What the connected calendar has booked lives here, next to the connection
+  // it is read from, rather than as its own page.
+  const showMeetings = Boolean(provider && connection?.status === 'active' && !switching);
 
-      <div className="p-5 space-y-4">
-        {flash && (
-          <Notice tone={flash.tone} onDismiss={() => setFlash(null)}>
-            {flash.text}
-          </Notice>
-        )}
-        {loadError && status && <Notice tone="error">{loadError}</Notice>}
-        {body}
-      </div>
-    </section>
+  return (
+    <div className="space-y-5">
+      <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden">
+        <header className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-800">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <CalendarDays className="w-4 h-4" />
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-white">Scheduling calendar</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Connect Calendly or Cal.com. One calendar at a time.
+              </p>
+            </div>
+          </div>
+          {pill}
+        </header>
+
+        <div className="p-5 space-y-4">
+          {flash && (
+            <Notice tone={flash.tone} onDismiss={() => setFlash(null)}>
+              {flash.text}
+            </Notice>
+          )}
+          {loadError && status && <Notice tone="error">{loadError}</Notice>}
+          {body}
+        </div>
+      </section>
+
+      {showMeetings && (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <SyncButton
+              providerLabel={PROVIDERS[provider!].label}
+              initialSyncedAt={connection?.syncedAt ?? null}
+              onSynced={() => setSyncVersion((version) => version + 1)}
+            />
+          </div>
+          {/* Keyed by connection so switching calendars never shows the old provider's rows. */}
+          <Meetings key={connection!.connectedAt} provider={provider!} syncVersion={syncVersion} />
+        </div>
+      )}
+    </div>
   );
 };

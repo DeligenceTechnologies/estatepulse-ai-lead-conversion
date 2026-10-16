@@ -6,12 +6,10 @@ import {
   PhoneCall,
   CalendarCheck,
   CalendarClock,
-  CalendarDays,
   Repeat,
   UserCheck,
   Plug,
   Bot,
-  BarChart3,
   Webhook,
   Clock,
   ShieldCheck,
@@ -48,7 +46,6 @@ export function useOwnerNav(): NavGroup[] {
       label: 'Overview',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'analytics', label: 'Analytics', icon: BarChart3 },
       ],
     },
     {
@@ -65,13 +62,13 @@ export function useOwnerNav(): NavGroup[] {
     },
     {
       // Booked appointments plus everything read from the calendar connected
-      // once under Settings → Calendar. Its members are added from Team Members.
+      // once under Settings → Calendar, where its meetings are listed too.
+      // Its members are added from Team Members.
       label: 'Scheduling',
       items: [
         { id: 'appointments', label: 'Appointments', icon: CalendarCheck },
         ...(canReadOrg
           ? [
-              { id: 'meetings' as const, label: 'Meetings', icon: CalendarDays },
               { id: 'team_availability' as const, label: 'Team Availability', icon: CalendarClock },
             ]
           : []),
@@ -93,11 +90,17 @@ export function useOwnerNav(): NavGroup[] {
       ],
     },
     {
+      // Where leads come from: connect a channel once, then watch what it sends.
+      label: 'Lead Intake',
+      items: [
+        { id: 'integrations', label: 'Lead Integrations', icon: Plug },
+        { id: 'lead_sources', label: 'Lead Sources', icon: Webhook },
+      ],
+    },
+    {
       label: 'Setup',
       items: [
         { id: 'ai_settings', label: 'AI Assistant', icon: Bot },
-        { id: 'lead_sources', label: 'Lead Sources', icon: Webhook },
-        { id: 'integrations', label: 'Integrations', icon: Plug },
         ...(canReadOrg ? [{ id: 'settings' as const, label: 'Settings', icon: Settings }] : []),
       ],
     },

@@ -214,8 +214,8 @@ const LeadRow: React.FC<{ lead: LiveLead }> = ({ lead }) => (
 /**
  * What each connected form has actually brought in.
  *
- * Connecting a source is NOT done here any more — it lives on Integrations &
- * Webhooks, along with webhook URLs, signing secrets and disconnect. That split
+ * Connecting a source is NOT done here any more — it lives on Lead Integrations,
+ * along with webhook URLs, signing secrets and disconnect. That split
  * is the point of this screen: setup is a once-per-form act, while this is the
  * page you open to ask "is the form working, and what came through it?". Mixing
  * the two put a wall of buttons in front of the answer.
@@ -379,7 +379,7 @@ export const LeadSourcesView: React.FC = () => {
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 text-center space-y-3">
               <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
               <div className="text-xs text-slate-400 leading-relaxed">
-                No lead sources yet. Connecting a form happens on Integrations &amp; Webhooks.
+                No lead sources yet. Connect one on Lead Integrations.
               </div>
               <button
                 onClick={() => setActiveView('integrations')}
@@ -530,7 +530,7 @@ export const LeadSourcesView: React.FC = () => {
                       ) : (
                         <>
                           Paste the webhook URL into Tally and submit your form. The URL is on
-                          Integrations &amp; Webhooks. Nothing arriving? It must be publicly
+                          Lead Integrations. Nothing arriving? It must be publicly
                           reachable — a <code className="font-mono">localhost</code> URL cannot be
                           called by Tally.
                         </>

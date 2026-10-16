@@ -43,7 +43,7 @@ type SettingsTab = 'general' | 'telnyx' | 'calendar';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
-  { id: 'calendar', label: 'Calendar', hint: 'Connect Calendly or Cal.com', icon: CalendarDays },
+  { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com, and booked meetings', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
 ];
 

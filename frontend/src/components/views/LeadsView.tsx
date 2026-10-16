@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { FileImportModal } from '../imports/FileImportModal';
+import { NewLeadModal } from '../modals/NewLeadModal';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
 import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
@@ -140,18 +141,15 @@ const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 /** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
 const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
 
-interface LeadsViewProps {
-  onOpenNewLead: () => void;
-}
-
-export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
+export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { agentProfileId, role } = useAuth();
   const isOwner = role === 'owner';
-  // "Add leads": a file import (owner only, where the server has it switched on). One lead at a time comes later.
+  // "Add leads" (owner only): one lead by hand, or a file import where the server has it switched on.
   const [canImport, setCanImport] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
   useEffect(() => {
     if (isOwner) void fileImportEnabled().then(setCanImport);
   }, [isOwner]);
@@ -315,7 +313,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          {canImport && (
+          {isOwner && (
             <div
               className="relative"
               onBlur={(e) => {
@@ -343,32 +341,42 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onOpenNewLead }) => {
                     role="menuitem"
                     onClick={() => {
                       setAddMenu(false);
-                      setImportOpen(true);
+                      setNewLeadOpen(true);
                     }}
                     className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
                   >
-                    <FileUp className="w-3.5 h-3.5 text-sky-300" />
-                    <span>
-                      Import from CSV / Excel
-                      <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled
-                    title="Adding a single lead by hand is not available yet"
-                    className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center gap-2 cursor-default"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5 text-emerald-300" />
                     <span>
                       Add one lead
-                      <span className="block text-2xs text-slate-600">Soon</span>
+                      <span className="block text-2xs text-slate-500">Type in their details by hand</span>
                     </span>
                   </button>
+                  {canImport && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddMenu(false);
+                        setImportOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
+                    >
+                      <FileUp className="w-3.5 h-3.5 text-sky-300" />
+                      <span>
+                        Import from CSV / Excel
+                        <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
+                      </span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
+          )}
+          {newLeadOpen && (
+            <NewLeadModal
+              onClose={() => setNewLeadOpen(false)}
+              onCreated={() => refresh()}
+            />
           )}
           {importOpen && (
             <FileImportModal

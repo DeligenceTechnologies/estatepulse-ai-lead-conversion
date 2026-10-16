@@ -439,6 +439,24 @@ export const providersApi = {
     ),
 };
 
+/** What POST /v1/leads takes. */
+export interface NewLeadInput {
+  firstName: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+  timeline?: string;
+  minBudget?: number;
+  maxBudget?: number;
+  bedrooms?: number;
+  notes?: string;
+  /** The lead agreed to be called and texted. */
+  consent: boolean;
+  /** Let the AI start calling right away; otherwise the lead waits paused. */
+  startOutreach: boolean;
+}
+
 export const leadsApi = {
   list: (filter: { status?: string; sourceId?: string } = {}) => {
     const q = new URLSearchParams();
@@ -448,6 +466,9 @@ export const leadsApi = {
     return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
   },
   stats: () => request<LeadStats>('/v1/leads/stats'),
+  /** Owner-only. One lead typed in by hand; a phone or an email is required. */
+  create: (input: NewLeadInput) =>
+    request<{ id: string }>('/v1/leads', { method: 'POST', body: JSON.stringify(input) }),
   /** Owner-only. Any of the 9 statuses; ends the strategy for an outcome. follow_up takes a reason. */
   setStatus: (leadId: string, status: string, reason?: string, followUpReason?: FollowUpReason) =>
     request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {
