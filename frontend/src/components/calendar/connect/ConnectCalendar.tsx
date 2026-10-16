@@ -25,7 +25,8 @@ import {
   type NoticeTone,
 } from '../shared/ui';
 import { formatDate } from '../../../lib/datetime';
-import { Meetings } from '../meetings/Meetings';
+// Explicit .tsx: on case-insensitive disks '../meetings/Meetings' resolves to the sibling meetings.ts helpers.
+import { Meetings } from '../meetings/Meetings.tsx';
 import { SyncButton } from '../shared/SyncButton';
 
 type Flash = { tone: NoticeTone; text: string };
