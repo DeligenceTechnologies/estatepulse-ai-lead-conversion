@@ -1,14 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, lead_sources } from '@prisma/client';
 import { SecretBox, sha256Hex, signingSecretAad } from '../../common/crypto';
-import { DeliveryOutcome, IngestStatus, QueueState, SignatureState } from '../../common/domain';
+import { DeliveryOutcome, IngestStatus, MappingOrigin, MappingStatus, QueueState, SignatureState } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { hashCredential, looksLikeIngestToken } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
 import { authHeaderName, headerValue, verifyCustomAuth, type CustomConfig } from './auth';
 import { AWAITING_MAPPING, CUSTOM_EVENT_TYPE, CUSTOM_PROVIDER, HELD_CAP } from './constants';
+import { detectAdapter } from './detect';
+import type { NormalizedDelivery } from '../ingest/adapters/types';
+import { expandFields, suggestFromAnswers, validateFields } from './mapping';
 import { parseConfig } from './schemas';
 
 /**
@@ -107,15 +110,33 @@ export class CustomWebhookIngestService {
     // --- Shape -------------------------------------------------------------
     const invalidDetail = body !== null && typeof body === 'object' ? null : 'The body must be a JSON object or form fields';
 
+    // A form provider's payload on this URL (a Tally submission, say) carries
+    // its own ids: kept for dedupe and for the deliveries screen, exactly as
+    // the provider's own route keeps them.
+    const adapter = invalidDetail ? null : detectAdapter(body);
+    const known = adapter ? adapter.parse(body) : null;
+
     const payloadHash = sha256Hex(rawBody);
     const deliveryId = cfg?.deliveryIdHeader ? headerValue(headers, cfg.deliveryIdHeader)?.trim() : null;
-    // The sender's delivery id when it sends one, else the bytes themselves —
-    // either way a retry of a delivery we hold is a no-op, per source.
-    const dedupeKey = deliveryId ? `custom:${deliveryId.slice(0, 100)}` : `sha256:${payloadHash}`;
+    // The sender's delivery id when it sends one, else the form provider's
+    // event id, else the bytes themselves — either way a retry of a delivery
+    // we hold is a no-op, per source.
+    const dedupeKey = deliveryId
+      ? `custom:${deliveryId.slice(0, 100)}`
+      : known?.providerEventId
+        ? `${adapter!.provider.toLowerCase()}:${known.providerEventId}`
+        : `sha256:${payloadHash}`;
 
     const paused = source.ingest_status === IngestStatus.PAUSED || !source.is_active;
     // Listening until the owner maps the source and switches it on.
-    const listening = !source.auto_create_leads;
+    let listening = !source.auto_create_leads;
+    // A form we know, on a webhook nobody has mapped yet: the form's own
+    // heuristics write the mapping and switch the source on right here, as the
+    // provider's own route would — the owner reviews it rather than builds it.
+    // Without a contact field among the questions the payload is held as usual.
+    if (listening && !paused && known && adapter && !sig.quarantine && !invalidDetail) {
+      if (await this.autoActivate(source, adapter.provider, known)) listening = false;
+    }
 
     const outcome = sig.quarantine
       ? DeliveryOutcome.QUARANTINED_SIGNATURE
@@ -146,13 +167,16 @@ export class CustomWebhookIngestService {
           organization_id: source.organization_id,
           lead_source_id: source.id,
           provider: CUSTOM_PROVIDER,
-          event_type: CUSTOM_EVENT_TYPE,
+          event_type: known?.eventType ?? CUSTOM_EVENT_TYPE,
           // NEVER set: (provider, external_event_id) is unique across every
           // tenant, and two apps can both send "id: 1". Identity lives in
           // dedupe_key, which is unique per source.
           external_event_id: null,
           dedupe_key: dedupeKey,
           payload_hash: payloadHash,
+          provider_submission_id: known?.providerSubmissionId ?? null,
+          provider_form_id: known?.providerFormId ?? null,
+          provider_created_at: known?.submittedAt ?? null,
           raw_body: rawBody.toString('utf8'),
           payload: (body ?? {}) as Prisma.InputJsonValue,
           headers: redactHeaders(headers, cfg) as Prisma.InputJsonValue,
@@ -244,6 +268,69 @@ export class CustomWebhookIngestService {
       quarantine: true,
       reason: verdict.reason,
     };
+  }
+
+  /**
+   * Map a listening source from a known form's first payload and switch it on.
+   * Only when nothing has been mapped yet and the heuristics find a phone or an
+   * email; the mapping is HEURISTIC with status NEEDS_REVIEW, so new questions
+   * keep auto-mapping until the owner signs it off, exactly as on the Tally
+   * route. Returns false to leave the payload held for the owner.
+   */
+  private async autoActivate(source: lead_sources, provider: string, known: NormalizedDelivery): Promise<boolean> {
+    if (source.mapping_status === MappingStatus.CONFIGURED) return false;
+    const existing = await this.prisma.lead_source_field_mappings.count({ where: { lead_source_id: source.id } });
+    if (existing > 0) return false;
+
+    const org = await this.prisma.organizations.findUnique({ where: { id: source.organization_id }, select: { default_region: true } });
+    const region = org?.default_region ?? 'US';
+    const fields = suggestFromAnswers(known.answers, region);
+    if (fields.length === 0 || validateFields(fields).length > 0) return false;
+    const rows = expandFields(fields, region);
+
+    try {
+      await this.prisma.$transaction([
+        this.prisma.lead_source_field_mappings.createMany({
+          data: rows.map((r) => ({
+            id: newId(),
+            organization_id: source.organization_id,
+            lead_source_id: source.id,
+            source_field_key: r.source_field_key,
+            target_field: r.target_field,
+            transform: r.transform as unknown as Prisma.InputJsonValue,
+            is_active: true,
+            origin: MappingOrigin.HEURISTIC,
+          })),
+        }),
+        this.prisma.lead_sources.update({
+          where: { id: source.id },
+          data: {
+            mapping_status: MappingStatus.NEEDS_REVIEW,
+            mapping_version: { increment: 1 },
+            auto_create_leads: true,
+            ingest_status: IngestStatus.ACTIVE,
+          },
+        }),
+        this.prisma.audit_logs.create({
+          data: {
+            id: newId(),
+            organization_id: source.organization_id,
+            actor_type: 'system',
+            action: 'custom_webhook.auto_activated',
+            entity_type: 'lead_source',
+            entity_id: source.id,
+            payload: { provider, fields: fields.map((f) => `${f.path} -> ${f.target}`) } as Prisma.InputJsonValue,
+          },
+        }),
+      ]);
+    } catch (e) {
+      // Two first deliveries at once: the other one wrote the mapping, which is
+      // the same outcome.
+      if ((e as { code?: string }).code === 'P2002') return true;
+      throw e;
+    }
+    this.logger.log(`Custom source ${source.id} mapped from a ${provider} payload and switched on (${rows.length} rows)`);
+    return true;
   }
 
   private async recordDrop(sourceId: string, cfg: CustomConfig | null): Promise<void> {

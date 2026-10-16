@@ -368,11 +368,13 @@ test('the sample is the held payload flattened to paths, with a suggested mappin
   const res = await call(`${API}/${main.id}/sample`, A.token);
   assert.equal(res.status, 200, res.text);
   assert.deepEqual(res.body.delivery, { id: seen.held, receivedAt: res.body.delivery.receivedAt, held: true });
+  assert.equal(res.body.format, null); // plain JSON, not a form we know
   assert.equal(res.body.truncated, false);
   const byPath = Object.fromEntries((res.body.paths as any[]).map((p) => [p.path, p]));
-  assert.deepEqual(byPath['contact.phone'], { path: 'contact.phone', value: '(512) 555-0101', type: 'string' });
-  assert.deepEqual(byPath['beds'], { path: 'beds', value: '3', type: 'number' });
-  assert.deepEqual(byPath['tags'], { path: 'tags', value: 'buyer, relocating', type: 'list' });
+  // Plain JSON: the label IS the path.
+  assert.deepEqual(byPath['contact.phone'], { path: 'contact.phone', label: 'contact.phone', value: '(512) 555-0101', type: 'string' });
+  assert.deepEqual(byPath['beds'], { path: 'beds', label: 'beds', value: '3', type: 'number' });
+  assert.deepEqual(byPath['tags'], { path: 'tags', label: 'tags', value: 'buyer, relocating', type: 'list' });
   assert.ok(byPath['tags[1]']);
   assert.ok(byPath['meta.source']);
   const suggested = Object.fromEntries((res.body.suggested as any[]).map((s) => [s.path, s.target]));
@@ -719,6 +721,152 @@ test('a listening source holds at most the cap; past it deliveries are dropped a
   const got = await call(`${API}/${capped.id}`, A.token);
   assert.equal(got.body.custom.dropped, 1);
   assert.equal(got.body.custom.held, HELD_CAP);
+});
+
+test('a Tally submission on the same kind of URL is read as a form: keys, options, the provider\'s own suggestions', async () => {
+  // The Tally preset: Tally's own signature header, base64 HMAC-SHA256 of the body.
+  const form = await createWebhook(A.token, { name: 'Tally buyer form', auth: { mode: 'hmac', headerName: 'tally-signature', algorithm: 'sha256', encoding: 'base64' } });
+  assert.match(form.secret ?? '', /^whsec_/);
+  const tallyPayload = (eventId: string, name: string) =>
+    JSON.stringify({
+      eventId,
+      eventType: 'FORM_RESPONSE',
+      createdAt: '2026-10-16T10:00:00.000Z',
+      data: {
+        responseId: `resp_${eventId}`,
+        submissionId: `sub_${eventId}`,
+        respondentId: `rsp_${RUN}`,
+        formId: 'form_1',
+        formName: 'Buyer Inquiry',
+        createdAt: '2026-10-16T09:59:58.000Z',
+        fields: [
+          { key: 'question_1', label: 'Your name', type: 'INPUT_TEXT', value: name },
+          { key: 'question_2', label: 'Email address', type: 'INPUT_EMAIL', value: `${name.split(' ')[0].toLowerCase()}.${RUN}@example.test` },
+          { key: 'question_3', label: 'Phone', type: 'INPUT_PHONE_NUMBER', value: '(512) 555-0177' },
+          {
+            key: 'question_4',
+            label: 'When are you looking to move?',
+            type: 'MULTIPLE_CHOICE',
+            value: ['opt_a'],
+            options: [
+              { id: 'opt_a', text: 'ASAP / under 30 days' },
+              { id: 'opt_b', text: '1-3 months' },
+            ],
+          },
+          { key: 'question_5', label: 'Anything else?', type: 'TEXTAREA', value: 'has a dog' },
+        ],
+      },
+    });
+  const sign = (raw: string) => createHmac('sha256', form.secret!).update(raw).digest('base64');
+
+  // A form we know with a phone and an email among its questions: mapped and
+  // switched on by itself, so the first submission is an ordinary lead — not
+  // held, not paused — exactly as on the Tally route. Deduped on Tally's event id.
+  const raw1 = tallyPayload(`tf_${RUN}_1`, 'Tess Tally');
+  const first = await deliver(form.token, raw1, { 'tally-signature': sign(raw1) });
+  assert.equal(first.status, 202, first.text);
+  assert.equal(first.body.held, undefined);
+  const row1 = await prisma.webhook_events.findUnique({ where: { id: first.body.deliveryId } });
+  assert.equal(row1?.dedupe_key, `tally:tf_${RUN}_1`);
+  assert.equal(row1?.event_type, 'FORM_RESPONSE');
+  assert.equal(row1?.provider_form_id, 'form_1');
+  assert.equal(row1?.signature_state, 'VALID');
+  const auto = await prisma.lead_sources.findUnique({ where: { id: form.id } });
+  assert.equal(auto?.auto_create_leads, true);
+  assert.equal(auto?.ingest_status, 'ACTIVE');
+  assert.equal(auto?.mapping_status, 'NEEDS_REVIEW');
+  const autoRows = await prisma.lead_source_field_mappings.findMany({ where: { lead_source_id: form.id } });
+  assert.ok(autoRows.length >= 6 && autoRows.every((r) => r.origin === 'HEURISTIC'), JSON.stringify(autoRows.map((r) => [r.source_field_key, r.target_field, r.origin])));
+  assert.ok(await prisma.audit_logs.findFirst({ where: { organization_id: A.orgId, action: 'custom_webhook.auto_activated', entity_id: form.id } }));
+  assert.equal((await deliver(form.token, raw1, { 'tally-signature': sign(raw1) })).body.duplicate, true);
+  // A new submission with a bad signature is quarantined (a replay of a known
+  // one is simply a duplicate first, as on the Tally route).
+  const forged = tallyPayload(`tf_${RUN}_forged`, 'Forged Form');
+  assert.equal((await deliver(form.token, forged, { 'tally-signature': 'bm90IGl0' })).status, 401);
+
+  // The sample is the form's questions, not JSON paths, with the provider's heuristics as the prefill.
+  const sample = await call(`${API}/${form.id}/sample`, A.token);
+  assert.equal(sample.status, 200, sample.text);
+  assert.equal(sample.body.format, 'TALLY');
+  assert.equal(sample.body.custom.activated, true);
+  assert.equal(sample.body.custom.mappingConfigured, false); // auto-mapped: the owner has not signed it off
+  assert.ok((sample.body.custom.fields as any[]).some((f) => f.path === 'question_3' && f.target === 'phone'));
+  const paths = Object.fromEntries((sample.body.paths as any[]).map((p) => [p.path, p]));
+  assert.deepEqual(paths['question_1'], { path: 'question_1', label: 'Your name', value: 'Tess Tally', type: 'INPUT_TEXT' });
+  assert.equal(paths['question_4'].value, 'ASAP / under 30 days');
+  const suggested = Object.fromEntries((sample.body.suggested as any[]).map((s) => [s.path, s]));
+  assert.deepEqual(suggested['question_1'], { path: 'question_1', target: 'full_name' });
+  assert.deepEqual(suggested['question_2'], { path: 'question_2', target: 'email' });
+  assert.deepEqual(suggested['question_3'], { path: 'question_3', target: 'phone' });
+  assert.deepEqual(suggested['question_4'], {
+    path: 'question_4',
+    target: 'timeline',
+    transform: { kind: 'enum_map', byOptionText: { 'asap / under 30 days': 'under_30_days', '1-3 months': '1_to_3_months' }, fallback: null },
+  });
+  // "Anything else?" reads as notes to the same heuristics the Tally route uses.
+  assert.deepEqual(suggested['question_5'], { path: 'question_5', target: 'motivation' });
+
+  // The first submission already became a lead, under the automatic mapping.
+  const done1 = await processed(first.body.deliveryId);
+  assert.equal(done1.outcome, 'PROCESSED');
+  const lead1 = await prisma.leads.findUnique({ where: { id: done1.lead_id! } });
+  assert.equal(lead1?.first_name, 'Tess');
+  assert.equal(lead1?.last_name, 'Tally');
+  assert.equal(lead1?.normalized_phone, '+15125550177');
+  assert.equal(lead1?.timeline, 'under_30_days');
+  assert.equal(lead1?.motivation, 'has a dog');
+  assert.equal(lead1?.automation_paused, false); // a live submission, not one captured during setup
+  assert.equal(lead1?.needs_review, false);
+
+  // The owner signs the mapping off, keeping the free-text question ALSO as an extra field.
+  const fields = [...(sample.body.suggested as any[]), { path: 'question_5', target: '__custom__', customName: 'Extra notes' }];
+  const saved = await call(`${API}/${form.id}/mapping`, A.token, { method: 'PUT', body: { fields } });
+  assert.equal(saved.status, 200, saved.text);
+  assert.equal(saved.body.mappingStatus, 'CONFIGURED');
+  assert.equal(saved.body.custom.activated, true);
+
+  // A live submission: an ordinary lead, as the Tally route would make it.
+  const raw2 = tallyPayload(`tf_${RUN}_2`, 'Liam Live');
+  const second = await deliver(form.token, raw2, { 'tally-signature': sign(raw2) });
+  assert.equal(second.status, 202, second.text);
+  assert.equal(second.body.held, undefined);
+  const done2 = await processed(second.body.deliveryId);
+  const lead2 = await prisma.leads.findUnique({ where: { id: done2.lead_id! } });
+  assert.equal(lead2?.first_name, 'Liam');
+  assert.equal(lead2?.timeline, 'under_30_days');
+  assert.equal(lead2?.motivation, 'has a dog');
+  assert.deepEqual(lead2?.custom_fields, { 'Extra notes': 'has a dog' }); // the same answer, kept as an extra too
+  assert.equal(lead2?.automation_paused, false);
+
+  // The deliveries screen shows the questions, as it does for a Tally source.
+  const deliveries = await call(`/api/v1/lead-sources/${form.id}/deliveries`, A.token);
+  const live = (deliveries.body as any[]).find((r) => r.id === second.body.deliveryId);
+  assert.equal(live.formName, 'Buyer Inquiry');
+  assert.equal(live.parseError, null);
+  const byLabel = Object.fromEntries(live.answers.map((a: any) => [a.label, sortedTargets(a)]));
+  assert.deepEqual(byLabel['Your name'].targetFields, ['first_name', 'last_name']);
+  assert.deepEqual(byLabel['When are you looking to move?'].targetFields, ['timeline']);
+  assert.deepEqual(byLabel['Anything else?'].targetFields, ['motivation']);
+  assert.equal(byLabel['Anything else?'].mappingOutcome, 'mapped');
+});
+
+test('a known form without a contact question is held for the owner, not switched on', async () => {
+  const form = await createWebhook(A.token, { name: 'Tally survey', auth: { mode: 'none' } });
+  const raw = JSON.stringify({
+    eventId: `tf_${RUN}_survey`,
+    eventType: 'FORM_RESPONSE',
+    data: { responseId: 'r', formId: 'survey', formName: 'Survey', fields: [{ key: 'question_1', label: 'Your name', type: 'INPUT_TEXT', value: 'No Contact' }] },
+  });
+  const res = await deliver(form.token, raw);
+  assert.equal(res.status, 202, res.text);
+  assert.equal(res.body.held, true);
+  const src = await prisma.lead_sources.findUnique({ where: { id: form.id } });
+  assert.equal(src?.auto_create_leads, false);
+  assert.equal(src?.ingest_status, 'NEEDS_MAPPING');
+  assert.equal(await prisma.lead_source_field_mappings.count({ where: { lead_source_id: form.id } }), 0);
+  const sample = await call(`${API}/${form.id}/sample`, A.token);
+  assert.equal(sample.body.format, 'TALLY');
+  assert.deepEqual(sample.body.suggested, [{ path: 'question_1', target: 'full_name' }]);
 });
 
 test('another organization sees none of it', async () => {

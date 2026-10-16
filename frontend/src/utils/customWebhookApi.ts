@@ -2,8 +2,9 @@ import type { LeadSourceConfig } from '../api/client';
 import { ApiError, apiFetch } from '../lib/api';
 
 /**
- * Custom webhooks: a URL any app can post a lead to, mapped by the owner from
- * the first payload. These routes exist only where the server has
+ * Webhooks: one URL any app or form can post a lead to. A form provider we
+ * understand (Tally) is parsed as a form; anything else is mapped by the owner
+ * from the first payload. These routes exist only where the server has
  * CUSTOM_WEBHOOK_ENABLED=1; elsewhere every one answers 404.
  */
 
@@ -35,13 +36,25 @@ export type CustomTarget =
   | 'utm_source'
   | 'utm_medium'
   | 'utm_campaign'
+  | 'timeline'
+  | 'buying_intent'
+  | 'financing_status'
   | '__custom__';
+
+/** The option map a form's choice question carries; the only transform the owner may send. */
+export interface EnumMapTransform {
+  kind: 'enum_map';
+  byOptionText: Record<string, string>;
+  fallback?: string | null;
+}
 
 export interface MappingField {
   path: string;
   target: CustomTarget;
   /** The extra field's name; only with target __custom__. */
   customName?: string;
+  /** Required for timeline / buying_intent / financing_status; comes from the suggestion. */
+  transform?: EnumMapTransform;
 }
 
 export interface CustomWebhook extends LeadSourceConfig {
@@ -66,13 +79,18 @@ export interface CustomWebhookCreated extends CustomWebhook {
 }
 
 export interface SamplePath {
+  /** The source field key: a JSON path, or a form's question key. */
   path: string;
+  /** What to show: the question text for a form, the path itself otherwise. */
+  label: string;
   value: string;
   type: string;
 }
 
 export interface CustomWebhookSample extends CustomWebhook {
   delivery: { id: string; receivedAt: string; held: boolean } | null;
+  /** The form provider whose shape the last payload had ('TALLY'), or null for plain JSON. */
+  format: string | null;
   paths: SamplePath[];
   truncated: boolean;
   suggested: MappingField[];

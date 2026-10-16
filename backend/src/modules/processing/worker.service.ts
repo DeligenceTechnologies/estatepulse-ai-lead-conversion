@@ -8,8 +8,8 @@ import { EventsBus } from '../events/events.bus';
 import { ingestAdapterFor } from '../ingest/adapters/registry';
 import type { NormalizedAnswer, NormalizedDelivery } from '../ingest/adapters/types';
 import { CUSTOM_TARGET } from '../google-sheets/sheet-rows';
-import { CAPTURED_DURING_SETUP, CUSTOM_PROVIDER, SETUP_REVIEW_REASON } from '../custom-webhook/constants';
-import { extractDelivery } from '../custom-webhook/extract';
+import { CAPTURED_DURING_SETUP, CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER, SETUP_REVIEW_REASON } from '../custom-webhook/constants';
+import { parseCustomPayload } from '../custom-webhook/extract';
 import type { StoredMapping } from '../custom-webhook/mapping';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
@@ -247,15 +247,23 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       let capturedDuringSetup = false;
 
       if (source.provider === CUSTOM_PROVIDER) {
-        // Custom webhook: the owner's saved mapping IS the parser, so there is
-        // no field catalog to sync and no heuristic to run — a custom source
-        // only reaches the worker after the owner mapped and switched it on.
+        // Custom webhook. A form provider's payload on it is parsed by that
+        // provider's adapter and keeps the same catalog and mapping top-up as
+        // the provider's own route; plain JSON is read through the owner's
+        // saved mapping, which IS the parser there (no heuristics). Either way
+        // a custom source only reaches the worker once mapped and switched on.
         const rows = await this.prisma.lead_source_field_mappings.findMany({
           where: { lead_source_id: source.id, is_active: true },
         });
-        parsed = extractDelivery(event.payload, rows as unknown as StoredMapping[]);
-        // Extra-field rows are consumed by the extractor; the engine sees only lead columns.
-        mappings = rows.filter((m) => m.target_field !== CUSTOM_TARGET);
+        const custom = parseCustomPayload(event.payload, rows as unknown as StoredMapping[]);
+        parsed = custom.delivery;
+        if (custom.provider) {
+          await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers.filter((a) => !a.key.startsWith(CUSTOM_KEY_PREFIX)));
+          mappings = (await this.ensureMappings(event.organization_id, source.id, parsed.answers, region)).filter((m) => m.target_field !== CUSTOM_TARGET);
+        } else {
+          // Extra-field rows are consumed by the extractor; the engine sees only lead columns.
+          mappings = rows.filter((m) => m.target_field !== CUSTOM_TARGET);
+        }
         const held = await this.prisma.webhook_events.findUnique({ where: { id: event.id }, select: { outcome_reason: true } });
         capturedDuringSetup = held?.outcome_reason === CAPTURED_DURING_SETUP;
       } else {

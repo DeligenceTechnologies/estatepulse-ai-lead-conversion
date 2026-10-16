@@ -50,10 +50,20 @@ export const updateAuthSchema = z.object({
 });
 export type UpdateAuthBody = z.infer<typeof updateAuthSchema>;
 
+/** The option map a choice question carries; the only transform an owner may send. */
+const enumMapTransform = z.object({
+  kind: z.literal('enum_map'),
+  byOptionText: z
+    .record(z.string().min(1).max(200), z.string().min(1).max(100))
+    .refine((m) => Object.keys(m).length <= 100, 'At most 100 options'),
+  fallback: z.string().max(100).nullable().optional(),
+});
+
 const field = z.object({
   path: z.string().trim().min(1).max(MAX_PATH_CHARS),
   target: z.enum(CUSTOM_TARGETS),
   customName: z.string().trim().min(1).max(MAX_CUSTOM_NAME).optional(),
+  transform: enumMapTransform.optional(),
 });
 
 export const fieldsSchema = z.array(field).min(1).max(100);

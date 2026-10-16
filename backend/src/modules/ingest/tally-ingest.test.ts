@@ -446,5 +446,7 @@ test('the source list counts 3 deliveries and 1 lead for this source', async () 
   assert.equal(mine.leadCount, 1);
   assert.equal(mine.ingestStatus, 'ACTIVE');
   assert.equal(mine.mappingStatus, 'NEEDS_REVIEW');
-  assert.equal(mine.webhookUrl, `${process.env['PUBLIC_API_BASE_URL']}/ingest/v1/tally/${source.token}`);
+  // Trimmed: ConfigModule reads .env through dotenv, which drops trailing
+  // whitespace; Node's --env-file (which filled process.env here) does not.
+  assert.equal(mine.webhookUrl, `${process.env['PUBLIC_API_BASE_URL']!.trim().replace(/\/+$/, '')}/ingest/v1/tally/${source.token}`);
 });

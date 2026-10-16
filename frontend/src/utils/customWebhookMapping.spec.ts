@@ -18,9 +18,9 @@ describe('custom webhook mapping draft', () => {
   });
 
   it('blocks saving without a contact, with a column filled twice, or an unnamed extra field', () => {
-    expect(draftProblems([{ path: 'name', target: 'full_name' }])).toEqual(['Choose the path with the phone or the email.']);
+    expect(draftProblems([{ path: 'name', target: 'full_name' }])).toEqual(['Choose the field with the phone or the email.']);
     expect(draftProblems([{ path: 'a', target: 'phone' }, { path: 'b', target: 'first_name' }, { path: 'c', target: 'full_name' }])).toEqual([
-      'First name is filled from more than one path.',
+      'First name is filled from more than one field.',
     ]);
     expect(draftProblems([{ path: 'a', target: 'email' }, { path: 'x', target: '__custom__', customName: ' ' }])).toEqual(['Name the extra field for x.']);
     expect(
@@ -31,6 +31,13 @@ describe('custom webhook mapping draft', () => {
       ]),
     ).toEqual(['Two paths are both named "tag".']);
     expect(draftProblems([{ path: 'a', target: 'email' }, { path: 'b', target: 'budget_range' }])).toEqual([]);
+  });
+
+  it('keeps a suggested option map through the draft, and refuses an enum target without one', () => {
+    const transform = { kind: 'enum_map' as const, byOptionText: { asap: 'under_30_days' } };
+    const draft = draftFromFields([{ path: 'q4', target: 'timeline', transform }, { path: 'q2', target: 'email' }]);
+    expect(fieldsFromDraft(draft)).toEqual([{ path: 'q4', target: 'timeline', transform }, { path: 'q2', target: 'email' }]);
+    expect(draftProblems([{ path: 'q2', target: 'email' }, { path: 'q4', target: 'timeline' }])).toEqual(['Timeline needs a question with options; q4 has none.']);
   });
 
   it('writes a curl command for each auth mode', () => {

@@ -13,7 +13,8 @@ import { needsSecret, type CustomConfig } from './auth';
 import { AWAITING_MAPPING, CAPTURED_DURING_SETUP, CUSTOM_PROVIDER } from './constants';
 import { previewLead } from './extract';
 import { flatten } from './flatten';
-import { expandFields, fieldsFromRows, suggestFields, validateFields, type StoredMapping } from './mapping';
+import { detectAdapter } from './detect';
+import { expandFields, fieldsFromRows, suggestFields, suggestFromAnswers, validateFields, type StoredMapping } from './mapping';
 import { parseConfig, type CreateBody, type SaveMappingBody, type TestBody, type UpdateAuthBody } from './schemas';
 
 export interface Identity {
@@ -94,18 +95,36 @@ export class CustomWebhookService {
     return this.dto(await this.source(organizationId, id));
   }
 
-  /** The latest usable payload, flattened to paths, with a suggested mapping. */
+  /** The latest usable payload as mappable fields — a form's questions, or plain JSON paths — with a suggested mapping. */
   async sample(organizationId: string, id: string) {
     const row = await this.source(organizationId, id);
     const base = await this.dto(row);
     const latest = await this.latestDelivery(row);
-    if (!latest) return { ...base, delivery: null, paths: [], truncated: false, suggested: [] };
-    const { leaves, truncated } = flatten(latest.payload);
+    if (!latest) return { ...base, delivery: null, format: null, paths: [], truncated: false, suggested: [] };
     const region = await this.region(organizationId);
+    const delivery = { id: latest.id, receivedAt: latest.received_at, held: latest.outcome_reason === AWAITING_MAPPING };
+
+    // A form provider's payload: its questions, by their stable keys, with the
+    // provider's own heuristics as the prefill (option maps included).
+    const adapter = detectAdapter(latest.payload);
+    if (adapter) {
+      const parsed = adapter.parse(latest.payload);
+      return {
+        ...base,
+        delivery,
+        format: adapter.provider,
+        paths: parsed.answers.map((a) => ({ path: a.key, label: a.label, value: a.scalarText, type: a.type })),
+        truncated: false,
+        suggested: suggestFromAnswers(parsed.answers, region),
+      };
+    }
+
+    const { leaves, truncated } = flatten(latest.payload);
     return {
       ...base,
-      delivery: { id: latest.id, receivedAt: latest.received_at, held: latest.outcome_reason === AWAITING_MAPPING },
-      paths: leaves,
+      delivery,
+      format: null,
+      paths: leaves.map((l) => ({ ...l, label: l.path })),
       truncated,
       suggested: suggestFields(leaves, region),
     };

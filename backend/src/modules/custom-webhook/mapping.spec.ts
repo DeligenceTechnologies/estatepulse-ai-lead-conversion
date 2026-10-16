@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { NormalizedAnswer } from '../ingest/adapters/types';
 import type { Leaf } from './flatten';
-import { expandFields, fieldsFromRows, suggestFields, validateFields, type MappingField } from './mapping';
+import { expandFields, fieldsFromRows, suggestFields, suggestFromAnswers, validateFields, type MappingField } from './mapping';
 
 const good: MappingField[] = [
   { path: 'name', target: 'full_name' },
@@ -43,7 +44,62 @@ describe('validateFields', () => {
 
   it('refuses a path the grammar cannot read, and an unknown target', () => {
     expect(messages([{ path: 'a..b', target: 'phone' }])[0]).toMatch(/not a path we can read/);
-    expect(messages([{ path: 'a', target: 'timeline' as never }, { path: 'p', target: 'phone' }])).toEqual(['fields.0.target: "timeline" is not a field a webhook value can fill']);
+    expect(messages([{ path: 'a', target: 'status' as never }, { path: 'p', target: 'phone' }])).toEqual(['fields.0.target: "status" is not a field a webhook value can fill']);
+  });
+
+  it('lets a fixed-vocabulary field be filled only through an option map with known values', () => {
+    const base: MappingField = { path: 'p', target: 'phone' };
+    expect(messages([base, { path: 'q', target: 'timeline' }])).toEqual(['fields.1.transform: Timeline needs an option map; only a form\'s choice question can fill it']);
+    expect(messages([base, { path: 'q', target: 'timeline', transform: { kind: 'enum_map', byOptionText: { asap: 'soon' } } }])[0]).toMatch(/"soon" is not one of/);
+    expect(messages([base, { path: 'q', target: 'timeline', transform: { kind: 'enum_map', byOptionText: { asap: 'under_30_days' } } }])).toEqual([]);
+    expect(messages([{ ...base, transform: { kind: 'enum_map', byOptionText: {} } }])).toEqual(['fields.0.transform: Only a timeline, intent or financing field takes an option map']);
+  });
+});
+
+describe('enum targets through the rows', () => {
+  const field: MappingField = { path: 'question_4', target: 'timeline', transform: { kind: 'enum_map', byOptionText: { 'asap / under 30 days': 'under_30_days' } } };
+  it('stores the option map as the transform and reads it back', () => {
+    const rows = expandFields([{ path: 'e', target: 'email' }, field], 'US');
+    expect(rows[1]).toEqual({ source_field_key: 'question_4', target_field: 'timeline', transform: { kind: 'enum_map', byOptionText: { 'asap / under 30 days': 'under_30_days' }, fallback: null } });
+    expect(fieldsFromRows(rows)).toEqual([{ path: 'e', target: 'email' }, { ...field, transform: { ...field.transform, fallback: null } }]);
+  });
+});
+
+describe('suggestFromAnswers (a form provider\'s questions)', () => {
+  const answer = (key: string, label: string, type: string, text: string, allOptions?: { id: string; text: string }[]): NormalizedAnswer => ({
+    key,
+    label,
+    type,
+    raw: text,
+    textValues: text ? [text] : [],
+    scalarText: text,
+    ...(allOptions ? { allOptions } : {}),
+  });
+
+  it('keeps the provider\'s own guesses, option maps included', () => {
+    const suggested = suggestFromAnswers(
+      [
+        answer('question_1', 'Your name', 'INPUT_TEXT', 'Ann Lee'),
+        answer('question_2', 'Email address', 'INPUT_EMAIL', 'ann@example.com'),
+        answer('question_3', 'Phone', 'INPUT_PHONE_NUMBER', '(512) 555-0101'),
+        answer('question_4', 'When are you looking to move?', 'MULTIPLE_CHOICE', 'ASAP / under 30 days', [
+          { id: 'a', text: 'ASAP / under 30 days' },
+          { id: 'b', text: '1-3 months' },
+        ]),
+      ],
+      'US',
+    );
+    const byPath = Object.fromEntries(suggested.map((s) => [s.path, s]));
+    expect(byPath['question_1']).toEqual({ path: 'question_1', target: 'full_name' });
+    expect(byPath['question_2']).toEqual({ path: 'question_2', target: 'email' });
+    expect(byPath['question_3']).toEqual({ path: 'question_3', target: 'phone' });
+    expect(byPath['question_4']).toEqual({
+      path: 'question_4',
+      target: 'timeline',
+      transform: { kind: 'enum_map', byOptionText: { 'asap / under 30 days': 'under_30_days', '1-3 months': '1_to_3_months' }, fallback: null },
+    });
+    // The buying_intent guess on the same question carries an empty map: not offered.
+    expect(suggested.filter((s) => s.path === 'question_4')).toHaveLength(1);
   });
 });
 

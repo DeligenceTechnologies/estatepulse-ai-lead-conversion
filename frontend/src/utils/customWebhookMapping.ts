@@ -1,14 +1,14 @@
-import type { CustomAuth, CustomTarget, MappingField } from './customWebhookApi';
+import type { CustomAuth, CustomTarget, EnumMapTransform, MappingField } from './customWebhookApi';
 
 /**
- * The mapper screen offers ONE choice per path; the API takes a list of
- * (path, target) pairs. These helpers are the translation, the checks the
+ * The mapper screen offers ONE choice per source field; the API takes a list
+ * of (path, target) pairs. These helpers are the translation, the checks the
  * screen runs before a round trip, and the wording around them.
  */
 
 export type TargetChoice = CustomTarget | '';
 
-export const TARGET_CHOICES: { value: TargetChoice; label: string }[] = [
+export const TARGET_CHOICES: { value: TargetChoice; label: string; /** Only offered when the field came with an option map (a form's choice question). */ enumOnly?: boolean }[] = [
   { value: '', label: 'Don’t import' },
   { value: 'full_name', label: 'Full name (split into first + last)' },
   { value: 'first_name', label: 'First name' },
@@ -22,6 +22,9 @@ export const TARGET_CHOICES: { value: TargetChoice; label: string }[] = [
   { value: 'bedrooms', label: 'Bedrooms' },
   { value: 'motivation', label: 'Notes / motivation' },
   { value: 'consent_status', label: 'SMS/call consent (yes/no)' },
+  { value: 'timeline', label: 'Timeline (from the question’s options)', enumOnly: true },
+  { value: 'buying_intent', label: 'Intent (from the question’s options)', enumOnly: true },
+  { value: 'financing_status', label: 'Financing (from the question’s options)', enumOnly: true },
   { value: 'utm_source', label: 'UTM source' },
   { value: 'utm_medium', label: 'UTM medium' },
   { value: 'utm_campaign', label: 'UTM campaign' },
@@ -39,30 +42,40 @@ export const FIELD_LABEL: Record<string, string> = {
   bedrooms: 'Bedrooms',
   motivation: 'Notes',
   consent_status: 'Consent',
+  timeline: 'Timeline',
+  buying_intent: 'Intent',
+  financing_status: 'Financing',
   utm_source: 'UTM source',
   utm_medium: 'UTM medium',
   utm_campaign: 'UTM campaign',
 };
 
-/** One row of the mapper per path. */
+const ENUM_TARGETS: CustomTarget[] = ['timeline', 'buying_intent', 'financing_status'];
+export const isEnumTarget = (t: TargetChoice): boolean => ENUM_TARGETS.includes(t as CustomTarget);
+
+/** One row of the mapper per source field. */
 export interface DraftRow {
   target: TargetChoice;
   customName: string;
+  /** The option map the suggestion came with, kept so an enum target can be saved. */
+  transform?: EnumMapTransform;
 }
 export type Draft = Record<string, DraftRow>;
 
 export function draftFromFields(fields: MappingField[]): Draft {
   const out: Draft = {};
-  for (const f of fields) out[f.path] = { target: f.target, customName: f.customName ?? '' };
+  for (const f of fields) out[f.path] = { target: f.target, customName: f.customName ?? '', ...(f.transform ? { transform: f.transform } : {}) };
   return out;
 }
 
-/** Paths left at "Don’t import" are simply absent from the API list. */
+/** Fields left at "Don’t import" are simply absent from the API list. */
 export function fieldsFromDraft(draft: Draft): MappingField[] {
   const out: MappingField[] = [];
   for (const [path, row] of Object.entries(draft)) {
     if (!row.target) continue;
-    out.push(row.target === '__custom__' ? { path, target: row.target, customName: row.customName.trim() } : { path, target: row.target });
+    if (row.target === '__custom__') out.push({ path, target: row.target, customName: row.customName.trim() });
+    else if (isEnumTarget(row.target) && row.transform) out.push({ path, target: row.target, transform: row.transform });
+    else out.push({ path, target: row.target });
   }
   return out;
 }
@@ -86,13 +99,46 @@ export function draftProblems(fields: MappingField[]): string[] {
       else if (names.has(name)) problems.push(`Two paths are both named "${f.customName}".`);
       names.add(name);
     }
+    if (isEnumTarget(f.target) && !f.transform) problems.push(`${FIELD_LABEL[f.target]} needs a question with options; ${f.path} has none.`);
   }
-  if (!filled.has('phone') && !filled.has('email')) problems.push('Choose the path with the phone or the email.');
+  if (!filled.has('phone') && !filled.has('email')) problems.push('Choose the field with the phone or the email.');
   for (const [field, n] of filled) {
-    if (n > 1) problems.push(`${FIELD_LABEL[field] ?? field} is filled from more than one path.`);
+    if (n > 1) problems.push(`${FIELD_LABEL[field] ?? field} is filled from more than one field.`);
   }
   return problems;
 }
+
+/**
+ * How the sending app proves itself, as the setup screen offers it. The two
+ * form presets are the providers' own signature schemes, so the owner pastes
+ * our secret into the form tool and nothing else is configured.
+ */
+export interface AuthPreset {
+  id: 'header' | 'tally' | 'typeform' | 'hmac' | 'basic' | 'none';
+  label: string;
+  hint: string;
+  /** Fixed auth for a preset; undefined when the form below completes it. */
+  auth?: CustomAuth;
+}
+
+export const AUTH_PRESETS: AuthPreset[] = [
+  { id: 'header', label: 'A secret in a header (simplest)', hint: 'Zapier, Make, your own code: send the secret in a header on every request.' },
+  {
+    id: 'tally',
+    label: 'Tally form (signature)',
+    hint: 'Paste the URL and the secret into Tally → Integrations → Webhooks. Submissions are read as a form.',
+    auth: { mode: 'hmac', headerName: 'tally-signature', algorithm: 'sha256', encoding: 'base64' },
+  },
+  {
+    id: 'typeform',
+    label: 'Typeform (signature)',
+    hint: 'Paste the URL and the secret into Typeform → Connect → Webhooks.',
+    auth: { mode: 'hmac', headerName: 'typeform-signature', algorithm: 'sha256', encoding: 'base64', prefix: 'sha256=' },
+  },
+  { id: 'hmac', label: 'An HMAC signature of the body (custom)', hint: 'Choose the header, algorithm and encoding your app signs with.' },
+  { id: 'basic', label: 'HTTP basic auth', hint: 'A username you choose and a password we mint.' },
+  { id: 'none', label: 'Nothing — the URL alone', hint: 'The unguessable URL is the only secret. Fine for a quick test.' },
+];
 
 const SAMPLE_BODY = '{"name":"Jane Doe","phone":"+1 512 555 0101","email":"jane@example.com"}';
 
@@ -126,7 +172,7 @@ export function curlExample(url: string, auth: CustomAuth, secret: string | null
   return lines.join(' \\\n');
 }
 
-/** One word for where a custom webhook stands, from the summary every list carries. */
+/** One word for where a webhook stands, from the summary every list carries. */
 export function customStatus(s: { ingestStatus: string | null; mappingStatus: string | null; isActive: boolean }): { label: string; cls: string } {
   const ingest = (s.ingestStatus ?? '').toUpperCase();
   const mapping = (s.mappingStatus ?? '').toUpperCase();

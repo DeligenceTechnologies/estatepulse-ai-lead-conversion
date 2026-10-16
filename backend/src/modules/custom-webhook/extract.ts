@@ -5,25 +5,32 @@ import { IGNORE_TARGET } from '../processing/canonical-fields';
 import { applyTransform, isValidEmail, type Transform } from '../processing/transforms';
 import { validateCanonicalValues, type CanonicalValue } from '../processing/validators';
 import { CUSTOM_EVENT_TYPE, CUSTOM_KEY_PREFIX } from './constants';
+import { detectAdapter } from './detect';
 import { valueAt } from './flatten';
 import type { StoredMapping } from './mapping';
 
 /**
  * A custom delivery as the worker's mapping engine expects it.
  *
- * For a form provider the adapter knows the questions; here the owner's mapping
- * IS the list of questions, so this reads exactly the paths that are mapped
- * (nothing else: a CRM payload has dozens of leaves nobody asked for, and the
- * whole payload is on the webhook_events row anyway).
+ * Two shapes arrive on the same URL:
  *
- * A canonical path becomes an answer keyed by its path, which the mapping rows
- * then match. A custom-field path becomes an answer keyed `__custom__:<path>`
- * — no mapping row carries that key, so the engine files it under its label
- * as an extra field, which is precisely what the owner asked for.
+ *  - A form provider's payload (detect.ts): its adapter supplies the answers,
+ *    keyed by the provider's stable question keys, with option ids resolved to
+ *    text — exactly what the provider's own route would see.
+ *  - Anything else: the owner's mapping IS the list of questions, so exactly
+ *    the mapped paths are read (nothing else: a CRM payload has dozens of
+ *    leaves nobody asked for, and the whole payload is on the webhook_events
+ *    row anyway).
+ *
+ * Either way, a field the owner mapped to an extra field is re-keyed
+ * `__custom__:<key>` with the owner's name as its label: no mapping row carries
+ * that key, so the engine files it under its label as an extra field, which
+ * is precisely what was asked for.
  */
 
 const typeLabel = (t: string): string => t.toUpperCase();
 
+/** Plain JSON: one answer per mapped path. */
 export function extractDelivery(payload: unknown, mappings: StoredMapping[]): NormalizedDelivery {
   const answers: NormalizedAnswer[] = [];
   const seen = new Set<string>();
@@ -66,6 +73,45 @@ export function extractDelivery(payload: unknown, mappings: StoredMapping[]): No
   };
 }
 
+/**
+ * A form provider's answers with the owner's extra-field choices applied: an
+ * answer mapped to an extra field is re-keyed under the owner's name, and kept
+ * under its own key only if it ALSO fills a lead column.
+ */
+export function renameCustomAnswers(answers: NormalizedAnswer[], mappings: StoredMapping[]): NormalizedAnswer[] {
+  const custom = new Map<string, string>();
+  const canonical = new Set<string>();
+  for (const m of mappings) {
+    if (m.target_field === CUSTOM_TARGET) custom.set(m.source_field_key, m.transform.label ?? m.source_field_key);
+    else if (m.target_field !== IGNORE_TARGET) canonical.add(m.source_field_key);
+  }
+  const out: NormalizedAnswer[] = [];
+  for (const a of answers) {
+    const name = custom.get(a.key);
+    if (name === undefined) {
+      out.push(a);
+      continue;
+    }
+    out.push({ ...a, key: `${CUSTOM_KEY_PREFIX}${a.key}`, label: name });
+    if (canonical.has(a.key)) out.push(a);
+  }
+  return out;
+}
+
+export interface ParsedCustom {
+  delivery: NormalizedDelivery;
+  /** The form provider whose adapter parsed the payload; null for plain JSON. */
+  provider: string | null;
+}
+
+/** Whichever shape arrived, as answers the engine can map. */
+export function parseCustomPayload(payload: unknown, mappings: StoredMapping[]): ParsedCustom {
+  const adapter = detectAdapter(payload);
+  if (!adapter) return { delivery: extractDelivery(payload, mappings), provider: null };
+  const parsed = adapter.parse(payload);
+  return { delivery: { ...parsed, answers: renameCustomAnswers(parsed.answers, mappings) }, provider: adapter.provider };
+}
+
 export interface LeadPreview {
   /** False when the payload carries neither a phone nor an email under the mapping. */
   wouldCreate: boolean;
@@ -85,7 +131,7 @@ export interface LeadPreview {
  * button.
  */
 export function previewLead(payload: unknown, mappings: StoredMapping[], region: string): LeadPreview {
-  const delivery = extractDelivery(payload, mappings);
+  const { delivery } = parseCustomPayload(payload, mappings);
   const values: Record<string, CanonicalValue> = {};
   const customFields: Record<string, string> = {};
   const warnings: string[] = [];
@@ -100,6 +146,7 @@ export function previewLead(payload: unknown, mappings: StoredMapping[], region:
   for (const a of delivery.answers) {
     const targets = byKey.get(a.key);
     if (!targets) {
+      // Unmapped: an extra field under its label (the owner's name, or the question text).
       if (a.scalarText) customFields[a.label] = a.scalarText;
       continue;
     }
