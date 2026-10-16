@@ -5,6 +5,7 @@ import type { BookedMeeting, MeetingPerson, SchedulingEventType } from '../calen
 import { CalendarAccessService } from '../connection/calendar-access.service';
 import { SchedulingProvider } from '../providers/scheduling-provider';
 import { CalendarSyncService, MEETINGS_AHEAD_DAYS, MEETINGS_PAST_DAYS } from '../sync/calendar-sync.service';
+import { bookedEventTypeIds } from './booked-event-types';
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -44,8 +45,9 @@ export class MeetingTypesService {
     const from = new Date(now - MEETINGS_PAST_DAYS * DAY_MS);
     const to = new Date(now + MEETINGS_AHEAD_DAYS * DAY_MS);
 
+    const knownIds = await bookedEventTypeIds(this.prisma, connection.id);
     const [eventTypes, rows] = await Promise.all([
-      this.access.useActive(orgId, (active, secret) => this.provider.eventTypes(active, secret)),
+      this.access.useActive(orgId, (active, secret) => this.provider.eventTypes(active, secret, knownIds)),
       this.prisma.calendarMeeting.findMany({
         where: { connectionId: connection.id, startsAt: { gte: from, lte: to } },
         orderBy: [{ startsAt: 'asc' }, { externalId: 'asc' }],

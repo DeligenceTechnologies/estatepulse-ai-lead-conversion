@@ -126,7 +126,7 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
         <div
           role="listbox"
           aria-label="Assign to agent"
-          className="absolute right-0 mt-2 w-72 z-20 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
+          className="absolute left-0 lg:left-auto lg:right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] z-20 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
         >
           <div className="px-3 py-2 border-b border-slate-800 text-2xs uppercase font-bold tracking-wide text-slate-500">
             Assign to

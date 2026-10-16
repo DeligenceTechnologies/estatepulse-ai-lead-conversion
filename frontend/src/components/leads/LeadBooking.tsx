@@ -33,6 +33,14 @@ const PROVIDER_LABEL: Record<string, string> = {
   cal: "Cal.com",
 };
 
+/** Shown on shared event types, where the provider may pick the host. */
+const POOLING_LABEL: Record<string, string> = {
+  round_robin: "Round robin",
+  collective: "Collective",
+  multi_pool: "Multi-pool",
+  managed: "Managed",
+};
+
 function blockerText(o: LeadBookingOptions): string {
   const provider =
     PROVIDER_LABEL[o.provider ?? ""] ?? "your scheduling account";
@@ -45,7 +53,7 @@ function blockerText(o: LeadBookingOptions): string {
     case "agent_not_linked":
       return `${agent} is not linked to a ${provider} team member. On Integrations, open ${provider} and press Sync agents — their ${provider} email must match their EstatePulse email.`;
     case "no_event_types":
-      return `${agent} has no event type of their own in ${provider}. Create one there (for example a 30 minute meeting), then reopen this lead.`;
+      return `${agent} does not host any event type in ${provider}. Create one there or add them as a host on a shared one, then reopen this lead.`;
     default:
       return "";
   }
@@ -194,11 +202,16 @@ export const LeadBookMeeting: React.FC<{
               href={et.bookingUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1.5"
+              className="max-w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1.5"
             >
-              <span>
+              <span className="min-w-0 break-words">
                 {et.name} · {et.durationMinutes} min
               </span>
+              {et.poolingType && (
+                <span className="text-2xs font-semibold px-1.5 py-0.5 rounded bg-black/20">
+                  {POOLING_LABEL[et.poolingType] ?? et.poolingType}
+                </span>
+              )}
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           ))}
@@ -290,14 +303,14 @@ export const LeadAppointments: React.FC<{
           return (
             <div
               key={appt.id}
-              className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl flex items-center justify-between gap-3"
+              className="bg-slate-950/80 border border-slate-800 p-3 sm:p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
                   <Calendar className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <h4 className="text-xs font-bold text-white truncate">
                       {appt.appointmentType ?? "Meeting"}
                     </h4>
@@ -319,7 +332,7 @@ export const LeadAppointments: React.FC<{
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0 sm:justify-end">
                 {isWebLink(appt.rescheduleUrl) && live && (
                   <a
                     href={appt.rescheduleUrl}

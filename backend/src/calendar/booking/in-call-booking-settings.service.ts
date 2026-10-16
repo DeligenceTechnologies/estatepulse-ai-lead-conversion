@@ -11,6 +11,7 @@ import { TelnyxCredentialsService } from '@/telnyx/telnyx-credentials.service';
 import { CalendarAccessService } from '../connection/calendar-access.service';
 import { inUse } from '../connection/connection-state';
 import { findLinkedUsers } from '../members/linked-users';
+import { bookedEventTypeIds } from '../meeting-types/booked-event-types';
 import { SchedulingProvider } from '../providers/scheduling-provider';
 import { withBookingSection, withoutBookingSection } from './booking-prompt';
 
@@ -88,7 +89,8 @@ export class InCallBookingSettingsService {
     let problem: string | null = null;
     if (isCalendly) {
       try {
-        eventTypes = (await this.access.useActive(orgId, (active, secret) => this.provider.eventTypes(active, secret)))
+        const knownIds = await bookedEventTypeIds(this.prisma, connection.id);
+        eventTypes = (await this.access.useActive(orgId, (active, secret) => this.provider.eventTypes(active, secret, knownIds)))
           .filter((et) => et.poolingType === 'round_robin' || et.poolingType === 'multi_pool')
           .map((et) => ({ uri: et.id, name: et.name, durationMinutes: et.durationMinutes }));
         const members = await this.prisma.calendarMember.findMany({

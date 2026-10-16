@@ -388,8 +388,8 @@ export type LeadBookingBlocker = 'no_agent' | 'no_calendar' | 'agent_not_linked'
 export interface LeadBookingOptions {
   agent: { id: string; name: string } | null;
   provider: 'calendly' | 'cal' | null;
-  /** The assigned agent's own event types, as links pre-filled for this lead. */
-  eventTypes: { id: string; name: string; durationMinutes: number; bookingUrl: string }[];
+  /** Every event type the assigned agent hosts (own and shared), as links pre-filled for this lead. */
+  eventTypes: { id: string; name: string; durationMinutes: number; bookingUrl: string; poolingType: PoolingType | null }[];
   blocker: LeadBookingBlocker | null;
 }
 

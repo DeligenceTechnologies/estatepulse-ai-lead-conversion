@@ -30,15 +30,23 @@ export class SchedulingProvider {
     return this.cal.members(secret, workspace.workspaceId);
   }
 
-  eventTypes(workspace: WorkspaceRef, secret: string): Promise<SchedulingEventType[]> {
-    if (workspace.provider === 'calendly') return this.calendly.eventTypes(secret, workspace.workspaceId);
+  /** `knownIds`: event types seen on booked meetings (see `bookedEventTypeIds`), so Calendly's list misses none of them. */
+  eventTypes(workspace: WorkspaceRef, secret: string, knownIds: string[] = []): Promise<SchedulingEventType[]> {
+    if (workspace.provider === 'calendly') return this.calendly.eventTypes(secret, workspace.workspaceId, knownIds);
     if (workspace.workspaceType === 'personal') return this.cal.personalEventTypes(secret, workspace.workspaceSlug);
     return this.cal.teamEventTypes(secret, workspace.workspaceId, workspace.workspaceSlug);
   }
 
-  /** The event types a member hosts alone, by their provider id (Calendly user URI) and username (Cal.com). */
-  memberEventTypes(workspace: WorkspaceRef, secret: string, member: { externalId: string; username: string | null }): Promise<SchedulingEventType[]> {
-    if (workspace.provider === 'calendly') return this.calendly.memberEventTypes(secret, member.externalId);
+  /** The event types a member hosts (Calendly: own and shared), by their provider id (Calendly user URI) and username (Cal.com). */
+  memberEventTypes(
+    workspace: WorkspaceRef,
+    secret: string,
+    member: { externalId: string; username: string | null },
+    knownIds: string[] = [],
+  ): Promise<SchedulingEventType[]> {
+    if (workspace.provider === 'calendly') {
+      return this.calendly.memberEventTypes(secret, workspace.workspaceId, member.externalId, knownIds);
+    }
     return member.username ? this.cal.memberEventTypes(secret, member.username) : Promise.resolve([]);
   }
 

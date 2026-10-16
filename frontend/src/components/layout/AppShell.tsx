@@ -48,6 +48,8 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
 
   const group = groups.find((g) => g.items.some((i) => i.id === activeId));
   const current = group?.items.find((i) => i.id === activeId);
+  // The profile menu's Settings shortcut, offered only when the sidebar lists Settings.
+  const hasSettings = groups.some((g) => g.items.some((i) => i.id === 'settings'));
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-on-accent">
@@ -91,7 +93,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
           <div className="flex items-center gap-1 shrink-0">
             <ThemeToggle />
             <div className="w-px h-6 bg-slate-800 mx-1" aria-hidden />
-            <ProfileMenu />
+            <ProfileMenu onOpenSettings={hasSettings ? () => onNavigate('settings') : undefined} />
           </div>
         </header>
 

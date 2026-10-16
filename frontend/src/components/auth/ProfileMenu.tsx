@@ -8,6 +8,7 @@ import {
   Loader2,
   LogOut,
   MonitorSmartphone,
+  Settings,
   ShieldCheck,
 } from 'lucide-react';
 import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
@@ -26,8 +27,12 @@ const item =
  * The signed-in user's menu at the right of the navbar, in both shells: who
  * they are, which view they are in (and, holding Owner plus another role, the
  * switch between the two), and the account actions.
+ *
+ * `onOpenSettings` is given only where the shell has a Settings page the user
+ * may open (the same one the sidebar lists), so the shortcut never offers a
+ * page the sidebar does not.
  */
-export const ProfileMenu: React.FC = () => {
+export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettings }) => {
   const { user, organization, roleName, role, profiles, switchProfile, logout, logoutAll } = useAuth();
   const [open, setOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -142,6 +147,19 @@ export const ProfileMenu: React.FC = () => {
           )}
 
           <div className="py-1">
+            {onOpenSettings && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                onClick={() => {
+                  setOpen(false);
+                  onOpenSettings();
+                }}
+              >
+                <Settings className="w-3.5 h-3.5" /> Settings
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"

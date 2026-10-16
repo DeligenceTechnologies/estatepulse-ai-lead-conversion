@@ -5,7 +5,9 @@ import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { fullName, visibleLeads } from '@/lead/lead-scope';
 import { AppointmentsService, type AppointmentDTO } from '../appointments/appointments.service';
+import type { PoolingType } from '../calendar.types';
 import { CalendarAccessService } from '../connection/calendar-access.service';
+import { bookedEventTypeIds } from '../meeting-types/booked-event-types';
 import { SchedulingProvider } from '../providers/scheduling-provider';
 import { leadBookingUrl } from './lead-booking-link';
 
@@ -14,17 +16,18 @@ export type LeadBookingBlocker = 'no_agent' | 'no_calendar' | 'agent_not_linked'
 export interface LeadBookingOptionsDTO {
   agent: { id: string; name: string } | null;
   provider: CalendarProvider | null;
-  eventTypes: { id: string; name: string; durationMinutes: number; bookingUrl: string }[];
+  eventTypes: { id: string; name: string; durationMinutes: number; bookingUrl: string; poolingType: PoolingType | null }[];
   blocker: LeadBookingBlocker | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Booking a meeting for a lead: with its assigned agent, on one of that agent's
- * own one-on-one event types, through a link that carries the lead so the sync
- * matches the meeting back to it. Shared pages (round robin, collective) are
- * not offered, as they let the provider pick a host other than the assigned one.
+ * Booking a meeting for a lead: on any event type its assigned agent hosts —
+ * their own one-on-one pages first, then the shared ones (round robin,
+ * collective, multi-pool) — through a link that carries the lead so the sync
+ * matches the meeting back to it. On a shared page the provider may pick a
+ * different host; the sync records whoever it picked.
  * A lead the caller cannot see is NOT_FOUND.
  */
 @Injectable()
@@ -59,16 +62,23 @@ export class LeadBookingService {
         if (!member) return empty('agent_not_linked', { agent, provider: connection.provider });
 
         const name = fullName(lead.firstName, lead.lastName) || null;
-        const eventTypes = (await this.provider.memberEventTypes(connection, secret, member))
-          .filter((et) => !et.poolingType && et.bookingUrl)
+        const knownIds = await bookedEventTypeIds(this.prisma, connection.id);
+        const eventTypes = (await this.provider.memberEventTypes(connection, secret, member, knownIds))
+          .filter((et) => et.bookingUrl)
           .map((et) => ({
             id: et.id,
             name: et.name,
             durationMinutes: et.durationMinutes,
             bookingUrl: leadBookingUrl(connection.provider, et.bookingUrl!, { id: lead.id, name, email: lead.email }),
+            poolingType: et.poolingType,
           }))
           .filter((et): et is typeof et & { bookingUrl: string } => et.bookingUrl !== null)
-          .sort((a, b) => a.durationMinutes - b.durationMinutes || a.name.localeCompare(b.name));
+          .sort(
+            (a, b) =>
+              Number(!!a.poolingType) - Number(!!b.poolingType) ||
+              a.durationMinutes - b.durationMinutes ||
+              a.name.localeCompare(b.name),
+          );
 
         return { agent, provider: connection.provider, eventTypes, blocker: eventTypes.length ? null : 'no_event_types' };
       });

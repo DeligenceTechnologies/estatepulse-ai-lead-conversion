@@ -78,12 +78,12 @@ const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
   };
   return (
     <div className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden">
-      <button onClick={toggle} className="w-full px-4 py-3.5 flex items-center gap-3 text-left hover:bg-slate-800/40 transition-colors cursor-pointer">
+      <button onClick={toggle} className="w-full px-3 sm:px-4 py-3 sm:py-3.5 flex items-center gap-3 text-left hover:bg-slate-800/40 transition-colors cursor-pointer">
         <div className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
           <Phone className="w-4 h-4" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-sm font-semibold text-slate-100 capitalize">{call.direction} call</span>
             <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${OUTCOME_STYLES[call.outcome]}`}>
               {call.outcome.replace(/_/g, ' ').toLowerCase()}
@@ -96,10 +96,10 @@ const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
             {call.agentName && ` · ${call.agentName}`}
           </div>
         </div>
-        <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-4 h-4 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-800">
+        <div className="px-3 sm:px-4 pb-4 pt-1 space-y-3 border-t border-slate-800">
           {call.recordingUrl && <audio controls src={call.recordingUrl} className="w-full h-9 mt-2" />}
           {error ? (
             <p className="text-xs text-rose-300">Could not load this call: {error}</p>
@@ -114,7 +114,7 @@ const CallItem: React.FC<{ call: CallRow }> = ({ call }) => {
               {detail.transcript && (
                 <div>
                   <div className="text-xs font-semibold text-slate-400 mb-1">Transcript</div>
-                  <pre className="max-h-56 overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs text-slate-300 leading-relaxed bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <pre className="max-h-56 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words font-sans text-xs text-slate-300 leading-relaxed bg-slate-900 border border-slate-800 rounded-lg p-3">
                     {detail.transcript}
                   </pre>
                 </div>
@@ -222,23 +222,23 @@ export const LeadDetailModal: React.FC = () => {
 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-5xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] text-slate-100">
         {/* Pinned to the corner, outside the header's wrapping rows, so it is
             always in the same place however the actions wrap. */}
         <button
           onClick={() => setSelectedLeadId(null)}
           aria-label="Close"
           title="Close (Esc)"
-          className="absolute top-4 right-4 z-10 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Header */}
-        <div className="p-5 pr-16 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg ${
+        <div className="p-4 pr-14 sm:p-5 sm:pr-16 bg-slate-950 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 shrink-0">
+          <div className="flex items-start sm:items-center gap-3 sm:gap-3.5 min-w-0">
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg ${
               lead.temperature === 'hot'
                 ? 'bg-gradient-to-tr from-amber-600 to-rose-600 shadow-md shadow-rose-950 text-on-accent'
                 : lead.temperature === 'warm'
@@ -248,9 +248,9 @@ export const LeadDetailModal: React.FC = () => {
               {lead.firstName[0]}{lead.lastName[0]}
             </div>
 
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-white">{lead.firstName} {lead.lastName}</h2>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <h2 className="text-lg sm:text-xl font-bold text-white break-words">{lead.firstName} {lead.lastName}</h2>
                 <span className={`text-xs uppercase font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                   lead.temperature === 'hot'
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
@@ -267,11 +267,11 @@ export const LeadDetailModal: React.FC = () => {
                 </span>
               </div>
 
-              <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 mt-1.5 sm:mt-1">
                 {/* Only the parts the lead has, so there is never a stray separator. */}
                 {[
                   lead.phone && <span key="p">{lead.phone}</span>,
-                  lead.email && <span key="e">{lead.email}</span>,
+                  lead.email && <span key="e" className="break-all">{lead.email}</span>,
                   <span key="a" className="text-slate-300 font-medium">
                     Agent: {agentLabel}
                   </span>,
@@ -284,7 +284,7 @@ export const LeadDetailModal: React.FC = () => {
           </div>
 
           {/* Quick Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end lg:shrink-0">
             {isLive && (
               <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
             )}
@@ -318,7 +318,7 @@ export const LeadDetailModal: React.FC = () => {
 
         {/* Flow status — where this lead is in its journey (strategy step vs follow-up) */}
         {flow && (
-          <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+          <div className="px-4 sm:px-5 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap shrink-0 max-h-32 sm:max-h-none overflow-y-auto custom-scrollbar items-center gap-x-3 gap-y-2 text-xs">
             <span className="text-2xs uppercase font-bold tracking-wide text-slate-500">Flow</span>
             {(() => {
               const map = {
@@ -337,7 +337,7 @@ export const LeadDetailModal: React.FC = () => {
             {flow.phase === 'strategy' && flow.steps.length > 0 && (
               <>
                 <span className="text-slate-400">{flow.strategyName}</span>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   {flow.steps.map((s) => {
                     const name = s.channel === 'voice' ? 'Call' : 'SMS';
                     const cls =
@@ -360,13 +360,13 @@ export const LeadDetailModal: React.FC = () => {
                   <span className="text-slate-400">All {flow.stepsTotal} steps sent — awaiting outcome</span>
                 )}
                 {flow.reason && (
-                  <span className="text-slate-500" title={flow.reason}>· last attempt: {flow.reason.replace(/\s+/g, ' ').slice(0, 45)}</span>
+                  <span className="text-slate-500 break-words" title={flow.reason}>· last attempt: {flow.reason.replace(/\s+/g, ' ').slice(0, 45)}</span>
                 )}
               </>
             )}
 
             {flow.phase === 'exited' && (
-              <span className="text-rose-300" title={flow.reason ?? undefined}>
+              <span className="text-rose-300 break-words" title={flow.reason ?? undefined}>
                 Left the strategy — not reached{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
               </span>
             )}
@@ -375,7 +375,7 @@ export const LeadDetailModal: React.FC = () => {
         )}
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-800 px-5 bg-slate-950/40 gap-4 text-xs font-medium">
+        <div className="flex border-b border-slate-800 px-4 sm:px-5 bg-slate-950/40 gap-4 sm:gap-5 text-xs font-medium overflow-x-auto no-scrollbar shrink-0">
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'conversation', label: `SMS${count(activity?.messages.length)}` },
@@ -385,7 +385,7 @@ export const LeadDetailModal: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`py-3 border-b-2 transition-colors cursor-pointer ${
+              className={`py-3 shrink-0 whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
                 activeTab === tab.id 
                   ? 'border-emerald-500 text-emerald-400 font-semibold' 
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -397,21 +397,21 @@ export const LeadDetailModal: React.FC = () => {
         </div>
 
         {/* Tab Content Container */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6 custom-scrollbar">
           
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               
               {/* What the lead told us. Each value is a real field or an honest dash. */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                 {[
                   { icon: <DollarSign className="w-4 h-4 text-emerald-400" />, label: 'Budget', value: lead.budgetMin || lead.budgetMax ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K` : '—' },
                   { icon: <MapPin className="w-4 h-4 text-cyan-400" />, label: 'Location', value: lead.preferredLocation || '—' },
                   { icon: <Clock className="w-4 h-4 text-amber-400" />, label: 'Timeline', value: lead.timeline || '—' },
                   { icon: <Home className="w-4 h-4 text-purple-400" />, label: 'Bedrooms', value: lead.bedrooms ? `${lead.bedrooms} beds${lead.propertyType ? ` · ${lead.propertyType}` : ''}` : '—' },
                 ].map((f) => (
-                  <div key={f.label} className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+                  <div key={f.label} className="min-w-0 bg-slate-950/60 border border-slate-800 px-3 py-3 sm:px-4 sm:py-3.5 rounded-xl">
                     <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
                       {f.icon}
                       <span>{f.label}</span>
@@ -421,12 +421,12 @@ export const LeadDetailModal: React.FC = () => {
                 ))}
               </div>
 
-              <div className="bg-slate-950/60 border border-slate-800 px-4 py-3.5 rounded-xl">
+              <div className="bg-slate-950/60 border border-slate-800 px-3 py-3 sm:px-4 sm:py-3.5 rounded-xl">
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
                   <ShieldCheck className="w-4 h-4 text-cyan-400" />
                   <span>Financing</span>
                 </div>
-                <div className="text-sm text-slate-100">{lead.financingStatus || '—'}</div>
+                <div className="text-sm text-slate-100 break-words">{lead.financingStatus || '—'}</div>
               </div>
 
               {/* Everything the prospect said that has no field of its own.
@@ -444,11 +444,11 @@ export const LeadDetailModal: React.FC = () => {
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 pt-1">
                     {Object.entries(lead.customFields).map(([k, v]) => (
-                      <div key={k} className="flex items-baseline gap-2 text-xs">
-                        <span className="text-slate-500 min-w-[40%] shrink-0 truncate" title={k}>
+                      <div key={k} className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2 text-xs">
+                        <span className="text-slate-500 sm:min-w-[40%] sm:max-w-[40%] shrink-0 sm:truncate break-words" title={k}>
                           {k}
                         </span>
-                        <span className="text-slate-200 break-words">{v}</span>
+                        <span className="text-slate-200 break-words min-w-0">{v}</span>
                       </div>
                     ))}
                   </div>
@@ -472,7 +472,7 @@ export const LeadDetailModal: React.FC = () => {
               are sent by the strategy and follow-up sequences. */}
           {activeTab === 'conversation' && activity && (
             activity.messages.length > 0 ? (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-3 sm:max-h-[460px] sm:overflow-y-auto custom-scrollbar">
                 {activity.messages.map(msg => {
                   const inbound = msg.direction === 'inbound';
                   const failed = msg.deliveryStatus === 'failed';
@@ -484,7 +484,7 @@ export const LeadDetailModal: React.FC = () => {
                         {formatDateTime(msg.sentAt ?? msg.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}
                         {failed && <span className="text-rose-400 font-semibold"> · not delivered</span>}
                       </div>
-                      <div className={`px-3.5 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed whitespace-pre-wrap ${
+                      <div className={`px-3.5 py-2.5 rounded-2xl max-w-[90%] sm:max-w-[80%] text-sm leading-relaxed whitespace-pre-wrap break-words ${
                         inbound
                           ? 'bg-slate-800 text-slate-100 rounded-tl-sm'
                           : failed

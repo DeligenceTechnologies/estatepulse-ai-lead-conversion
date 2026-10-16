@@ -248,20 +248,43 @@ export class CalendlyClient {
     }));
   }
 
-  async eventTypes(accessToken: string, organizationUri: string): Promise<SchedulingEventType[]> {
-    const eventTypes = await this.collect<CalendlyEventType>(
+  /**
+   * The organization's active event types. Calendly's `?organization=` list
+   * leaves some shared pages out (a multi-pool event, for one), so
+   * `knownUris` — event types seen on booked meetings — are read one by one
+   * when the list does not have them.
+   */
+  async eventTypes(accessToken: string, organizationUri: string, knownUris: string[] = []): Promise<SchedulingEventType[]> {
+    return (await this.organizationEventTypes(accessToken, organizationUri, knownUris)).map(toEventType);
+  }
+
+  private async organizationEventTypes(
+    accessToken: string,
+    organizationUri: string,
+    knownUris: string[],
+  ): Promise<CalendlyEventType[]> {
+    const listed = await this.collect<CalendlyEventType>(
       accessToken,
       `${API_BASE}/event_types?${new URLSearchParams({ organization: organizationUri, active: 'true', count: String(PAGE_SIZE) })}`,
     );
-    return eventTypes.map((eventType) => ({
-      id: eventType.uri,
-      name: eventType.name,
-      durationMinutes: eventType.duration,
-      bookingUrl: eventType.scheduling_url,
-      poolingType: toPooling(eventType.pooling_type),
-      hostName: eventType.profile?.name ?? null,
-      color: hexColor(eventType.color),
-    }));
+    return [...listed, ...(await this.missingEventTypes(accessToken, listed, knownUris))];
+  }
+
+  /** The active ones of `uris` that `listed` does not have, each read on its own. Best effort per event type. */
+  private async missingEventTypes(accessToken: string, listed: CalendlyEventType[], uris: string[]): Promise<CalendlyEventType[]> {
+    const have = new Set(listed.map((eventType) => eventType.uri));
+    const missing = [...new Set(uris)].filter((uri) => uri.startsWith(`${API_BASE}/event_types/`) && !have.has(uri));
+    const read = await mapLimit(missing, INVITEE_CONCURRENCY, async (uri) => {
+      try {
+        const { resource } = await this.get<{ resource: CalendlyEventType & { active?: boolean } }>(accessToken, uri);
+        return resource.active === false ? null : resource;
+      } catch (error) {
+        if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+        this.logger.warn(`Calendly event type ${uri} unavailable: ${(error as Error).message}`);
+        return null;
+      }
+    });
+    return read.filter((eventType): eventType is CalendlyEventType & { active?: boolean } => eventType !== null);
   }
 
   /** Meetings booked in the organization between `from` and `to`, with who booked each. */
@@ -332,23 +355,66 @@ export class CalendlyClient {
     });
   }
 
-  /** A member's own (one-on-one) event types: the ones a lead assigned to them can book with them alone. */
-  async memberEventTypes(accessToken: string, userUri: string): Promise<SchedulingEventType[]> {
-    const eventTypes = await this.collect<CalendlyEventType & { profile: { type?: string; owner?: string; name: string | null } | null }>(
-      accessToken,
-      `${API_BASE}/event_types?${new URLSearchParams({ user: userUri, active: 'true', count: String(PAGE_SIZE) })}`,
+  /**
+   * Every active event type the member hosts: their own one-on-one pages and
+   * the shared ones they are a host on (round robin, collective, multi-pool),
+   * each with its `poolingType`.
+   *
+   * `?user=` leaves out team-owned pages such as a multi-pool event, so the
+   * organization's shared event types (with `knownUris`, see `eventTypes`)
+   * are read too and kept when the member is one of their hosts.
+   */
+  async memberEventTypes(
+    accessToken: string,
+    organizationUri: string,
+    userUri: string,
+    knownUris: string[] = [],
+  ): Promise<SchedulingEventType[]> {
+    const [own, shared] = await Promise.all([
+      this.collect<CalendlyEventType>(
+        accessToken,
+        `${API_BASE}/event_types?${new URLSearchParams({ user: userUri, active: 'true', count: String(PAGE_SIZE) })}`,
+      ),
+      this.sharedEventTypes(accessToken, organizationUri, knownUris),
+    ]);
+    const ownUris = new Set(own.map((eventType) => eventType.uri));
+    const candidates = shared.filter((eventType) => !ownUris.has(eventType.uri));
+    const hosted = await mapLimit(candidates, INVITEE_CONCURRENCY, async (eventType) =>
+      (await this.hostsEventType(accessToken, eventType.uri, userUri)) ? eventType : null,
     );
-    return eventTypes
-      .filter((eventType) => eventType.profile?.type === 'User' && eventType.profile.owner === userUri && !eventType.pooling_type)
-      .map((eventType) => ({
-        id: eventType.uri,
-        name: eventType.name,
-        durationMinutes: eventType.duration,
-        bookingUrl: eventType.scheduling_url,
-        poolingType: null,
-        hostName: eventType.profile?.name ?? null,
-        color: hexColor(eventType.color),
-      }));
+    return [...own, ...hosted.filter((eventType): eventType is CalendlyEventType => eventType !== null)].map(toEventType);
+  }
+
+  /** The organization's active shared (pooled) event types. Best effort: unreadable means none. */
+  private async sharedEventTypes(accessToken: string, organizationUri: string, knownUris: string[]): Promise<CalendlyEventType[]> {
+    try {
+      const all = await this.organizationEventTypes(accessToken, organizationUri, knownUris);
+      return all.filter((eventType) => toPooling(eventType.pooling_type) !== null);
+    } catch (error) {
+      if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+      this.logger.warn(`Calendly shared event types unavailable: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Whether `userUri` is a host on a shared event type, from its memberships.
+   * When they cannot be read the event type is kept: offering a page the agent
+   * is not on is better than hiding one they are.
+   */
+  private async hostsEventType(accessToken: string, eventTypeUri: string, userUri: string): Promise<boolean> {
+    try {
+      const memberships = await this.collect<unknown>(
+        accessToken,
+        `${API_BASE}/event_type_memberships?${new URLSearchParams({ event_type: eventTypeUri, count: String(PAGE_SIZE) })}`,
+      );
+      // The host's user URI sits in a nested field; match it wherever it is.
+      return JSON.stringify(memberships).includes(JSON.stringify(userUri));
+    } catch (error) {
+      if (error instanceof ProviderHttpError && error.credentialRejected) throw error;
+      this.logger.warn(`Calendly hosts for event type ${eventTypeUri} unavailable, keeping it: ${(error as Error).message}`);
+      return true;
+    }
   }
 
   async eventType(accessToken: string, eventTypeUri: string): Promise<CalendlyEventTypeDetail> {
@@ -488,6 +554,18 @@ const LOCATION_LABEL: Record<string, string> = {
 
 function toRole(role: string): WorkspaceRole {
   return role === 'owner' || role === 'admin' ? role : 'member';
+}
+
+function toEventType(eventType: CalendlyEventType): SchedulingEventType {
+  return {
+    id: eventType.uri,
+    name: eventType.name,
+    durationMinutes: eventType.duration,
+    bookingUrl: eventType.scheduling_url,
+    poolingType: toPooling(eventType.pooling_type),
+    hostName: eventType.profile?.name ?? null,
+    color: hexColor(eventType.color),
+  };
 }
 
 function toPooling(type: string | null): PoolingType | null {
