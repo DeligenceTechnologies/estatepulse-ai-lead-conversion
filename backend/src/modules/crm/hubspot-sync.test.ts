@@ -20,6 +20,7 @@ import { CrmConnectionsService } from './crm-connections.service';
 import { CRM_PROVIDER_LABELS, crmRowKey, type CrmContact } from './crm-records';
 import { CrmRegistry } from './crm-registry';
 import { CrmSyncService } from './crm-sync.service';
+import { CrmWebhooksController } from './crm-webhooks.controller';
 import { CrmWebhooksService } from './crm-webhooks.service';
 import { CrmModule } from './crm.module';
 import { HubSpotClient } from './hubspot/hubspot.client';
@@ -508,6 +509,23 @@ test('connecting the same account again refreshes it in place; a different accou
   assert.equal(await prisma.provider_credentials.count({ where: { organization_id: B.orgId } }), 0);
 });
 
+test('two tabs finishing the same authorization at once: one connection, never two', async () => {
+  grant.portal = P_A;
+  const states = await Promise.all(
+    [1, 2].map(async () => {
+      const s = await call(`${API}/oauth/start`, A.token, { method: 'POST' });
+      return new URL(s.body.authorizeUrl).searchParams.get('state')!;
+    }),
+  );
+  const results = await Promise.all(states.map((state, i) => call(`${API}/oauth/complete`, A.token, { method: 'POST', body: { code: `code-tab-${i}`, state } })));
+  for (const r of results) assert.equal(r.status, 200, r.text);
+  assert.equal(await prisma.provider_credentials.count({ where: { organization_id: A.orgId, revoked_at: null } }), 1);
+  assert.equal(await prisma.lead_sources.count({ where: { organization_id: A.orgId, provider: 'HUBSPOT' } }), 1);
+  // Only the first connect's import ever exists — each completion nudges the
+  // worker, so it may already have finished; what must never happen is a second.
+  assert.equal(await prisma.crm_sync_runs.count({ where: { organization_id: A.orgId } }), 1);
+});
+
 // =================================================================================
 // Initial import
 // =================================================================================
@@ -882,6 +900,87 @@ test('a rate limit never dead-letters a delivery — a deletion has no other way
   assert.ok(row.error_message);
 });
 
+test('webhooks: a correctly signed body that is not JSON is refused with 400, never a 500', async () => {
+  const r = await webhook([], { body: '{not json' });
+  assert.equal(r.status, 400, r.text);
+});
+
+test('webhooks: one delivery for a connected and an unknown account keeps the known half', async () => {
+  put(P_A, '21', { lastName: 'Mixed' });
+  const r = await webhook([ev(P_A, 'contact.propertyChange', '21', { propertyName: 'lastname' }), ev('123456780', 'contact.creation', '5')]);
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.accepted, 1);
+  assert.equal(r.body.ignored, 1);
+  await sync.drain();
+  assert.equal((await leadOf(A.orgId, '21'))!.leads!.last_name, 'Mixed');
+});
+
+test('webhooks: the same delivery arriving twice at the same moment is stored once', async () => {
+  const events = [ev(P_A, 'contact.propertyChange', '22', { propertyName: 'lastname' })];
+  const [a, b] = await Promise.all([webhook(events), webhook(events)]);
+  assert.equal(a.status, 200, a.text);
+  assert.equal(b.status, 200, b.text);
+  assert.equal(a.body.accepted + b.body.accepted, 1);
+  assert.equal(a.body.duplicates + b.body.duplicates, 1);
+  await sync.drain();
+});
+
+test('webhooks: a 150-contact delivery is read from HubSpot in batches of 100', async () => {
+  const ids = Array.from({ length: 150 }, (_, i) => String(13 + i));
+  const reads = calls.read;
+  const r = await webhook(ids.map((id) => ev(P_A, 'contact.propertyChange', id, { propertyName: 'lastname' })));
+  assert.equal(r.body.accepted, 150, r.text);
+  await sync.drain();
+  assert.equal(calls.read - reads, 2);
+  assert.equal(await prisma.webhook_events.count({ where: { organization_id: A.orgId, provider: 'HUBSPOT', queue_state: 'PENDING' } }), 0);
+});
+
+test('odd values — very long fields, emoji, upper-case email, a foreign phone — land without a database error, trimmed to fit', async () => {
+  put(P_A, '170', {
+    firstName: 'J'.repeat(300),
+    lastName: '🏡 Núñez-O’Brien',
+    email: `  ODD.170.${RUN.toUpperCase()}@EXAMPLE.TEST `,
+    phone: '+44 20 7946 0958',
+    extra: { 'HubSpot lifecycle stage': 'x'.repeat(2000) },
+  });
+  await webhook([ev(P_A, 'contact.creation', '170')]);
+  await sync.drain();
+  const l = (await leadOf(A.orgId, '170'))!.leads!;
+  assert.equal(l.first_name!.length, 100);
+  assert.equal(l.last_name, '🏡 Núñez-O’Brien');
+  assert.equal(l.normalized_email, `odd.170.${RUN}@example.test`);
+  assert.equal(l.normalized_phone, '+442079460958');
+  assert.equal(((l.custom_fields as any)['HubSpot lifecycle stage'] as string).length, 500);
+  assert.equal(l.automation_paused, true);
+});
+
+test('linking ignores email case: an existing lead is matched, not duplicated', async () => {
+  const lead = await prisma.leads.create({
+    data: { organization_id: A.orgId, first_name: 'Casey', email: `case.${RUN}@example.test`, normalized_email: `case.${RUN}@example.test`, email_valid: true, status: 'contacting' },
+  });
+  const before = await leadsOf(A.orgId);
+  put(P_A, '171', { firstName: 'Casey', lastName: 'Upper', email: `CASE.${RUN.toUpperCase()}@Example.TEST` });
+  await webhook([ev(P_A, 'contact.creation', '171')]);
+  await sync.drain();
+  assert.equal(await leadsOf(A.orgId), before, 'a duplicate lead was created');
+  const row = (await leadOf(A.orgId, '171'))!;
+  assert.equal(row.lead_id, lead.id);
+  assert.equal(row.leads!.last_name, 'Upper', 'a blank was not filled');
+});
+
+test('a contact that loses every way to reach them is skipped; its lead is kept as it was, and not called missing', async () => {
+  const before = (await leadOf(A.orgId, '23'))!;
+  put(P_A, '23', { email: null, phone: null, lastName: 'Unreachable' });
+  await webhook([ev(P_A, 'contact.propertyChange', '23', { propertyName: 'email' })]);
+  await sync.drain();
+  const after = (await leadOf(A.orgId, '23'))!;
+  assert.equal(after.lead_id, before.lead_id);
+  assert.equal(after.leads!.normalized_email, before.leads!.normalized_email);
+  assert.equal(after.leads!.last_name, before.leads!.last_name);
+  assert.equal(after.missing_since, null);
+  put(P_A, '23', { email: email(23), phone: phone(23), lastName: 'Doe' });
+});
+
 test('a webhook cannot reach another organization’s leads', async () => {
   const leadsB = await leadsOf(B.orgId);
   put(P_A, '4', { lastName: 'Changed' });
@@ -956,6 +1055,16 @@ test('approved leads: a new phone that belongs to another lead is held, not appl
   const lead = await prisma.leads.findUniqueOrThrow({ where: { id: row.lead_id! } });
   assert.equal(lead.normalized_phone, '+15125550105');
   assert.ok((await leadOf(A.orgId, '5'))!.changed_after_review_at);
+});
+
+test('the Leads list shows a HubSpot lead once approved, labelled as HubSpot; pending ones stay in Import Review', async () => {
+  const leads = await call('/api/v1/leads?limit=200', A.token);
+  assert.equal(leads.status, 200, leads.text);
+  const byId = new Map(leads.body.map((l: any) => [l.id, l]));
+  const approved = byId.get((await leadOf(A.orgId, '1'))!.lead_id!) as any;
+  assert.ok(approved, 'an approved HubSpot lead is missing from Leads');
+  assert.equal(approved.source?.provider, 'HUBSPOT');
+  assert.ok(!byId.has((await leadOf(A.orgId, '7'))!.lead_id!), 'a lead still awaiting review is listed in Leads');
 });
 
 test('pending drafts follow HubSpot; a rejected import stays rejected', async () => {
@@ -1204,6 +1313,24 @@ test('reconnect after a disconnect: the same source and tracking rows carry on �
   // B's leads are B's: imported fresh, with nothing of A's linked or reached.
   assert.equal(await prisma.leads.count({ where: { organization_id: B.orgId } }), store(P_A).size - 1);
   assert.equal(await prisma.sheet_import_rows.count({ where: { organization_id: B.orgId, lead_id: { in: Object.values(existing) } } }), 0);
+});
+
+test('switched off (HUBSPOT_ENABLED not 1): the webhook answers 404 and the worker does nothing', async () => {
+  const off = new CrmRegistry(fake as unknown as HubSpotClient, new ConfigService({ HUBSPOT_ENABLED: '0' }));
+  const controller = new CrmWebhooksController(off, app.get(CrmWebhooksService));
+  let status = 0;
+  const res: any = { status: (s: number) => ((status = s), res), json: () => res, set: () => res };
+  await controller.hubspot({ method: 'POST', originalUrl: WEBHOOK_PATH, rawBody: Buffer.from('[]'), headers: {} } as any, res);
+  assert.equal(status, 404);
+
+  const idle = new CrmSyncService(app.get(PrismaService), app.get<GuardedPrisma>(TENANT_PRISMA), connections, off, app.get(SheetImportService), app.get(EventsBus), app.get(ConfigService));
+  idle.claimOnly([A.orgId, B.orgId]);
+  const src = await sourceOf(B.orgId);
+  await prisma.lead_sources.update({ where: { id: src.id }, data: { sync_next_at: new Date(Date.now() - 1000) } });
+  const before = { list: calls.list, read: calls.read, refresh: calls.refresh };
+  await idle.drain();
+  assert.deepEqual({ list: calls.list, read: calls.read, refresh: calls.refresh }, before, 'a switched-off worker called HubSpot');
+  await prisma.lead_sources.update({ where: { id: src.id }, data: { sync_next_at: null } });
 });
 
 // =================================================================================

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Contact, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { connectCrm, disconnectCrm, getCrmStatus, isCrmDisabled, startCrmSync, type CrmStatus } from '../../utils/crmApi';
@@ -87,14 +88,14 @@ export const HubSpotCard: React.FC = () => {
       pending.current?.abort();
       return;
     }
-    setError(null);
     setBusy('connect');
     const ac = new AbortController();
     pending.current = ac;
     try {
       setStatus(await connectCrm(PROVIDER, NAME, ac.signal));
+      toast.success(`${NAME} connected. Importing your contacts…`);
     } catch (e) {
-      if (!ac.signal.aborted) setError(errorText(e));
+      if (!ac.signal.aborted) toast.error(errorText(e));
     } finally {
       pending.current = null;
       setBusy(null);
@@ -102,13 +103,13 @@ export const HubSpotCard: React.FC = () => {
   };
 
   const sync = async () => {
-    setError(null);
     setBusy('sync');
     try {
-      await startCrmSync(PROVIDER);
+      const { alreadyActive } = await startCrmSync(PROVIDER);
       await load();
+      toast.success(alreadyActive ? 'A sync is already running.' : 'Sync started.');
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -124,8 +125,9 @@ export const HubSpotCard: React.FC = () => {
       await disconnectCrm(PROVIDER);
       setArmed(false);
       await load();
+      toast.success(`${NAME} disconnected. Imported leads were kept.`);
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -183,7 +185,9 @@ export const HubSpotCard: React.FC = () => {
 
         {status?.account && (
           <div className="space-y-1.5">
-            <Fact label="Account" value={status.account.name ?? status.account.id ?? 'Unknown account'} />
+            {/* HubSpot's name for an account is its website domain, which can be anything — the id is what is unambiguous. */}
+            <Fact label="Account" value={status.account.name ?? 'HubSpot account'} />
+            {status.account.id && <Fact label="Account ID" value={status.account.id} />}
             {status.account.connectedBy && <Fact label="Connected by" value={status.account.connectedBy} />}
             {live && <Fact label="Last sync" value={timeAgo(status.lastSuccessfulSyncAt)} />}
             <Fact label="Leads from HubSpot" value={status.importedLeads.toLocaleString()} />
