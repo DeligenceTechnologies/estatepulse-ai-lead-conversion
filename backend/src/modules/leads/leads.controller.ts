@@ -17,10 +17,11 @@ type AssignedAgentDTO = { id: string; name: string; assignmentType: string; assi
  * the one owner write on a lead, lives in LeadAssignmentController: it needs a
  * signed-in owner, and this controller also accepts API keys.)
  *
- * That is the structural answer to "who owns leads": the API creates leads ONLY
- * via ingestion, and the SPA has no way to write one. The demo store in
- * AppContext keeps exclusive ownership of its own localStorage leads. The two
- * cannot collide because neither can write to the other.
+ * That is the structural answer to "who owns leads": the API creates leads via
+ * ingestion, imports and the owner's own hand (ManualLeadController) — never
+ * through this read path. The demo store in AppContext keeps exclusive
+ * ownership of its own localStorage leads. The two cannot collide because
+ * neither can write to the other.
  */
 @Controller('api/v1/leads')
 @UseGuards(TenantGuard)

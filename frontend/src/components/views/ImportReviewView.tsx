@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, CheckCircle2, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { getCrmStatus } from '../../utils/crmApi';
@@ -39,7 +40,6 @@ const DECISION_BATCH = 500;
 const clean = (i: ReviewItem): boolean => !i.missing && !i.lead?.dncStatus && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
 type Tab = 'pending' | 'rejected' | 'changes';
-type Notice = { tone: 'ok' | 'error'; text: string } | null;
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
 const btn =
@@ -107,7 +107,6 @@ export const ImportReviewView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'more' | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
-  const [notice, setNotice] = useState<Notice>(null);
   const [upload, setUpload] = useState(false);
   const [history, setHistory] = useState(false);
 
@@ -180,7 +179,6 @@ export const ImportReviewView: React.FC = () => {
     setCursor(null);
     setSelected(new Set());
     setArmed(null);
-    setNotice(null);
   };
 
   const more = async () => {
@@ -227,7 +225,6 @@ export const ImportReviewView: React.FC = () => {
     const ids = syncTargets.map((s) => s.id);
     const failedBefore = new Map(sources.map((s) => [s.id, s.lastFailureAt]));
     setSyncing(true);
-    setNotice(null);
     try {
       await Promise.all(ids.map((id) => syncSheetSource(id)));
       let list = await listSheetSources();
@@ -237,25 +234,12 @@ export const ImportReviewView: React.FC = () => {
         list = await listSheetSources();
       }
       const failed = list.filter((s) => ids.includes(s.id) && s.lastFailureAt && s.lastFailureAt !== failedBefore.get(s.id));
-      setNotice(
-        failed.length > 0
-          ? {
-              tone: 'error',
-              text: failed.map((s) => `${s.name}: ${s.lastErrorMessage ?? s.lastErrorCode}`).join(' '),
-            }
-          : running()
-            ? {
-                tone: 'ok',
-                text: 'Still syncing — refresh in a moment to see the rest.',
-              }
-            : {
-                tone: 'ok',
-                text: `Synced ${ids.length === 1 ? 'the sheet' : `${ids.length} sheets`} with Google.`,
-              },
-      );
+      if (failed.length > 0) toast.error(failed.map((s) => `${s.name}: ${s.lastErrorMessage ?? s.lastErrorCode}`).join(' '));
+      else if (running()) toast.info('Still syncing — refresh in a moment to see the rest.');
+      else toast.success(`Synced ${ids.length === 1 ? 'the sheet' : `${ids.length} sheets`} with Google.`);
       await load();
     } catch (e) {
-      setNotice({ tone: 'error', text: errorText(e) });
+      toast.error(errorText(e));
     } finally {
       setSyncing(false);
     }
@@ -283,7 +267,6 @@ export const ImportReviewView: React.FC = () => {
     }
     setArmed(null);
     setBusy(what);
-    setNotice(null);
     const ids = [...selected];
     try {
       if (what === 'approve') {
@@ -294,35 +277,32 @@ export const ImportReviewView: React.FC = () => {
           held: [...a.held, ...r.held],
           skipped: [...a.skipped, ...r.skipped],
         }));
-        setNotice({ tone: 'ok', text: approveMessage(merged) });
+        toast.success(approveMessage(merged));
       } else if (what === 'reject') {
         const rs = await inBatches(ids, rejectRows);
-        setNotice({
-          tone: 'ok',
-          text: rejectMessage(
+        toast.success(
+          rejectMessage(
             rs.reduce((a, r) => ({
               rejected: a.rejected + r.rejected,
               skipped: [...a.skipped, ...r.skipped],
             })),
           ),
-        });
+        );
       } else {
         const rs = await inBatches(ids, (b) => resolveChanges(b, what));
         const n = rs.reduce((a, r) => a + r.resolved, 0);
-        setNotice({
-          tone: 'ok',
-          text:
-            what === 'apply'
-              ? `Updated ${n} lead${n === 1 ? '' : 's'} with ${crmChanges ? 'HubSpot’s' : 'the sheet’s'} values.`
-              : `Kept ${n} lead${n === 1 ? '' : 's'} as reviewed. ${crmChanges ? 'HubSpot’s' : 'The sheet’s'} change will not be raised again.`,
-        });
+        toast.success(
+          what === 'apply'
+            ? `Updated ${n} lead${n === 1 ? '' : 's'} with ${crmChanges ? 'HubSpot’s' : 'the sheet’s'} values.`
+            : `Kept ${n} lead${n === 1 ? '' : 's'} as reviewed. ${crmChanges ? 'HubSpot’s' : 'The sheet’s'} change will not be raised again.`,
+        );
       }
       setSelected(new Set());
       // Approved leads join the Leads list: tell the shell, so its count follows.
       if (what === 'approve') window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       await load();
     } catch (e) {
-      setNotice({ tone: 'error', text: errorText(e) });
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -471,23 +451,6 @@ export const ImportReviewView: React.FC = () => {
             </>
           )}
         </div>
-
-        {notice && (
-          <div
-            className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${
-              notice.tone === 'ok'
-                ? 'text-emerald-200 bg-emerald-500/10 border-emerald-500/30'
-                : 'text-rose-300 bg-rose-500/10 border-rose-500/30'
-            }`}
-          >
-            {notice.tone === 'ok' ? (
-              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            ) : (
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            )}
-            <span>{notice.text}</span>
-          </div>
-        )}
 
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-300">
@@ -723,7 +686,7 @@ export const ImportReviewView: React.FC = () => {
         <FileImportModal
           onClose={() => setUpload(false)}
           onImported={(b) => {
-            setNotice({ tone: 'ok', text: `${b.rows?.imported ?? 0} lead${b.rows?.imported === 1 ? '' : 's'} from ${b.name} added for review.` });
+            toast.success(`${b.rows?.imported ?? 0} lead${b.rows?.imported === 1 ? '' : 's'} from ${b.name} added for review.`);
             void load();
           }}
         />

@@ -7,6 +7,7 @@ import {
   providerCredentialAad,
   signingSecretAad,
   verifyTallySignature,
+  verifyTypeformSignature,
 } from './crypto';
 
 const KEY_A = randomBytes(32).toString('base64');
@@ -100,6 +101,23 @@ describe('verifyTallySignature', () => {
     // timingSafeEqual throws on length mismatch; that must not become a 500.
     expect(verifyTallySignature(rawBody, secret, '')).toBe(false);
     expect(verifyTallySignature(rawBody, secret, 'nonsense')).toBe(false);
+  });
+});
+
+describe('verifyTypeformSignature', () => {
+  const secret = 'whsec_abc123';
+  const rawBody = Buffer.from('{"event_id":"01H","form_response":{}}', 'utf8');
+  const goodSig = createHmac('sha256', secret).update(rawBody).digest('base64');
+
+  it('accepts the sha256= dressed form Typeform sends', () => {
+    expect(verifyTypeformSignature(rawBody, secret, `sha256=${goodSig}`)).toBe(true);
+  });
+
+  it('rejects a tampered body, a wrong secret, and junk', () => {
+    expect(verifyTypeformSignature(Buffer.from('{}'), secret, `sha256=${goodSig}`)).toBe(false);
+    expect(verifyTypeformSignature(rawBody, 'whsec_wrong', `sha256=${goodSig}`)).toBe(false);
+    expect(verifyTypeformSignature(rawBody, secret, 'sha256=')).toBe(false);
+    expect(verifyTypeformSignature(rawBody, secret, '')).toBe(false);
   });
 });
 

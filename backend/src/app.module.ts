@@ -104,6 +104,7 @@ export const envSchema = z.object({
   // Absent simply omits the link.
   APP_BASE_URL: z.string().optional(),
   TALLY_API_BASE_URL: z.string().url().default('https://api.tally.so'),
+  TYPEFORM_API_BASE_URL: z.string().url().default('https://api.typeform.com'),
   PROVIDER_HTTP_TIMEOUT_MS: z.coerce.number().default(10_000),
 
   // --- calendar (Calendly) ---

@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DeliveryOutcome, IngestStatus, QueueState, SignatureState } from '../../common/domain';
-import { SecretBox, sha256Hex, signingSecretAad, verifyTallySignature } from '../../common/crypto';
+import { DeliveryOutcome, IngestStatus, Provider, QueueState, SignatureState } from '../../common/domain';
+import {
+  SecretBox,
+  sha256Hex,
+  signingSecretAad,
+  verifyTallySignature,
+  verifyTypeformSignature,
+} from '../../common/crypto';
 import { newId } from '../../common/ids';
 import { hashCredential, looksLikeIngestToken } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
-import { TallyAdapter } from './adapters/tally.adapter';
+import { ingestAdapterFor } from './adapters/registry';
 import { InvalidPayloadError } from './adapters/types';
 
 /**
@@ -22,13 +28,21 @@ export type IngestResult =
   | { kind: 'unknown_token' }
   | { kind: 'archived' };
 
+const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature']);
+
 const ALLOWED_HEADERS = new Set([
   'content-type',
   'content-length',
   'user-agent',
   'x-forwarded-for',
-  'tally-signature',
+  ...SIGNATURE_HEADERS,
 ]);
+
+/** How each provider signs the raw body. Both are HMAC-SHA256; only the header's dressing differs. */
+const VERIFIERS: Record<Provider, (rawBody: Buffer, secret: string, header: string) => boolean> = {
+  TALLY: verifyTallySignature,
+  TYPEFORM: verifyTypeformSignature,
+};
 
 /**
  * Store only headers we would actually read in support, and never the signature
@@ -40,7 +54,7 @@ function redactHeaders(headers: Record<string, unknown>): Record<string, string>
   for (const [k, v] of Object.entries(headers)) {
     const key = k.toLowerCase();
     if (!ALLOWED_HEADERS.has(key)) continue;
-    out[key] = key === 'tally-signature' ? '[present, redacted]' : String(v);
+    out[key] = SIGNATURE_HEADERS.has(key) ? '[present, redacted]' : String(v);
   }
   return out;
 }
@@ -48,7 +62,6 @@ function redactHeaders(headers: Record<string, unknown>): Record<string, string>
 @Injectable()
 export class IngestService {
   private readonly logger = new Logger(IngestService.name);
-  private readonly adapter = new TallyAdapter();
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -80,14 +93,16 @@ export class IngestService {
    * email to the form owner) cannot fix a mapping we misconfigured — it can only
    * generate duplicates and a support ticket.
    */
-  async ingestTally(params: {
+  async ingest(params: {
+    /** Which provider's route this arrived on; decides the parser and the verifier. */
+    provider: Provider;
     token: string;
     rawBody: Buffer;
     headers: Record<string, unknown>;
     signature: string | undefined;
     sourceIp: string | undefined;
   }): Promise<IngestResult> {
-    const { token, rawBody, headers, signature, sourceIp } = params;
+    const { provider, token, rawBody, headers, signature, sourceIp } = params;
 
     // Reject structurally invalid tokens with zero DB round trips — a cheap
     // guard against someone spraying the endpoint.
@@ -111,8 +126,16 @@ export class IngestService {
       return { kind: 'archived' };
     }
 
+    // A token is bound to one provider's route. A Tally token posted to the
+    // Typeform URL (or the reverse) is not ours to accept: the payload would
+    // fail to parse anyway, and 404 keeps the two token spaces separate.
+    if ((source.provider ?? Provider.TALLY).toUpperCase() !== provider) {
+      this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${provider} route`);
+      return { kind: 'unknown_token' };
+    }
+
     // --- Signature verification -------------------------------------------
-    const sig = await this.evaluateSignature(source, rawBody, signature);
+    const sig = await this.evaluateSignature(source, rawBody, signature, VERIFIERS[provider]);
 
     // --- Parse (structural only; mapping is the worker's job) --------------
     let parsedBody: unknown;
@@ -125,7 +148,7 @@ export class IngestService {
 
     try {
       parsedBody = JSON.parse(rawBody.toString('utf8'));
-      const preview = this.adapter.parse(parsedBody);
+      const preview = ingestAdapterFor(provider).parse(parsedBody);
       providerEventId = preview.providerEventId;
       providerSubmissionId = preview.providerSubmissionId;
       providerFormId = preview.providerFormId;
@@ -138,9 +161,9 @@ export class IngestService {
     }
 
     const payloadHash = sha256Hex(rawBody);
-    // Tally's eventId is stable across its retry ladder. Falling back to a body
-    // hash means an unsigned provider that omits an id is still deduplicated.
-    const dedupeKey = providerEventId ? `tally:${providerEventId}` : `sha256:${payloadHash}`;
+    // The provider's event id is stable across its retries. Falling back to a
+    // body hash means an unsigned provider that omits an id is still deduplicated.
+    const dedupeKey = providerEventId ? `${provider.toLowerCase()}:${providerEventId}` : `sha256:${payloadHash}`;
 
     // A paused source still records deliveries and holds them, rather than
     // rejecting: pausing is OUR feature, the customer's form is fine. This is
@@ -165,7 +188,7 @@ export class IngestService {
           organization_id: source.organization_id,
           lead_source_id: source.id,
           // NOT NULL in the Phase One schema.
-          provider: 'TALLY',
+          provider,
           event_type: eventType ?? 'FORM_RESPONSE',
           // A pre-existing partial unique index covers
           // (provider, external_event_id) WHERE external_event_id IS NOT NULL,
@@ -280,6 +303,7 @@ export class IngestService {
     },
     rawBody: Buffer,
     signature: string | undefined,
+    verify: (rawBody: Buffer, secret: string, header: string) => boolean,
   ): Promise<{
     state: SignatureState;
     usedPrevious: boolean;
@@ -314,7 +338,7 @@ export class IngestService {
     const aad = signingSecretAad(source.organization_id, source.id);
     const current = this.secretBox.decrypt(source.signing_secret_enc, aad);
 
-    if (verifyTallySignature(rawBody, current, signature)) {
+    if (verify(rawBody, current, signature)) {
       return { state: SignatureState.VALID, usedPrevious: false, quarantine: false };
     }
 
@@ -325,7 +349,7 @@ export class IngestService {
 
     if (graceOpen) {
       const previous = this.secretBox.decrypt(source.previous_secret_enc!, aad);
-      if (verifyTallySignature(rawBody, previous, signature)) {
+      if (verify(rawBody, previous, signature)) {
         // Surfaced in the UI as an amber "old secret" chip — a visible nudge to
         // finish the rotation.
         return { state: SignatureState.VALID, usedPrevious: true, quarantine: false };

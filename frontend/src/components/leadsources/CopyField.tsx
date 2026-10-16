@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 /**
  * A read-only value with a copy button.
@@ -27,7 +28,7 @@ export const CopyField: React.FC<{ label: string; value: string; mono?: boolean 
         </div>
         <button
           onClick={() => {
-            navigator.clipboard.writeText(value);
+            navigator.clipboard.writeText(value).catch(() => toast.error('Could not copy — select the text instead.'));
             setCopied(true);
             setTimeout(() => setCopied(false), 1800);
           }}
