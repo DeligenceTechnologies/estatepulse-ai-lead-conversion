@@ -111,6 +111,12 @@ export const envValidationSchema = Joi.object({
     FILE_IMPORT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     FILE_IMPORT_MAX_BYTES: Joi.number().integer().positive().default(5 * 1024 * 1024),
 
+    // Custom webhooks: a URL any app can post a lead to; the owner maps the first
+    // payload's fields on screen. Off unless CUSTOM_WEBHOOK_ENABLED: the ingest
+    // route (ingest/v1/custom/:token) and the management routes answer 404 and
+    // the card is hidden. Switching it off changes no data.
+    CUSTOM_WEBHOOK_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+
     // HubSpot CRM import. Off unless HUBSPOT_ENABLED: its endpoints answer 404 and nothing syncs.
     // Unset client id/secret = the card says "not configured" instead of failing at boot.
     HUBSPOT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),

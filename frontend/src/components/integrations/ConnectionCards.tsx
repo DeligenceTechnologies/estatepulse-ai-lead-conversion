@@ -18,8 +18,11 @@ import {
   type ProviderConnection,
 } from '../../api/client';
 import { useApp } from '../../context/AppContext';
-import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
+import { isCustomSource } from '../../utils/customWebhookApi';
+import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
+import { ConnectModal } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { CustomWebhookCard } from './CustomWebhookCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { HubSpotCard } from './HubSpotCard';
 import { IntegrationCard } from './IntegrationCard';
@@ -168,7 +171,10 @@ export const ConnectionCards: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
-  const [connect, setConnect] = useState<ConnectKind | null>(null);
+  /** The form provider whose connect flow is open ('TALLY', 'TYPEFORM'), or null. */
+  const [connect, setConnect] = useState<'TALLY' | 'TYPEFORM' | null>(null);
+  /** The webhook wizard: closed, or open on a source (null source = create a new one). */
+  const [webhookWizard, setWebhookWizard] = useState<{ sourceId: string | null } | null>(null);
 
   const load = useCallback(async () => {
     // Both are asked for at once: neither needs the other's answer, and asking
@@ -262,11 +268,15 @@ export const ConnectionCards: React.FC = () => {
     onDisconnect: disconnect,
   });
 
-  // Sources from before providers existed carry no provider and were all Tally.
-  const apiSources = (code: string) =>
-    (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API' && norm(s.provider || 'TALLY') === code);
+  // Every source of a form provider — installed through its API, or its URL
+  // pasted by hand before the Webhook card existed — sits on that provider's
+  // card. Sources from before providers existed carry no provider and were all
+  // Tally. The Webhook card lists the custom ones.
+  const providerSources = (code: string) => (sources ?? []).filter((s) => !isCustomSource(s) && norm(s.provider || 'TALLY') === code);
   const accounts = (code: string) => connections.filter((c) => norm(c.provider) === code);
-  const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API');
+  const customSources = (sources ?? []).filter(isCustomSource);
+  // The plain webhook URL from before the Webhook card (provider WEBHOOK).
+  const legacyWebhookSources = (sources ?? []).filter((s) => norm(s.provider) === 'WEBHOOK');
 
   /**
    * The body of a card whose data has not arrived. Named after the card it sits
@@ -292,7 +302,7 @@ export const ConnectionCards: React.FC = () => {
    * and remount its rows each time.
    */
   const formProviderCard = (code: 'TALLY' | 'TYPEFORM', title: string, empty: string) => {
-    const mine = apiSources(code);
+    const mine = providerSources(code);
     const conns = accounts(code);
     return (
       <IntegrationCard
@@ -351,6 +361,14 @@ export const ConnectionCards: React.FC = () => {
             Google Sheets is self-loading: its account is not a lead source. */}
         <GoogleSheetsCard />
 
+        {/* Webhook — one URL for any app or form; the owner maps the first payload's fields. Hidden when the server has it off. */}
+        <CustomWebhookCard
+          sources={customSources}
+          loading={loading}
+          onOpenSource={openInLeadSources}
+          onAdd={() => setWebhookWizard({ sourceId: null })}
+          onMap={(id) => setWebhookWizard({ sourceId: id })}
+        />
         {/* HubSpot — self-loading too; hidden where the server has it switched off. */}
         <HubSpotCard />
 
@@ -366,41 +384,38 @@ export const ConnectionCards: React.FC = () => {
           'Paste a Typeform personal access token once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
         )}
 
-        {/* Webhook — we hold nothing, so the customer installs and repairs it. */}
-        <IntegrationCard
-          icon={
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
-              <Webhook className="w-5 h-5" />
-            </div>
-          }
-          title="Website & Other Forms"
-          blurb="Your website, Zapier, Make or any tool that can send a webhook"
-          connected={webhookSources.length > 0}
-          loading={loading}
-          accent="border-amber-500/40"
-          action={{
-            label: webhookSources.length > 0 ? 'Add another' : 'Get webhook URL',
-            icon: <Plus className="w-4 h-4" />,
-            onClick: () => setConnect('WEBHOOK'),
-            className: 'bg-slate-800 hover:bg-slate-700 text-slate-100',
-          }}
-        >
-          {loading ? (
-            <LoadingBody what="webhook" />
-          ) : webhookSources.length > 0 ? (
-            webhookSources.map((s) => <SourceRow {...rowProps(s)} />)
-          ) : (
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              Works with any form tool — Tally, Typeform, a website form, Zapier. We hand you a URL and a
-              signing secret and hold no credential for your account.
-            </div>
-          )}
-        </IntegrationCard>
+        {/* Website & Other Forms — sources made with the plain webhook URL before
+            the Webhook card above existed. Kept so they stay visible and
+            manageable; a new one is made on the Webhook card. */}
+        {legacyWebhookSources.length > 0 && (
+          <IntegrationCard
+            icon={
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
+                <Webhook className="w-5 h-5" />
+              </div>
+            }
+            title="Website & Other Forms"
+            blurb="Your website, Zapier, Make or any tool that can send a webhook"
+            connected
+            loading={loading}
+            accent="border-amber-500/40"
+            action={{
+              label: 'Add webhook',
+              icon: <Plus className="w-4 h-4" />,
+              onClick: () => setWebhookWizard({ sourceId: null }),
+              className: 'bg-slate-800 hover:bg-slate-700 text-slate-100',
+            }}
+          >
+            {legacyWebhookSources.map((s) => (
+              <SourceRow {...rowProps(s)} />
+            ))}
+          </IntegrationCard>
+        )}
       </div>
 
       {connect && (
         <ConnectModal
-          initial={connect}
+          provider={connect}
           onClose={() => setConnect(null)}
           onConnected={() => {
             void load();
@@ -409,6 +424,21 @@ export const ConnectionCards: React.FC = () => {
             setConnect(null);
             openInLeadSources(id);
           }}
+          onManual={() => {
+            setConnect(null);
+            setWebhookWizard({ sourceId: null });
+          }}
+        />
+      )}
+
+      {webhookWizard && (
+        <CustomWebhookWizard
+          sourceId={webhookWizard.sourceId}
+          onClose={() => {
+            setWebhookWizard(null);
+            void load();
+          }}
+          onChanged={() => void load()}
         />
       )}
     </div>

@@ -130,6 +130,8 @@ enum LeadSourceProvider {
   FILE_UPLOAD
   TYPEFORM
   HUBSPOT
+  /// A custom webhook: any app posts JSON, the owner maps the first payload's fields.
+  CUSTOM
 
   @@map("lead_source_provider")
 }

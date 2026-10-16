@@ -57,6 +57,33 @@ export function sourceTone(s: LeadSourceConfig): Tone {
   if (ingest === 'PAUSED' || s.isActive === false) {
     return { cls: 'bg-slate-800 text-slate-400 border-slate-700', label: 'paused', Icon: PauseCircle };
   }
+  // A custom webhook is mapped by hand, so its waiting states say what is waited for.
+  if (norm(s.provider) === 'CUSTOM') {
+    if (ingest === 'AWAITING_FIRST_EVENT') {
+      return {
+        cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+        label: 'waiting for payload',
+        Icon: Radio,
+        pulse: true,
+        title: 'Nothing has been posted to the webhook URL yet.',
+      };
+    }
+    if (ingest === 'NEEDS_MAPPING') {
+      return mapping === 'CONFIGURED'
+        ? {
+            cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+            label: 'ready to switch on',
+            Icon: SlidersHorizontal,
+            title: 'Mapped. Switch it on to start creating leads; deliveries are held until then.',
+          }
+        : {
+            cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+            label: 'needs mapping',
+            Icon: SlidersHorizontal,
+            title: 'A payload arrived. Map its fields to lead fields.',
+          };
+    }
+  }
   if (ingest === 'NEEDS_MAPPING' || mapping === 'NEEDS_REVIEW') {
     return {
       cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40',

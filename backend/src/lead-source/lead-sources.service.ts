@@ -13,6 +13,9 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad, generateIngestToken, generateSigningSecret, secretPreview } from '@/common/utils/crypto';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER } from '@/custom-webhook/constants';
+import { detectAdapter } from '@/custom-webhook/detect';
+import { flatten } from '@/custom-webhook/flatten';
 import { adapterFor } from '@/ingest/adapters/generic.adapter';
 import { IngestService } from '@/ingest/ingest.service';
 
@@ -42,7 +45,13 @@ export class LeadSourcesService {
 
   ingestUrl(token: string, provider: LeadSourceProvider = LeadSourceProvider.TALLY): string {
     const route =
-      provider === LeadSourceProvider.TALLY ? 'tally' : provider === LeadSourceProvider.TYPEFORM ? 'typeform' : 'webhook';
+      provider === LeadSourceProvider.TALLY
+        ? 'tally'
+        : provider === LeadSourceProvider.TYPEFORM
+          ? 'typeform'
+          : provider === LeadSourceProvider.CUSTOM
+            ? 'custom'
+            : 'webhook';
     return `${this.publicBase}/ingest/v1/${route}/${token}`;
   }
 
@@ -175,20 +184,44 @@ export class LeadSourcesService {
 
       let answers: { label: string; type: string; value: string; targetFields: string[]; mappingOutcome: string | null; warnings: string[] }[] = [];
       let parseError: string | null = null;
-      try {
-        answers = adapterFor(r.provider).parse(r.payload).answers.map((a) => {
-          const entries = byKey.get(a.key) ?? [];
+      let formName = (r.payload as { data?: { formName?: string } } | null)?.data?.formName ?? null;
+      if (r.provider === CUSTOM_PROVIDER) {
+        // A custom delivery: a form provider's questions when the payload has
+        // a known shape, else every leaf of the payload as a path — either way
+        // joined to what the owner's mapping did with it. A field mapped to an
+        // extra field was traced under a prefixed key.
+        const known = detectAdapter(r.payload)?.parse(r.payload) ?? null;
+        if (known) formName = known.providerFormName;
+        const fields = known
+          ? known.answers.map((a) => ({ key: a.key, label: a.label, type: a.type, value: a.scalarText }))
+          : flatten(r.payload).leaves.map((leaf) => ({ key: leaf.path, label: leaf.path, type: leaf.type.toUpperCase(), value: leaf.value }));
+        answers = fields.map((f) => {
+          const entries = byKey.get(f.key) ?? byKey.get(`${CUSTOM_KEY_PREFIX}${f.key}`) ?? [];
           return {
-            label: a.label,
-            type: a.type,
-            value: a.scalarText,
+            label: f.label,
+            type: f.type,
+            value: f.value,
             targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
             mappingOutcome: entries[0]?.outcome ?? null,
             warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
           };
         });
-      } catch (error) {
-        parseError = (error as Error).message;
+      } else {
+        try {
+          answers = adapterFor(r.provider).parse(r.payload).answers.map((a) => {
+            const entries = byKey.get(a.key) ?? [];
+            return {
+              label: a.label,
+              type: a.type,
+              value: a.scalarText,
+              targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
+              mappingOutcome: entries[0]?.outcome ?? null,
+              warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
+            };
+          });
+        } catch (error) {
+          parseError = (error as Error).message;
+        }
       }
 
       return {
@@ -202,7 +235,7 @@ export class LeadSourcesService {
         outcomeReason: r.outcomeReason,
         errorMessage: r.errorMessage,
         bodyBytes: r.contentLength,
-        formName: (r.payload as { data?: { formName?: string } } | null)?.data?.formName ?? null,
+        formName,
         answers,
         parseError,
         mapping: trace.length

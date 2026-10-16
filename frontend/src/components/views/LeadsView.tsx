@@ -17,6 +17,7 @@ import {
   Sun,
   Users,
   Webhook,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -197,6 +198,9 @@ const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 /** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
 const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
 
+/** Rows shown before "Load more", as on Import Review. */
+const PAGE_SIZE = 10;
+
 export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { agentProfileId, role } = useAuth();
@@ -224,6 +228,9 @@ export const LeadsView: React.FC = () => {
   });
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
+  // "Load more" paging over the filtered list; any change of filter starts over at the first page.
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  useEffect(() => setVisible(PAGE_SIZE), [searchQuery, selectedTab, sourceFilter, agentFilter]);
 
   // One fetch, both payloads. They are always read together, so a failure in
   // either has to be a failure of the pair — a lead list rendered beside counts
@@ -504,8 +511,18 @@ export const LeadsView: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by name, phone, email, or submarket..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-9 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1.5 p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           <div className="md:col-span-3">
@@ -573,7 +590,7 @@ export const LeadsView: React.FC = () => {
                   </tr>
                 ))
               ) : filteredLeads.length > 0 ? (
-                filteredLeads.map(lead => {
+                filteredLeads.slice(0, visible).map(lead => {
                   const attention = attentionReasons(lead);
                   const budget = budgetRange(lead);
                   return (
@@ -723,6 +740,18 @@ export const LeadsView: React.FC = () => {
               )}
             </tbody>
           </table>
+          {filteredLeads.length > visible && (
+            <div className="flex items-center justify-center gap-3 py-3 border-t border-slate-800/60 text-xs text-slate-500">
+              <span>{`Showing ${visible} of ${filteredLeads.length}`}</span>
+              <button
+                type="button"
+                onClick={() => setVisible((v) => v + PAGE_SIZE)}
+                className="px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                Load more
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

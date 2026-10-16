@@ -15,9 +15,13 @@ import { randomUUID } from 'node:crypto';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { CAPTURED_DURING_SETUP, CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER, SETUP_REVIEW_REASON } from '@/custom-webhook/constants';
+import { parseCustomPayload } from '@/custom-webhook/extract';
+import { toStoredMapping } from '@/custom-webhook/mapping';
 import { EventsBus } from '@/events/events.bus';
+import { CUSTOM_TARGET } from '@/google-sheets/sheet-rows';
 import { adapterFor } from '../adapters/generic.adapter';
-import type { NormalizedAnswer } from '../adapters/types';
+import type { NormalizedAnswer, NormalizedDelivery } from '../adapters/types';
 import { CANONICAL_FIELDS, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
 import { applyTransform, isValidEmail, type Transform } from './transforms';
@@ -176,10 +180,42 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const parsed = adapterFor(event.provider).parse(event.payload);
       const region = settings?.defaultRegion ?? 'US';
-      await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);
-      const mappings = await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers, region);
+      let parsed: NormalizedDelivery;
+      let mappings: LeadSourceFieldMapping[];
+      // A delivery held while a custom webhook was being set up: its lead is
+      // created paused and flagged, never auto-contacted.
+      let capturedDuringSetup = false;
+
+      if (source.provider === CUSTOM_PROVIDER) {
+        // Custom webhook. A form provider's payload on it is parsed by that
+        // provider's adapter and keeps the same catalog and mapping top-up as
+        // the provider's own route; plain JSON is read through the owner's
+        // saved mapping, which IS the parser there (no heuristics). Either way
+        // a custom source only reaches the worker once mapped and switched on.
+        const rows = await this.prisma.leadSourceFieldMapping.findMany({ where: { leadSourceId: source.id, isActive: true } });
+        const custom = parseCustomPayload(event.payload, rows.map(toStoredMapping));
+        parsed = custom.delivery;
+        if (custom.provider) {
+          await this.syncFieldCatalog(
+            event.organization_id,
+            source.id,
+            parsed.answers.filter((a) => !a.key.startsWith(CUSTOM_KEY_PREFIX)),
+          );
+          mappings = (
+            await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers, region)
+          ).filter((m) => m.targetField !== CUSTOM_TARGET);
+        } else {
+          // Extra-field rows are consumed by the extractor; the engine sees only lead columns.
+          mappings = rows.filter((m) => m.targetField !== CUSTOM_TARGET);
+        }
+        const held = await this.prisma.ingestEvent.findUnique({ where: { id: event.id }, select: { outcomeReason: true } });
+        capturedDuringSetup = held?.outcomeReason === CAPTURED_DURING_SETUP;
+      } else {
+        parsed = adapterFor(event.provider).parse(event.payload);
+        await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);
+        mappings = await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers, region);
+      }
       const mapped = this.applyMappings(parsed.answers, mappings, region);
 
       const validated = validateCanonicalValues(mapped.values);
@@ -199,6 +235,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
 
       const reviewReasons = [...validated.warnings];
       if (phone && !phone.startsWith('+')) reviewReasons.push(PHONE_UNPARSED);
+      // Captured while a custom webhook was still being set up: the owner looks
+      // at it before anyone contacts it (see CustomWebhookService.activate).
+      if (capturedDuringSetup) reviewReasons.push(SETUP_REVIEW_REASON);
       const leadId = await this.createLead({
         orgId: event.organization_id,
         leadSourceId: source.id,
@@ -208,6 +247,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         phone,
         email,
         reviewReasons,
+        automationPaused: capturedDuringSetup,
         submittedAt: parsed.submittedAt ?? new Date(),
       });
 
@@ -357,6 +397,8 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     phone: string | null;
     email: string | null;
     reviewReasons: string[];
+    /** Start paused: the outreach pollers skip it until the owner resumes it. Default false. */
+    automationPaused?: boolean;
     submittedAt: Date;
   }): Promise<string> {
     const { values, phone, email } = input;
@@ -377,6 +419,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         emailValid,
         needsReview: input.reviewReasons.length > 0,
         reviewReasons: input.reviewReasons,
+        automationPaused: input.automationPaused ?? false,
         status: normalizedPhone || emailValid ? LeadStatus.new : LeadStatus.invalid,
         temperature: LeadTemperature.cold,
         score: 0,
@@ -388,6 +431,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         maxBudget: num(values.max_budget),
         bedrooms: int(values.bedrooms),
         motivation: text(values.motivation),
+        utmSource: text(values.utm_source),
+        utmMedium: text(values.utm_medium),
+        utmCampaign: text(values.utm_campaign),
         consentStatus: consentGranted ? ConsentStatus.granted : input.defaultConsent,
         consentSource: consentGranted ? 'webhook_form' : null,
         consentAt: consentGranted ? new Date() : null,

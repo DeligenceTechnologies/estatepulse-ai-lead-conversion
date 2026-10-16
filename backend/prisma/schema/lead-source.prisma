@@ -45,6 +45,11 @@ model LeadSource {
   syncFallbackAckAt DateTime? @map("sync_fallback_ack_at") @db.Timestamptz(6)
   syncFallbackAckBy String?   @map("sync_fallback_ack_by") @db.Uuid
 
+  /// Custom webhook sources only (provider CUSTOM): how an inbound delivery
+  /// proves itself and which header carries the sender's delivery id. The
+  /// secret itself stays in signingSecretEnc. NULL on every other source.
+  customConfig Json? @map("custom_config")
+
   lastEventAt   DateTime? @map("last_event_at") @db.Timestamptz(6)
   lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
   lastFailureAt DateTime? @map("last_failure_at") @db.Timestamptz(6)

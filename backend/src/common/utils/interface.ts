@@ -64,6 +64,7 @@ export interface IntegrationEnv {
   SHEETS_FULL_READ_MAX_AGE_MS: number;
   FILE_IMPORT_ENABLED: boolean;
   FILE_IMPORT_MAX_BYTES: number;
+  CUSTOM_WEBHOOK_ENABLED: boolean;
   HUBSPOT_ENABLED: boolean;
   HUBSPOT_CLIENT_ID?: string;
   HUBSPOT_CLIENT_SECRET?: string;

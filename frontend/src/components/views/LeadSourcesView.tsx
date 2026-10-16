@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Settings2,
   ShieldAlert,
+  SlidersHorizontal,
   ShieldCheck,
   Users,
   Webhook,
@@ -21,6 +22,8 @@ import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { ConnectionPill, SourceStatusPill } from '../leadsources/StatusPills';
 import { formatDateTime } from '../../lib/datetime';
+import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
+import { isCustomSource } from '../../utils/customWebhookApi';
 
 
 const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> = ({
@@ -229,6 +232,8 @@ export const LeadSourcesView: React.FC = () => {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  /** The custom webhook whose mapper is open. */
+  const [mapping, setMapping] = useState<string | null>(null);
 
   const fetchSources = useCallback(() => api.listLeadSources(), []);
 
@@ -447,6 +452,16 @@ export const LeadSourcesView: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                  {isCustomSource(selected) && (
+                    <button
+                      type="button"
+                      onClick={() => setMapping(selected.id)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      Mapping &amp; test
+                    </button>
+                  )}
                   <SourceStatusPill source={selected} />
                   <ConnectionPill source={selected} />
                 </div>
@@ -521,7 +536,13 @@ export const LeadSourcesView: React.FC = () => {
                     <Radio className="w-6 h-6 text-slate-600 mx-auto animate-pulse" />
                     <div className="text-xs text-slate-400">Listening for your first submission…</div>
                     <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                      {(selected.connectionMethod ?? '').toUpperCase() === 'API' ? (
+                      {isCustomSource(selected) ? (
+                        <>
+                          Send one payload to the webhook URL — it is on Integrations &amp; Webhooks, with a curl
+                          example. The first payload is held until you map its fields; nothing becomes a lead
+                          before that.
+                        </>
+                      ) : (selected.connectionMethod ?? '').toUpperCase() === 'API' ? (
                         <>
                           The webhook is already installed on your form — just submit it once.
                           Nothing arriving? Our public URL must be reachable from the internet; a{' '}
@@ -553,6 +574,8 @@ export const LeadSourcesView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {mapping && <CustomWebhookWizard sourceId={mapping} onClose={() => setMapping(null)} onChanged={refreshAll} />}
     </div>
   );
 };

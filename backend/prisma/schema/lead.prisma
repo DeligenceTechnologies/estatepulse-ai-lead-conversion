@@ -28,6 +28,9 @@ model Lead {
   location        String?  @db.VarChar(255)
   bedrooms        Int?
   motivation      String?
+  utmSource       String?  @map("utm_source") @db.VarChar(255)
+  utmMedium       String?  @map("utm_medium") @db.VarChar(255)
+  utmCampaign     String?  @map("utm_campaign") @db.VarChar(255)
   customFields    Json     @default("{}") @map("custom_fields")
 
   consentStatus    ConsentStatus @default(pending) @map("consent_status")

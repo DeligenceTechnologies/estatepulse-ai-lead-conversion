@@ -30,7 +30,10 @@ export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WE
 const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature']);
 const ALLOWED_HEADERS = new Set(['content-type', 'content-length', 'user-agent', 'x-forwarded-for', ...SIGNATURE_HEADERS]);
 /** A paused source keeps its deliveries queued, far in the future, until it is resumed. */
-const HELD_UNTIL = new Date('9999-12-31T00:00:00Z');
+export const HELD_UNTIL = new Date('9999-12-31T00:00:00Z');
+
+/** Custom webhook deliveries held for the owner's mapping (custom-webhook/constants.ts). Released by activation, not by a resume. */
+const AWAITING_MAPPING = 'awaiting_mapping';
 
 interface SignatureVerdict {
   state: SignatureState;
@@ -69,6 +72,11 @@ export class IngestService {
       return { kind: 'unknown_token' };
     }
     if (source.archivedAt) return { kind: 'archived' };
+    // A custom webhook's token is only good on its own route (CustomWebhookIngestController).
+    if (source.provider === LeadSourceProvider.CUSTOM) {
+      this.logger.warn(`Ingest rejected: custom webhook token ${token.slice(0, 12)}… on the ${route} route`);
+      return { kind: 'unknown_token' };
+    }
     // A Typeform token is bound to the Typeform route and no other token is accepted there.
     if ((route === LeadSourceProvider.TYPEFORM) !== (source.provider === LeadSourceProvider.TYPEFORM)) {
       this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
@@ -147,10 +155,18 @@ export class IngestService {
     return { kind: 'accepted', eventId };
   }
 
-  /** Re-queues the deliveries a paused source held, oldest first. */
+  /**
+   * Re-queues the deliveries a paused source held, oldest first. A custom
+   * webhook's deliveries still waiting for their mapping stay held.
+   */
   async releaseHeld(leadSourceId: string): Promise<number> {
     const { count } = await this.prisma.ingestEvent.updateMany({
-      where: { leadSourceId, queueState: QueueState.PENDING, availableAt: HELD_UNTIL },
+      where: {
+        leadSourceId,
+        queueState: QueueState.PENDING,
+        availableAt: HELD_UNTIL,
+        OR: [{ outcomeReason: null }, { outcomeReason: { not: AWAITING_MAPPING } }],
+      },
       data: { availableAt: new Date() },
     });
     return count;
