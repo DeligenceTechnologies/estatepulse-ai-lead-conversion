@@ -92,6 +92,7 @@ export type MappingOrigin = (typeof MappingOrigin)[keyof typeof MappingOrigin];
 /** Form providers we can drive through their management API. */
 export const Provider = {
   TALLY: 'TALLY',
+  TYPEFORM: 'TYPEFORM',
 } as const;
 export type Provider = (typeof Provider)[keyof typeof Provider];
 

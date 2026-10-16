@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Beaker, Plus, Trash2, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   blankTool,
   testTool,
@@ -146,9 +147,10 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
     setError(null);
     try {
       await onSave(built);
+      toast.success('Tool saved.');
       onClose();
     } catch (e: any) {
-      setError(e?.message || 'Could not save the tool.');
+      toast.error(e?.message || 'Could not save the tool.');
     } finally {
       setSaving(false);
     }

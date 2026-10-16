@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
+import { toast } from 'react-toastify';
 import { 
   BarChart3, 
   TrendingUp, 
   Clock, 
   DollarSign, 
   Flame, 
-  CheckCircle2, 
   Users, 
   Calculator,
   PieChart,
@@ -30,7 +30,6 @@ export const AnalyticsView: React.FC = () => {
   // Quick Reports states
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isQuickExporting, setIsQuickExporting] = useState(false);
-  const [exportedReportNotice, setExportedReportNotice] = useState<string | null>(null);
 
   const hotCount = leads.filter(l => l.temperature === 'hot').length;
   const warmCount = leads.filter(l => l.temperature === 'warm').length;
@@ -54,7 +53,6 @@ export const AnalyticsView: React.FC = () => {
   // Instant 1-click Quick Export
   const handleQuickExport = (template: 'full' | 'marketing' | 'roi' = 'full') => {
     setIsQuickExporting(true);
-    setExportedReportNotice(null);
 
     try {
       const monthStr = 'September 2026';
@@ -137,7 +135,7 @@ export const AnalyticsView: React.FC = () => {
       generateMonthlyPerformancePDF(reportData);
 
       const filename = `${brokerage.replace(/\s+/g, '_')}_Monthly_Performance_${monthStr.replace(/\s+/g, '_')}.pdf`;
-      setExportedReportNotice(filename);
+      toast.success(`Monthly Performance PDF exported as ${filename}`);
 
       if (addAuditLog) {
         addAuditLog(
@@ -150,6 +148,7 @@ export const AnalyticsView: React.FC = () => {
       }
     } catch (err) {
       console.error('Error exporting quick report:', err);
+      toast.error('Could not export the report.');
     } finally {
       setIsQuickExporting(false);
     }
@@ -208,27 +207,6 @@ export const AnalyticsView: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* Export Confirmation Toast / Banner */}
-      {exportedReportNotice && (
-        <div 
-          id="quick-report-success-banner"
-          className="p-3 bg-emerald-950/70 border border-emerald-500/40 rounded-xl text-xs text-emerald-200 flex items-center justify-between gap-3 shadow-lg animate-in fade-in"
-        >
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>
-              <strong>Monthly Performance PDF exported!</strong> Saved as <code className="font-mono text-emerald-300 font-semibold">{exportedReportNotice}</code>
-            </span>
-          </div>
-          <button
-            onClick={() => setExportedReportNotice(null)}
-            className="text-emerald-400 hover:text-white underline text-xs"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
 
       {/* Quick Reports Feature Card (PRD Executive Reporting) */}
       <div 
@@ -516,9 +494,6 @@ export const AnalyticsView: React.FC = () => {
         warmCount={warmCount}
         coldCount={coldCount}
         sources={sources}
-        onReportExported={(filename) => {
-          setExportedReportNotice(filename);
-        }}
       />
 
     </div>

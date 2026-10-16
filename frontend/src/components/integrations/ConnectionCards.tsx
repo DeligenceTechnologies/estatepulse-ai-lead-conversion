@@ -8,8 +8,8 @@ import {
   Plus,
   Settings2,
   Webhook,
-  X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   ApiError,
   api,
@@ -61,7 +61,7 @@ const CopyButton: React.FC<{ value: string; title: string }> = ({ value, title }
           setDone(true);
           setTimeout(() => setDone(false), 1500);
         } catch {
-          /* clipboard blocked — the URL is still on Lead Sources to select by hand */
+          toast.error('Could not copy — select the URL on Lead Sources instead.');
         }
       }}
       className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
@@ -170,7 +170,6 @@ export const ConnectionCards: React.FC = () => {
   const [sources, setSources] = useState<LeadSourceConfig[] | null>(null);
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
@@ -214,18 +213,18 @@ export const ConnectionCards: React.FC = () => {
     try {
       if (mode === 'resync') {
         const r = await providersApi.resync(source.id);
-        setNotice(
+        toast.success(
           `Re-sync: ${r.remoteState.toLowerCase()}${
             r.removedDuplicates ? `, removed ${r.removedDuplicates} duplicate webhook(s)` : ''
           }.`,
         );
       } else {
         await providersApi.reinstall(source.id);
-        setNotice('Webhook reinstalled with the same URL and secret — nothing else to change.');
+        toast.success('Webhook reinstalled with the same URL and secret — nothing else to change.');
       }
       await load();
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : String(e));
+      toast.error(e instanceof ApiError ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -240,16 +239,14 @@ export const ConnectionCards: React.FC = () => {
     setBusy(true);
     try {
       const r = await providersApi.disconnectForm(source.id);
-      setNotice(
-        r.warning ??
-          (norm(source.connectionMethod) === 'API'
-            ? 'Disconnected, and the webhook was removed from your form. Leads already received are untouched.'
-            : 'Disconnected. Remove the webhook in your form tool too, or it keeps firing at a dead URL.'),
-      );
+      if (r.warning) toast.warn(r.warning);
+      else if (norm(source.connectionMethod) === 'API')
+        toast.success('Disconnected, and the webhook was removed from your form. Leads already received are untouched.');
+      else toast.warn('Disconnected. Remove the webhook in your form tool too, or it keeps firing at a dead URL.');
       setConfirmDisconnect(null);
       await load();
     } catch (e) {
-      setNotice(
+      toast.error(
         e instanceof ApiError
           ? `${e.message} You can remove it in your form tool and disconnect again.`
           : String(e),
@@ -269,7 +266,10 @@ export const ConnectionCards: React.FC = () => {
     onDisconnect: disconnect,
   });
 
-  const tallySources = (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API');
+  // Sources from before providers existed carry no provider and were all Tally.
+  const apiSources = (code: string) =>
+    (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API' && norm(s.provider || 'TALLY') === code);
+  const accounts = (code: string) => connections.filter((c) => norm(c.provider) === code);
   // A custom webhook is manual too, but has its own card: it is mapped here, not pasted into a form tool.
   const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API' && !isCustomSource(s));
   const customSources = (sources ?? []).filter(isCustomSource);
@@ -292,6 +292,55 @@ export const ConnectionCards: React.FC = () => {
 
   const loading = sources === null;
 
+  /**
+   * A form provider we hold a key for, so we install and repair the webhook.
+   * Tally and Typeform are the same card with different words. A function, not
+   * a component: a component declared here would be a new type on every render
+   * and remount its rows each time.
+   */
+  const formProviderCard = (code: 'TALLY' | 'TYPEFORM', title: string, empty: string) => {
+    const mine = apiSources(code);
+    const conns = accounts(code);
+    return (
+      <IntegrationCard
+        key={code}
+        icon={
+          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+            <Link2 className="w-5 h-5" />
+          </div>
+        }
+        title={title}
+        blurb="Pick a form — we install the webhook for you"
+        connected={mine.length > 0 || conns.length > 0}
+        loading={loading}
+        accent="border-emerald-500/40"
+        action={{
+          // An account with no form yet gets its own label: "Connect Tally"
+          // next to a Connected badge reads as if the key never saved.
+          label: mine.length > 0 ? 'Manage / add form' : conns.length > 0 ? 'Add a form' : `Connect ${title}`,
+          icon: mine.length > 0 ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
+          onClick: () => setConnect(code),
+          className: 'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-md shadow-emerald-950',
+        }}
+      >
+        {loading ? (
+          <LoadingBody what={title} />
+        ) : mine.length > 0 ? (
+          mine.map((s) => <SourceRow {...rowProps(s)} />)
+        ) : conns.length > 0 ? (
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
+            <strong className="text-slate-200">{conns[0].label || conns[0].accountEmail || 'Account'}</strong> is
+            connected, but no form is selected yet. Add one and its submissions start creating leads.
+          </div>
+        ) : (
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
+            {empty}
+          </div>
+        )}
+      </IntegrationCard>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {error && (
@@ -301,20 +350,6 @@ export const ConnectionCards: React.FC = () => {
             <div className="font-semibold text-rose-100">Can't reach the backend</div>
             {error}
           </div>
-        </div>
-      )}
-
-      {notice && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-amber-200 leading-relaxed flex-1">{notice}</div>
-          <button
-            type="button"
-            onClick={() => setNotice(null)}
-            className="p-1 rounded-lg text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
         </div>
       )}
 
@@ -334,51 +369,17 @@ export const ConnectionCards: React.FC = () => {
         {/* Custom webhook — any app posts here; the owner maps the first payload's fields. Hidden when the server has it off. */}
         <CustomWebhookCard sources={customSources} loading={loading} onChanged={load} onOpenSource={openInLeadSources} />
 
-        {/* Tally — we hold the key, so we install and repair the webhook. */}
-        <IntegrationCard
-          icon={
-            <div className="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-              <Link2 className="w-5 h-5" />
-            </div>
-          }
-          title="Tally"
-          blurb="Pick a form — we install the webhook for you"
-          connected={tallySources.length > 0 || connections.length > 0}
-          loading={loading}
-          accent="border-emerald-500/40"
-          action={{
-            // An account with no form yet gets its own label: "Connect Tally"
-            // next to a Connected badge reads as if the key never saved.
-            label:
-              tallySources.length > 0
-                ? 'Manage / add form'
-                : connections.length > 0
-                  ? 'Add a form'
-                  : 'Connect Tally',
-            icon: tallySources.length > 0 ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
-            onClick: () => setConnect('TALLY'),
-            className: 'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-md shadow-emerald-950',
-          }}
-        >
-          {loading ? (
-            <LoadingBody what="Tally" />
-          ) : tallySources.length > 0 ? (
-            tallySources.map((s) => <SourceRow {...rowProps(s)} />)
-          ) : connections.length > 0 ? (
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              <strong className="text-slate-200">
-                {connections[0].label || connections[0].accountEmail || 'Account'}
-              </strong>{' '}
-              is connected, but no form is selected yet. Add one and its submissions start creating
-              leads.
-            </div>
-          ) : (
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              Paste your Tally API key once, pick the forms you want, and we install the webhook on
-              each of them — nothing to copy by hand.
-            </div>
-          )}
-        </IntegrationCard>
+        {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
+        {formProviderCard(
+          'TALLY',
+          'Tally',
+          'Paste your Tally API key once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+        )}
+        {formProviderCard(
+          'TYPEFORM',
+          'Typeform',
+          'Paste a Typeform personal access token once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+        )}
 
         {/* Webhook — we hold nothing, so the customer installs and repairs it. */}
         <IntegrationCard
@@ -405,7 +406,7 @@ export const ConnectionCards: React.FC = () => {
             webhookSources.map((s) => <SourceRow {...rowProps(s)} />)
           ) : (
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              Works with any form tool — Tally, a website form, Zapier. We hand you a URL and a
+              Works with any form tool — Tally, Typeform, a website form, Zapier. We hand you a URL and a
               signing secret and hold no credential for your account.
             </div>
           )}

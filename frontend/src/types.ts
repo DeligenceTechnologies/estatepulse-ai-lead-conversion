@@ -36,6 +36,7 @@ export type LeadSource =
   // A form we connected through the provider's own API, as opposed to a
   // webhook URL the customer pasted somewhere we cannot see.
   | 'tally'
+  | 'typeform'
   // Imported from a connected Google spreadsheet (provider GOOGLE_SHEETS).
   | 'google sheets'
   // Imported from an uploaded CSV / XLSX (provider FILE_UPLOAD).

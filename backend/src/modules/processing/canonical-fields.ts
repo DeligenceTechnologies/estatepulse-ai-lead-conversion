@@ -23,7 +23,7 @@ export interface CanonicalField {
   merge: MergePolicy;
   /** At least one of the `contactable` group must be present to create a lead. */
   requiredGroup?: 'contactable';
-  /** Tally field types that unambiguously imply this target. */
+  /** Provider field types (Tally upper-case, Typeform lower-case) that unambiguously imply this target. */
   providerTypes?: string[];
   /** Normalized label fragments that suggest this target. */
   synonyms?: string[];
@@ -66,7 +66,7 @@ const FIELDS = {
     dataType: 'email',
     merge: 'fill_if_empty',
     requiredGroup: 'contactable',
-    providerTypes: ['INPUT_EMAIL'],
+    providerTypes: ['INPUT_EMAIL', 'email'],
     synonyms: ['email', 'e mail', 'email address', 'best email', 'contact email'],
   },
   phone: {
@@ -79,7 +79,7 @@ const FIELDS = {
     // repoint outreach at a different number.
     merge: 'fill_if_empty',
     requiredGroup: 'contactable',
-    providerTypes: ['INPUT_PHONE_NUMBER'],
+    providerTypes: ['INPUT_PHONE_NUMBER', 'phone_number'],
     synonyms: [
       'phone', 'phone number', 'mobile', 'cell', 'cell phone', 'best number',
       'contact number', 'number we can reach you on', 'whatsapp', 'how can we reach you',

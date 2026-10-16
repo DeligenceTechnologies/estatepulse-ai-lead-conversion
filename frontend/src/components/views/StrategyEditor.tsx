@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertTriangle, MessageSquare, Phone, Save, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { Strategy, StrategyStep, getStrategy, saveStrategy, emptyStep } from '../../utils/strategiesApi';
 
 // Single editable strategy: the voice + SMS sequence for new leads.
@@ -9,7 +10,6 @@ export const StrategyEditor: React.FC = () => {
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     getStrategy()
@@ -47,14 +47,12 @@ export const StrategyEditor: React.FC = () => {
     }
     setSaving(true);
     setError(null);
-    setSaved(false);
     try {
       const s = await saveStrategy({ steps });
       setSteps(s.steps || []);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      toast.success('Strategy saved.');
     } catch (e: any) {
-      setError(e.message);
+      toast.error(e.message);
     } finally {
       setSaving(false);
     }
@@ -147,7 +145,6 @@ export const StrategyEditor: React.FC = () => {
           <Phone className="w-3.5 h-3.5" /> Add Call
         </button>
         <div className="ml-auto flex items-center gap-2">
-          {saved && <span className="text-xs text-emerald-400 font-semibold">Saved ✓</span>}
           <button
             type="button"
             onClick={save}

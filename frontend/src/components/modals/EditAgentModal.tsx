@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, Loader2, Save, UserCog, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { memberName, updateAgentProfile, type AgentProfileUpdate, type OrganizationMember } from '../../utils/agentsApi';
 
@@ -110,6 +111,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
     setError(null);
     try {
       await updateAgentProfile(member.id, pending);
+      toast.success(`${memberName(member)} updated.`);
       onSaved();
       // Closing only here is the point: a failed save leaves the form open with
       // everything the owner typed still in it.
@@ -117,7 +119,7 @@ export const EditAgentModal: React.FC<EditAgentModalProps> = ({ member, onClose,
     } catch (err) {
       // The server's own message is preferred where it has one — "An account
       // with that email already exists" beats a generic form error.
-      setError(messageFor(err));
+      toast.error(messageFor(err));
     } finally {
       setSaving(false);
     }

@@ -5,7 +5,7 @@ import { DeliveryOutcome, LeadStatus, MappingOrigin, MappingStatus, QueueState }
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
-import { TallyAdapter } from '../ingest/adapters/tally.adapter';
+import { ingestAdapterFor } from '../ingest/adapters/registry';
 import type { NormalizedAnswer, NormalizedDelivery } from '../ingest/adapters/types';
 import { CUSTOM_TARGET } from '../google-sheets/sheet-rows';
 import { CAPTURED_DURING_SETUP, CUSTOM_PROVIDER, SETUP_REVIEW_REASON } from '../custom-webhook/constants';
@@ -20,6 +20,8 @@ interface ClaimedEvent {
   id: string;
   organization_id: string | null;
   lead_source_id: string | null;
+  /** Which adapter parses `payload`. */
+  provider: string | null;
   payload: unknown;
   attempts: number;
 }
@@ -52,7 +54,6 @@ interface MappedResult {
 @Injectable()
 export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProcessingWorker.name);
-  private readonly adapter = new TallyAdapter();
   private readonly instanceId = randomUUID();
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -177,7 +178,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           SET queue_state = 'PROCESSING', locked_by = $2, locked_at = now(), attempts = e.attempts + 1
          FROM claimed
         WHERE e.id = claimed.id
-       RETURNING e.id, e.organization_id, e.lead_source_id, e.payload, e.attempts`,
+       RETURNING e.id, e.organization_id, e.lead_source_id, e.provider, e.payload, e.attempts`,
       batchSize,
       this.instanceId,
     );
@@ -258,7 +259,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         const held = await this.prisma.webhook_events.findUnique({ where: { id: event.id }, select: { outcome_reason: true } });
         capturedDuringSetup = held?.outcome_reason === CAPTURED_DURING_SETUP;
       } else {
-        parsed = this.adapter.parse(event.payload);
+        parsed = ingestAdapterFor(event.provider).parse(event.payload);
         await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);
         mappings = await this.ensureMappings(event.organization_id, source.id, parsed.answers, region);
       }

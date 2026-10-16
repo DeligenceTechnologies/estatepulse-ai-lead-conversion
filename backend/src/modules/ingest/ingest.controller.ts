@@ -1,5 +1,6 @@
 import { Controller, Headers, Ip, Logger, Param, Post, RawBodyRequest, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { Provider } from '../../common/domain';
 import { ProcessingWorker } from '../processing/worker.service';
 import { IngestService } from './ingest.service';
 
@@ -9,8 +10,12 @@ import { IngestService } from './ingest.service';
  *
  * Status codes here are load-bearing. Tally retries non-2xx at
  * 5min → 30min → 1hr → 6hr → 1day and then emails the form owner that our
- * webhook is failing, so returning the wrong code for an error WE caused
- * generates duplicate deliveries and an upstream reputation hit.
+ * webhook is failing (Typeform retries on its own backoff for about a day), so
+ * returning the wrong code for an error WE caused generates duplicate
+ * deliveries and an upstream reputation hit.
+ *
+ * One route per provider, because each signs with its own header and sends its
+ * own payload shape. Everything after the header read is shared.
  */
 @Controller('ingest/v1')
 export class IngestController {
@@ -22,12 +27,34 @@ export class IngestController {
   ) {}
 
   @Post('tally/:token')
-  async tally(
+  tally(
     @Param('token') token: string,
     @Req() req: RawBodyRequest<Request>,
     @Res() res: Response,
     @Headers('tally-signature') signature: string | undefined,
     @Ip() ip: string,
+  ): Promise<void> {
+    return this.handle(Provider.TALLY, token, req, res, signature, ip);
+  }
+
+  @Post('typeform/:token')
+  typeform(
+    @Param('token') token: string,
+    @Req() req: RawBodyRequest<Request>,
+    @Res() res: Response,
+    @Headers('typeform-signature') signature: string | undefined,
+    @Ip() ip: string,
+  ): Promise<void> {
+    return this.handle(Provider.TYPEFORM, token, req, res, signature, ip);
+  }
+
+  private async handle(
+    provider: Provider,
+    token: string,
+    req: RawBodyRequest<Request>,
+    res: Response,
+    signature: string | undefined,
+    ip: string,
   ): Promise<void> {
     const startedAt = Date.now();
 
@@ -41,7 +68,8 @@ export class IngestController {
 
     let result;
     try {
-      result = await this.ingest.ingestTally({
+      result = await this.ingest.ingest({
+        provider,
         token,
         rawBody,
         headers: req.headers as Record<string, unknown>,

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FileSpreadsheet, FileUp, History, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { importHistory, removeImport, type ImportBatch } from '../../utils/fileImportApi';
 import { ISSUE_TEXT } from '../../utils/sheetMapping';
 import { SheetError, SheetModal, errorText } from '../sheets/SheetModal';
@@ -52,7 +53,6 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,10 +69,9 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
 
   const remove = async (b: ImportBatch) => {
     setBusy(b.id);
-    setError(null);
     try {
       const r = await removeImport(b.id);
-      setNotice(
+      toast.success(
         `Removed ${b.name}: ${r.rejected} lead${r.rejected === 1 ? '' : 's'} waiting for review rejected` +
           (r.approvedKept ? `, ${r.approvedKept} approved lead${r.approvedKept === 1 ? '' : 's'} kept` : '') +
           '.',
@@ -81,7 +80,7 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
       await load();
       onChanged();
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -96,9 +95,6 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
       onClose={onClose}
     >
       {error && <SheetError message={error} />}
-      {notice && (
-        <div className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">{notice}</div>
-      )}
       {!imports && !error && (
         <div className="flex items-center gap-2 text-xs text-slate-400">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
