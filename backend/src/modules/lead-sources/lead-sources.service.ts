@@ -6,6 +6,9 @@ import { IngestStatus, MappingStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { generateIngestToken, generateSigningSecret, secretPreview } from '../../common/tokens';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER } from '../custom-webhook/constants';
+import { detectAdapter } from '../custom-webhook/detect';
+import { flatten } from '../custom-webhook/flatten';
 import { ingestAdapterFor } from '../ingest/adapters/registry';
 
 export interface CreateLeadSourceInput {
@@ -312,7 +315,28 @@ export class LeadSourcesService {
         }
       }
 
-      if (r.payload) {
+      if (r.payload && r.provider === CUSTOM_PROVIDER) {
+        // A custom delivery: a form provider's questions when the payload has
+        // a known shape, else every leaf of the payload as a path — either way
+        // joined to what the owner's mapping did with it. A field mapped to an
+        // extra field was traced under a prefixed key.
+        const known = detectAdapter(r.payload)?.parse(r.payload) ?? null;
+        if (known) formName = known.providerFormName;
+        const fields = known
+          ? known.answers.map((a) => ({ key: a.key, label: a.label, type: a.type, value: a.scalarText }))
+          : flatten(r.payload).leaves.map((leaf) => ({ key: leaf.path, label: leaf.path, type: leaf.type.toUpperCase(), value: leaf.value }));
+        answers = fields.map((f) => {
+          const entries = trace.get(f.key) ?? trace.get(`${CUSTOM_KEY_PREFIX}${f.key}`) ?? [];
+          return {
+            label: f.label,
+            type: f.type,
+            value: f.value,
+            targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
+            mappingOutcome: entries[0]?.outcome ?? null,
+            warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
+          };
+        });
+      } else if (r.payload) {
         try {
           const parsed = ingestAdapterFor(r.provider).parse(r.payload);
           formName = parsed.providerFormName;

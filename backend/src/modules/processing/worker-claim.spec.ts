@@ -19,7 +19,7 @@ function worker() {
   return { w, prisma };
 }
 
-describe('ProcessingWorker claims exactly the form providers it parses', () => {
+describe('ProcessingWorker claims exactly the form providers it parses, plus custom webhooks', () => {
   it('knows Tally and Typeform, and not a CRM', () => {
     expect([...INGEST_PROVIDERS].sort()).toEqual(['TALLY', 'TYPEFORM']);
     expect(INGEST_PROVIDERS).not.toContain('HUBSPOT');
@@ -30,7 +30,9 @@ describe('ProcessingWorker claims exactly the form providers it parses', () => {
     await (w as any).claim();
     const [sql, , , providers] = prisma.$queryRawUnsafe.mock.calls[0];
     expect(sql).toMatch(/provider = ANY\(\$3::text\[\]\)/);
-    expect(providers).toEqual(INGEST_PROVIDERS);
+    // Every form provider's deliveries, plus custom webhooks' (parsed through the owner's mapping); never HubSpot's.
+    expect(providers).toEqual([...INGEST_PROVIDERS, 'CUSTOM']);
+    expect(providers).not.toContain('HUBSPOT');
   });
 
   it('requeues stuck deliveries of those providers only', async () => {
@@ -38,6 +40,8 @@ describe('ProcessingWorker claims exactly the form providers it parses', () => {
     await (w as any).requeueStuck();
     const [sql, , providers] = prisma.$executeRawUnsafe.mock.calls[0];
     expect(sql).toMatch(/provider = ANY\(\$2::text\[\]\)/);
-    expect(providers).toEqual(INGEST_PROVIDERS);
+    // Every form provider's deliveries, plus custom webhooks' (parsed through the owner's mapping); never HubSpot's.
+    expect(providers).toEqual([...INGEST_PROVIDERS, 'CUSTOM']);
+    expect(providers).not.toContain('HUBSPOT');
   });
 });

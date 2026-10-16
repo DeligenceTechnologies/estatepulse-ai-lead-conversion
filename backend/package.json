@@ -28,6 +28,8 @@
     "test:in-call-booking": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/calendar/in-call-booking/in-call-booking.test.js",
     "test:sheet-import": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/google-sheets/sheet-import.test.js",
     "test:file-import": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/file-import/file-import.test.js",
+    "test:tally-ingest": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/ingest/tally-ingest.test.js",
+    "test:custom-webhook": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/custom-webhook/custom-webhook.test.js",
     "test:hubspot": "tsc -p tsconfig.test.json && node --env-file=.env --require ./dist-test/test-setup.js --test dist-test/modules/crm/hubspot-sync.test.js"
   },
   "prisma": {

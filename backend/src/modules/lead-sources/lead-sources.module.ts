@@ -11,5 +11,7 @@ import { LeadSourcesService } from './lead-sources.service';
   imports: [PrismaModule, ProvidersModule, IntegrationsModule, AuthModule],
   controllers: [LeadSourcesController],
   providers: [LeadSourcesService, ConnectService],
+  // Custom webhooks build the same source DTO and mint codes the same way.
+  exports: [LeadSourcesService],
 })
 export class LeadSourcesModule {}
