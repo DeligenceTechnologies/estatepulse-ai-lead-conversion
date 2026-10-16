@@ -215,7 +215,7 @@ export const sheetRuns = (id: string): Promise<SheetRun[]> =>
 
 // --- review ---------------------------------------------------------------------------
 
-export type ImportKind = 'google_sheets' | 'file_upload';
+export type ImportKind = 'google_sheets' | 'file_upload' | 'hubspot';
 
 export interface ReviewItem {
   rowId: string;
@@ -271,7 +271,7 @@ export interface ChangeItem {
 
 export const reviewQueue = (q: {
   state?: 'pending' | 'rejected';
-  /** Sheets only, uploaded files only, or (default) both. */
+  /** One kind of import, or (default) all of them. */
   source?: 'all' | ImportKind;
   sourceId?: string;
   cursor?: string | null;

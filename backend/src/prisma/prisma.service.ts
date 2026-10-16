@@ -33,6 +33,8 @@ const TENANT_SCOPED = new Set<string>([
   'domain_events',
   'organization_members',
   'sheet_import_rows',
+  'crm_sync_runs',
+  'oauth_states',
 ]);
 
 /** Operations that read or write rows and therefore need a tenant predicate. */

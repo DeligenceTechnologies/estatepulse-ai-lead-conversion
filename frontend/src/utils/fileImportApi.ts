@@ -1,4 +1,5 @@
 import { apiFetch, apiUpload } from '../lib/api';
+import { crmEnabled } from './crmApi';
 import { googleSheetsEnabled, isSheetsDisabled, type ColumnMapping, type ImportKind, type PreviewLead } from './googleSheetsApi';
 
 /**
@@ -85,9 +86,9 @@ export const fileImportEnabled = (): Promise<boolean> =>
     (e) => !isSheetsDisabled(e),
   );
 
-/** Import Review is open while either import is switched on. */
+/** Import Review is open while any import is switched on — sheets, files, or a CRM. */
 export const importReviewEnabled = (): Promise<boolean> =>
-  Promise.all([googleSheetsEnabled(), fileImportEnabled()]).then(([sheets, files]) => sheets || files);
+  Promise.all([googleSheetsEnabled(), fileImportEnabled(), crmEnabled('hubspot')]).then(([sheets, files, crm]) => sheets || files || crm);
 
 function form(file: File, fields: Record<string, string | undefined>): FormData {
   const fd = new FormData();

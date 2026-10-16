@@ -649,10 +649,16 @@ test('switches: the upload has its own (FILE_IMPORT_ENABLED); Import Review is o
       return e.getResponse().error.code;
     }
   };
-  // A ConfigService without validated values falls back to process.env, where this suite switched both on.
-  const saved = { sheets: process.env['GOOGLE_SHEETS_ENABLED'], files: process.env['FILE_IMPORT_ENABLED'] };
+  // A ConfigService without validated values falls back to process.env, where this suite switched both on
+  // (and .env may switch HubSpot on, which also opens Import Review).
+  const saved = {
+    sheets: process.env['GOOGLE_SHEETS_ENABLED'],
+    files: process.env['FILE_IMPORT_ENABLED'],
+    hubspot: process.env['HUBSPOT_ENABLED'],
+  };
   delete process.env['GOOGLE_SHEETS_ENABLED'];
   delete process.env['FILE_IMPORT_ENABLED'];
+  delete process.env['HUBSPOT_ENABLED'];
   try {
     assert.equal(
       code(() => new FileImportEnabledGuard(new ConfigService({ FILE_IMPORT_ENABLED: '1' })).canActivate()),
@@ -675,6 +681,10 @@ test('switches: the upload has its own (FILE_IMPORT_ENABLED); Import Review is o
       null,
     );
     assert.equal(
+      code(() => new ImportReviewEnabledGuard(new ConfigService({ HUBSPOT_ENABLED: '1' })).canActivate()),
+      null,
+    );
+    assert.equal(
       code(() => new ImportReviewEnabledGuard(new ConfigService({})).canActivate()),
       'IMPORT_REVIEW_DISABLED',
     );
@@ -684,6 +694,7 @@ test('switches: the upload has its own (FILE_IMPORT_ENABLED); Import Review is o
   } finally {
     if (saved.sheets !== undefined) process.env['GOOGLE_SHEETS_ENABLED'] = saved.sheets;
     if (saved.files !== undefined) process.env['FILE_IMPORT_ENABLED'] = saved.files;
+    if (saved.hubspot !== undefined) process.env['HUBSPOT_ENABLED'] = saved.hubspot;
   }
 });
 

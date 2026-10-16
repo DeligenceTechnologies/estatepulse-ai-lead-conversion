@@ -5,7 +5,7 @@ import { DeliveryOutcome, LeadStatus, MappingOrigin, MappingStatus, QueueState }
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
-import { ingestAdapterFor } from '../ingest/adapters/registry';
+import { INGEST_PROVIDERS, ingestAdapterFor } from '../ingest/adapters/registry';
 import type { NormalizedAnswer } from '../ingest/adapters/types';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
@@ -162,10 +162,13 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
    */
   private async claim(): Promise<ClaimedEvent[]> {
     const batchSize = Number(this.config.get('WORKER_BATCH_SIZE') ?? 10);
+    // Form providers only (INGEST_PROVIDERS): webhook_events is also the durable
+    // queue for CRM webhooks (provider 'HUBSPOT'), which CrmSyncService drains
+    // under its own lease and this worker has no parser for.
     return this.prisma.$queryRawUnsafe<ClaimedEvent[]>(
       `WITH claimed AS (
          SELECT id FROM webhook_events
-          WHERE queue_state = 'PENDING' AND available_at <= now()
+          WHERE queue_state = 'PENDING' AND provider = ANY($3::text[]) AND available_at <= now()
           ORDER BY available_at, id
           FOR UPDATE SKIP LOCKED
           LIMIT $1
@@ -177,6 +180,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
        RETURNING e.id, e.organization_id, e.lead_source_id, e.provider, e.payload, e.attempts`,
       batchSize,
       this.instanceId,
+      INGEST_PROVIDERS,
     );
   }
 
@@ -186,9 +190,10 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$executeRawUnsafe(
       `UPDATE webhook_events
           SET queue_state = 'PENDING', locked_by = NULL, locked_at = NULL
-        WHERE queue_state = 'PROCESSING'
+        WHERE queue_state = 'PROCESSING' AND provider = ANY($2::text[])
           AND locked_at < now() - ($1 || ' milliseconds')::interval`,
       String(ms),
+      INGEST_PROVIDERS,
     );
   }
 

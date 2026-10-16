@@ -89,7 +89,7 @@ export const reviewQuerySchema = z.object({
   /** Waiting for a decision, or rejected (kept here, out of the lead lists). */
   state: z.enum(['pending', 'rejected']).default('pending'),
   /** Where the rows came from; a sheet and an uploaded file share this queue. */
-  source: z.enum(['all', 'google_sheets', 'file_upload']).default('all'),
+  source: z.enum(['all', 'google_sheets', 'file_upload', 'hubspot']).default('all'),
   /** One sheet, or one uploaded file. */
   sourceId: z.string().uuid().optional(),
   cursor: z.string().max(200).optional(),

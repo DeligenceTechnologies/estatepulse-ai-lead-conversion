@@ -1,0 +1,17 @@
+-- CRM sync: the last CRM values accepted for each tracked record.
+--
+-- A field-level three-way merge needs a base. When a CRM record changes, each
+-- field the CRM owns is compared three ways: the CRM's new value, the lead's
+-- current value, and this — what the CRM said last time. Changed only in the
+-- CRM: applied. Changed on both sides: held for the owner in Import Review. A
+-- content hash cannot answer that per field, and cannot tell "the CRM left this
+-- empty" from "someone here edited it", which is why the CRM can never clear a
+-- value (see crm-records.ts, crmMerge).
+--
+-- Additive only: one nullable column. NULL for sheet and file rows, which
+-- never read it, and for a CRM record linked to an existing lead whose
+-- differences are still waiting for the owner.
+--
+-- Rollback: ALTER TABLE sheet_import_rows DROP COLUMN synced_values;
+--           DELETE FROM _prisma_migrations WHERE migration_name = '20261015000002_crm_synced_values';
+ALTER TABLE sheet_import_rows ADD COLUMN synced_values JSONB;
