@@ -426,6 +426,10 @@ model lead_sources {
   sync_row_key_field          String?                      @db.VarChar(255)
   sync_fallback_ack_at        DateTime?                    @db.Timestamptz(6)
   sync_fallback_ack_by        String?                      @db.Uuid
+  /// Custom webhook sources only (provider 'CUSTOM'): how an inbound delivery
+  /// proves itself and which header carries the sender's delivery id. The secret
+  /// itself stays in signing_secret_enc. NULL on every other source.
+  custom_config               Json?
   lead_source_field_mappings  lead_source_field_mappings[]
   lead_source_fields          lead_source_fields[]
   organizations               organizations                @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)

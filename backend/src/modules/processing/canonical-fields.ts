@@ -18,7 +18,7 @@ export interface CanonicalField {
   /** Column on `leads`. */
   column: string;
   label: string;
-  group: 'Contact' | 'Property criteria' | 'Qualification' | 'Compliance';
+  group: 'Contact' | 'Property criteria' | 'Qualification' | 'Compliance' | 'Attribution';
   dataType: 'string' | 'int' | 'decimal' | 'bool' | 'phone' | 'email' | 'enum';
   merge: MergePolicy;
   /** At least one of the `contactable` group must be present to create a lead. */
@@ -155,6 +155,12 @@ const FIELDS = {
     merge: 'latest_wins',
     synonyms: ['motivation', 'why', 'tell us more', 'anything else', 'comments', 'message'],
   },
+  // Attribution, for sources that carry campaign parameters (a custom webhook,
+  // say). No synonyms or provider types on purpose: the heuristics never guess
+  // these, only an owner maps them.
+  utm_source: { column: 'utm_source', label: 'UTM source', group: 'Attribution', dataType: 'string', merge: 'fill_if_empty' },
+  utm_medium: { column: 'utm_medium', label: 'UTM medium', group: 'Attribution', dataType: 'string', merge: 'fill_if_empty' },
+  utm_campaign: { column: 'utm_campaign', label: 'UTM campaign', group: 'Attribution', dataType: 'string', merge: 'fill_if_empty' },
   consent_status: {
     column: 'consent_status',
     label: 'SMS/call consent',

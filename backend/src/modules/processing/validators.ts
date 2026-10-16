@@ -56,6 +56,9 @@ const MAX_LEN: Partial<Record<CanonicalKey, number>> = {
   timeline: 100,
   buying_intent: 100,
   financing_status: 100,
+  utm_source: 255,
+  utm_medium: 255,
+  utm_campaign: 255,
   // `motivation` is TEXT — no clamp.
 };
 

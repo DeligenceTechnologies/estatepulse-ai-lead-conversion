@@ -7,6 +7,8 @@ import { newId } from '../../common/ids';
 import { generateIngestToken, generateSigningSecret, secretPreview } from '../../common/tokens';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
 import { TallyAdapter } from '../ingest/adapters/tally.adapter';
+import { CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER } from '../custom-webhook/constants';
+import { flatten } from '../custom-webhook/flatten';
 
 export interface CreateLeadSourceInput {
   name: string;
@@ -46,9 +48,14 @@ export class LeadSourcesService {
     );
   }
 
-  /** Public so the connect flow builds the same URL rather than its own. */
-  ingestUrl(token: string): string {
-    return `${this.config.get<string>('PUBLIC_API_BASE_URL')}/ingest/v1/tally/${token}`;
+  /**
+   * Public so the connect flow builds the same URL rather than its own. One
+   * route per kind of source: a custom webhook posts to its own path, every
+   * form source (the column default is TALLY) to the Tally one.
+   */
+  ingestUrl(token: string, provider: string | null = null): string {
+    const route = provider === CUSTOM_PROVIDER ? 'custom' : 'tally';
+    return `${this.config.get<string>('PUBLIC_API_BASE_URL')}/ingest/v1/${route}/${token}`;
   }
 
   /**
@@ -272,6 +279,7 @@ export class LeadSourcesService {
       // roughly doubling what crosses the wire for nothing.
       select: {
         id: true,
+        provider: true,
         received_at: true,
         external_event_id: true,
         signature_state: true,
@@ -308,7 +316,22 @@ export class LeadSourcesService {
         }
       }
 
-      if (r.payload) {
+      if (r.payload && r.provider === CUSTOM_PROVIDER) {
+        // A custom delivery has no questions, only paths: every leaf of the
+        // payload, joined to what the owner's mapping did with it. A path mapped
+        // to an extra field was traced under a prefixed key.
+        answers = flatten(r.payload).leaves.map((leaf) => {
+          const entries = trace.get(leaf.path) ?? trace.get(`${CUSTOM_KEY_PREFIX}${leaf.path}`) ?? [];
+          return {
+            label: leaf.path,
+            type: leaf.type.toUpperCase(),
+            value: leaf.value,
+            targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
+            mappingOutcome: entries[0]?.outcome ?? null,
+            warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
+          };
+        });
+      } else if (r.payload) {
         try {
           const parsed = this.adapter.parse(r.payload);
           answers = parsed.answers.map((a) => {
@@ -411,7 +434,7 @@ export class LeadSourcesService {
       externalFormName: row.external_form_name,
       lastEventAt: row.last_event_at,
       createdAt: row.created_at,
-      webhookUrl: token ? this.ingestUrl(token) : null,
+      webhookUrl: token ? this.ingestUrl(token, row.provider ?? null) : null,
       // Only meaningful for an API-connected source; null on a manual one, which
       // is exactly what the UI needs to tell them apart.
       provider: row.provider ?? null,

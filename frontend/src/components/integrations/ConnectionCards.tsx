@@ -18,8 +18,10 @@ import {
   type ProviderConnection,
 } from '../../api/client';
 import { useApp } from '../../context/AppContext';
+import { isCustomSource } from '../../utils/customWebhookApi';
 import { ConnectModal, type ConnectKind } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
+import { CustomWebhookCard } from './CustomWebhookCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
@@ -268,7 +270,9 @@ export const ConnectionCards: React.FC = () => {
   });
 
   const tallySources = (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API');
-  const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API');
+  // A custom webhook is manual too, but has its own card: it is mapped here, not pasted into a form tool.
+  const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API' && !isCustomSource(s));
+  const customSources = (sources ?? []).filter(isCustomSource);
 
   /**
    * The body of a card whose data has not arrived. Named after the card it sits
@@ -326,6 +330,9 @@ export const ConnectionCards: React.FC = () => {
 
         {/* Google Sheets — self-loading, like Telnyx: its account is not a lead source. */}
         <GoogleSheetsCard />
+
+        {/* Custom webhook — any app posts here; the owner maps the first payload's fields. Hidden when the server has it off. */}
+        <CustomWebhookCard sources={customSources} loading={loading} onChanged={load} onOpenSource={openInLeadSources} />
 
         {/* Tally — we hold the key, so we install and repair the webhook. */}
         <IntegrationCard

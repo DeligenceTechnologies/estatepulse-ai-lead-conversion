@@ -7,6 +7,7 @@ import { EventsModule } from './modules/events/events.module';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { CustomWebhookModule } from './modules/custom-webhook/custom-webhook.module';
 import { FollowupModule } from './modules/followup/followup.module';
 import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
@@ -181,6 +182,10 @@ export const envSchema = z.object({
   // Largest CSV / XLSX an owner may upload to import leads.
   FILE_IMPORT_MAX_BYTES: z.coerce.number().default(5 * 1024 * 1024),
   SHEETS_FULL_READ_MAX_AGE_MS: z.coerce.number().default(21_600_000),
+  // Custom webhook sources, off unless CUSTOM_WEBHOOK_ENABLED=1: the public
+  // ingest route and the management routes answer 404 and the card is hidden.
+  // Switching it off changes no data.
+  CUSTOM_WEBHOOK_ENABLED: z.string().optional(),
 });
 
 @Module({
@@ -228,6 +233,7 @@ export const envSchema = z.object({
     IntegrationsModule,
     GoogleSheetsModule,
     FileImportModule,
+    CustomWebhookModule,
   ],
   controllers: [HealthController],
 })
