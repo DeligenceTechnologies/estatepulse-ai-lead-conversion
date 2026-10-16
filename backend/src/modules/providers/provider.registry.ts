@@ -6,12 +6,11 @@ export const FORM_PROVIDER_ADAPTERS = Symbol('FORM_PROVIDER_ADAPTERS');
 /**
  * Resolves a provider code to its adapter.
  *
- * The point of this indirection is that adding Typeform is a new file plus one
+ * The point of this indirection is that adding a provider is a new file plus one
  * line in providers.module.ts, with no `if (provider === 'tally')` anywhere in
- * the services. Be honest about the remaining cost though: a second provider
- * also needs its own payload-parsing IngestAdapter, its own ingest route, and a
- * signature verifier — `evaluateSignature` currently hardcodes Tally's. That
- * last one is on the ingest hot path and is deliberately not generalised yet.
+ * the services. Be honest about the remaining cost though: a provider also
+ * needs its own payload-parsing IngestAdapter (ingest/adapters/registry.ts),
+ * its own ingest route, and a signature verifier (IngestService.VERIFIERS).
  */
 @Injectable()
 export class ProviderRegistry {

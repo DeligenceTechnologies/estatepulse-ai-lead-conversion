@@ -25,6 +25,8 @@
 
 import type { DescribedField } from './tally/tally-form-schema';
 
+export type { DescribedField };
+
 export interface ProviderCredential {
   /** Plaintext, held only for the duration of one call. Never log or persist. */
   readonly apiKey: string;

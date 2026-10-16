@@ -264,7 +264,10 @@ export const ConnectionCards: React.FC = () => {
     onDisconnect: disconnect,
   });
 
-  const tallySources = (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API');
+  // Sources from before providers existed carry no provider and were all Tally.
+  const apiSources = (code: string) =>
+    (sources ?? []).filter((s) => norm(s.connectionMethod) === 'API' && norm(s.provider || 'TALLY') === code);
+  const accounts = (code: string) => connections.filter((c) => norm(c.provider) === code);
   const webhookSources = (sources ?? []).filter((s) => norm(s.connectionMethod) !== 'API');
 
   /**
@@ -284,6 +287,55 @@ export const ConnectionCards: React.FC = () => {
   );
 
   const loading = sources === null;
+
+  /**
+   * A form provider we hold a key for, so we install and repair the webhook.
+   * Tally and Typeform are the same card with different words. A function, not
+   * a component: a component declared here would be a new type on every render
+   * and remount its rows each time.
+   */
+  const formProviderCard = (code: 'TALLY' | 'TYPEFORM', title: string, empty: string) => {
+    const mine = apiSources(code);
+    const conns = accounts(code);
+    return (
+      <IntegrationCard
+        key={code}
+        icon={
+          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+            <Link2 className="w-5 h-5" />
+          </div>
+        }
+        title={title}
+        blurb="Pick a form — we install the webhook for you"
+        connected={mine.length > 0 || conns.length > 0}
+        loading={loading}
+        accent="border-emerald-500/40"
+        action={{
+          // An account with no form yet gets its own label: "Connect Tally"
+          // next to a Connected badge reads as if the key never saved.
+          label: mine.length > 0 ? 'Manage / add form' : conns.length > 0 ? 'Add a form' : `Connect ${title}`,
+          icon: mine.length > 0 ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
+          onClick: () => setConnect(code),
+          className: 'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-md shadow-emerald-950',
+        }}
+      >
+        {loading ? (
+          <LoadingBody what={title} />
+        ) : mine.length > 0 ? (
+          mine.map((s) => <SourceRow {...rowProps(s)} />)
+        ) : conns.length > 0 ? (
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
+            <strong className="text-slate-200">{conns[0].label || conns[0].accountEmail || 'Account'}</strong> is
+            connected, but no form is selected yet. Add one and its submissions start creating leads.
+          </div>
+        ) : (
+          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
+            {empty}
+          </div>
+        )}
+      </IntegrationCard>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -310,51 +362,17 @@ export const ConnectionCards: React.FC = () => {
         {/* Google Sheets — self-loading, like Telnyx: its account is not a lead source. */}
         <GoogleSheetsCard />
 
-        {/* Tally — we hold the key, so we install and repair the webhook. */}
-        <IntegrationCard
-          icon={
-            <div className="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-              <Link2 className="w-5 h-5" />
-            </div>
-          }
-          title="Tally"
-          blurb="Pick a form — we install the webhook for you"
-          connected={tallySources.length > 0 || connections.length > 0}
-          loading={loading}
-          accent="border-emerald-500/40"
-          action={{
-            // An account with no form yet gets its own label: "Connect Tally"
-            // next to a Connected badge reads as if the key never saved.
-            label:
-              tallySources.length > 0
-                ? 'Manage / add form'
-                : connections.length > 0
-                  ? 'Add a form'
-                  : 'Connect Tally',
-            icon: tallySources.length > 0 ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
-            onClick: () => setConnect('TALLY'),
-            className: 'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-md shadow-emerald-950',
-          }}
-        >
-          {loading ? (
-            <LoadingBody what="Tally" />
-          ) : tallySources.length > 0 ? (
-            tallySources.map((s) => <SourceRow {...rowProps(s)} />)
-          ) : connections.length > 0 ? (
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              <strong className="text-slate-200">
-                {connections[0].label || connections[0].accountEmail || 'Account'}
-              </strong>{' '}
-              is connected, but no form is selected yet. Add one and its submissions start creating
-              leads.
-            </div>
-          ) : (
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              Paste your Tally API key once, pick the forms you want, and we install the webhook on
-              each of them — nothing to copy by hand.
-            </div>
-          )}
-        </IntegrationCard>
+        {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
+        {formProviderCard(
+          'TALLY',
+          'Tally',
+          'Paste your Tally API key once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+        )}
+        {formProviderCard(
+          'TYPEFORM',
+          'Typeform',
+          'Paste a Typeform personal access token once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+        )}
 
         {/* Webhook — we hold nothing, so the customer installs and repairs it. */}
         <IntegrationCard
@@ -381,7 +399,7 @@ export const ConnectionCards: React.FC = () => {
             webhookSources.map((s) => <SourceRow {...rowProps(s)} />)
           ) : (
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
-              Works with any form tool — Tally, a website form, Zapier. We hand you a URL and a
+              Works with any form tool — Tally, Typeform, a website form, Zapier. We hand you a URL and a
               signing secret and hold no credential for your account.
             </div>
           )}

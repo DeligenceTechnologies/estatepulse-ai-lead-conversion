@@ -5,7 +5,7 @@ import { DeliveryOutcome, LeadStatus, MappingOrigin, MappingStatus, QueueState }
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
-import { TallyAdapter } from '../ingest/adapters/tally.adapter';
+import { ingestAdapterFor } from '../ingest/adapters/registry';
 import type { NormalizedAnswer } from '../ingest/adapters/types';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
@@ -16,6 +16,8 @@ interface ClaimedEvent {
   id: string;
   organization_id: string | null;
   lead_source_id: string | null;
+  /** Which adapter parses `payload`. */
+  provider: string | null;
   payload: unknown;
   attempts: number;
 }
@@ -48,7 +50,6 @@ interface MappedResult {
 @Injectable()
 export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProcessingWorker.name);
-  private readonly adapter = new TallyAdapter();
   private readonly instanceId = randomUUID();
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -173,7 +174,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           SET queue_state = 'PROCESSING', locked_by = $2, locked_at = now(), attempts = e.attempts + 1
          FROM claimed
         WHERE e.id = claimed.id
-       RETURNING e.id, e.organization_id, e.lead_source_id, e.payload, e.attempts`,
+       RETURNING e.id, e.organization_id, e.lead_source_id, e.provider, e.payload, e.attempts`,
       batchSize,
       this.instanceId,
     );
@@ -234,7 +235,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const parsed = this.adapter.parse(event.payload);
+      const parsed = ingestAdapterFor(event.provider).parse(event.payload);
       const region = org.default_region ?? 'US';
 
       await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);
