@@ -161,10 +161,12 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
    */
   private async claim(): Promise<ClaimedEvent[]> {
     const batchSize = Number(this.config.get('WORKER_BATCH_SIZE') ?? 10);
+    // TALLY only: webhook_events is also the durable queue for CRM webhooks
+    // (provider 'HUBSPOT'), which CrmSyncService drains under its own lease.
     return this.prisma.$queryRawUnsafe<ClaimedEvent[]>(
       `WITH claimed AS (
          SELECT id FROM webhook_events
-          WHERE queue_state = 'PENDING' AND available_at <= now()
+          WHERE queue_state = 'PENDING' AND provider = 'TALLY' AND available_at <= now()
           ORDER BY available_at, id
           FOR UPDATE SKIP LOCKED
           LIMIT $1
@@ -185,7 +187,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$executeRawUnsafe(
       `UPDATE webhook_events
           SET queue_state = 'PENDING', locked_by = NULL, locked_at = NULL
-        WHERE queue_state = 'PROCESSING'
+        WHERE queue_state = 'PROCESSING' AND provider = 'TALLY'
           AND locked_at < now() - ($1 || ' milliseconds')::interval`,
       String(ms),
     );

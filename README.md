@@ -139,6 +139,10 @@ ranges, consent) before creating the lead. Connecting a Tally form through its
 API installs the webhook and pre-maps the form's fields before the first
 submission arrives. See `TESTING-TALLY.md` to exercise it end to end.
 
+**HubSpot CRM import** (`backend/src/modules/crm`) — owners connect their own
+HubSpot account; contacts become paused leads in Import Review and stay in step
+through webhooks. Setup, policies and limits: `HUBSPOT-INTEGRATION.md`.
+
 ## Production notes
 
 `netlify.toml` builds and serves `frontend/` only. The backend deploys

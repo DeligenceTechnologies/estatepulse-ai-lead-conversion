@@ -40,6 +40,8 @@ export type LeadSource =
   | 'google sheets'
   // Imported from an uploaded CSV / XLSX (provider FILE_UPLOAD).
   | 'file upload'
+  // Imported from a connected HubSpot account (provider HUBSPOT).
+  | 'hubspot'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';

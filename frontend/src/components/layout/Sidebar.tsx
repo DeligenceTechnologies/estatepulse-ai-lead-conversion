@@ -28,7 +28,7 @@ export const Sidebar: React.FC = () => {
   const { user, role, organization, agentProfileId, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const isOwner = role === 'owner';
-  // Import Review exists only where the server has Google Sheets import or file import switched on.
+  // Import Review exists only where the server has an import switched on: Google Sheets, file upload or HubSpot.
   const [sheetsOn, setSheetsOn] = useState(false);
   useEffect(() => {
     if (isOwner) void importReviewEnabled().then(setSheetsOn);
