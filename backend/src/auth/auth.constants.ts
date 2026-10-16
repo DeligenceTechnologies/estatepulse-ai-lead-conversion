@@ -1,7 +1,8 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
 export const REFRESH_TOKEN_COOKIE = 'refresh_token';
-export const REFRESH_TOKEN_COOKIE_PATH = '/auth';
+/** The auth routes' public path (server.ts serves them under /api), so the cookie reaches /api/auth/refresh. */
+export const REFRESH_TOKEN_COOKIE_PATH = '/api/auth';
 
 export const IS_PUBLIC_KEY = 'isPublic';
 
