@@ -7,9 +7,12 @@ import { aad, sha256Hex } from '@/common/utils/crypto';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ProviderApiError, type ProviderCredential } from './providers/types';
 
-/** Form providers' adapter codes ('TALLY') and how their accounts are stored. */
-const FORM_PROVIDERS: Record<string, IntegrationProvider> = { TALLY: IntegrationProvider.tally };
-const ADAPTER_CODE: Partial<Record<IntegrationProvider, string>> = { tally: 'TALLY' };
+/** Form providers' adapter codes ('TALLY', 'TYPEFORM') and how their accounts are stored. */
+const FORM_PROVIDERS: Record<string, IntegrationProvider> = {
+  TALLY: IntegrationProvider.tally,
+  TYPEFORM: IntegrationProvider.typeform,
+};
+const ADAPTER_CODE: Partial<Record<IntegrationProvider, string>> = { tally: 'TALLY', typeform: 'TYPEFORM' };
 
 export interface ProviderCredentialSummary {
   id: string;

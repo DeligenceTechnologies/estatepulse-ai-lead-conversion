@@ -15,7 +15,7 @@ model Lead {
 
   status          LeadStatus       @default(new)
   followUpReason  FollowUpReason?  @map("follow_up_reason")
-  temperature     LeadTemperature?
+  temperature     LeadTemperature? @default(cold)
   score           Decimal?         @db.Decimal(5, 2)
   aiSummary       String?          @map("ai_summary")
   lostReason      String?          @map("lost_reason") @db.VarChar(255)

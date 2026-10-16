@@ -29,6 +29,16 @@ export class IngestController {
     return this.handle('TALLY', token, req, res, signature);
   }
 
+  @Post('ingest/v1/typeform/:token')
+  typeform(
+    @Param('token') token: string,
+    @Req() req: RawBodyRequest<Request>,
+    @Res() res: Response,
+    @Headers('typeform-signature') signature?: string,
+  ) {
+    return this.handle('TYPEFORM', token, req, res, signature);
+  }
+
   @Post(['ingest/v1/webhook/:token', 'webhooks/leads/:token'])
   webhook(@Param('token') token: string, @Req() req: RawBodyRequest<Request>, @Res() res: Response) {
     return this.handle('WEBHOOK', token, req, res, undefined);

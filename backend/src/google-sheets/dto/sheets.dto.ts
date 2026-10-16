@@ -128,8 +128,8 @@ export class ReviewQueryDto {
   state?: 'pending' | 'rejected';
 
   @IsOptional()
-  @IsIn(['all', 'google_sheets', 'file_upload'])
-  source?: 'all' | 'google_sheets' | 'file_upload';
+  @IsIn(['all', 'google_sheets', 'file_upload', 'hubspot'])
+  source?: 'all' | 'google_sheets' | 'file_upload' | 'hubspot';
 
   @IsOptional()
   @IsUUID()

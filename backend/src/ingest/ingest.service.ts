@@ -11,7 +11,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
-import { aad, looksLikeIngestToken, sha256Hex, verifyTallySignature } from '@/common/utils/crypto';
+import { aad, looksLikeIngestToken, sha256Hex, verifyTallySignature, verifyTypeformSignature } from '@/common/utils/crypto';
 import { EventsBus } from '@/events/events.bus';
 import { adapterFor } from './adapters/generic.adapter';
 import { InvalidPayloadError } from './adapters/types';
@@ -25,9 +25,10 @@ export type IngestResult =
   | { kind: 'unknown_token' }
   | { kind: 'archived' };
 
-export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'WEBHOOK'>;
+export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WEBHOOK'>;
 
-const ALLOWED_HEADERS = new Set(['content-type', 'content-length', 'user-agent', 'x-forwarded-for', 'tally-signature']);
+const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature']);
+const ALLOWED_HEADERS = new Set(['content-type', 'content-length', 'user-agent', 'x-forwarded-for', ...SIGNATURE_HEADERS]);
 /** A paused source keeps its deliveries queued, far in the future, until it is resumed. */
 const HELD_UNTIL = new Date('9999-12-31T00:00:00Z');
 
@@ -68,8 +69,14 @@ export class IngestService {
       return { kind: 'unknown_token' };
     }
     if (source.archivedAt) return { kind: 'archived' };
+    // A Typeform token is bound to the Typeform route and no other token is accepted there.
+    if ((route === LeadSourceProvider.TYPEFORM) !== (source.provider === LeadSourceProvider.TYPEFORM)) {
+      this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
+      return { kind: 'unknown_token' };
+    }
 
-    const sig = this.evaluateSignature(source, rawBody, signature);
+    const verify = route === LeadSourceProvider.TYPEFORM ? verifyTypeformSignature : verifyTallySignature;
+    const sig = this.evaluateSignature(source, rawBody, signature, verify);
     let payload: unknown = null;
     let invalid: string | null = null;
     let preview = null;
@@ -154,7 +161,12 @@ export class IngestService {
    * defence on its own: the per-source dedupe key is. A rotated secret keeps
    * verifying during its grace window so a delivery mid-rotation is not lost.
    */
-  private evaluateSignature(source: LeadSource, rawBody: Buffer, signature: string | undefined): SignatureVerdict {
+  private evaluateSignature(
+    source: LeadSource,
+    rawBody: Buffer,
+    signature: string | undefined,
+    verify: (rawBody: Buffer, secret: string, header: string) => boolean = verifyTallySignature,
+  ): SignatureVerdict {
     if (!source.signingSecretEnc || !signature) {
       const state = source.signingSecretEnc ? SignatureState.MISSING : SignatureState.NOT_CONFIGURED;
       return source.requireSignature
@@ -162,11 +174,11 @@ export class IngestService {
         : { state, usedPrevious: false };
     }
     const secretAad = aad.signingSecret(source.orgId, source.id);
-    if (verifyTallySignature(rawBody, this.secrets.open(source.signingSecretEnc, secretAad), signature)) {
+    if (verify(rawBody, this.secrets.open(source.signingSecretEnc, secretAad), signature)) {
       return { state: SignatureState.VALID, usedPrevious: false };
     }
     const graceOpen = source.previousSecretEnc && source.previousSecretValidUntil && source.previousSecretValidUntil > new Date();
-    if (graceOpen && verifyTallySignature(rawBody, this.secrets.open(source.previousSecretEnc!, secretAad), signature)) {
+    if (graceOpen && verify(rawBody, this.secrets.open(source.previousSecretEnc!, secretAad), signature)) {
       return { state: SignatureState.VALID, usedPrevious: true };
     }
     return { state: SignatureState.INVALID, usedPrevious: false, quarantine: 'invalid_signature' };
@@ -178,7 +190,7 @@ function redactHeaders(headers: Record<string, unknown>): Record<string, string>
   for (const [name, value] of Object.entries(headers)) {
     const key = name.toLowerCase();
     if (!ALLOWED_HEADERS.has(key)) continue;
-    out[key] = key === 'tally-signature' ? '[present, redacted]' : String(value);
+    out[key] = SIGNATURE_HEADERS.has(key) ? '[present, redacted]' : String(value);
   }
   return out;
 }

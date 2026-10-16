@@ -21,6 +21,8 @@ export function sealState(
   box: Box,
   who: { organizationId: string; userId: string; sessionId: string },
   now = Date.now(),
+  /** Binds the state to one provider's flow; Google's by default. */
+  stateAad = STATE_AAD,
 ): { state: string; codeChallenge: string; payload: OAuthState } {
   const cv = randomBytes(32).toString('base64url');
   const payload: OAuthState = {
@@ -33,16 +35,16 @@ export function sealState(
     cv,
   };
   return {
-    state: box.seal(JSON.stringify(payload), STATE_AAD),
+    state: box.seal(JSON.stringify(payload), stateAad),
     codeChallenge: createHash('sha256').update(cv).digest('base64url'),
     payload,
   };
 }
 
-export function openState(box: Box, state: string): OAuthState | null {
+export function openState(box: Box, state: string, stateAad = STATE_AAD): OAuthState | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(box.open(state, STATE_AAD));
+    parsed = JSON.parse(box.open(state, stateAad));
   } catch {
     return null;
   }

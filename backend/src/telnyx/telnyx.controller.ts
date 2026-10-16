@@ -5,7 +5,7 @@ import { AppError } from '@/common/errors/app-error';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssistantService } from './assistant.service';
-import { AttachAssistantDto, CreateAssistantDto, PhoneNumberDto, ReconnectDto, RenameAccountDto, TelnyxCredentialsDto } from './dto/telnyx.dto';
+import { AttachAssistantDto, CreateAssistantDto, NumbersLookupDto, PhoneNumberDto, ReconnectDto, RenameAccountDto, TelnyxCredentialsDto } from './dto/telnyx.dto';
 import { NumbersService } from './numbers.service';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
 
@@ -128,6 +128,19 @@ export class TelnyxController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
   async owned(@CurrentAuth() auth: AuthContext) {
     return { numbers: await this.numbers.listOwned(auth.organizationId) };
+  }
+
+  /**
+   * Verify a key and list the numbers it owns, so the From Number can be picked
+   * rather than typed. With no key in the body the stored one is used.
+   */
+  @Post('numbers/lookup')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
+  async lookup(@CurrentAuth() auth: AuthContext, @Body() body: NumbersLookupDto) {
+    const apiKey = body.apiKey?.trim();
+    if (!apiKey) return { numbers: await this.numbers.listOwned(auth.organizationId) };
+    return { numbers: await this.numbers.listOwnedForKey(apiKey) };
   }
 
   @Post('numbers/buy')

@@ -68,6 +68,8 @@ export interface ChangedValues {
   externalId: string | null;
   dnc: boolean;
   reviewReasons: string[];
+  /** A CRM row's custom-field prefix (BuiltRow.crmPrefix): applying writes only the CRM's fields. */
+  crmPrefix?: string;
 }
 
 export class RunStats {
@@ -518,9 +520,14 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     stats: RunStats,
     importReason: string,
     approve: Approval | null,
+    /** Load only the tracking rows for `rows`' keys: for a CRM import written a page at a time. */
+    opts: { scopeToRows?: boolean } = {},
   ): Promise<void> {
     stats.dbStatements += 1;
-    const tracked = await this.prisma.sheetImportRow.findMany({ where: { orgId, leadSourceId: sourceId }, select: TRACKED_FIELDS });
+    const tracked = await this.prisma.sheetImportRow.findMany({
+      where: { orgId, leadSourceId: sourceId, ...(opts.scopeToRows ? { rowKey: { in: rows.map((r) => r.key!) } } : {}) },
+      select: TRACKED_FIELDS,
+    });
     const known = new Map(tracked.map((t) => [t.rowKey, t]));
     const runPhones = new Set<string>();
     const runEmails = new Set<string>();
@@ -711,6 +718,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         externalId: row.externalId ?? null,
         dnc,
         reviewReasons: reasons(dnc, duplicate, row.reviewReasons).filter((r) => r !== importReason),
+        ...(row.crmPrefix ? { crmPrefix: row.crmPrefix } : {}),
       };
       rowUpdates.push({ id: tracked.id, hash: tracked.contentHash, rowNumber: row.rowNumber, set: changed, clear: false, requirePending: false });
     }

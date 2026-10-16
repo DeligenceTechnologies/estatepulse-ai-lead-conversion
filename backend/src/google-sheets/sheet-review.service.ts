@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { approveTrackingRows, notDecided } from './approval';
+import { CRM_INBOUND_FIELDS, NO_NAME_REASON_PREFIX } from '@/crm/crm-records';
+import { IMPORT_REASONS_SPENT_ON_DECISION, approveTrackingRows, notDecided } from './approval';
 import type { ChangesQueryDto } from './dto/sheets.dto';
 import type { SessionIdentity } from './google-connections.service';
 import { leadValuesRow, type ChangedValues } from './sheet-import.service';
-import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
 
 export const REJECTED_REASON = 'Rejected at import review';
 
@@ -51,7 +51,8 @@ export class SheetReviewService {
              SET status = 'closed',
                  lost_reason = ${REJECTED_REASON},
                  automation_paused = true,
-                 review_reasons = array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON}),
+                 review_reasons = ARRAY(SELECT r FROM unnest(review_reasons) WITH ORDINALITY AS u(r, n)
+                                         WHERE r <> ALL(${IMPORT_REASONS_SPENT_ON_DECISION}::text[]) ORDER BY n),
                  needs_review = false,
                  updated_at = now()
            WHERE organization_id = ${orgId}::uuid AND id = ANY(${leadIds}::uuid[])`;
@@ -107,11 +108,16 @@ export class SheetReviewService {
         const changed = r.changedValues as unknown as ChangedValues | null;
         const incoming = changed?.lead as unknown as Record<string, unknown> | undefined;
         const current = r.lead as Record<string, unknown> | null;
-        const diff = DIFF_FIELDS.map(([field, column]) => ({
-          field,
-          current: normalize(current?.[column]),
-          incoming: normalize(incoming?.[field]),
-        })).filter((d) => JSON.stringify(d.current) !== JSON.stringify(d.incoming));
+        // A CRM change only ever writes the CRM's fields (see applyCrmChanges), so only those are a difference worth showing.
+        const prefix = changed?.crmPrefix;
+        const fields = prefix ? DIFF_FIELDS.filter(([f]) => f === 'custom_fields' || (CRM_INBOUND_FIELDS as readonly string[]).includes(f)) : DIFF_FIELDS;
+        const diff = fields
+          .map(([field, column]) => ({
+            field,
+            current: normalize(prefix && field === 'custom_fields' ? ownCustom(current?.[column], prefix) : current?.[column]),
+            incoming: normalize(incoming?.[field]),
+          }))
+          .filter((d) => JSON.stringify(d.current) !== JSON.stringify(d.incoming));
         return {
           rowId: r.id,
           rowNumber: r.rowNumber,
@@ -134,9 +140,12 @@ export class SheetReviewService {
          FOR UPDATE`;
       if (flagged.length === 0) return { resolved: 0, skipped: rowIds };
       const withLead = flagged.filter((f) => f.lead_id);
+      const fromSheets = withLead.filter((f) => !f.changed_values.crmPrefix);
+      const fromCrm = withLead.filter((f) => f.changed_values.crmPrefix);
 
-      if (action === 'apply' && withLead.length) {
-        const values = withLead.map((f) =>
+      if (action === 'apply' && fromCrm.length) await applyCrmChanges(tx, orgId, fromCrm);
+      if (action === 'apply' && fromSheets.length) {
+        const values = fromSheets.map((f) =>
           leadValuesRow(f.lead_id!, f.changed_values.lead, f.changed_values.externalId, f.changed_values.reviewReasons, f.changed_values.dnc),
         );
         await tx.$executeRaw`
@@ -156,9 +165,18 @@ export class SheetReviewService {
                  custom_fields, external_lead_id, review_reasons, dnc)
            WHERE l.id = v.id AND l.organization_id = ${orgId}::uuid`;
       }
+      // For a CRM row the CRM's values at the time of the flag become the base of the next
+      // three-way merge either way: "keep" acknowledges them, so only a later change is raised again.
       await tx.$executeRaw`
         UPDATE sheet_import_rows
-           SET content_hash = changed_values->>'hash', changed_values = NULL, changed_after_review_at = NULL, updated_at = now()
+           SET content_hash = changed_values->>'hash',
+               synced_values = CASE WHEN changed_values ? 'crmPrefix' THEN jsonb_build_object(
+                                 'first_name', changed_values->'lead'->'first_name', 'last_name', changed_values->'lead'->'last_name',
+                                 'email', changed_values->'lead'->'email',
+                                 'phone', COALESCE(NULLIF(changed_values->'lead'->'normalized_phone', 'null'::jsonb), changed_values->'lead'->'phone'),
+                                 'custom', COALESCE(changed_values->'lead'->'custom_fields', '{}'::jsonb))
+                               ELSE synced_values END,
+               changed_values = NULL, changed_after_review_at = NULL, updated_at = now()
          WHERE organization_id = ${orgId}::uuid AND id = ANY(${flagged.map((f) => f.id)}::uuid[])`;
       await this.audit.recordMany(
         withLead.map((f) => ({
@@ -175,6 +193,59 @@ export class SheetReviewService {
       return { resolved: flagged.length, skipped: rowIds.filter((id) => !flagged.some((f) => f.id === id)) };
     });
   }
+}
+
+/**
+ * Apply CRM changes to leads (a flagged change the owner applies, or a clean one the sync
+ * applies itself): the CRM's own fields only. Nothing EstatePulse owns is written, an empty
+ * CRM value never clears one, the lead's other custom fields are kept, review reasons are
+ * only added to, and a DNC flag is never cleared.
+ */
+export function applyCrmChanges(
+  db: Prisma.TransactionClient | PrismaService,
+  orgId: string,
+  rows: { lead_id: string | null; changed_values: ChangedValues }[],
+): Prisma.PrismaPromise<number> {
+  const values = rows.map((f) => {
+    const l = f.changed_values.lead;
+    return Prisma.sql`(${f.lead_id}::uuid, ${l.first_name}::varchar, ${l.last_name}::varchar, ${l.email}::varchar,
+      ${l.normalized_email}::varchar, ${l.email_valid}::boolean, ${l.phone}::varchar, ${l.normalized_phone}::varchar,
+      ${l.phone_valid}::boolean, ${JSON.stringify(l.custom_fields)}::jsonb, ${f.changed_values.crmPrefix!}::text,
+      ${f.changed_values.externalId}::varchar, ${f.changed_values.reviewReasons}::text[], ${f.changed_values.dnc}::boolean)`;
+  });
+  return db.$executeRaw`
+    UPDATE leads AS l
+       SET first_name = COALESCE(v.first_name, l.first_name), last_name = COALESCE(v.last_name, l.last_name),
+           email = COALESCE(v.email, l.email),
+           normalized_email = CASE WHEN v.email IS NULL THEN l.normalized_email ELSE v.normalized_email END,
+           email_valid = CASE WHEN v.email IS NULL THEN l.email_valid ELSE v.email_valid END,
+           phone = COALESCE(v.phone, l.phone),
+           normalized_phone = CASE WHEN v.phone IS NULL THEN l.normalized_phone ELSE v.normalized_phone END,
+           phone_valid = CASE WHEN v.phone IS NULL THEN l.phone_valid ELSE v.phone_valid END,
+           custom_fields = COALESCE((SELECT jsonb_object_agg(e.key, e.value) FROM jsonb_each(l.custom_fields) AS e
+                                      WHERE left(e.key, length(v.prefix)) <> v.prefix), '{}'::jsonb) || v.custom,
+           external_lead_id = COALESCE(l.external_lead_id, v.external_lead_id),
+           review_reasons = l.review_reasons || ARRAY(
+             SELECT r FROM unnest(v.review_reasons) AS r
+              WHERE r <> ALL(l.review_reasons)
+                AND NOT (left(r, length(${NO_NAME_REASON_PREFIX})) = ${NO_NAME_REASON_PREFIX}
+                         AND COALESCE(v.first_name, l.first_name, v.last_name, l.last_name) IS NOT NULL)),
+           needs_review = l.needs_review OR EXISTS (
+             SELECT 1 FROM unnest(v.review_reasons) AS r
+              WHERE NOT (left(r, length(${NO_NAME_REASON_PREFIX})) = ${NO_NAME_REASON_PREFIX}
+                         AND COALESCE(v.first_name, l.first_name, v.last_name, l.last_name) IS NOT NULL)),
+           dnc_status = l.dnc_status OR v.dnc,
+           automation_paused = l.automation_paused OR (v.phone IS NOT NULL AND v.normalized_phone IS NULL) OR v.dnc,
+           updated_at = now()
+      FROM (VALUES ${Prisma.join(values)}) AS v(id, first_name, last_name, email, normalized_email, email_valid,
+           phone, normalized_phone, phone_valid, custom, prefix, external_lead_id, review_reasons, dnc)
+     WHERE l.id = v.id AND l.organization_id = ${orgId}::uuid`;
+}
+
+/** A lead's custom fields that belong to the CRM with this prefix, for a like-for-like diff. */
+function ownCustom(custom: unknown, prefix: string): Record<string, unknown> {
+  if (!custom || typeof custom !== 'object') return {};
+  return Object.fromEntries(Object.entries(custom as Record<string, unknown>).filter(([k]) => k.startsWith(prefix)));
 }
 
 function normalize(value: unknown): unknown {

@@ -1,4 +1,5 @@
 import { TallyAdapter } from './tally.adapter';
+import { TypeformAdapter } from './typeform.adapter';
 import { InvalidPayloadError, type IngestAdapter, type NormalizedAnswer, type NormalizedDelivery } from './types';
 
 const MAX_FIELDS = 100;
@@ -55,4 +56,4 @@ export class GenericWebhookAdapter implements IngestAdapter {
 }
 
 export const adapterFor = (provider: string): IngestAdapter =>
-  provider === 'TALLY' ? new TallyAdapter() : new GenericWebhookAdapter();
+  provider === 'TALLY' ? new TallyAdapter() : provider === 'TYPEFORM' ? new TypeformAdapter() : new GenericWebhookAdapter();

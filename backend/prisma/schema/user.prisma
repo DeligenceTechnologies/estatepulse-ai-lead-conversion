@@ -27,6 +27,7 @@ model User {
   sentMessages        Message[]
   enrollments         SequenceEnrollment[]
   reviewedImportRows  SheetImportRow[]
+  crmSyncRuns         CrmSyncRun[]
   hostedMeetings      CalendarMeeting[]
 
   @@index([orgId])

@@ -41,6 +41,10 @@ export class ImportReviewEnabledGuard extends FeatureGuard {
   protected readonly code = 'IMPORT_REVIEW_DISABLED';
   protected readonly message = 'Lead import is not enabled on this server.';
   protected enabled() {
-    return this.config.get('GOOGLE_SHEETS_ENABLED', { infer: true }) || this.config.get('FILE_IMPORT_ENABLED', { infer: true });
+    return (
+      this.config.get('GOOGLE_SHEETS_ENABLED', { infer: true }) ||
+      this.config.get('FILE_IMPORT_ENABLED', { infer: true }) ||
+      this.config.get('HUBSPOT_ENABLED', { infer: true })
+    );
   }
 }

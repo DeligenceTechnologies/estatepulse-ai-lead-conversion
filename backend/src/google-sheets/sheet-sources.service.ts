@@ -50,6 +50,18 @@ type SourceRow = Prisma.LeadSourceGetPayload<{ select: typeof SOURCE_SELECT }>;
 
 const SHEET_SOURCE = { provider: LeadSourceProvider.GOOGLE_SHEETS, connectionMethod: ConnectionMethod.SYNC } as const;
 
+/** Where a reviewed row came from, as the review queue names it: sheets, uploaded files, a connected CRM. */
+const REVIEW_SOURCE_PROVIDER = {
+  google_sheets: LeadSourceProvider.GOOGLE_SHEETS,
+  file_upload: LeadSourceProvider.FILE_UPLOAD,
+  hubspot: LeadSourceProvider.HUBSPOT,
+} as const;
+type ReviewKind = keyof typeof REVIEW_SOURCE_PROVIDER;
+
+function reviewKind(provider: LeadSourceProvider): ReviewKind {
+  return (Object.keys(REVIEW_SOURCE_PROVIDER) as ReviewKind[]).find((k) => REVIEW_SOURCE_PROVIDER[k] === provider) ?? 'google_sheets';
+}
+
 export interface SheetSourceDTO {
   id: string;
   name: string;
@@ -406,9 +418,7 @@ export class SheetSourcesService {
       reviewState: q.state ?? 'pending',
       leadId: { not: null },
       ...(q.sourceId ? { leadSourceId: q.sourceId } : {}),
-      ...(kind === 'all'
-        ? {}
-        : { leadSource: { provider: kind === 'file_upload' ? LeadSourceProvider.FILE_UPLOAD : LeadSourceProvider.GOOGLE_SHEETS } }),
+      ...(kind === 'all' ? {} : { leadSource: { provider: REVIEW_SOURCE_PROVIDER[kind] } }),
     };
     const rows = await this.prisma.sheetImportRow.findMany({
       where: { ...scope, ...(cursor ? { OR: [{ createdAt: { lt: cursor.t } }, { createdAt: cursor.t, id: { lt: cursor.id } }] } : {}) },
@@ -450,7 +460,7 @@ export class SheetSourcesService {
         source: {
           id: r.leadSource.id,
           name: r.leadSource.name,
-          kind: r.leadSource.provider === LeadSourceProvider.FILE_UPLOAD ? ('file_upload' as const) : ('google_sheets' as const),
+          kind: reviewKind(r.leadSource.provider),
         },
         lead: r.lead
           ? {

@@ -19,6 +19,7 @@ model Organization {
   sequences           Sequence[]
   enrollments         SequenceEnrollment[]
   sheetImportRows     SheetImportRow[]
+  crmSyncRuns         CrmSyncRun[]
   auditLogs           AuditLog[]
 
   @@map("organizations")

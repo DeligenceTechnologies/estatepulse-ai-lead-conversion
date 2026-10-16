@@ -77,6 +77,7 @@ export const envValidationSchema = Joi.object({
     INGEST_MAX_BODY_BYTES: Joi.number().integer().positive().default(1_048_576),
 
     TALLY_API_BASE_URL: Joi.string().uri().default('https://api.tally.so'),
+    TYPEFORM_API_BASE_URL: Joi.string().uri().default('https://api.typeform.com'),
     PROVIDER_HTTP_TIMEOUT_MS: Joi.number().integer().positive().default(10_000),
 
     // The worker that turns stored form deliveries into leads.
@@ -109,4 +110,26 @@ export const envValidationSchema = Joi.object({
 
     FILE_IMPORT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     FILE_IMPORT_MAX_BYTES: Joi.number().integer().positive().default(5 * 1024 * 1024),
+
+    // HubSpot CRM import. Off unless HUBSPOT_ENABLED: its endpoints answer 404 and nothing syncs.
+    // Unset client id/secret = the card says "not configured" instead of failing at boot.
+    HUBSPOT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    HUBSPOT_CLIENT_ID: Joi.string().empty('').optional(),
+    // Also keys HubSpot's v3 webhook signatures, so it must be the same app's secret.
+    HUBSPOT_CLIENT_SECRET: Joi.string().empty('').optional(),
+    // Defaults to ${APP_URL}/oauth/hubspot-callback.html; must be listed in the app's redirect URLs exactly.
+    HUBSPOT_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Space-separated; must include every REQUIRED scope of the HubSpot app. Default: "oauth crm.objects.contacts.read".
+    HUBSPOT_SCOPES: Joi.string().empty('').optional(),
+    // The webhook target exactly as registered with HubSpot (part of what it signs).
+    // Defaults to ${PUBLIC_API_URL}/ingest/v1/crm/hubspot/webhook.
+    HUBSPOT_WEBHOOK_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    HUBSPOT_API_BASE_URL: Joi.string().uri().default('https://api.hubapi.com'),
+    HUBSPOT_AUTH_BASE_URL: Joi.string().uri().default('https://app.hubspot.com'),
+    HUBSPOT_API_VERSION: Joi.string().pattern(/^\d{4}-\d{2}$/).default('2026-09'),
+    HUBSPOT_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
+    // How often the worker looks for due CRM work (0 = only when nudged), and how often each
+    // connection is reconciled against the CRM's modified dates to catch a lost webhook.
+    CRM_POLL_MS: Joi.number().integer().min(0).default(30_000),
+    CRM_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
 });

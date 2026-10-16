@@ -80,6 +80,8 @@ export interface BuiltRow {
   lead?: LeadFields;
   externalId?: string;
   reviewReasons: string[];
+  /** Set on rows from a connected CRM (crm/crm-records.ts): the custom-field prefix the CRM owns. Absent for sheets and files. */
+  crmPrefix?: string;
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');

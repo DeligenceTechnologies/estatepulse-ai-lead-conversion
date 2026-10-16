@@ -52,6 +52,12 @@ export function verifyTallySignature(rawBody: Buffer, secret: string, header: st
   return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
+/** Typeform's `Typeform-Signature` header: `sha256=` followed by the same base64 HMAC Tally sends. */
+export function verifyTypeformSignature(rawBody: Buffer, secret: string, header: string): boolean {
+  const value = header.startsWith('sha256=') ? header.slice('sha256='.length) : header;
+  return verifyTallySignature(rawBody, secret, value);
+}
+
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const TELNYX_TOLERANCE_SECONDS = 300;
 

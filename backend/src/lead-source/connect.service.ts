@@ -139,7 +139,8 @@ export class ConnectService implements OnApplicationBootstrap {
 
     const name = input.name?.trim() || remoteName;
     const fresh = this.leadSources.newSourceSecrets(orgId);
-    const url = this.leadSources.ingestUrl(fresh.token, LeadSourceProvider.TALLY);
+    const sourceProvider = cred.provider === 'TYPEFORM' ? LeadSourceProvider.TYPEFORM : LeadSourceProvider.TALLY;
+    const url = this.leadSources.ingestUrl(fresh.token, sourceProvider);
     try {
       await this.prisma.leadSource.create({
         data: {
@@ -147,7 +148,7 @@ export class ConnectService implements OnApplicationBootstrap {
           orgId,
           name: name.slice(0, 100),
           code: await this.leadSources.uniqueCode(orgId, name),
-          provider: LeadSourceProvider.TALLY,
+          provider: sourceProvider,
           connectionMethod: ConnectionMethod.API,
           integrationId: input.credentialId,
           externalFormId: input.externalFormId,
@@ -159,7 +160,7 @@ export class ConnectService implements OnApplicationBootstrap {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const existing = await this.prisma.leadSource.findFirst({
-          where: { orgId, provider: LeadSourceProvider.TALLY, externalFormId: input.externalFormId, archivedAt: null },
+          where: { orgId, provider: sourceProvider, externalFormId: input.externalFormId, archivedAt: null },
           select: { id: true, name: true },
         });
         throw new ConflictException({

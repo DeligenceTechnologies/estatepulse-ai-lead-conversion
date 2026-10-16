@@ -16,6 +16,7 @@ import { IntegrationModule } from './integration/integration.module';
 import { LeadSourceModule } from './lead-source/lead-source.module';
 import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import { FileImportModule } from './file-import/file-import.module';
+import { CrmModule } from './crm/crm.module';
 import { TelnyxModule } from './telnyx/telnyx.module';
 import { FollowupModule } from './followup/followup.module';
 import { HistoryModule } from './history/history.module';
@@ -41,6 +42,7 @@ import {QueueModule} from "@/queue/queue.module";
     LeadSourceModule,
     GoogleSheetsModule,
     FileImportModule,
+    CrmModule,
     TelnyxModule,
     FollowupModule,
     HistoryModule,

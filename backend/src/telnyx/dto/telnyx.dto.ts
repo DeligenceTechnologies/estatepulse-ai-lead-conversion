@@ -56,6 +56,16 @@ export class TelnyxCredentialsDto {
   label?: string;
 }
 
+/** POST /telnyx/numbers/lookup: a key to verify, or none to use the stored one. */
+export class NumbersLookupDto {
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
+  @IsString()
+  @Matches(/^KEY/, { message: 'A valid Telnyx API key (starts with "KEY") is required.' })
+  @MaxLength(500)
+  apiKey?: string;
+}
+
 export class RenameAccountDto {
   @Transform(trim)
   @IsString()

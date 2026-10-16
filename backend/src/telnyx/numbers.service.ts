@@ -43,7 +43,24 @@ export class NumbersService {
 
   async listOwned(orgId: string) {
     const c = await this.requireCreds(orgId);
-    const res = await telnyx<{ data?: any[] }>(c.apiKey, '/phone_numbers?page[size]=50');
+    return this.listOwnedForKey(c.apiKey);
+  }
+
+  /**
+   * The numbers a key owns. Also how a key is verified before it is saved: a
+   * 401/403 here means Telnyx rejected it, which is reported as such rather
+   * than as a failed listing.
+   */
+  async listOwnedForKey(apiKey: string) {
+    let res: { data?: any[] };
+    try {
+      res = await telnyx<{ data?: any[] }>(apiKey, '/phone_numbers?page[size]=50');
+    } catch (error) {
+      if (/failed 40[13]:/.test((error as Error).message)) {
+        throw new AppError('VALIDATION_ERROR', 'Telnyx rejected this API key — check it and try again.');
+      }
+      throw error;
+    }
     return (res.data ?? []).map((n) => ({
       id: n.id,
       phone_number: n.phone_number,

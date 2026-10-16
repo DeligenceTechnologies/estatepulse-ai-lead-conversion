@@ -138,6 +138,8 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       WITH claimed AS (
         SELECT id FROM ingest_events
          WHERE queue_state = 'PENDING' AND available_at <= now()
+           -- CRM webhooks are queued here too, and drained by CrmSyncService under its own lease.
+           AND provider <> 'HUBSPOT'
          ORDER BY available_at, id
          FOR UPDATE SKIP LOCKED
          LIMIT ${batchSize}
@@ -154,7 +156,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$executeRaw`
       UPDATE ingest_events
          SET queue_state = 'PENDING', locked_by = NULL, locked_at = NULL
-       WHERE queue_state = 'PROCESSING' AND locked_at < now() - make_interval(secs => ${stuckMs / 1000})`;
+       WHERE queue_state = 'PROCESSING' AND provider <> 'HUBSPOT' AND locked_at < now() - make_interval(secs => ${stuckMs / 1000})`;
   }
 
   private async process(event: ClaimedEvent): Promise<void> {

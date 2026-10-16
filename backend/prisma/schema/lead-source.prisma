@@ -59,6 +59,7 @@ model LeadSource {
   ingestEvents    IngestEvent[]
   leads           Lead[]
   sheetImportRows SheetImportRow[]
+  crmSyncRuns     CrmSyncRun[]
 
   @@unique([orgId, code])
   @@index([orgId])
@@ -175,6 +176,10 @@ model SheetImportRow {
   changedAfterReviewAt DateTime?   @map("changed_after_review_at") @db.Timestamptz(6)
   changedValues        Json?       @map("changed_values")
   missingSince         DateTime?   @map("missing_since") @db.Timestamptz(6)
+  /// CRM rows only: when a CRM read last saw this record. NULL for sheets and files.
+  lastSeenAt           DateTime?   @map("last_seen_at") @db.Timestamptz(6)
+  /// CRM rows only: the CRM-owned values last accepted, the base of the three-way merge (crm-records.ts).
+  syncedValues         Json?       @map("synced_values")
   createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 

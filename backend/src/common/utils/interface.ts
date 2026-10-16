@@ -38,6 +38,7 @@ export interface IntegrationEnv {
   ALLOW_INSECURE_INGEST_URL: boolean;
   INGEST_MAX_BODY_BYTES: number;
   TALLY_API_BASE_URL: string;
+  TYPEFORM_API_BASE_URL: string;
   PROVIDER_HTTP_TIMEOUT_MS: number;
   WORKER_ENABLED: boolean;
   WORKER_POLL_INTERVAL_MS: number;
@@ -63,6 +64,18 @@ export interface IntegrationEnv {
   SHEETS_FULL_READ_MAX_AGE_MS: number;
   FILE_IMPORT_ENABLED: boolean;
   FILE_IMPORT_MAX_BYTES: number;
+  HUBSPOT_ENABLED: boolean;
+  HUBSPOT_CLIENT_ID?: string;
+  HUBSPOT_CLIENT_SECRET?: string;
+  HUBSPOT_REDIRECT_URI?: string;
+  HUBSPOT_SCOPES?: string;
+  HUBSPOT_WEBHOOK_URL?: string;
+  HUBSPOT_API_BASE_URL: string;
+  HUBSPOT_AUTH_BASE_URL: string;
+  HUBSPOT_API_VERSION: string;
+  HUBSPOT_RETRY_BASE_MS: number;
+  CRM_POLL_MS: number;
+  CRM_RECONCILE_INTERVAL_MS: number;
   NODE_ENV: 'development' | 'test' | 'production';
 }
 

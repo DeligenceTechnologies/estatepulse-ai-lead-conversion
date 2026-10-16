@@ -41,7 +41,8 @@ export class LeadSourcesService {
   }
 
   ingestUrl(token: string, provider: LeadSourceProvider = LeadSourceProvider.TALLY): string {
-    const route = provider === LeadSourceProvider.TALLY ? 'tally' : 'webhook';
+    const route =
+      provider === LeadSourceProvider.TALLY ? 'tally' : provider === LeadSourceProvider.TYPEFORM ? 'typeform' : 'webhook';
     return `${this.publicBase}/ingest/v1/${route}/${token}`;
   }
 

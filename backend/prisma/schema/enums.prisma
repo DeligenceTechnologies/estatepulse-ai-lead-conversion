@@ -108,6 +108,8 @@ enum IntegrationProvider {
   telnyx
   tally
   google
+  typeform
+  hubspot
 
   @@map("integration_provider")
 }
@@ -126,6 +128,8 @@ enum LeadSourceProvider {
   TALLY
   GOOGLE_SHEETS
   FILE_UPLOAD
+  TYPEFORM
+  HUBSPOT
 
   @@map("lead_source_provider")
 }
