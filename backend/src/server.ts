@@ -79,12 +79,22 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
-  const corsOrigin = config.get<string>('CORS_ORIGIN');
-  app.enableCors(
-    corsOrigin
-      ? { origin: corsOrigin.split(',').map((origin) => origin.trim()), credentials: true }
-      : undefined,
-  );
+    const corsOrigins = (config.get<string>('CORS_ORIGINS') ?? '')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+
+    app.enableCors({
+        origin: corsOrigins,
+        credentials: true,
+        methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: [
+            'Content-Type',
+            'Authorization',
+            'X-Api-Key',
+            'X-Request-Id',
+        ],
+    });
 
   await app.listen(port);
   console.log(`Server running on http://localhost:${port}`);
