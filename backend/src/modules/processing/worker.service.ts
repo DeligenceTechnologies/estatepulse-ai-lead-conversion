@@ -5,16 +5,23 @@ import { DeliveryOutcome, LeadStatus, MappingOrigin, MappingStatus, QueueState }
 import { newId } from '../../common/ids';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsBus } from '../events/events.bus';
-import { ingestAdapterFor } from '../ingest/adapters/registry';
+
 import type { NormalizedAnswer, NormalizedDelivery } from '../ingest/adapters/types';
 import { CUSTOM_TARGET } from '../google-sheets/sheet-rows';
 import { CAPTURED_DURING_SETUP, CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER, SETUP_REVIEW_REASON } from '../custom-webhook/constants';
 import { parseCustomPayload } from '../custom-webhook/extract';
 import type { StoredMapping } from '../custom-webhook/mapping';
+import { INGEST_PROVIDERS, ingestAdapterFor } from '../ingest/adapters/registry';
 import { CANONICAL_FIELDS, CanonicalKey, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
 import { applyTransform, isValidEmail, type Transform } from './transforms';
 import { validateCanonicalValues } from './validators';
+
+/**
+ * Deliveries this worker turns into leads: every form provider's, plus custom
+ * webhooks (provider 'CUSTOM', parsed through the owner's mapping below).
+ */
+const WORKED_PROVIDERS: readonly string[] = [...INGEST_PROVIDERS, CUSTOM_PROVIDER];
 
 interface ClaimedEvent {
   id: string;
@@ -166,10 +173,13 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
    */
   private async claim(): Promise<ClaimedEvent[]> {
     const batchSize = Number(this.config.get('WORKER_BATCH_SIZE') ?? 10);
+    // Form providers and custom webhooks only (WORKED_PROVIDERS): webhook_events
+    // is also the durable queue for CRM webhooks (provider 'HUBSPOT'), which
+    // CrmSyncService drains under its own lease and this worker has no parser for.
     return this.prisma.$queryRawUnsafe<ClaimedEvent[]>(
       `WITH claimed AS (
          SELECT id FROM webhook_events
-          WHERE queue_state = 'PENDING' AND available_at <= now()
+          WHERE queue_state = 'PENDING' AND provider = ANY($3::text[]) AND available_at <= now()
           ORDER BY available_at, id
           FOR UPDATE SKIP LOCKED
           LIMIT $1
@@ -181,6 +191,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
        RETURNING e.id, e.organization_id, e.lead_source_id, e.provider, e.payload, e.attempts`,
       batchSize,
       this.instanceId,
+      WORKED_PROVIDERS,
     );
   }
 
@@ -190,9 +201,10 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$executeRawUnsafe(
       `UPDATE webhook_events
           SET queue_state = 'PENDING', locked_by = NULL, locked_at = NULL
-        WHERE queue_state = 'PROCESSING'
+        WHERE queue_state = 'PROCESSING' AND provider = ANY($2::text[])
           AND locked_at < now() - ($1 || ' milliseconds')::interval`,
       String(ms),
+      WORKED_PROVIDERS,
     );
   }
 

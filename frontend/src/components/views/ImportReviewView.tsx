@@ -3,6 +3,7 @@ import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loa
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
+import { getCrmStatus } from '../../utils/crmApi';
 import { importHistory, type ImportBatch } from '../../utils/fileImportApi';
 import {
   approveRows,
@@ -24,7 +25,14 @@ import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
 import { errorText } from '../sheets/SheetModal';
 
 /** The review reasons every import starts with; shown as the screen itself, not as badges. */
-const IMPORT_REASONS = ['Imported from Google Sheets — awaiting owner approval', 'Imported from a file — awaiting owner approval'];
+const IMPORT_REASONS = [
+  'Imported from Google Sheets — awaiting owner approval',
+  'Imported from a file — awaiting owner approval',
+  'Imported from HubSpot — awaiting owner approval',
+];
+
+/** What a row's source is called on hover, and whether it has a row number worth showing (a CRM record has none). */
+const KIND_NAME: Record<ImportKind, string> = { google_sheets: 'Google Sheet', file_upload: 'Uploaded file', hubspot: 'HubSpot' };
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
@@ -86,7 +94,9 @@ export const ImportReviewView: React.FC = () => {
   const [tab, setTab] = useState<Tab>('pending');
   const [sources, setSources] = useState<SheetSource[]>([]);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
-  const [features, setFeatures] = useState({ sheets: true, files: true });
+  const [features, setFeatures] = useState({ sheets: true, files: true, hubspot: false });
+  /** The connected HubSpot account's import source, when there is one: it changes after review, like a sheet. */
+  const [crm, setCrm] = useState<{ id: string; name: string } | null>(null);
   const [filter, setFilter] = useState('');
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [changes, setChanges] = useState<ChangeItem[]>([]);
@@ -101,17 +111,27 @@ export const ImportReviewView: React.FC = () => {
   const [history, setHistory] = useState(false);
 
   const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
-  // "Changed in the sheet" is about one sheet: the chosen one, or the only one.
+  // "Changed since review" is about one source that keeps syncing — a sheet or
+  // the HubSpot account: the chosen one, or the only one.
   const sheetIds = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
-  const changeSource = tab === 'changes' ? (sourceId && sheetIds.has(sourceId) ? sourceId : sources.length === 1 ? sources[0].id : '') : '';
+  const changeIds = useMemo(() => [...sources.map((s) => s.id), ...(crm ? [crm.id] : [])], [sources, crm]);
+  const changeSource =
+    tab === 'changes' ? (sourceId && changeIds.includes(sourceId) ? sourceId : changeIds.length === 1 ? changeIds[0] : '') : '';
+  const crmChanges = Boolean(crm && changeSource === crm.id);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sheets, hist] = await Promise.all([listSheetSources().catch(unlessOff), importHistory().catch(unlessOff)]);
-      setFeatures({ sheets: sheets !== null, files: hist !== null });
+      const [sheets, hist, hubspot] = await Promise.all([
+        listSheetSources().catch(unlessOff),
+        importHistory().catch(unlessOff),
+        getCrmStatus('hubspot').catch(unlessOff),
+      ]);
+      setFeatures({ sheets: sheets !== null, files: hist !== null, hubspot: hubspot !== null });
       const list = sheets ?? [];
       setSources(list);
+      const crmSource = hubspot?.sourceId ? { id: hubspot.sourceId, name: `HubSpot · ${hubspot.account?.name ?? hubspot.account?.id ?? 'account'}` } : null;
+      setCrm(crmSource);
       setBatches((hist ?? []).filter((b) => b.kind === 'file_upload'));
       if (tab !== 'changes') {
         const page = await reviewQueue({ state: tab, source, sourceId, limit: 50 });
@@ -121,7 +141,8 @@ export const ImportReviewView: React.FC = () => {
         // Clean rows start ticked, so one click approves them; the owner unticks what should wait.
         setSelected(new Set(tab === 'pending' ? page.items.filter(clean).map((i) => i.rowId) : []));
       } else {
-        const src = sourceId && list.some((s) => s.id === sourceId) ? sourceId : list.length === 1 ? list[0].id : '';
+        const ids = [...list.map((s) => s.id), ...(crmSource ? [crmSource.id] : [])];
+        const src = sourceId && ids.includes(sourceId) ? sourceId : ids.length === 1 ? ids[0] : '';
         const found = src ? await sheetChanges(src) : [];
         setChanges(found);
         setSelected((s) => new Set([...s].filter((id) => found.some((c) => c.rowId === id))));
@@ -141,9 +162,14 @@ export const ImportReviewView: React.FC = () => {
   useLiveEvents(
     useCallback(
       (e) => {
-        if (e.type === 'lead.created' && (sources.some((s) => s.id === e.leadSourceId) || batches.some((b) => b.id === e.leadSourceId))) void load();
+        if (
+          e.type === 'lead.created' &&
+          (sources.some((s) => s.id === e.leadSourceId) || batches.some((b) => b.id === e.leadSourceId) || crm?.id === e.leadSourceId)
+        ) {
+          void load();
+        }
       },
-      [sources, batches, load],
+      [sources, batches, crm, load],
     ),
   );
 
@@ -173,7 +199,7 @@ export const ImportReviewView: React.FC = () => {
   // Only a switched-on sheet can sync (the API refuses a paused one); a file never does.
   const syncTargets = useMemo(
     () =>
-      source === 'file_upload' || (sourceId && !sheetIds.has(sourceId))
+      source === 'file_upload' || source === 'hubspot' || (sourceId && !sheetIds.has(sourceId))
         ? []
         : sources.filter((s) => s.status === 'ACTIVE' && (!sourceId || s.id === sourceId)),
     [sources, source, sourceId, sheetIds],
@@ -267,8 +293,8 @@ export const ImportReviewView: React.FC = () => {
         const n = rs.reduce((a, r) => a + r.resolved, 0);
         toast.success(
           what === 'apply'
-            ? `Updated ${n} lead${n === 1 ? '' : 's'} with the sheet’s values.`
-            : `Kept ${n} lead${n === 1 ? '' : 's'} as reviewed. The sheet’s change will not be raised again.`,
+            ? `Updated ${n} lead${n === 1 ? '' : 's'} with ${crmChanges ? 'HubSpot’s' : 'the sheet’s'} values.`
+            : `Kept ${n} lead${n === 1 ? '' : 's'} as reviewed. ${crmChanges ? 'HubSpot’s' : 'The sheet’s'} change will not be raised again.`,
         );
       }
       setSelected(new Set());
@@ -302,8 +328,11 @@ export const ImportReviewView: React.FC = () => {
           <h2 className="text-xl font-bold text-white tracking-tight">Import Review</h2>
           <p className="text-xs text-slate-400">
             Leads from your{' '}
-            {features.sheets && features.files ? 'Google Sheets and uploaded files' : features.files ? 'uploaded files' : 'Google Sheets'} wait
-            here. Rows without a warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
+            {[features.sheets && 'Google Sheets', features.files && 'uploaded files', features.hubspot && 'HubSpot']
+              .filter(Boolean)
+              .join(', ')
+              .replace(/, ([^,]*)$/, ' and $1') || 'imports'}{' '}
+            wait here. Rows without a warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -317,13 +346,19 @@ export const ImportReviewView: React.FC = () => {
             aria-label="Which imports to show"
           >
             {tab === 'changes' ? (
-              <option value="">Choose a sheet…</option>
+              <option value="">{crm ? 'Choose a source…' : 'Choose a sheet…'}</option>
             ) : (
               <>
                 <option value="">All sources</option>
                 {features.sheets && <option value={`${KIND_PREFIX}google_sheets`}>All Google Sheets</option>}
                 {features.files && <option value={`${KIND_PREFIX}file_upload`}>All file uploads</option>}
+                {features.hubspot && <option value={`${KIND_PREFIX}hubspot`}>All HubSpot</option>}
               </>
+            )}
+            {tab === 'changes' && crm && (
+              <optgroup label="HubSpot">
+                <option value={crm.id}>{crm.name}</option>
+              </optgroup>
             )}
             {sources.length > 0 && (
               <optgroup label="Google Sheets">
@@ -382,8 +417,10 @@ export const ImportReviewView: React.FC = () => {
           {(
             [
               ['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`],
-              // Only a sheet changes after review; an uploaded file is read once.
-              ...(features.sheets ? ([['changes', 'Changed in the sheet']] as const) : []),
+              // Only a sheet or a CRM changes after review; an uploaded file is read once.
+              ...(features.sheets || features.hubspot
+                ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet']] as const)
+                : []),
               ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
             ] as const
           ).map(([id, label]) => (
@@ -410,7 +447,7 @@ export const ImportReviewView: React.FC = () => {
           ) : tab === 'rejected' ? null : (
             <>
               {decisionButton('keep', 'Keep current', 'bg-slate-800 text-slate-200 hover:bg-slate-700')}
-              {decisionButton('apply', 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
+              {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
             </>
           )}
         </div>
@@ -517,7 +554,7 @@ export const ImportReviewView: React.FC = () => {
                         <SourceBadge
                           kind={i.source?.kind ?? 'google_sheets'}
                           label={false}
-                          title={`${i.source?.kind === 'file_upload' ? 'Uploaded file' : 'Google Sheet'}: ${i.source?.name ?? '—'} · row ${i.rowNumber}`}
+                          title={`${KIND_NAME[i.source?.kind ?? 'google_sheets']}: ${i.source?.name ?? '—'}${i.source?.kind === 'hubspot' ? '' : ` · row ${i.rowNumber}`}`}
                         />
                       </td>
                       {tab === 'rejected' ? (
@@ -540,8 +577,12 @@ export const ImportReviewView: React.FC = () => {
                             {i.missing && (
                               <span
                                 className="p-1 rounded border bg-slate-800 text-slate-400 border-slate-700 inline-flex cursor-help"
-                                title="Removed from the sheet — the lead is kept; reject it if it should not be worked"
-                                aria-label="Removed from the sheet"
+                                title={
+                                  i.source?.kind === 'hubspot'
+                                    ? 'Deleted, archived or merged in HubSpot — the lead is kept; reject it if it should not be worked'
+                                    : 'Removed from the sheet — the lead is kept; reject it if it should not be worked'
+                                }
+                                aria-label={i.source?.kind === 'hubspot' ? 'No longer in HubSpot' : 'Removed from the sheet'}
                               >
                                 <FileX className="w-3 h-3" />
                               </span>
@@ -579,12 +620,16 @@ export const ImportReviewView: React.FC = () => {
 
         {/* Changed in the sheet after review */}
         {tab === 'changes' && !changeSource && !loading && (
-          <div className="text-center py-10 text-xs text-slate-400">Choose a sheet to see rows that changed after you reviewed them.</div>
+          <div className="text-center py-10 text-xs text-slate-400">
+            {crm ? 'Choose a source to see leads that changed there after you reviewed them.' : 'Choose a sheet to see rows that changed after you reviewed them.'}
+          </div>
         )}
         {tab === 'changes' && changeSource && !loading && changes.length === 0 && !error && (
           <div className="text-center py-10 space-y-2">
             <Inbox className="w-7 h-7 text-slate-600 mx-auto" />
-            <div className="text-xs text-slate-400">No reviewed rows have changed in the sheet.</div>
+            <div className="text-xs text-slate-400">
+              {crmChanges ? 'No reviewed leads have a HubSpot change waiting for you.' : 'No reviewed rows have changed in the sheet.'}
+            </div>
           </div>
         )}
         {tab === 'changes' && changes.length > 0 && (
@@ -604,7 +649,8 @@ export const ImportReviewView: React.FC = () => {
                     {[c.lead?.firstName, c.lead?.lastName].filter(Boolean).join(' ') || 'Lead'}
                   </span>
                   <span className="text-2xs text-slate-500">
-                    row {c.rowNumber} · {c.reviewState} · changed {new Date(c.changedAt).toLocaleString()}
+                    {crmChanges ? '' : `row ${c.rowNumber} · `}
+                    {c.reviewState} · changed {new Date(c.changedAt).toLocaleString()}
                   </span>
                 </div>
                 {c.incomingDoNotContact && (
@@ -617,7 +663,7 @@ export const ImportReviewView: React.FC = () => {
                     <tr>
                       <th className="py-1 pr-2 font-semibold">Field</th>
                       <th className="py-1 pr-2 font-semibold">On the lead now</th>
-                      <th className="py-1 font-semibold">In the sheet</th>
+                      <th className="py-1 font-semibold">{crmChanges ? 'In HubSpot' : 'In the sheet'}</th>
                     </tr>
                   </thead>
                   <tbody>

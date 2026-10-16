@@ -2,7 +2,15 @@ import { Prisma } from '@prisma/client';
 import { LeadStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
 import type { GuardedPrisma } from '../../prisma/prisma.service';
-import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
+import { CRM_IMPORT_REVIEW_REASONS } from '../crm/crm-records';
+import { IMPORT_REVIEW_REASONS } from './sheet-rows';
+
+/**
+ * Every reason an import starts with — a sheet, a file, each connected CRM.
+ * A decision (approve or reject) spends whichever one the lead carries; any
+ * other review reason stays.
+ */
+export const IMPORT_REASONS_SPENT_ON_DECISION: string[] = [...IMPORT_REVIEW_REASONS, ...CRM_IMPORT_REVIEW_REASONS];
 
 /** Why an approved lead stays paused. Approval never overrides any of these. */
 export type HoldReason = 'DO_NOT_CONTACT' | 'NO_DIALABLE_PHONE' | 'STATUS_CHANGED' | 'HUMAN_TAKEOVER';
@@ -42,8 +50,9 @@ export async function approveTrackingRows(tx: Tx, organizationId: string, rowIds
   // The import's reason is spent; any other review reason stays visible.
   await tx.$executeRaw`
     UPDATE leads
-       SET review_reasons = array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON}),
-           needs_review = cardinality(array_remove(array_remove(review_reasons, ${IMPORT_REVIEW_REASON}), ${FILE_IMPORT_REVIEW_REASON})) > 0,
+       SET review_reasons = ARRAY(SELECT r FROM unnest(review_reasons) WITH ORDINALITY AS u(r, n)
+                                   WHERE r <> ALL(${IMPORT_REASONS_SPENT_ON_DECISION}::text[]) ORDER BY n),
+           needs_review = EXISTS (SELECT 1 FROM unnest(review_reasons) AS u(r) WHERE r <> ALL(${IMPORT_REASONS_SPENT_ON_DECISION}::text[])),
            updated_at = now()
      WHERE organization_id = ${organizationId}::uuid AND id = ANY(${leadIds}::uuid[])`;
 

@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Contact,
   FileSpreadsheet,
   FileUp,
   Flame,
@@ -107,7 +108,8 @@ const sourceIcon = (l: LiveLead): LucideIcon => {
     case 'API':
       return Radio;
     case 'SYNC':
-      return FileSpreadsheet;
+      // A connected CRM syncs too; only a spreadsheet gets the sheet glyph.
+      return (s.provider ?? '').toUpperCase() === 'HUBSPOT' ? Contact : FileSpreadsheet;
     case 'UPLOAD':
       return FileUp;
     default:

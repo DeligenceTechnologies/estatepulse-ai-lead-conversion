@@ -89,6 +89,8 @@ export interface ChangedValues {
   /** The new contact matched an opted-out contact when the change was seen. */
   dnc: boolean;
   reviewReasons: string[];
+  /** A CRM row's custom-field prefix (BuiltRow.crmPrefix): applying writes only the CRM's fields. */
+  crmPrefix?: string;
 }
 
 /** Counters for one run: logged every run, and recorded on eventful runs. */
@@ -653,10 +655,20 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     importReason: string,
     /** Rows to approve as they land; null approves nothing. */
     approve: Approval | null,
+    /**
+     * Load only the tracking rows for `rows`' keys, not the whole source's.
+     * For callers that write a large source a page at a time (a CRM import):
+     * the classification of a row never depends on any other row's tracking.
+     */
+    opts: { scopeToRows?: boolean } = {},
   ): Promise<void> {
     stats.dbStatements += 1;
     const tracked = (await this.prisma.sheet_import_rows.findMany({
-      where: { organization_id: organizationId, lead_source_id: sourceId },
+      where: {
+        organization_id: organizationId,
+        lead_source_id: sourceId,
+        ...(opts.scopeToRows ? { row_key: { in: rows.map((r) => r.key!) } } : {}),
+      },
       select: {
         id: true,
         row_key: true,
@@ -878,6 +890,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
         externalId: row.externalId ?? null,
         dnc,
         reviewReasons: reasons(dnc, duplicate, row.reviewReasons).filter((r) => r !== importReason),
+        ...(row.crmPrefix ? { crmPrefix: row.crmPrefix } : {}),
       };
       // The reviewed hash stays: it is what the lead still holds.
       rowUpdates.push({ id: tracked.id, hash: tracked.content_hash, rowNumber: row.rowNumber, set: changed, clear: false, requirePending: false });

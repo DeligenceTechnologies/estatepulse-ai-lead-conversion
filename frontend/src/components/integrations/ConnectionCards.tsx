@@ -23,6 +23,7 @@ import { ConnectModal } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
 import { CustomWebhookCard } from './CustomWebhookCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
+import { HubSpotCard } from './HubSpotCard';
 import { SchedulingCards } from './SchedulingCards';
 import { IntegrationCard } from './IntegrationCard';
 import { TelnyxCard } from './TelnyxCard';
@@ -377,6 +378,8 @@ export const ConnectionCards: React.FC = () => {
           onAdd={() => setWebhookWizard({ sourceId: null })}
           onMap={(id) => setWebhookWizard({ sourceId: id })}
         />
+        {/* HubSpot — self-loading too; hidden where the server has it switched off. */}
+        <HubSpotCard />
 
         {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
         {formProviderCard(

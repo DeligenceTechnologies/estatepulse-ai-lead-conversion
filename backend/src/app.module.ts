@@ -8,6 +8,7 @@ import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { CustomWebhookModule } from './modules/custom-webhook/custom-webhook.module';
+import { CrmModule } from './modules/crm/crm.module';
 import { FollowupModule } from './modules/followup/followup.module';
 import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
@@ -187,6 +188,36 @@ export const envSchema = z.object({
   // ingest route and the management routes answer 404 and the card is hidden.
   // Switching it off changes no data.
   CUSTOM_WEBHOOK_ENABLED: z.string().optional(),
+
+  // --- CRM sync (HubSpot) ---
+  // Off unless HUBSPOT_ENABLED=1: its endpoints answer 404 and nothing syncs.
+  // Switching it off changes no data. Unset client id/secret = the card says
+  // "not configured" instead of failing at boot.
+  HUBSPOT_ENABLED: z.string().optional(),
+  // From the HubSpot app's Auth tab (HubSpot CLI project, developer platform
+  // 2025.2+). The client secret also keys HubSpot's webhook signatures.
+  HUBSPOT_CLIENT_ID: z.string().optional(),
+  HUBSPOT_CLIENT_SECRET: z.string().optional(),
+  // Defaults to `${PUBLIC_APP_URL}/oauth/hubspot-callback.html`; must be listed
+  // in the app's redirectUrls exactly.
+  HUBSPOT_REDIRECT_URI: z.string().url().optional(),
+  // Space-separated. Must include every REQUIRED scope of the HubSpot app, or
+  // HubSpot's authorize page errors. Default: "oauth crm.objects.contacts.read".
+  HUBSPOT_SCOPES: z.string().optional(),
+  // The webhook target URL exactly as registered with HubSpot — what HubSpot
+  // signs. Defaults to `${PUBLIC_API_BASE_URL}/ingest/v1/crm/hubspot/webhook`.
+  HUBSPOT_WEBHOOK_URL: z.string().url().optional(),
+  // Overridable so a fake server can stand in for HubSpot in tests.
+  HUBSPOT_API_BASE_URL: z.string().url().default('https://api.hubapi.com'),
+  HUBSPOT_AUTH_BASE_URL: z.string().url().default('https://app.hubspot.com'),
+  // HubSpot's date-versioned API. Moving to the next version is a deploy.
+  HUBSPOT_API_VERSION: z.string().regex(/^\d{4}-\d{2}$/).default('2026-09'),
+  HUBSPOT_RETRY_BASE_MS: z.coerce.number().default(1000),
+  // How often the worker looks for due CRM work (queued webhooks, runs to
+  // resume, reconciliation); 0 = only when nudged. And how often each
+  // connection is reconciled against the CRM's modified dates.
+  CRM_POLL_MS: z.coerce.number().default(30_000),
+  CRM_RECONCILE_INTERVAL_MS: z.coerce.number().default(3_600_000),
 });
 
 @Module({
@@ -235,6 +266,7 @@ export const envSchema = z.object({
     GoogleSheetsModule,
     FileImportModule,
     CustomWebhookModule,
+    CrmModule,
   ],
   controllers: [HealthController],
 })

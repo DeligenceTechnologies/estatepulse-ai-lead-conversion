@@ -122,6 +122,13 @@ export interface BuiltRow {
   /** The unique-ID cell, kept as leads.external_lead_id. */
   externalId?: string;
   reviewReasons: string[];
+  /**
+   * Set on rows from a connected CRM (crm/crm-records.ts): the custom-field
+   * prefix the CRM owns. A flagged change carries it, so applying the change
+   * writes only the CRM's own fields and never nulls EstatePulse's — see
+   * SheetReviewService.resolve. Absent for sheets and files.
+   */
+  crmPrefix?: string;
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');

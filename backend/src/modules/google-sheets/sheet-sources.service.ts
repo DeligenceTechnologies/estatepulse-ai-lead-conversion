@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../common/errors';
 import { newId } from '../../common/ids';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
+import { HUBSPOT_PROVIDER } from '../crm/crm-records';
 import { GOOGLE_PROVIDER, GoogleConnectionsService, type SessionIdentity } from './google-connections.service';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
 import { GOOGLE_SHEETS_PROVIDER, READ_CHUNK_ROWS, SYNC_CONNECTION, SheetImportService, contactFlags, type RunStats } from './sheet-import.service';
@@ -29,6 +30,15 @@ import type { CreateSourceBody, EnableBody, ReviewQuery, SaveMappingBody } from 
 const SUGGEST_ROWS = 20;
 
 const fail = (status: number, code: string, message: string) => new HttpException({ error: { code, message } }, status);
+
+/** Where a reviewed row came from, as the review queue names it — sheets, uploaded files, a connected CRM. */
+const REVIEW_SOURCE_PROVIDER = { google_sheets: GOOGLE_SHEETS_PROVIDER, file_upload: FILE_UPLOAD_PROVIDER, hubspot: HUBSPOT_PROVIDER } as const;
+type ReviewKind = keyof typeof REVIEW_SOURCE_PROVIDER;
+
+function reviewKind(provider: string): ReviewKind {
+  const found = (Object.keys(REVIEW_SOURCE_PROVIDER) as ReviewKind[]).find((k) => REVIEW_SOURCE_PROVIDER[k] === provider);
+  return found ?? 'google_sheets';
+}
 
 const SOURCE_SELECT = {
   id: true,
@@ -532,7 +542,7 @@ export class SheetSourcesService {
       // A row whose lead was deleted out of band has nothing left to decide: not shown, not counted.
       lead_id: { not: null },
       ...(q.sourceId ? { lead_source_id: q.sourceId } : {}),
-      ...(q.source === 'all' ? {} : { lead_sources: { provider: q.source === 'file_upload' ? FILE_UPLOAD_PROVIDER : GOOGLE_SHEETS_PROVIDER } }),
+      ...(q.source === 'all' ? {} : { lead_sources: { provider: REVIEW_SOURCE_PROVIDER[q.source] } }),
     };
     const rows = await this.prisma.sheet_import_rows.findMany({
       where: {
@@ -580,7 +590,7 @@ export class SheetSourcesService {
         source: {
           id: r.lead_sources.id,
           name: r.lead_sources.name,
-          kind: r.lead_sources.provider === FILE_UPLOAD_PROVIDER ? ('file_upload' as const) : ('google_sheets' as const),
+          kind: reviewKind(r.lead_sources.provider),
         },
         lead: r.leads
           ? {

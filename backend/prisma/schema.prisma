@@ -430,6 +430,7 @@ model lead_sources {
   /// proves itself and which header carries the sender's delivery id. The secret
   /// itself stays in signing_secret_enc. NULL on every other source.
   custom_config               Json?
+  crm_sync_runs               crm_sync_runs[]
   lead_source_field_mappings  lead_source_field_mappings[]
   lead_source_fields          lead_source_fields[]
   organizations               organizations                @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -599,6 +600,7 @@ model organizations {
   audit_logs               audit_logs[]
   calendar_connections     calendar_connections[]
   conversations            conversations[]
+  crm_sync_runs            crm_sync_runs[]
   domainEvents             domain_events[]
   followup_sequences       followup_sequences[]
   integrations             integrations[]
@@ -606,6 +608,7 @@ model organizations {
   lead_sources             lead_sources[]
   leads                    leads[]
   messages                 messages[]
+  oauth_states             oauth_states[]
   organization_members     organization_members[]
   provider_credentials     provider_credentials[]
   sequence_enroll_triggers sequence_enroll_triggers[]
@@ -689,8 +692,10 @@ model users {
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   password_hash        String?
   agent_profiles       agent_profiles[]
+  crm_sync_runs        crm_sync_runs[]
   leads                leads[]
   messages             messages[]
+  oauth_states         oauth_states[]
   organization_members organization_members[]
   user_sessions        user_sessions[]
   sequence_enrollments sequence_enrollments[]
@@ -1089,6 +1094,12 @@ model sheet_import_rows {
   changed_values          Json?
   /// Set only after a COMPLETE read no longer finds the row.
   missing_since           DateTime?     @db.Timestamptz(6)
+  /// CRM rows only: when a CRM read last saw this record. A complete CRM read
+  /// marks rows not seen since it started as missing. NULL for sheets and files.
+  last_seen_at            DateTime?     @db.Timestamptz(6)
+  /// CRM rows only: the CRM-owned values last accepted from the CRM — the base
+  /// of the field-level three-way merge (crm-records.ts, crmMerge).
+  synced_values           Json?
   created_at              DateTime      @default(now()) @db.Timestamptz(6)
   updated_at              DateTime      @default(now()) @db.Timestamptz(6)
   organizations           organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1098,4 +1109,74 @@ model sheet_import_rows {
 
   @@unique([lead_source_id, row_key], map: "sheet_import_rows_source_row_unique")
   @@index([lead_id], map: "idx_sheet_import_rows_lead")
+}
+
+/// One full read of a connected CRM (an initial import, or a later complete
+/// re-read), resumable from its cursor. See migration
+/// 20261015000001_crm_hubspot_sync.
+///
+/// NOTE: the PARTIAL unique index crm_sync_runs_one_active — one queued or
+/// running run per lead source — lives only in the migration (Prisma cannot
+/// express it), as do the CHECKs: kind initial|full; status
+/// queued|running|succeeded|failed|cancelled; finished_at set exactly when the
+/// status is final; every counter >= 0.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model crm_sync_runs {
+  id              String        @id @db.Uuid
+  organization_id String        @db.Uuid
+  lead_source_id  String        @db.Uuid
+  provider        String        @db.VarChar(50)
+  /// initial | full
+  kind            String        @db.VarChar(20)
+  /// queued | running | succeeded | failed | cancelled
+  status          String        @default("queued") @db.VarChar(20)
+  requested_by    String?       @db.Uuid
+  /// The provider's paging cursor after the last page written; NULL = from the start.
+  cursor          String?       @db.VarChar(255)
+  pages           Int           @default(0)
+  fetched         Int           @default(0)
+  created         Int           @default(0)
+  updated         Int           @default(0)
+  unchanged       Int           @default(0)
+  linked          Int           @default(0)
+  conflicts       Int           @default(0)
+  duplicates      Int           @default(0)
+  skipped         Int           @default(0)
+  failed          Int           @default(0)
+  missing         Int           @default(0)
+  /// Consecutive transient failures; drives backoff.
+  attempts        Int           @default(0)
+  available_at    DateTime      @default(now()) @db.Timestamptz(6)
+  error_code      String?       @db.VarChar(50)
+  error_message   String?       @db.VarChar(500)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  started_at      DateTime?     @db.Timestamptz(6)
+  heartbeat_at    DateTime?     @db.Timestamptz(6)
+  finished_at     DateTime?     @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lead_sources    lead_sources  @relation(fields: [lead_source_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users           users?        @relation(fields: [requested_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id, lead_source_id, created_at(sort: Desc)], map: "idx_crm_sync_runs_source")
+}
+
+/// An OAuth authorization in flight. `id` is sha256(state) — the state value is
+/// never stored. Consumed once, by the same user, organization and session that
+/// started it, with one conditional UPDATE. See migration
+/// 20261015000001_crm_hubspot_sync.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model oauth_states {
+  id              String        @id @db.VarChar(64)
+  provider        String        @db.VarChar(50)
+  organization_id String        @db.Uuid
+  user_id         String        @db.Uuid
+  session_id      String        @db.Uuid
+  expires_at      DateTime      @db.Timestamptz(6)
+  consumed_at     DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_oauth_states_expires")
 }
