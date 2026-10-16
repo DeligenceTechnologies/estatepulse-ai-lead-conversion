@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Clock, Loader2, ShieldCheck } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { getStrategy, saveStrategy, type Guardrails } from '../../utils/strategiesApi';
 
 /**
@@ -28,7 +29,6 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
   const [respect, setRespect] = useState(true);
   const [start, setStart] = useState('21:00');
@@ -70,10 +70,9 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           maxVoiceAttempts: maxVoice,
         },
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.success('Contact window saved.');
     } catch (e: any) {
-      setError(e?.message || 'Could not save your contact window.');
+      toast.error(e?.message || 'Could not save your contact window.');
     } finally {
       setSaving(false);
     }
@@ -177,7 +176,6 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
               </span>
             </p>
             <div className="flex items-center gap-2 shrink-0">
-              {saved && <span className="text-xs text-emerald-400 font-semibold">Saved</span>}
               <button
                 type="button"
                 onClick={() => void save()}

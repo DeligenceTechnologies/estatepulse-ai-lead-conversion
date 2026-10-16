@@ -20,6 +20,8 @@ import {
   MessageSquare,
   Lock
 } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { confirmToast } from '../../lib/toast';
 import { useApp } from '../../context/AppContext';
 import {
   getAssistant,
@@ -58,7 +60,6 @@ export const AISettingsView: React.FC = () => {
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
   const [systemPrompt, setSystemPrompt] = useState(orgSettings.aiSystemPrompt);
-  const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Provider connection (Bring-Your-Own-Telnyx).
   const [status, setStatus] = useState<TelnyxStatus | null>(null);
@@ -79,7 +80,13 @@ export const AISettingsView: React.FC = () => {
   const switchAgent = (id: string) => {
     if (!id || (status && id === status.assistantId)) return;
     setSwitching(true);
-    attachAssistant(id).then(refreshStatus).catch(() => refreshStatus()).finally(() => setSwitching(false));
+    attachAssistant(id)
+      .then(refreshStatus)
+      .catch((e: any) => {
+        toast.error(e?.message || 'Could not switch the AI agent.');
+        return refreshStatus();
+      })
+      .finally(() => setSwitching(false));
   };
 
   // Live AI agent state.
@@ -87,7 +94,6 @@ export const AISettingsView: React.FC = () => {
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [deploying, setDeploying] = useState(false);
-  const [deployError, setDeployError] = useState<string | null>(null);
 
   // Editable agent settings (loaded live).
   const [greeting, setGreeting] = useState('');
@@ -130,7 +136,6 @@ export const AISettingsView: React.FC = () => {
   const [tools, setTools] = useState<AssistantTool[]>([]);
   const [editingTool, setEditingTool] = useState<AssistantTool | null>(null);
   const [toolModalOpen, setToolModalOpen] = useState(false);
-  const [toolError, setToolError] = useState<string | null>(null);
   const [toolBusy, setToolBusy] = useState(false);
 
   // Prompt helpers
@@ -203,7 +208,6 @@ export const AISettingsView: React.FC = () => {
 
     // 2) Deploy prompt + tone + voice + call behavior to the live AI voice agent.
     setDeploying(true);
-    setDeployError(null);
     try {
       const dynamic_variables = dynamicVars.reduce((acc, { key, value }) => {
         if (key.trim()) acc[key.trim()] = value;
@@ -248,10 +252,9 @@ export const AISettingsView: React.FC = () => {
         // never silently rewrite them — and so a shared tool is never forked
         // into a private copy. See the Tools card below.
       });
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+      toast.success('AI agent settings saved & deployed');
     } catch (err: any) {
-      setDeployError(err.message || 'Failed to deploy to AI agent');
+      toast.error(`Deploy failed: ${err.message || 'Failed to deploy to AI agent'}`);
     } finally {
       setDeploying(false);
     }
@@ -268,14 +271,10 @@ export const AISettingsView: React.FC = () => {
   const ownedTools = () => tools.filter((t) => !t.shared);
 
   const persistTools = async (next: AssistantTool[]) => {
-    setToolError(null);
     setToolBusy(true);
     try {
       const a = await saveTools(next);
       setTools(a.tools || []);
-    } catch (e: any) {
-      setToolError(e?.message || 'Could not save tools.');
-      throw e;
     } finally {
       setToolBusy(false);
     }
@@ -290,8 +289,7 @@ export const AISettingsView: React.FC = () => {
   };
 
   const removeTool = async (tool: AssistantTool) => {
-    if (!confirm(`Remove "${toolLabel(tool)}" from this agent?`)) return;
-    setToolError(null);
+    if (!(await confirmToast(`Remove "${toolLabel(tool)}" from this agent?`, 'Remove'))) return;
     setToolBusy(true);
     try {
       // A shared tool is detached by id and survives in the library; an owned
@@ -300,8 +298,9 @@ export const AISettingsView: React.FC = () => {
         ? await detachTool(tool.id)
         : await saveTools(ownedTools().filter((t) => t !== tool));
       setTools(a.tools || []);
+      toast.success('Tool removed.');
     } catch (e: any) {
-      setToolError(e?.message || 'Could not remove the tool.');
+      toast.error(e?.message || 'Could not remove the tool.');
     } finally {
       setToolBusy(false);
     }
@@ -338,18 +337,6 @@ export const AISettingsView: React.FC = () => {
           </p>
         </div>
 
-        {savedSuccess && (
-          <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/40 px-3 py-1.5 rounded-xl">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>AI agent settings saved &amp; deployed</span>
-          </div>
-        )}
-        {deployError && (
-          <div className="flex items-center gap-1.5 text-xs text-rose-300 font-semibold bg-rose-950/60 border border-rose-800/40 px-3 py-1.5 rounded-xl">
-            <AlertTriangle className="w-4 h-4" />
-            <span>Deploy failed: {deployError}</span>
-          </div>
-        )}
       </div>
 
       {/* The connection itself is made on Integrations & Webhooks. This page
@@ -1015,12 +1002,6 @@ export const AISettingsView: React.FC = () => {
               <Plus className="w-3 h-3" /> Add tool
             </button>
           </div>
-
-          {toolError && (
-            <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
-              {toolError}
-            </div>
-          )}
 
           <div className="space-y-2 text-xs">
             {tools.length === 0 && (

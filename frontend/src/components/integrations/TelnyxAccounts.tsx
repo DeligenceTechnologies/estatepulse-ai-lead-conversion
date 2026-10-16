@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Check, Loader2, Pencil, PhoneCall, Trash2, X } from 'lucide-react';
+import { Check, Loader2, Pencil, PhoneCall, Trash2, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   TelnyxAccount,
   activateTelnyxAccount,
@@ -24,21 +25,20 @@ export const TelnyxAccounts: React.FC<{
   onChange: () => void;
 }> = ({ accounts, onChange }) => {
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   if (accounts.length < 2) return null;
 
-  const run = async (key: string, fn: () => Promise<unknown>) => {
+  const run = async (key: string, fn: () => Promise<unknown>, done?: string) => {
     setBusy(key);
-    setError(null);
     try {
       await fn();
       onChange();
+      if (done) toast.success(done);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -52,7 +52,7 @@ export const TelnyxAccounts: React.FC<{
   const commitRename = (id: string) => {
     const label = draft.trim();
     if (!label) return setRenaming(null);
-    void run(`rename:${id}`, () => renameTelnyxAccount(id, label)).then(() => setRenaming(null));
+    void run(`rename:${id}`, () => renameTelnyxAccount(id, label), 'Account renamed.').then(() => setRenaming(null));
   };
 
   return (
@@ -61,12 +61,6 @@ export const TelnyxAccounts: React.FC<{
         <h4 className="text-xs font-semibold text-slate-200">Saved accounts</h4>
         <span className="text-xs text-slate-500">One is active at a time</span>
       </div>
-
-      {error && (
-        <div className="flex items-start gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
-        </div>
-      )}
 
       <div className="space-y-1.5">
         {accounts.map((a) => (
@@ -132,7 +126,7 @@ export const TelnyxAccounts: React.FC<{
                 <button
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => void run(`use:${a.id}`, () => activateTelnyxAccount(a.id))}
+                  onClick={() => void run(`use:${a.id}`, () => activateTelnyxAccount(a.id), 'Account activated.')}
                   className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40 shrink-0 flex items-center gap-1.5"
                 >
                   {busy === `use:${a.id}` && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -157,7 +151,7 @@ export const TelnyxAccounts: React.FC<{
                 disabled={busy !== null}
                 onClick={() => {
                   if (confirmDelete !== a.id) return setConfirmDelete(a.id);
-                  void run(`del:${a.id}`, () => deleteTelnyxAccount(a.id)).then(() =>
+                  void run(`del:${a.id}`, () => deleteTelnyxAccount(a.id), 'Account deleted.').then(() =>
                     setConfirmDelete(null),
                   );
                 }}

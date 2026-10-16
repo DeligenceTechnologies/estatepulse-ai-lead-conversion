@@ -13,6 +13,7 @@ import {
   FileText,
   ChevronDown,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
@@ -184,8 +185,10 @@ export const LeadDetailModal: React.FC = () => {
     try {
       await enrollLead(selectedLeadId);
       setFlow(await getLeadFlow(selectedLeadId));
+      toast.success('AI outreach started.');
     } catch (e) {
       setEnrollError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setEnrolling(false);
     }

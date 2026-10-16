@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FileSpreadsheet, FileUp, History, Loader2 } from 'lucide-react';
+import { Contact, FileSpreadsheet, FileUp, History, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { importHistory, removeImport, type ImportBatch } from '../../utils/fileImportApi';
+import type { ImportKind } from '../../utils/googleSheetsApi';
 import { ISSUE_TEXT } from '../../utils/sheetMapping';
 import { SheetError, SheetModal, errorText } from '../sheets/SheetModal';
 
@@ -8,23 +10,25 @@ import { SheetError, SheetModal, errorText } from '../sheets/SheetModal';
  * The badge a row wears for where it came from — the same on every screen.
  * `label={false}` is the icon alone, with `title` as the hover text.
  */
-export const SourceBadge: React.FC<{ kind: 'google_sheets' | 'file_upload'; label?: boolean; title?: string }> = ({
-  kind,
-  label = true,
-  title,
-}) => {
-  const file = kind === 'file_upload';
-  const Icon = file ? FileUp : FileSpreadsheet;
+const BADGE: Record<ImportKind, { icon: typeof FileUp; cls: string; name: string; word: string }> = {
+  google_sheets: { icon: FileSpreadsheet, cls: 'bg-green-500/15 text-green-300 border-green-500/30', name: 'Google Sheet', word: 'sheet' },
+  file_upload: { icon: FileUp, cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30', name: 'Uploaded file', word: 'file' },
+  hubspot: { icon: Contact, cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30', name: 'HubSpot', word: 'crm' },
+};
+
+export const SourceBadge: React.FC<{ kind: ImportKind; label?: boolean; title?: string }> = ({ kind, label = true, title }) => {
+  const b = BADGE[kind] ?? BADGE.google_sheets;
+  const Icon = b.icon;
   return (
     <span
       className={`text-2xs font-bold uppercase rounded border inline-flex items-center gap-1 whitespace-nowrap ${
         label ? 'px-1.5 py-0.5' : 'p-1 cursor-help'
-      } ${file ? 'bg-sky-500/15 text-sky-300 border-sky-500/30' : 'bg-green-500/15 text-green-300 border-green-500/30'}`}
+      } ${b.cls}`}
       title={title}
-      aria-label={title ?? (file ? 'Uploaded file' : 'Google Sheet')}
+      aria-label={title ?? b.name}
     >
       <Icon className="w-3 h-3" />
-      {label && (file ? 'file' : 'sheet')}
+      {label && b.word}
     </span>
   );
 };
@@ -52,7 +56,6 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,10 +72,9 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
 
   const remove = async (b: ImportBatch) => {
     setBusy(b.id);
-    setError(null);
     try {
       const r = await removeImport(b.id);
-      setNotice(
+      toast.success(
         `Removed ${b.name}: ${r.rejected} lead${r.rejected === 1 ? '' : 's'} waiting for review rejected` +
           (r.approvedKept ? `, ${r.approvedKept} approved lead${r.approvedKept === 1 ? '' : 's'} kept` : '') +
           '.',
@@ -81,7 +83,7 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
       await load();
       onChanged();
     } catch (e) {
-      setError(errorText(e));
+      toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -96,9 +98,6 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
       onClose={onClose}
     >
       {error && <SheetError message={error} />}
-      {notice && (
-        <div className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">{notice}</div>
-      )}
       {!imports && !error && (
         <div className="flex items-center gap-2 text-xs text-slate-400">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…

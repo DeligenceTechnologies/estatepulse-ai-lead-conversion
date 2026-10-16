@@ -13,13 +13,14 @@ import { ManualWebhookPanel, PanelClose } from './ManualWebhookPanel';
  *
  * Two routes in, and the difference between them is what we are trusted with,
  * not how hard they are:
- *  - Tally: we hold an API key, install the webhook, and can repair it later.
+ *  - Tally / Typeform: we hold an API key, install the webhook, and can repair
+ *    it later. Same panel, different provider code.
  *  - Webhook: we hold nothing, hand over a URL and secret, and cannot.
  */
 
-export type ConnectKind = 'TALLY' | 'WEBHOOK';
+export type ConnectKind = 'TALLY' | 'TYPEFORM' | 'WEBHOOK';
 
-type Step = { k: 'choose' } | { k: 'tally' } | { k: 'webhook' };
+type Step = { k: 'choose' } | { k: 'provider'; code: 'TALLY' | 'TYPEFORM' } | { k: 'webhook' };
 
 const Option: React.FC<{
   icon: React.ReactNode;
@@ -53,7 +54,7 @@ export const ConnectModal: React.FC<{
   onOpenSource: (leadSourceId: string) => void;
 }> = ({ initial, onClose, onConnected, onOpenSource }) => {
   const [step, setStep] = useState<Step>(
-    initial === 'TALLY' ? { k: 'tally' } : initial === 'WEBHOOK' ? { k: 'webhook' } : { k: 'choose' },
+    initial === 'WEBHOOK' ? { k: 'webhook' } : initial ? { k: 'provider', code: initial } : { k: 'choose' },
   );
 
   // Escape closes, and the page behind must not scroll under the overlay.
@@ -96,7 +97,16 @@ export const ConnectModal: React.FC<{
               blurb="Pick a form and we install the webhook on it for you."
               detail="Needs an API key. In exchange we can read the form's questions before the first submission arrives, and repair or remove the webhook later."
               accent="border-emerald-500/40 hover:border-emerald-500/70"
-              onClick={() => setStep({ k: 'tally' })}
+              onClick={() => setStep({ k: 'provider', code: 'TALLY' })}
+            />
+
+            <Option
+              icon={<Radio className="w-4 h-4 text-emerald-400" />}
+              title="Typeform"
+              blurb="Pick a form and we install the webhook on it for you."
+              detail="Needs a personal access token. Same deal as Tally: we read the form's questions up front and can repair or remove the webhook later."
+              accent="border-emerald-500/40 hover:border-emerald-500/70"
+              onClick={() => setStep({ k: 'provider', code: 'TYPEFORM' })}
             />
 
             <Option
@@ -110,8 +120,9 @@ export const ConnectModal: React.FC<{
           </div>
         )}
 
-        {step.k === 'tally' && (
+        {step.k === 'provider' && (
           <ConnectFormPanel
+            provider={step.code}
             onClose={onClose}
             onConnected={onConnected}
             onOpenSource={onOpenSource}

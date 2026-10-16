@@ -144,7 +144,7 @@ export interface LeadSourceConfig {
   leadCount?: number;
 
   // --- set only on API-connected sources ---
-  /** 'TALLY'. Absent on sources created before providers existed. */
+  /** 'TALLY' | 'TYPEFORM'. Absent on sources created before providers existed. */
   provider?: string | null;
   /** 'MANUAL' (customer pasted our URL) | 'API' (we installed the webhook). */
   connectionMethod?: string | null;

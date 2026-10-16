@@ -232,3 +232,26 @@ body {
     animation: none;
   }
 }
+
+/*
+ * react-toastify. One "dark" theme whose colours are the slate/accent tokens
+ * above, so toasts flip with [data-theme="light"] for free. `html:root` only
+ * out-ranks the :root block the library injects at mount, after this sheet.
+ */
+html:root {
+  --toastify-font-family: var(--font-sans);
+  --toastify-color-dark: var(--color-slate-900);
+  --toastify-text-color-dark: var(--color-slate-100);
+  --toastify-color-progress-dark: var(--color-slate-600);
+  --toastify-color-success: var(--color-emerald-400);
+  --toastify-color-error: var(--color-rose-400);
+  --toastify-color-warning: var(--color-amber-400);
+  --toastify-color-info: var(--color-sky-400);
+  --toastify-toast-bd-radius: 0.75rem;
+  --toastify-toast-shadow: var(--shadow-xl);
+}
+.Toastify__toast {
+  border: 1px solid var(--color-slate-800);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
+import { toast } from 'react-toastify';
 import { 
   X, 
   FileText, 
   Download, 
-  CheckCircle2, 
   Calendar, 
   Sparkles, 
   Sliders, 
@@ -69,7 +69,6 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
   );
 
   const [isExporting, setIsExporting] = useState(false);
-  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -113,7 +112,6 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
 
   const handleExportPDF = () => {
     setIsExporting(true);
-    setExportSuccess(null);
 
     try {
       const reportConfig: ReportConfig = {
@@ -190,7 +188,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
       generateMonthlyPerformancePDF(reportData);
 
       const filename = `${reportConfig.brokerageName}_Monthly_Performance_${selectedMonth.replace(/\s+/g, '_')}.pdf`;
-      setExportSuccess(filename);
+      toast.success(`PDF exported as ${filename}`);
 
       if (addAuditLog) {
         addAuditLog(
@@ -207,6 +205,7 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
       }
     } catch (err) {
       console.error('Failed to export PDF:', err);
+      toast.error('Could not export the PDF.');
     } finally {
       setIsExporting(false);
     }
@@ -251,24 +250,6 @@ export const QuickReportModal: React.FC<QuickReportModalProps> = ({
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs">
           
-          {/* Export Success Alert */}
-          {exportSuccess && (
-            <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 flex items-center justify-between gap-3 text-emerald-200 animate-in fade-in duration-200">
-              <div className="flex items-center gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>PDF Exported successfully!</strong> Downloaded: <code className="font-mono text-emerald-300 font-semibold">{exportSuccess}</code>
-                </span>
-              </div>
-              <button 
-                onClick={() => setExportSuccess(null)} 
-                className="text-emerald-400 hover:text-white underline text-xs"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
           {/* Top Configuration Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             

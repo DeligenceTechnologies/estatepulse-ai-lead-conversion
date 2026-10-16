@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, User, Users } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor, type OrganizationType } from '../../lib/api';
 import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton } from './AuthLayout';
@@ -78,7 +79,7 @@ export const SignupPage: React.FC = () => {
       });
       navigate('/', { replace: true });
     } catch (err) {
-      setError(messageFor(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }
