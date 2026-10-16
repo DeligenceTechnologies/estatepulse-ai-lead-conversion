@@ -62,15 +62,15 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
   }, [leadId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100 max-h-[90vh] flex flex-col">
-        <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+      <div className="relative w-full max-w-2xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden text-slate-100 h-[100dvh] sm:h-auto sm:max-h-[90vh] flex flex-col">
+        <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-white truncate">
               {lead ? leadName(lead) : 'Lead'}
             </h3>
             {lead && (
-              <div className="flex items-center gap-1.5 mt-1">
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
                 <span className={`${PILL} ${statusTone(lead.status)}`}>
                   {statusLabel(lead.status)}
                 </span>
@@ -96,7 +96,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
           </button>
         </div>
 
-        <div className="p-5 space-y-4 text-xs overflow-y-auto custom-scrollbar">
+        <div className="p-4 sm:p-5 space-y-4 text-xs flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           {error && (
             <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
               <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
@@ -112,7 +112,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
 
           {lead && (
             <>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Field label="Phone" value={lead.phone} />
                 <Field label="Email" value={lead.email} />
                 <Field label="Source" value={lead.source?.name ?? null} />
@@ -121,7 +121,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
                 <Field label="Assigned to you" value={formatDate(lead.assignedAt)} />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Field label="Location" value={lead.location} />
                 <Field label="Timeline" value={lead.timeline} />
                 <Field label="Buying intent" value={lead.buyingIntent} />
