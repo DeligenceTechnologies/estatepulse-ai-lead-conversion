@@ -8,6 +8,9 @@ export const envValidationSchema = Joi.object({
     REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
     EMAIL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
     EMAIL_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(5),
+    CALL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
+    CALL_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(200).default(20),
+    CALL_SLOT_TTL_MS: Joi.number().integer().min(60_000).default(1_800_000),
 
     PORT: Joi.number().port().default(4000),
 

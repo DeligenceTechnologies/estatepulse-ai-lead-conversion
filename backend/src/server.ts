@@ -14,7 +14,21 @@ import { sha256Hex } from './common/utils/crypto';
 /** Provider deliveries (lead webhooks, Telnyx, calendars, booking tools) get their own generous per-IP bucket. */
 const INBOUND_PREFIXES = ['/ingest/', '/webhooks/', '/tools/', '/calendar/webhooks/'];
 
+const SHUTDOWN_GRACE_MS = 10_000;
+
+function exitIfShutdownHangs(): void {
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => {
+      setTimeout(() => {
+        console.error(`Shutdown on ${signal} took over ${SHUTDOWN_GRACE_MS / 1000}s; exiting without waiting.`);
+        process.exit(1);
+      }, SHUTDOWN_GRACE_MS).unref();
+    });
+  }
+}
+
 async function bootstrap() {
+  exitIfShutdownHangs();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   const config = app.get(ConfigService);
