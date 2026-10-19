@@ -8,7 +8,7 @@ import { nextAllowedAt } from '@/common/utils/quiet-hours';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from '@/telnyx/activity.service';
 import { SmsService } from '@/telnyx/sms.service';
-import { VoiceService } from '@/telnyx/voice.service';
+import { CallQueue } from '@/telnyx/calls/call.queue';
 import { FollowupService, stepsOf, type SequenceStep } from './followup.service';
 
 interface ClaimedEnrollment {
@@ -41,7 +41,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly followup: FollowupService,
     private readonly sms: SmsService,
-    private readonly voice: VoiceService,
+    private readonly calls: CallQueue,
     private readonly activity: ActivityService,
   ) {}
 
@@ -149,12 +149,10 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       return;
     }
     try {
-      const call = await this.voice.placeCall(row.organization_id, lead.phone ?? '', {
-        leadId: row.lead_id,
-        orgId: row.organization_id,
-        sequenceId: row.sequence_id,
-      });
-      await this.activity.startCall(row.organization_id, row.lead_id, call.call_control_id);
+      await this.calls.enqueue(
+        { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id },
+        { dedupeKey: `followup:${row.id}:${row.current_step}` },
+      );
     } catch (error) {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
     }

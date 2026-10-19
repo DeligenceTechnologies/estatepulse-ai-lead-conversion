@@ -8,7 +8,7 @@ import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lea
 import { ActivityService } from './activity.service';
 import { SmsService } from './sms.service';
 import { StrategyStoreService, type StrategyStep } from './strategy-store.service';
-import { VoiceService } from './voice.service';
+import { CallQueue } from './calls/call.queue';
 
 const UNIT_MS: Record<string, number> = { seconds: 1_000, minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const FINALIZE_AFTER_MS = 90_000;
@@ -77,7 +77,7 @@ export class EngineService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly strategies: StrategyStoreService,
     private readonly sms: SmsService,
-    private readonly voice: VoiceService,
+    private readonly calls: CallQueue,
     private readonly activity: ActivityService,
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
   ) {}
@@ -272,8 +272,10 @@ export class EngineService implements OnModuleDestroy {
     } else if (step.channel === 'voice' && (guardrails?.maxVoiceAttempts ?? 99) > e.voiceAttempts) {
       e.voiceAttempts += 1;
       try {
-        const call = await this.voice.placeCall(e.orgId, lead.phone ?? '', { leadId: e.leadId, orgId: e.orgId });
-        await this.activity.startCall(e.orgId, e.leadId, call.call_control_id);
+        await this.calls.enqueue(
+          { orgId: e.orgId, leadId: e.leadId, source: 'strategy' },
+          { dedupeKey: `strategy:${e.leadId}:${e.enrolledAt}:${e.voiceAttempts}` },
+        );
       } catch (error) {
         await this.activity.recordCallFailed(e.orgId, e.leadId, (error as Error).message);
       }

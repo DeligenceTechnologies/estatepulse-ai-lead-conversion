@@ -4,6 +4,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
 import { AssistantService } from './assistant.service';
+import { CallSlots } from './calls/call-slots';
 import { LeadInsightsService } from './lead-insights.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TELNYX_API } from './telnyx-api';
@@ -36,6 +37,7 @@ export class ActivityService {
     private readonly creds: TelnyxCredentialsService,
     private readonly insights: LeadInsightsService,
     private readonly assistants: AssistantService,
+    private readonly slots: CallSlots,
   ) {}
 
   async recordSms(orgId: string, leadId: string, text: string, ok: boolean, providerIdOrReason?: string | null): Promise<void> {
@@ -111,6 +113,7 @@ export class ActivityService {
       const call = await this.callByProvider(ccid);
       if (!call) return null;
       await this.prisma.call.update({ where: { id: call.id }, data: { status: CallStatus.in_progress } });
+      await this.slots.extend(call.orgId, ccid).catch(() => undefined);
       await this.markContacted(call.leadId, true);
       return call;
     })().catch((error) => {
@@ -132,6 +135,7 @@ export class ActivityService {
   async onCallHangup(ccid: string, payload: { hangup_cause?: string } = {}): Promise<void> {
     const call = await this.callByProvider(ccid);
     if (!call) return;
+    await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
     const answered = call.status === CallStatus.in_progress;
     await this.prisma.call.update({
       where: { id: call.id },

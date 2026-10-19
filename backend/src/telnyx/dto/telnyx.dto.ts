@@ -200,3 +200,10 @@ export class SetToolsDto {
   @IsObject({ each: true })
   tools!: Record<string, unknown>[];
 }
+
+export class CallCapacityDto {
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  maxConcurrentCalls!: number;
+}
