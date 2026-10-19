@@ -10,9 +10,12 @@ import { IntegrationCard } from './IntegrationCard';
 
 /**
  * HubSpot — connect the office's HubSpot account and import its contacts as
- * leads. New leads wait in Import Review; nobody is called or texted until the
- * owner approves them. After the first import, HubSpot's webhooks keep leads in
- * step, with a periodic check for anything a webhook missed.
+ * leads. Contacts already in HubSpot wait in Import Review; none is called or
+ * texted until the owner approves it. Contacts created in HubSpot afterwards go
+ * straight to Leads (and outreach) when clean — a name, a valid email and phone,
+ * nothing flagged — and wait for review otherwise. After the first import,
+ * HubSpot's webhooks keep leads in step, with a periodic check for anything a
+ * webhook missed.
  */
 
 const PROVIDER = 'hubspot' as const;
@@ -165,7 +168,7 @@ export const HubSpotCard: React.FC = () => {
           </div>
         }
         title={NAME}
-        blurb="Import your CRM contacts, reviewed before anyone is contacted"
+        blurb="Import your CRM contacts; clean new ones go straight to Leads"
         connected={live}
         loading={loading}
         accent="border-orange-500/40"
@@ -179,7 +182,9 @@ export const HubSpotCard: React.FC = () => {
 
         {!loading && status?.configured && s === 'not_connected' && (
           <p className="text-xs text-slate-500">
-            Connecting imports your HubSpot contacts as leads. They wait in Import Review — nobody is contacted until you approve them.
+            Connecting imports your HubSpot contacts as leads. Contacts already in HubSpot wait in Import Review — nobody is contacted
+            until you approve them. Contacts added to HubSpot later go straight to Leads, and outreach, when they have a name, a valid
+            email and a valid phone; the rest wait for review.
           </p>
         )}
 

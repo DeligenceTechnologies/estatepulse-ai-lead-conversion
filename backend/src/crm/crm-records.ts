@@ -95,6 +95,12 @@ export interface CrmContact {
    * person, which must start with the provider's custom-field prefix.
    */
   extra: Record<string, string | null>;
+  /**
+   * When the record was created in the CRM, epoch ms; null when the provider
+   * did not say. Only decides whether a contact is new since the connection
+   * (see crm-sync.service autoApproval); never written to the lead.
+   */
+  createdAt?: number | null;
 }
 
 export interface CrmProviderLabel {

@@ -7,7 +7,7 @@ import { httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
-import { RunStats, SheetImportService, type ChangedValues } from '@/google-sheets/sheet-import.service';
+import { RunStats, SheetImportService, type Approval, type ChangedValues } from '@/google-sheets/sheet-import.service';
 import { applyCrmChanges } from '@/google-sheets/sheet-review.service';
 import { PHONE_UNPARSED_REASON, type BuiltRow, type LeadFields } from '@/google-sheets/sheet-rows';
 import { CrmConnectionsService, integrationProviderOf, sourceProviderOf, type SessionIdentity } from './crm-connections.service';
@@ -103,6 +103,7 @@ interface Claimed {
   sync_remote_version: string | null;
   sync_next_at: Date | null;
   sync_failures: number;
+  created_at: Date;
 }
 
 interface Ctx {
@@ -113,6 +114,8 @@ interface Ctx {
   defaultConsent: ConsentStatus;
   region: string;
   importReason: string;
+  /** When the CRM was first connected (the source's creation): contacts created after it may skip review. */
+  connectedAt: Date;
   /** What the logs show: names and ids only. */
   logTag: string;
 }
@@ -348,7 +351,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
         FROM due
        WHERE s.id = due.id
       RETURNING s.id, s.organization_id, s.provider::text AS provider, s.integration_id, s.default_consent_status,
-                s.sync_remote_version, s.sync_next_at, s.sync_failures`;
+                s.sync_remote_version, s.sync_next_at, s.sync_failures, s.created_at`;
     return rows[0] ?? null;
   }
 
@@ -385,6 +388,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
       defaultConsent: c.default_consent_status,
       region: settings?.defaultRegion ?? 'US',
       importReason: adapter ? crmImportReviewReason(adapter.label) : '',
+      connectedAt: c.created_at,
       logTag: `${c.provider} source ${c.id}`,
     };
     const deadline = Date.now() + SLICE_MS;
@@ -716,6 +720,8 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
    *    owner in Import Review. Never a second lead.
    *  - Untracked otherwise: a new lead, paused, awaiting approval. Phone alone
    *    never links: shared office and family numbers would merge strangers.
+   *    A clean contact created in the CRM after the connection skips Import
+   *    Review instead (autoApproval).
    *  - Tracked and approved, changed in the CRM: a field-level three-way merge
    *    against what the CRM said last time (crmMerge).
    *  - Pending drafts, rejected rows, and a lead deleted out of band: the
@@ -725,9 +731,11 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
     const { adapter, organizationId: orgId, sourceId } = ctx;
     const prefix = adapter.label.customPrefix;
     const byKey = new Map<string, BuiltRow>();
+    const createdSinceConnect = new Set<string>();
     for (const contact of contacts) {
       const row = buildCrmRow(adapter.provider, adapter.label, contact, ctx.region);
       byKey.set(row.key!, row);
+      if (contact.createdAt && contact.createdAt >= ctx.connectedAt.getTime()) createdSinceConnect.add(contact.externalId);
     }
     const all = [...byKey.values()];
     const seenKeys = all.map((r) => r.key!);
@@ -890,7 +898,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
       // --- everything else through the shared import engine ---
       const applied = new Set(apply.map((a) => a.key));
       const engineRows = rows.filter((r) => !applied.has(r.key!));
-      if (engineRows.length) await this.writeThroughEngine(ctx, engineRows, counts);
+      if (engineRows.length) await this.writeThroughEngine(ctx, engineRows, counts, autoApproval(createdSinceConnect));
 
       // The CRM values each record now stands at: the base of the next merge. Only where they were
       // accepted (applied, imported, unchanged); a held change keeps its old hash, so its old base too.
@@ -915,10 +923,10 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
    * for a reason a retry cannot fix, the page is written again one contact at
    * a time, so one bad record cannot hold back the rest; each is counted failed.
    */
-  private async writeThroughEngine(ctx: Ctx, rows: BuiltRow[], counts: CrmCounts): Promise<void> {
+  private async writeThroughEngine(ctx: Ctx, rows: BuiltRow[], counts: CrmCounts, approve: Approval): Promise<void> {
     const write = async (batch: BuiltRow[]) => {
       const stats = new RunStats(0);
-      await this.importer.importRows(ctx.organizationId, ctx.sourceId, ctx.defaultConsent, batch, stats, ctx.importReason, null, { scopeToRows: true });
+      await this.importer.importRows(ctx.organizationId, ctx.sourceId, ctx.defaultConsent, batch, stats, ctx.importReason, approve, { scopeToRows: true });
       counts.created += stats.inserted;
       counts.updated += stats.updated;
       counts.unchanged += stats.unchanged;
@@ -1172,6 +1180,27 @@ export function toRunDTO(r: RunRow): RunDTO {
     createdAt: r.createdAt,
     startedAt: r.startedAt,
     finishedAt: r.finishedAt,
+  };
+}
+
+/**
+ * Which new CRM contacts skip Import Review and go straight to the Leads table,
+ * as a sheet's clean rows do: created in the CRM after it was connected (the
+ * first import of contacts already there always waits for the owner, so
+ * connecting never releases a whole CRM to outreach at once), with a first name,
+ * a valid email and a dialable phone, nothing flagged on the row, and no other
+ * lead or do-not-contact record sharing that phone or email. Approved by the
+ * system; anything else waits in Import Review as before.
+ */
+export function autoApproval(createdSinceConnect: ReadonlySet<string>): Approval {
+  return {
+    by: { userId: null },
+    rule: (row, { dnc, duplicate }) =>
+      createdSinceConnect.has(row.externalId ?? '') &&
+      row.reviewReasons.length === 0 &&
+      Boolean(row.lead?.first_name && row.lead.normalized_email && row.lead.normalized_phone) &&
+      !dnc &&
+      !duplicate,
   };
 }
 

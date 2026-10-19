@@ -58,8 +58,10 @@ export class SyncError extends Error {
 }
 
 export interface Approval {
-  rule: (row: BuiltRow) => boolean;
-  by: { userId: string };
+  /** Decides each new row; `flags` is this import's own duplicate / do-not-contact verdict on it. */
+  rule: (row: BuiltRow, flags: { dnc: boolean; duplicate: boolean }) => boolean;
+  /** The owner who approved; null when a sync approves on its own (a connected CRM). */
+  by: { userId: string | null };
 }
 
 export interface ChangedValues {
@@ -695,7 +697,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       });
       const existing = relink.get(b.key!);
       const trackingId = existing ?? randomUUID();
-      if (approve?.rule(b)) toApprove.push(trackingId);
+      if (approve?.rule(b, { dnc, duplicate })) toApprove.push(trackingId);
       if (existing) {
         relinks.push(Prisma.sql`(${existing}::uuid, ${leadId}::uuid, ${b.hash!}::varchar, ${b.rowNumber}::int)`);
         continue;

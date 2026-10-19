@@ -13,8 +13,9 @@ import type { CrmContact } from '../crm-records';
  *  - hubspot_owner_id — an id that means nothing without HubSpot's owner list
  *    (another scope), and EstatePulse assigns its own agents.
  *  - createdate / lastmodifieddate — HubSpot's clock, not a lead fact; the
- *    modified date drives incremental sync and never reaches the lead, or every
- *    unrelated HubSpot edit would read as a change.
+ *    modified date drives incremental sync and the created date only tells a
+ *    contact made after the connection (auto-approval). Neither reaches the
+ *    lead, or every unrelated HubSpot edit would read as a change.
  */
 
 /** Requested on every read, so a contact always arrives with the same shape. */
@@ -26,6 +27,7 @@ export const HUBSPOT_CONTACT_PROPERTIES = [
   'mobilephone',
   'lifecyclestage',
   'hs_lead_status',
+  'createdate',
   'lastmodifieddate',
 ] as const;
 
@@ -80,12 +82,17 @@ export function toCrmContact(o: HubSpotObject): CrmContact {
       [LIFECYCLE_LABEL]: stage ? (LIFECYCLE_STAGES[stage] ?? stage) : null,
       [LEAD_STATUS_LABEL]: status ? (LEAD_STATUSES[status] ?? status) : null,
     },
+    createdAt: epochMs(p.createdate) || null,
   };
 }
 
 /** HubSpot's last-modified time for a contact, in epoch ms; 0 when absent or unreadable. */
 export function modifiedAtMs(o: HubSpotObject): number {
-  const raw = o.properties?.lastmodifieddate ?? o.updatedAt;
+  return epochMs(o.properties?.lastmodifieddate ?? o.updatedAt);
+}
+
+/** A HubSpot timestamp (epoch-ms digits or an ISO date) in epoch ms; 0 when absent or unreadable. */
+function epochMs(raw: string | null | undefined): number {
   if (!raw) return 0;
   const asNumber = Number(raw);
   const ms = Number.isFinite(asNumber) && /^\d+$/.test(raw) ? asNumber : Date.parse(raw);
