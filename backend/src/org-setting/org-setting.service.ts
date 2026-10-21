@@ -4,9 +4,10 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
 import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
+import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 
-const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, maxConcurrentAiCalls: true, reservedCallSlots: true, updatedAt: true } as const;
+const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, reservedCallSlots: true, updatedAt: true } as const;
 
 @Injectable()
 export class OrgSettingService {
@@ -26,11 +27,12 @@ export class OrgSettingService {
   }
 
   async update(orgId: string, { workingHours, ...dto }: UpdateOrgSettingDto) {
-    if (dto.maxConcurrentAiCalls !== undefined || dto.reservedCallSlots !== undefined) {
-      const current = await this.find(orgId);
-      const max = dto.maxConcurrentAiCalls ?? current?.maxConcurrentAiCalls ?? 5;
-      const reserved = dto.reservedCallSlots ?? current?.reservedCallSlots ?? 1;
-      if (reserved >= max) throw new BadRequestException('Reserved call slots must be fewer than the maximum concurrent AI calls.');
+    if (dto.reservedCallSlots !== undefined) {
+      const limit = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { maxConcurrentCalls: true } });
+      const max = limit?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT;
+      if (dto.reservedCallSlots >= max) {
+        throw new BadRequestException(`Keep fewer slots free than your concurrent call limit (${max}), so batches can still call.`);
+      }
     }
     const data = { ...dto, ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}) };
     try {

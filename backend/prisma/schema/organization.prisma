@@ -41,9 +41,7 @@ model OrganizationSetting {
   maxConcurrentCalls    Int     @default(5) @map("max_concurrent_calls")
   outreachStrategy      Json?   @map("outreach_strategy")
   inCallBooking         Json?   @map("in_call_booking")
-  /// Outreach batches never push the org's live outbound AI calls past this...
-  maxConcurrentAiCalls  Int     @default(5) @map("max_concurrent_ai_calls")
-  /// ...minus these, kept free for calls outside a batch (new form leads, hot follow-ups).
+  /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

@@ -51,9 +51,14 @@ describe('releaseCapacity', () => {
     expect(releaseCapacity({ maxConcurrent: 5, reserved: 1, activeCalls: 2, awaitingCall: 1 })).toBe(1);
   });
 
-  it('never goes below zero, and a reserve the size of the limit leaves nothing', () => {
+  it('never goes below zero', () => {
     expect(releaseCapacity({ maxConcurrent: 3, reserved: 1, activeCalls: 5, awaitingCall: 2 })).toBe(0);
-    expect(releaseCapacity({ maxConcurrent: 2, reserved: 2, activeCalls: 0, awaitingCall: 0 })).toBe(0);
+  });
+
+  it('keeps one slot for the batch when the reserve is as large as the limit, so a batch never stalls', () => {
+    expect(releaseCapacity({ maxConcurrent: 2, reserved: 2, activeCalls: 0, awaitingCall: 0 })).toBe(1);
+    expect(releaseCapacity({ maxConcurrent: 1, reserved: 1, activeCalls: 0, awaitingCall: 0 })).toBe(1);
+    expect(releaseCapacity({ maxConcurrent: 2, reserved: 5, activeCalls: 1, awaitingCall: 0 })).toBe(0);
   });
 });
 

@@ -28,7 +28,8 @@ export interface OutreachConfig {
   timeZone: string;
   /** Null when the organization does not hold outreach back at night. */
   quietHours: { start: string; end: string } | null;
-  maxConcurrentAiCalls: number;
+  /** The concurrent call limit the call worker enforces (Call Capacity card). */
+  maxConcurrentCalls: number;
   reservedCallSlots: number;
 }
 

@@ -13,6 +13,7 @@ import { FILE_IMPORT_REVIEW_REASON } from '@/google-sheets/sheet-rows';
 import { LeadsController } from '@/lead/leads.controller';
 import type { AuthContext } from '@/auth/auth.types';
 import { StrategyStoreService, defaultStrategy } from '@/telnyx/strategy-store.service';
+import type { CallSlots } from '@/telnyx/calls/call-slots';
 import { OutreachRunner } from './outreach.runner';
 import { OutreachService } from './outreach.service';
 
@@ -41,7 +42,10 @@ const strategies = new StrategyStoreService(prisma);
 const reviewsOn = new SheetReviewService(prisma, audit, env(true));
 const reviewsOff = new SheetReviewService(prisma, audit, env(false));
 const outreach = new OutreachService(prisma, strategies, audit);
-const newRunner = () => new OutreachRunner(prisma, env(true), strategies, audit);
+/** Live calls per org, as the call worker's Redis slots would report them; a test sets them directly. */
+const live = new Map<string, number>();
+const slots = { inUse: async (orgId: string) => live.get(orgId) ?? 0 } as unknown as CallSlots;
+const newRunner = () => new OutreachRunner(prisma, env(true), strategies, audit, slots);
 const runner = newRunner();
 
 const orgs: string[] = [];
@@ -78,7 +82,7 @@ async function setupOrg(opts: { max?: number; reserved?: number; quiet?: { start
     data: {
       orgId: org.id,
       timezone: 'UTC',
-      maxConcurrentAiCalls: opts.max ?? 5,
+      maxConcurrentCalls: opts.max ?? 5,
       reservedCallSlots: opts.reserved ?? 1,
       outreachStrategy: {
         ...strategy,
@@ -300,6 +304,7 @@ describe('pacing', () => {
     const fresh = released.filter((i) => i.releasedAt && i.releasedAt.getTime() >= released.reduce((m, x) => Math.max(m, x.releasedAt!.getTime()), 0));
     await callFor(o, fresh[0].leadId, 'ringing');
     await callFor(o, fresh[1].leadId, 'completed');
+    live.set(o.orgId, 1);
     await runner.tick(new Date());
     expect(await unpaused(leadIds)).toBe(5);
     expect((await batchOf(r.outreach!.batchId)).status).toBe('completed');
@@ -314,11 +319,10 @@ describe('pacing', () => {
     expect(await unpaused(leadIds)).toBe(2);
   });
 
-  it('never holds back calls outside a batch, and another org’s calls do not count', async () => {
+  it('another org’s live calls do not count', async () => {
     const a = await setupOrg({ max: 3, reserved: 1 });
     const b = await setupOrg({ max: 3, reserved: 1 });
-    const busy = await imported(b, 3);
-    for (const id of busy.leadIds) await callFor(b, id, 'ringing');
+    live.set(b.orgId, 3);
     const { leadIds, rowIds } = await imported(a, 2);
     await reviewsOn.approve(a.who, rowIds, { mode: 'now' });
     await runner.tick(new Date());

@@ -7,16 +7,16 @@ import { getOutreachConfig } from '../../utils/outreachApi';
 const input = 'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-24 text-center focus:outline-none focus:border-emerald-600';
 
 /**
- * How many AI calls an outreach batch may keep live at once, and how many of
- * those stay free for calls outside a batch. Only with outreach scheduling on
- * (the card hides itself otherwise): nothing else reads these limits.
+ * How many of the organization's concurrent calls (set on the Call Capacity
+ * card) an outreach batch leaves free for calls outside it. Only with outreach
+ * scheduling on (the card hides itself otherwise): nothing else reads this.
  */
 export const CallPacingCard: React.FC = () => {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [max, setMax] = useState(5);
+  const [limit, setLimit] = useState(5);
   const [reserved, setReserved] = useState(1);
 
   useEffect(() => {
@@ -24,27 +24,24 @@ export const CallPacingCard: React.FC = () => {
       .then(async (config) => {
         if (!config) return;
         setEnabled(true);
-        const s = await getOrgSettings();
-        setMax(s.maxConcurrentAiCalls);
-        setReserved(s.reservedCallSlots);
+        setLimit(config.maxConcurrentCalls);
+        setReserved((await getOrgSettings()).reservedCallSlots);
       })
-      .catch((e) => setError(e?.message || 'Could not load your call limits.'))
+      .catch((e) => setError(e?.message || 'Could not load your call pacing.'))
       .finally(() => setLoading(false));
   }, []);
 
   if (!enabled && !error) return null;
 
-  const invalid = !Number.isInteger(max) || max < 1 || max > 50 || !Number.isInteger(reserved) || reserved < 0 || reserved >= max;
+  const invalid = !Number.isInteger(reserved) || reserved < 0 || reserved >= limit;
 
   const save = async () => {
     setSaving(true);
     try {
-      const s = await updateOrgSettings({ maxConcurrentAiCalls: max, reservedCallSlots: reserved });
-      setMax(s.maxConcurrentAiCalls);
-      setReserved(s.reservedCallSlots);
-      toast.success('Call limits saved.');
+      setReserved((await updateOrgSettings({ reservedCallSlots: reserved })).reservedCallSlots);
+      toast.success('Call pacing saved.');
     } catch (e: any) {
-      toast.error(e?.message || 'Could not save your call limits.');
+      toast.error(e?.message || 'Could not save your call pacing.');
     } finally {
       setSaving(false);
     }
@@ -58,33 +55,30 @@ export const CallPacingCard: React.FC = () => {
           Call Pacing for Launched Imports
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          A batch you launch from Import Review is released a few leads at a time, so your AI agent never runs more calls at once than this.
-          New form leads and follow-ups are never held back; the reserved slots keep room for them.
+          A batch you launch from Import Review is released a few leads at a time, within your concurrent call limit (Call Capacity, above).
+          New form leads and follow-ups are never held back; the slots kept free are room for them.
         </p>
       </div>
       {error && <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">{error}</div>}
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Loading your call limits…
+          Loading your call pacing…
         </div>
       ) : (
         enabled && (
           <>
-            <div className="flex flex-wrap gap-6 text-xs">
-              <label className="space-y-1">
-                <span className="block text-slate-300 font-semibold">Max AI calls at once</span>
-                <input type="number" min={1} max={50} value={max} onChange={(e) => setMax(Number(e.target.value))} className={input} />
-              </label>
-              <label className="space-y-1">
-                <span className="block text-slate-300 font-semibold">Kept free</span>
-                <input type="number" min={0} max={49} value={reserved} onChange={(e) => setReserved(Number(e.target.value))} className={input} />
-              </label>
-            </div>
-            {invalid && <p className="text-2xs text-rose-300">Use 1–50 calls at once, and keep fewer slots free than that.</p>}
-            <p className="text-2xs text-slate-500">
-              A batch may use {invalid ? '—' : max - reserved} call slot{max - reserved === 1 ? '' : 's'} at a time.
-            </p>
+            <label className="space-y-1 text-xs block">
+              <span className="block text-slate-300 font-semibold">Call slots kept free</span>
+              <input type="number" min={0} max={Math.max(0, limit - 1)} value={reserved} onChange={(e) => setReserved(Number(e.target.value))} className={input} />
+            </label>
+            {invalid ? (
+              <p className="text-2xs text-rose-300">Keep fewer slots free than your concurrent call limit ({limit}).</p>
+            ) : (
+              <p className="text-2xs text-slate-500">
+                Of your {limit} concurrent call{limit === 1 ? '' : 's'}, a batch may use {limit - reserved} at a time.
+              </p>
+            )}
             <button
               type="button"
               onClick={() => void save()}
@@ -92,7 +86,7 @@ export const CallPacingCard: React.FC = () => {
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
             >
               {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Save call limits
+              Save call pacing
             </button>
           </>
         )

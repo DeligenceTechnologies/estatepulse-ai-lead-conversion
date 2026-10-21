@@ -4,6 +4,7 @@ import { AuditService } from '@/audit/audit.service';
 import { httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QuietHours } from '@/common/utils/quiet-hours';
+import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
 import type { RescheduleDto } from './outreach.dto';
 import { scheduledStart } from './schedule';
@@ -35,14 +36,14 @@ export class OutreachService {
   /** What the launch dialog shows: the org's zone, its contact window and its call limits. */
   async config(orgId: string) {
     const [settings, strategy] = await Promise.all([
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true, maxConcurrentAiCalls: true, reservedCallSlots: true } }),
+      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true, maxConcurrentCalls: true, reservedCallSlots: true } }),
       this.strategies.getStrategy(orgId),
     ]);
     const guard = (strategy.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours };
     return {
       timeZone: settings?.timezone ?? 'UTC',
       quietHours: guard.respectQuietHours === false ? null : (guard.quietHours ?? null),
-      maxConcurrentAiCalls: settings?.maxConcurrentAiCalls ?? 5,
+      maxConcurrentCalls: settings?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT,
       reservedCallSlots: settings?.reservedCallSlots ?? 1,
     };
   }

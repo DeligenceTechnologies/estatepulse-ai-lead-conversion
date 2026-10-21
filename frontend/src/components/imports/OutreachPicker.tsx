@@ -89,7 +89,7 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
         <span className="flex items-center gap-1.5">
           <Clock className="w-3 h-3 text-amber-400" />
           {config.quietHours ? `${config.quietHours.end}–${config.quietHours.start} daily (${config.timeZone})` : 'Any time'} · up to{' '}
-          {config.maxConcurrentAiCalls} at once
+          {config.maxConcurrentCalls} at once
           <button type="button" onClick={() => setActiveView('ai_settings')} className="font-bold text-emerald-300 hover:text-emerald-200 cursor-pointer ml-1">
             Change
           </button>

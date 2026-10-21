@@ -6,8 +6,10 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { inQuietHours, type QuietHours } from '@/common/utils/quiet-hours';
 import { RELEASABLE_LEAD } from '@/google-sheets/approval';
+import { CallSlots } from '@/telnyx/calls/call-slots';
+import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { StrategyStoreService, type Strategy } from '@/telnyx/strategy-store.service';
-import { ACTIVE_CALL_WINDOW_MS, awaitingWindowMs, releaseCapacity } from './schedule';
+import { awaitingWindowMs, releaseCapacity } from './schedule';
 
 const BATCHES_PER_TICK = 50;
 /** One release is ~9 round trips; Prisma's 5 s default is tight against a remote database. A timed-out batch is retried next tick. */
@@ -24,7 +26,10 @@ interface OrgRules {
 /**
  * Releases outreach batches whose time has come: unpauses their queued leads,
  * for the lead watcher to enroll as it does any new lead, as many as the org's
- * free call slots allow and never inside quiet hours. A lead that stopped being
+ * free call slots allow and never inside quiet hours. The limit and the live
+ * calls are the call worker's own (org_settings.max_concurrent_calls and its
+ * Redis slots), less the slots the org keeps free for calls outside a batch;
+ * the worker still enforces the limit on every call it places. A lead that stopped being
  * releasable since approval (opted out, taken over, phone gone) is skipped.
  * State lives only in the database and each batch is released in its own
  * transaction under FOR UPDATE SKIP LOCKED, so instances share the work and a
@@ -43,6 +48,7 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly strategies: StrategyStoreService,
     private readonly audit: AuditService,
+    private readonly slots: CallSlots,
   ) {}
 
   onModuleInit(): void {
@@ -85,14 +91,14 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
   /** Read before the batch's transaction opens, so it never holds a second pool connection. */
   private async rulesFor(orgId: string): Promise<OrgRules> {
     const [settings, strategy] = await Promise.all([
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true, maxConcurrentAiCalls: true, reservedCallSlots: true } }),
+      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true, maxConcurrentCalls: true, reservedCallSlots: true } }),
       this.strategies.getStrategy(orgId),
     ]);
     const guard = (strategy.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours };
     return {
       timeZone: settings?.timezone ?? 'UTC',
       quiet: guard.respectQuietHours === false ? undefined : guard.quietHours,
-      maxConcurrent: settings?.maxConcurrentAiCalls ?? 5,
+      maxConcurrent: settings?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT,
       reserved: settings?.reservedCallSlots ?? 1,
       steps: strategy.steps,
     };
@@ -123,21 +129,18 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
 
       let released = 0;
       if (!inQuietHours(rules.timeZone, rules.quiet, now)) {
-        const activeSince = new Date(now.getTime() - ACTIVE_CALL_WINDOW_MS).toISOString();
         const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps)).toISOString();
-        const [load] = await tx.$queryRaw<{ active: number; awaiting: number }[]>`
-          SELECT (SELECT count(*)::int FROM calls
-                   WHERE organization_id = ${orgId}::uuid AND direction = 'outbound'
-                     AND status IN ('queued', 'ringing', 'in_progress') AND created_at > ${activeSince}::timestamptz) AS active,
-                 (SELECT count(*)::int FROM outreach_batch_leads AS i
-                   WHERE i.organization_id = ${orgId}::uuid AND i.state = 'released' AND i.released_at > ${awaitingSince}::timestamptz
-                     AND NOT EXISTS (SELECT 1 FROM calls AS c
-                                      WHERE c.organization_id = i.organization_id AND c.lead_id = i.lead_id
-                                        AND c.created_at >= i.released_at)) AS awaiting`;
+        // Released leads whose first call is not on record yet: queued for a slot, or not yet enrolled.
+        const [load] = await tx.$queryRaw<{ awaiting: number }[]>`
+          SELECT count(*)::int AS awaiting FROM outreach_batch_leads AS i
+           WHERE i.organization_id = ${orgId}::uuid AND i.state = 'released' AND i.released_at > ${awaitingSince}::timestamptz
+             AND NOT EXISTS (SELECT 1 FROM calls AS c
+                              WHERE c.organization_id = i.organization_id AND c.lead_id = i.lead_id
+                                AND c.created_at >= i.released_at)`;
         const capacity = releaseCapacity({
           maxConcurrent: rules.maxConcurrent,
           reserved: rules.reserved,
-          activeCalls: load.active,
+          activeCalls: await this.slots.inUse(orgId),
           awaitingCall: load.awaiting,
         });
         if (capacity > 0) {

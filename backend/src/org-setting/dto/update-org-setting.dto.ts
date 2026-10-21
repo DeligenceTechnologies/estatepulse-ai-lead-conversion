@@ -13,17 +13,10 @@ export class UpdateOrgSettingDto {
   @IsWeeklySchedule()
   workingHours?: WorkingDayDto[];
 
-  /** Outreach batches keep the org's live outbound AI calls at or under this. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  maxConcurrentAiCalls?: number;
-
-  /** Of those, kept free for calls outside a batch: new form leads and hot follow-ups. */
+  /** Of the org's concurrent call limit (max_concurrent_calls), kept free for calls outside an outreach batch. */
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(49)
+  @Max(499)
   reservedCallSlots?: number;
 }

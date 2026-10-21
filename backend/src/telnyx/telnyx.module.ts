@@ -41,6 +41,6 @@ import { VoiceService } from './voice.service';
     StrategyStoreService,
     VoiceService,
   ],
-  exports: [CallQueue, EngineService, TelnyxCredentialsService, SmsService, ActivityService, StrategyStoreService, AssistantService],
+  exports: [CallQueue, CallSlots, EngineService, TelnyxCredentialsService, SmsService, ActivityService, StrategyStoreService, AssistantService],
 })
 export class TelnyxModule {}

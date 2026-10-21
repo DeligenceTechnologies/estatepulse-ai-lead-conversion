@@ -49,9 +49,14 @@ export function scheduledStart(date: string, time: string, timeZone: string, now
   return new Date(at);
 }
 
-/** How many more batch leads may be released now without the org's live AI calls passing its limit. */
+/**
+ * How many more batch leads may be released now without the org's live AI calls
+ * passing its limit. The reserve is capped one below the limit: lowering the
+ * call limit under it slows a batch to one call at a time, never stops it.
+ */
 export function releaseCapacity(p: { maxConcurrent: number; reserved: number; activeCalls: number; awaitingCall: number }): number {
-  return Math.max(0, p.maxConcurrent - p.reserved - p.activeCalls - p.awaitingCall);
+  const reserved = Math.min(p.reserved, Math.max(0, p.maxConcurrent - 1));
+  return Math.max(0, p.maxConcurrent - reserved - p.activeCalls - p.awaitingCall);
 }
 
 /**
@@ -59,11 +64,8 @@ export function releaseCapacity(p: { maxConcurrent: number; reserved: number; ac
  * record: the strategy's first voice step plus a margin for the watcher's
  * poll. Zero when the strategy places no calls, so nothing waits on a slot.
  */
-// ponytail: only the first voice attempt is reserved; later attempts (maxVoiceAttempts) can briefly exceed the limit. Count per-step if that matters.
+// ponytail: only the first voice attempt is counted; later attempts (maxVoiceAttempts) wait in the call queue, whose worker enforces the limit. Count per-step if release pacing must account for them.
 export function awaitingWindowMs(steps: StrategyStep[]): number {
   const voice = steps.filter((s) => s.channel === 'voice').map((s) => offsetMs(s.after));
   return voice.length ? Math.min(...voice) + 5 * 60_000 : 0;
 }
-
-/** A call still ringing past this is treated as over: its hang-up webhook went missing. */
-export const ACTIVE_CALL_WINDOW_MS = 30 * 60_000;
