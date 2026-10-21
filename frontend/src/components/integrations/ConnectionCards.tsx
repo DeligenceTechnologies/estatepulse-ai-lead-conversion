@@ -356,8 +356,8 @@ export const ConnectionCards: React.FC = () => {
         </div>
       )}
 
-      {/* Every card the same height, whatever it lists: a long list scrolls inside its card instead of stretching the row. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 [&>*]:h-[26rem]">
+      {/* Cards keep their natural height, up to a cap: past it a long list scrolls inside its card instead of stretching the row. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 [&>*]:max-h-[24rem]">
         {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings.
             Google Sheets is self-loading: its account is not a lead source. */}
         <GoogleSheetsCard />
