@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarClock, Clock, PhoneCall } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useNavigate } from 'react-router-dom';
+import { pathForView } from '../../context/AppContext';
 import { wallClockNow, type OutreachChoice, type OutreachConfig, type OutreachMode } from '../../utils/outreachApi';
 import { todayIn } from '../calendar/availability/time';
 import { TimezoneSelect } from '../common/TimezoneSelect';
@@ -30,11 +31,23 @@ export function launchProblem(l: Launch): string | null {
 /**
  * "When to send the calls" for leads being approved: now, or at a date and
  * time in a chosen zone. Below it, read-only, when calls may run (the
- * organization's contact window) and how many run at once, with a link to
- * where both are changed.
+ * organization's contact window), how many run at once and how many slots a
+ * batch leaves free, each with a link to the very card on AI Settings where it
+ * is changed.
  */
 export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; onChange: (l: Launch) => void }> = ({ config, value, onChange }) => {
-  const { setActiveView } = useApp();
+  const navigate = useNavigate();
+  /** A "Change" link to one AI Settings card: the page scrolls to it and points it out. */
+  const change = (card: 'contact-window' | 'call-capacity' | 'call-pacing', where: string) => (
+    <button
+      type="button"
+      onClick={() => navigate({ pathname: pathForView('ai_settings'), hash: card })}
+      title={`Change in AI Settings → ${where}`}
+      className="font-bold text-emerald-300 hover:text-emerald-200 cursor-pointer"
+    >
+      Change
+    </button>
+  );
   const set = (patch: Partial<Launch>) => onChange({ ...value, ...patch });
   const problem = launchProblem(value);
 
@@ -86,18 +99,22 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-2xs text-slate-400">
         <span className="font-semibold text-slate-300">When calls can run</span>
-        <span className="flex items-center gap-1.5">
+        <span className="flex flex-wrap items-center gap-1.5">
           <Clock className="w-3 h-3 text-amber-400" />
-          {config.quietHours ? `${config.quietHours.end}–${config.quietHours.start} daily (${config.timeZone})` : 'Any time'} · up to{' '}
-          {config.maxConcurrentCalls} at once
-          <button type="button" onClick={() => setActiveView('ai_settings')} className="font-bold text-emerald-300 hover:text-emerald-200 cursor-pointer ml-1">
-            Change
-          </button>
+          {config.quietHours ? `${config.quietHours.end}–${config.quietHours.start} daily (${config.timeZone})` : 'Any time'}
+          {change('contact-window', 'Contact Window')}
+          <span className="text-slate-600">·</span>
+          up to {config.maxConcurrentCalls} at once
+          {change('call-capacity', 'Call Capacity')}
         </span>
       </div>
-      {config.quietHours && (
-        <p className="text-2xs text-slate-500">A start outside these hours waits for them; {config.reservedCallSlots} call slot{config.reservedCallSlots === 1 ? ' stays' : 's stay'} free for new leads and follow-ups.</p>
-      )}
+      <p className="text-2xs text-slate-500 flex flex-wrap items-center gap-1">
+        {config.quietHours && <span>A start outside these hours waits for them.</span>}
+        <span>
+          {config.reservedCallSlots} call slot{config.reservedCallSlots === 1 ? ' stays' : 's stay'} free for new leads and follow-ups.
+        </span>
+        {change('call-pacing', 'Call Pacing')}
+      </p>
     </div>
   );
 };
