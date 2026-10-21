@@ -19,13 +19,14 @@ export interface ApprovalResult {
  * Approves imported rows still pending review. A lead is released to the
  * outreach strategy only when it is still new, has a dialable phone and is
  * not do-not-contact; anything else is approved but held, with the reason.
+ * `by.userId` null: a sync approved on its own, recorded as the system.
  */
 export async function approveTrackingRows(
   tx: Prisma.TransactionClient,
   audit: AuditService,
   orgId: string,
   rowIds: string[],
-  by: { userId: string },
+  by: { userId: string | null },
 ): Promise<ApprovalResult> {
   if (rowIds.length === 0) return { approved: 0, released: 0, held: [], skipped: [] };
 
@@ -65,7 +66,7 @@ export async function approveTrackingRows(
       .filter((d) => d.lead_id)
       .map((d) => ({
         orgId,
-        actorType: 'user' as const,
+        actorType: by.userId ? ('user' as const) : ('system' as const),
         actorId: by.userId,
         action: 'sheet_import.approved',
         entityType: 'lead',

@@ -10,16 +10,11 @@ export default defineConfig(() => {
       // Keeps the API same-origin in dev, so the frontend calls relative /api
       // paths and CORS stays a production-only concern.
       proxy: {
+        // Forwarded unchanged: the backend serves the app's routes under /api
+        // (/api/auth/login) in development and production alike.
         '/api': {
           target: 'http://localhost:4000',
           changeOrigin: true,
-          // The backend serves its routes at the root (/auth/login), the
-          // frontend calls them under /api.
-          rewrite: (path) => path.replace(/^\/api/, ''),
-          // The refresh cookie is scoped to the backend's /auth path; seen
-          // through the proxy that path is /api/auth, or the browser would
-          // never send it back to /api/auth/refresh.
-          cookiePathRewrite: { '/auth': '/api/auth' },
         },
       },
     },
