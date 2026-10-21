@@ -5,7 +5,7 @@ import { redisOptions } from '@/common/config/redis.config';
 import type { QueueEnv } from '@/common/utils/interface';
 import { EmailQueue } from './email/email.queue';
 import { EmailWorker } from './email/email.worker';
-import { EMAIL_QUEUE, QUEUE_PREFIX } from './queue.constants';
+import { CALL_QUEUE, EMAIL_QUEUE, QUEUE_PREFIX } from './queue.constants';
 
 const DAY_SECONDS = 24 * 60 * 60;
 
@@ -18,6 +18,10 @@ const QUEUES: RegisterQueueOptions[] = [
   {
     name: EMAIL_QUEUE,
     defaultJobOptions: { attempts: 6, backoff: { type: 'exponential', delay: 15_000 }, ...RETENTION },
+  },
+  {
+    name: CALL_QUEUE,
+    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 30_000 }, ...RETENTION },
   },
 ];
 
