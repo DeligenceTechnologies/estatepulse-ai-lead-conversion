@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EnrollmentStatus, LeadStatus } from '@prisma/client';
+import { EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
@@ -162,10 +162,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   private async advance(row: ClaimedEnrollment, steps: SequenceStep[]): Promise<void> {
     const next = steps[row.current_step];
     if (!next) {
-      await this.finish(row.id, EnrollmentStatus.completed, 'exhausted');
-      await this.prisma.lead.updateMany({
-        where: { id: row.lead_id, status: LeadStatus.follow_up },
-        data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
+      await this.prisma.$transaction(async (tx) => {
+        await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
+        await tx.lead.updateMany({
+          where: { id: row.lead_id, status: LeadStatus.follow_up },
+          data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
+        });
       });
       return;
     }
@@ -181,8 +183,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private finish(id: string, status: EnrollmentStatus, reason: string) {
-    return this.prisma.sequenceEnrollment.update({
+  private finish(id: string, status: EnrollmentStatus, reason: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    return db.sequenceEnrollment.update({
       where: { id },
       data: {
         status,

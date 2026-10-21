@@ -22,12 +22,13 @@ import {
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type LiveLead } from '../../api/client';
+import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type ListLeadsParams, type LiveLead } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { FileImportModal } from '../imports/FileImportModal';
 import { NewLeadModal } from '../modals/NewLeadModal';
+import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
 import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
@@ -198,8 +199,38 @@ const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
 /** Poll cadence while the live stream is connected. Module-level, so it is one stable object. */
 const STREAM_UP_CADENCE = { baseIntervalMs: 60_000, maxIntervalMs: 60_000 } as const;
 
-/** Rows shown before "Load more", as on Import Review. */
-const PAGE_SIZE = 10;
+const PAGE_SIZE_KEY = 'ep_leads_page_size';
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** The value, `delay` ms after it last changed — so search does not fire per keystroke. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+/** The remembered rows-per-page, or the smallest size. */
+function readPageSize(): number {
+  try {
+    const stored = Number(localStorage.getItem(PAGE_SIZE_KEY));
+    return (PAGE_SIZE_OPTIONS as readonly number[]).includes(stored) ? stored : PAGE_SIZE_OPTIONS[0];
+  } catch {
+    return PAGE_SIZE_OPTIONS[0];
+  }
+}
+
+/** What a tab asks the server for. */
+const TAB_FILTER: Record<Tab, Pick<ListLeadsParams, 'status' | 'temperature'>> = {
+  all: {},
+  hot: { temperature: 'hot' },
+  warm: { temperature: 'warm' },
+  cold: { temperature: 'cold' },
+  new: { status: 'new' },
+  booked: { status: 'appointment_booked' },
+};
 
 export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
@@ -220,6 +251,7 @@ export const LeadsView: React.FC = () => {
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounced(searchQuery, SEARCH_DEBOUNCE_MS);
   // ?tab=hot etc. lets other screens (the dashboard) open Leads pre-filtered.
   const { search } = useLocation();
   const [selectedTab, setSelectedTab] = useState<Tab>(() => {
@@ -228,17 +260,31 @@ export const LeadsView: React.FC = () => {
   });
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
-  // "Load more" paging over the filtered list; any change of filter starts over at the first page.
-  const [visible, setVisible] = useState(PAGE_SIZE);
-  useEffect(() => setVisible(PAGE_SIZE), [searchQuery, selectedTab, sourceFilter, agentFilter]);
+  // Search, filters and paging all happen server-side; any change of filter starts over at the first page.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(readPageSize);
+  useEffect(() => setPage(1), [debouncedSearch, selectedTab, sourceFilter, agentFilter, pageSize]);
+
+  const params = useMemo<ListLeadsParams>(
+    () => ({
+      page,
+      limit: pageSize,
+      search: debouncedSearch,
+      ...TAB_FILTER[selectedTab],
+      sourceId: sourceFilter === 'all' ? undefined : sourceFilter,
+      agentId: agentFilter === 'all' || agentFilter === 'unassigned' ? undefined : agentFilter,
+      unassigned: agentFilter === 'unassigned',
+    }),
+    [page, pageSize, debouncedSearch, selectedTab, sourceFilter, agentFilter],
+  );
 
   // One fetch, both payloads. They are always read together, so a failure in
   // either has to be a failure of the pair — a lead list rendered beside counts
   // from a minute ago is worse than a moment of staleness in both.
   const load = useCallback(async () => {
-    const [leads, stats] = await Promise.all([leadsApi.list(), leadsApi.stats()]);
+    const [leads, stats] = await Promise.all([leadsApi.list(params), leadsApi.stats()]);
     return { leads, stats };
-  }, []);
+  }, [params]);
 
   // The push path. The backend knows the moment a submission becomes a lead, so
   // this screen is told rather than asked to guess. Subscribed before the query
@@ -253,10 +299,11 @@ export const LeadsView: React.FC = () => {
   // safety net — once a minute, and an event or a return to the tab refetches
   // without dropping back to 5-second polling. Stream down: the default
   // 5-second poll backing off to a minute, the reliability fallback as before.
-  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(
-    load,
-    connected ? STREAM_UP_CADENCE : undefined,
-  );
+  // A new page or filter is a different question, so its key discards the old rows and asks at once.
+  const { data, error, refreshing, stale, refresh, invalidate } = useLiveQuery(load, {
+    ...(connected ? STREAM_UP_CADENCE : {}),
+    refreshKey: JSON.stringify(params),
+  });
 
   // This tab's own assignments refetch at once, stream or no stream.
   useEffect(() => {
@@ -265,8 +312,23 @@ export const LeadsView: React.FC = () => {
     return () => window.removeEventListener(LEADS_CHANGED_EVENT, onChanged);
   }, [invalidate]);
 
-  const rows = data?.leads ?? [];
+  const rows = data?.leads.data ?? [];
+  const meta = data?.leads.meta ?? null;
   const stats: LeadStats | null = data?.stats ?? null;
+
+  // The last row of the last page went away (reassigned, filtered out): step back to a page that has rows.
+  useEffect(() => {
+    if (meta && meta.count === 0 && meta.page > 1 && meta.total > 0) setPage(meta.totalPages);
+  }, [meta]);
+
+  const changePageSize = (size: number): void => {
+    setPageSize(size);
+    try {
+      localStorage.setItem(PAGE_SIZE_KEY, String(size));
+    } catch {
+      /* the choice just will not be remembered */
+    }
+  };
 
   const mapped = useMemo(() => {
     const byId: Record<string, Lead> = {};
@@ -281,53 +343,23 @@ export const LeadsView: React.FC = () => {
   }, [mapped, registerExternalLeads]);
 
   // Source options come from what has actually arrived rather than a hardcoded
-  // list: a source exists here only once a form has been connected to it.
-  const sourceOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const l of rows) if (l.source) seen.set(l.source.id, l.source.name);
-    return [...seen].map(([id, name]) => ({ id, name }));
-  }, [rows]);
+  // list: a source exists here only once it holds a lead. The server lists them
+  // across every page, not just the one on screen.
+  const sourceOptions = stats?.sources ?? [];
 
   // Agent options from real assignments, like the source options above: an
   // agent appears once they hold a lead. The reader's own entry, when they take
   // leads, is first and reads "Mine".
-  const agentOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const l of rows) {
-      if (l.assignedAgent) seen.set(l.assignedAgent.id, l.assignedAgent.id === agentProfileId ? 'Mine' : l.assignedAgent.name);
-    }
-    return [...seen]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name));
-  }, [rows, agentProfileId]);
+  const agentOptions = useMemo(
+    () =>
+      (stats?.agents ?? [])
+        .map((a) => ({ id: a.id, name: a.id === agentProfileId ? 'Mine' : a.name }))
+        .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name)),
+    [stats, agentProfileId],
+  );
 
-  const filteredLeads = rows.filter(lead => {
-    // Tab filter
-    if (selectedTab === 'hot' && lead.temperature !== 'hot') return false;
-    if (selectedTab === 'warm' && lead.temperature !== 'warm') return false;
-    if (selectedTab === 'cold' && lead.temperature !== 'cold') return false;
-    if (selectedTab === 'new' && lead.status !== 'new') return false;
-    if (selectedTab === 'booked' && normalizeStatus(lead.status) !== 'appointment_booked') return false;
-
-    // Source filter
-    if (sourceFilter !== 'all' && lead.source?.id !== sourceFilter) return false;
-
-    // Agent filter
-    if (agentFilter === 'unassigned' && lead.assignedAgent) return false;
-    if (agentFilter !== 'all' && agentFilter !== 'unassigned' && lead.assignedAgent?.id !== agentFilter) return false;
-
-    // Search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const haystack = [fullName(lead), lead.phone, lead.email, lead.location]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-
-    return true;
-  });
+  // Tab counts cover every lead, not the page on screen; hidden until the first answer arrives.
+  const tabCount = (n: number | undefined): string => (stats ? ` (${n ?? 0})` : '');
 
   const openLead = (lead: LiveLead) => setSelectedLeadId(lead.id);
 
@@ -479,12 +511,12 @@ export const LeadsView: React.FC = () => {
         {/* Filter Tabs */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {[
-            { id: 'all', icon: null, label: `All Leads (${rows.length})` },
-            { id: 'hot', icon: <Flame className="w-3.5 h-3.5" />, label: `Hot (${rows.filter(l => l.temperature === 'hot').length})` },
-            { id: 'warm', icon: <Sun className="w-3.5 h-3.5" />, label: `Warm (${rows.filter(l => l.temperature === 'warm').length})` },
-            { id: 'cold', icon: <Snowflake className="w-3.5 h-3.5" />, label: `Cold (${rows.filter(l => l.temperature === 'cold').length})` },
-            { id: 'new', icon: null, label: `New Inbound (${rows.filter(l => l.status === 'new').length})` },
-            { id: 'booked', icon: null, label: `Appointments (${rows.filter(l => normalizeStatus(l.status) === 'appointment_booked').length})` },
+            { id: 'all', icon: null, label: `All Leads${tabCount(stats?.total)}` },
+            { id: 'hot', icon: <Flame className="w-3.5 h-3.5" />, label: `Hot${tabCount(stats?.byTemperature.hot)}` },
+            { id: 'warm', icon: <Sun className="w-3.5 h-3.5" />, label: `Warm${tabCount(stats?.byTemperature.warm)}` },
+            { id: 'cold', icon: <Snowflake className="w-3.5 h-3.5" />, label: `Cold${tabCount(stats?.byTemperature.cold)}` },
+            { id: 'new', icon: null, label: `New Inbound${tabCount(stats?.byStatus.new)}` },
+            { id: 'booked', icon: null, label: `Appointments${tabCount(stats?.byStatus.appointment_booked)}` },
           ].map(tab => (
             <button
               key={tab.id}
@@ -589,8 +621,8 @@ export const LeadsView: React.FC = () => {
                     ))}
                   </tr>
                 ))
-              ) : filteredLeads.length > 0 ? (
-                filteredLeads.slice(0, visible).map(lead => {
+              ) : rows.length > 0 ? (
+                rows.map(lead => {
                   const attention = attentionReasons(lead);
                   const budget = budgetRange(lead);
                   return (
@@ -719,7 +751,7 @@ export const LeadsView: React.FC = () => {
                     </tr>
                   );
                 })
-              ) : rows.length === 0 && !error ? (
+              ) : stats?.total === 0 && !error ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center space-y-2">
                     <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
@@ -740,20 +772,19 @@ export const LeadsView: React.FC = () => {
               )}
             </tbody>
           </table>
-          {filteredLeads.length > visible && (
-            <div className="flex items-center justify-center gap-3 py-3 border-t border-slate-800/60 text-xs text-slate-500">
-              <span>{`Showing ${visible} of ${filteredLeads.length}`}</span>
-              <button
-                type="button"
-                onClick={() => setVisible((v) => v + PAGE_SIZE)}
-                className="px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
-              >
-                Load more
-              </button>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Outside the card: its overflow-hidden would clip the rows-per-page menu, which opens upwards. */}
+      {meta && (
+        <Pagination
+          meta={meta}
+          itemLabel={meta.total === 1 ? 'lead' : 'leads'}
+          disabled={refreshing}
+          onPageChange={setPage}
+          onPageSizeChange={changePageSize}
+        />
+      )}
 
     </div>
   );

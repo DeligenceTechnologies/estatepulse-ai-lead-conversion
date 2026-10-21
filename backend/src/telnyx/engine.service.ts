@@ -91,9 +91,14 @@ export class EngineService implements OnModuleDestroy {
     if (this.active.has(leadId)) return;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId } });
     if (!lead || lead.dncStatus || lead.automationPaused) return;
-    const claim = await this.prisma.lead.updateMany({ where: { id: leadId, firstContactAt: null }, data: { firstContactAt: new Date() } });
-    if (claim.count === 0) return;
-    await this.prisma.lead.updateMany({ where: { id: leadId, status: LeadStatus.new }, data: { status: LeadStatus.contacting } });
+    // The claim and the status move commit together, so a failed status update never leaves a claimed lead stuck in `new`.
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.lead.updateMany({ where: { id: leadId, firstContactAt: null }, data: { firstContactAt: new Date() } });
+      if (claim.count === 0) return false;
+      await tx.lead.updateMany({ where: { id: leadId, status: LeadStatus.new }, data: { status: LeadStatus.contacting } });
+      return true;
+    });
+    if (!claimed) return;
 
     const [strategy, office] = await Promise.all([this.strategies.getStrategy(orgId), this.office(orgId)]);
     const enrollment: Enrollment = {
@@ -215,18 +220,21 @@ export class EngineService implements OnModuleDestroy {
     const optOut = Boolean(opts.optOut) && status === LeadStatus.not_interested;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { id: true } });
     if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        status,
-        ...(reason ? { aiSummary: reason.slice(0, 2000) } : {}),
-        ...(status === LeadStatus.follow_up ? { followUpReason: opts.followUpReason ?? FollowUpReason.other } : {}),
-        ...(optOut ? { dncStatus: true, automationPaused: true, consentStatus: ConsentStatus.revoked } : {}),
-        ...(INACTIVE_STATUSES.includes(status) && reason ? { lostReason: reason.slice(0, 255) } : {}),
-      },
+    // An opt-out sets DNC and stops the sequences together: never one without the other.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lead.update({
+        where: { id: leadId },
+        data: {
+          status,
+          ...(reason ? { aiSummary: reason.slice(0, 2000) } : {}),
+          ...(status === LeadStatus.follow_up ? { followUpReason: opts.followUpReason ?? FollowUpReason.other } : {}),
+          ...(optOut ? { dncStatus: true, automationPaused: true, consentStatus: ConsentStatus.revoked } : {}),
+          ...(INACTIVE_STATUSES.includes(status) && reason ? { lostReason: reason.slice(0, 255) } : {}),
+        },
+      });
+      if (optOut) await this.followup.stopForLead(orgId, leadId, 'opted_out', tx);
     });
     if (!IN_STRATEGY_STATUSES.includes(status)) this.stopFor(leadId);
-    if (optOut) await this.followup.stopForLead(orgId, leadId, 'opted_out');
     if (status === LeadStatus.follow_up) await this.enrolOnFollowUp(orgId, leadId);
   }
 

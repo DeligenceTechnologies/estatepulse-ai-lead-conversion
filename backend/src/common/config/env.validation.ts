@@ -20,7 +20,7 @@ export const envValidationSchema = Joi.object({
 
     LOG_LEVEL: Joi.string().default('info'),
 
-    CORS_ORIGIN: Joi.string().empty('').optional(),
+    CORS_ORIGINS: Joi.string().empty('').optional(),
 
     APP_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
 

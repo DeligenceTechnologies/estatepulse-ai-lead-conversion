@@ -251,11 +251,11 @@ export const LeadSourcesView: React.FC = () => {
     if (!selectedId) return null;
     const [d, l] = await Promise.allSettled([
       api.deliveries(selectedId),
-      leadsApi.list({ sourceId: selectedId }),
+      leadsApi.list({ sourceId: selectedId, limit: 100 }),
     ]);
     if (d.status === 'rejected') throw d.reason;
     if (l.status === 'rejected') throw l.reason;
-    return { deliveries: d.value, leads: l.value };
+    return { deliveries: d.value, leads: l.value.data };
   }, [selectedId]);
 
   const sourcesQuery = useLiveQuery(fetchSources, { enabled: autoRefresh });
