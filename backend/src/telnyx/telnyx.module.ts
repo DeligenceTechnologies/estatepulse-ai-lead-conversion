@@ -2,6 +2,10 @@ import { Module, forwardRef } from '@nestjs/common';
 import { FollowupModule } from '@/followup/followup.module';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
+import { CallCapacityService } from './calls/call-capacity.service';
+import { CallSlots } from './calls/call-slots';
+import { CallQueue } from './calls/call.queue';
+import { CallWorker } from './calls/call.worker';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
 import { LeadInsightsService } from './lead-insights.service';
@@ -23,6 +27,10 @@ import { VoiceService } from './voice.service';
     TelnyxCredentialsService,
     ActivityService,
     AssistantService,
+    CallCapacityService,
+    CallQueue,
+    CallSlots,
+    CallWorker,
     EngineService,
     InboundSmsService,
     LeadInsightsService,
@@ -33,6 +41,6 @@ import { VoiceService } from './voice.service';
     StrategyStoreService,
     VoiceService,
   ],
-  exports: [EngineService, TelnyxCredentialsService, SmsService, VoiceService, ActivityService, StrategyStoreService, AssistantService],
+  exports: [CallQueue, EngineService, TelnyxCredentialsService, SmsService, ActivityService, StrategyStoreService, AssistantService],
 })
 export class TelnyxModule {}

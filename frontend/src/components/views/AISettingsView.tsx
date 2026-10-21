@@ -50,6 +50,7 @@ import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
 import { CallPacingCard } from './CallPacingCard';
 import { ContactWindowCard } from './ContactWindowCard';
+import { CallCapacityCard } from './CallCapacityCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
@@ -1106,6 +1107,8 @@ export const AISettingsView: React.FC = () => {
             that used to be here bound to the browser's demo store, so editing
             the contact hours changed nothing the engine ever saw. */}
         <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+
+        <CallCapacityCard />
 
         <CallPacingCard />
 

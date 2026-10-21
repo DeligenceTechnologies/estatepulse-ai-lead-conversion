@@ -6,6 +6,7 @@ import {
   refreshAccessToken,
 } from '../lib/api';
 import type { FollowUpReason } from '../types';
+import type { Paginated } from '../utils/usersApi';
 
 /**
  * Typed client for the EstatePulse ingestion API.
@@ -327,7 +328,27 @@ export const LEADS_CHANGED_EVENT = 'estatepulse:leads-changed';
 
 export interface LeadStats {
   byStatus: Record<string, number>;
+  byTemperature: Record<string, number>;
   total: number;
+  /** Sources and agents that hold at least one lead: the Leads screen's filter options. */
+  sources: { id: string; name: string }[];
+  agents: { id: string; name: string }[];
+}
+
+/**
+ * What GET /v1/leads accepts: search matches first name, last name, phone,
+ * email and location; the filters narrow the page server-side.
+ */
+export interface ListLeadsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  temperature?: string;
+  sourceId?: string;
+  agentId?: string;
+  /** Only leads nobody holds. */
+  unassigned?: boolean;
 }
 
 // --- Providers & connections ----------------------------------------------
@@ -471,12 +492,15 @@ export interface NewLeadInput {
 }
 
 export const leadsApi = {
-  list: (filter: { status?: string; sourceId?: string } = {}) => {
+  /** One page of leads, newest first. Empty values are left out so the server's defaults apply. */
+  list: (params: ListLeadsParams = {}) => {
     const q = new URLSearchParams();
-    if (filter.status) q.set('status', filter.status);
-    if (filter.sourceId) q.set('sourceId', filter.sourceId);
+    for (const [key, value] of Object.entries({ ...params, search: params.search?.trim() })) {
+      if (value === undefined || value === '' || value === false) continue;
+      q.set(key, String(value));
+    }
     const qs = q.toString();
-    return request<LiveLead[]>(`/v1/leads${qs ? `?${qs}` : ''}`);
+    return request<Paginated<LiveLead>>(`/v1/leads${qs ? `?${qs}` : ''}`);
   },
   stats: () => request<LeadStats>('/v1/leads/stats'),
   /** Owner-only. One lead typed in by hand; a phone or an email is required. */

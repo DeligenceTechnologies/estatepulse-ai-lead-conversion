@@ -5,7 +5,8 @@ import { AppError } from '@/common/errors/app-error';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssistantService } from './assistant.service';
-import { AttachAssistantDto, CreateAssistantDto, NumbersLookupDto, PhoneNumberDto, ReconnectDto, RenameAccountDto, TelnyxCredentialsDto } from './dto/telnyx.dto';
+import { AttachAssistantDto, CallCapacityDto, CreateAssistantDto, NumbersLookupDto, PhoneNumberDto, ReconnectDto, RenameAccountDto, TelnyxCredentialsDto } from './dto/telnyx.dto';
+import { CallCapacityService } from './calls/call-capacity.service';
 import { NumbersService } from './numbers.service';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
 
@@ -16,6 +17,7 @@ export class TelnyxController {
     private readonly creds: TelnyxCredentialsService,
     private readonly assistant: AssistantService,
     private readonly numbers: NumbersService,
+    private readonly capacity: CallCapacityService,
   ) {}
 
   @Get('status')
@@ -29,6 +31,7 @@ export class TelnyxController {
   async saveCredentials(@CurrentAuth() auth: AuthContext, @Body() body: TelnyxCredentialsDto) {
     const current = await this.creds.getCreds(auth.organizationId);
     await this.creds.saveCreds(auth.organizationId, await this.validated(body, current));
+    void this.capacity.pushToTelnyx(auth.organizationId);
     return this.creds.publicStatus(auth.organizationId);
   }
 
@@ -43,6 +46,7 @@ export class TelnyxController {
   async addAccount(@CurrentAuth() auth: AuthContext, @Body() body: TelnyxCredentialsDto) {
     if (!body.apiKey) throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required to add an account.');
     await this.creds.createAccount(auth.organizationId, await this.validated(body, null));
+    void this.capacity.pushToTelnyx(auth.organizationId);
     return this.creds.publicStatus(auth.organizationId);
   }
 
@@ -51,6 +55,7 @@ export class TelnyxController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async activateAccount(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     await this.creds.activateAccount(auth.organizationId, id);
+    void this.capacity.pushToTelnyx(auth.organizationId);
     return this.creds.publicStatus(auth.organizationId);
   }
 
@@ -80,7 +85,20 @@ export class TelnyxController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async reconnect(@CurrentAuth() auth: AuthContext, @Body() body: ReconnectDto) {
     await this.creds.reconnect(auth.organizationId, body.accountId);
+    void this.capacity.pushToTelnyx(auth.organizationId);
     return this.creds.publicStatus(auth.organizationId);
+  }
+
+  @Get('call-capacity')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  callCapacity(@CurrentAuth() auth: AuthContext) {
+    return this.capacity.status(auth.organizationId);
+  }
+
+  @Put('call-capacity')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  setCallCapacity(@CurrentAuth() auth: AuthContext, @Body() body: CallCapacityDto) {
+    return this.capacity.setLimit(auth.organizationId, body.maxConcurrentCalls);
   }
 
   @Post('assistant/create')

@@ -28,13 +28,14 @@ export const RELEASABLE_LEAD = Prisma.sql`l.automation_paused AND NOT l.dnc_stat
  * not do-not-contact; anything else is approved but held, with the reason.
  * With an outreach request the releasable leads stay paused and are queued on
  * its batch instead, for the outreach runner to release at the batch's time.
+ * `by.userId` null: a sync approved on its own, recorded as the system.
  */
 export async function approveTrackingRows(
   tx: Prisma.TransactionClient,
   audit: AuditService,
   orgId: string,
   rowIds: string[],
-  by: { userId: string },
+  by: { userId: string | null },
   outreach?: OutreachRequest,
 ): Promise<ApprovalResult> {
   if (rowIds.length === 0) return { approved: 0, released: 0, held: [], skipped: [] };
@@ -79,7 +80,7 @@ export async function approveTrackingRows(
       .filter((d) => d.lead_id)
       .map((d) => ({
         orgId,
-        actorType: 'user' as const,
+        actorType: by.userId ? ('user' as const) : ('system' as const),
         actorId: by.userId,
         action: 'sheet_import.approved',
         entityType: 'lead',

@@ -438,7 +438,7 @@ describe('leads list', () => {
     await prisma.lead.update({ where: { id: optsOut }, data: { dncStatus: true } });
     await runner.tick(new Date()); // one slot: one released, one still queued in a running batch
 
-    const listed = await leads.list({ organizationId: o.orgId, userId: o.who.userId } as AuthContext, {} as never);
+    const { data: listed } = await leads.list({ organizationId: o.orgId, userId: o.who.userId } as AuthContext, {} as never);
     const of = (id: string) => listed.find((l) => l.id === id)?.outreach;
     expect(of(later.leadIds[0])).toEqual({ state: 'scheduled', startAt: start, timeZone: 'UTC' });
     expect([of(dialA)?.state, of(dialB)?.state].sort()).toEqual(['released', 'waiting']);

@@ -107,8 +107,13 @@ export class FollowupService {
     return true;
   }
 
-  async stopForLead(orgId: string, leadId: string, reason: string): Promise<number> {
-    const { count } = await this.prisma.sequenceEnrollment.updateMany({
+  async stopForLead(
+    orgId: string,
+    leadId: string,
+    reason: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<number> {
+    const { count } = await db.sequenceEnrollment.updateMany({
       where: { orgId, leadId, status: { in: LIVE } },
       data: { status: EnrollmentStatus.stopped, stoppedAt: new Date(), stoppedReason: reason.slice(0, 100), nextActionAt: null },
     });

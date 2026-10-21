@@ -38,6 +38,7 @@ model OrganizationSetting {
   callRecordingAnnounce Boolean @default(true) @map("call_recording_announce")
   leadHotThreshold      Int     @default(75) @map("lead_hot_threshold")
   leadWarmThreshold     Int     @default(45) @map("lead_warm_threshold")
+  maxConcurrentCalls    Int     @default(5) @map("max_concurrent_calls")
   outreachStrategy      Json?   @map("outreach_strategy")
   inCallBooking         Json?   @map("in_call_booking")
   /// Outreach batches never push the org's live outbound AI calls past this...

@@ -75,38 +75,43 @@ export class InboundSmsService {
   }
 
   private async onOptOut(orgId: string, leadId: string): Promise<void> {
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        dncStatus: true,
-        automationPaused: true,
-        status: LeadStatus.not_interested,
-        lostReason: 'Opted out by SMS',
-        consentStatus: ConsentStatus.revoked,
-        firstResponseAt: new Date(),
-        lastContactAt: new Date(),
-      },
+    // DNC and stopping the sequences land together: never one without the other.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lead.update({
+        where: { id: leadId },
+        data: {
+          dncStatus: true,
+          automationPaused: true,
+          status: LeadStatus.not_interested,
+          lostReason: 'Opted out by SMS',
+          consentStatus: ConsentStatus.revoked,
+          firstResponseAt: new Date(),
+          lastContactAt: new Date(),
+        },
+      });
+      await this.followup.stopForLead(orgId, leadId, 'opted_out', tx);
     });
-    await this.followup.stopForLead(orgId, leadId, 'opted_out');
     this.logger.log(`lead ${leadId} opted out — DNC set, sequences stopped`);
   }
 
   /** Clears do-not-contact but leaves automation paused: a person decides what happens next. */
   private async onOptIn(leadId: string): Promise<void> {
-    await this.prisma.lead.updateMany({
-      where: { id: leadId, dncStatus: true, status: LeadStatus.not_interested },
-      data: { status: LeadStatus.follow_up, followUpReason: FollowUpReason.other },
-    });
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        dncStatus: false,
-        consentStatus: ConsentStatus.granted,
-        consentAt: new Date(),
-        consentSource: 'sms_start',
-        firstResponseAt: new Date(),
-        lastContactAt: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lead.updateMany({
+        where: { id: leadId, dncStatus: true, status: LeadStatus.not_interested },
+        data: { status: LeadStatus.follow_up, followUpReason: FollowUpReason.other },
+      });
+      await tx.lead.update({
+        where: { id: leadId },
+        data: {
+          dncStatus: false,
+          consentStatus: ConsentStatus.granted,
+          consentAt: new Date(),
+          consentSource: 'sms_start',
+          firstResponseAt: new Date(),
+          lastContactAt: new Date(),
+        },
+      });
     });
   }
 

@@ -86,4 +86,7 @@ export interface QueueEnv {
   REDIS_URL: string;
   EMAIL_WORKER_ENABLED: boolean;
   EMAIL_WORKER_CONCURRENCY: number;
+  CALL_WORKER_ENABLED: boolean;
+  CALL_WORKER_CONCURRENCY: number;
+  CALL_SLOT_TTL_MS: number;
 }

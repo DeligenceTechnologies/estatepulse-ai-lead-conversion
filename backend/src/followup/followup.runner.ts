@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EnrollmentStatus, LeadStatus } from '@prisma/client';
+import { EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
@@ -8,7 +8,7 @@ import { nextAllowedAt } from '@/common/utils/quiet-hours';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from '@/telnyx/activity.service';
 import { SmsService } from '@/telnyx/sms.service';
-import { VoiceService } from '@/telnyx/voice.service';
+import { CallQueue } from '@/telnyx/calls/call.queue';
 import { FollowupService, stepsOf, type SequenceStep } from './followup.service';
 
 interface ClaimedEnrollment {
@@ -41,7 +41,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly followup: FollowupService,
     private readonly sms: SmsService,
-    private readonly voice: VoiceService,
+    private readonly calls: CallQueue,
     private readonly activity: ActivityService,
   ) {}
 
@@ -149,12 +149,10 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       return;
     }
     try {
-      const call = await this.voice.placeCall(row.organization_id, lead.phone ?? '', {
-        leadId: row.lead_id,
-        orgId: row.organization_id,
-        sequenceId: row.sequence_id,
-      });
-      await this.activity.startCall(row.organization_id, row.lead_id, call.call_control_id);
+      await this.calls.enqueue(
+        { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id },
+        { dedupeKey: `followup:${row.id}:${row.current_step}` },
+      );
     } catch (error) {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
     }
@@ -164,10 +162,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   private async advance(row: ClaimedEnrollment, steps: SequenceStep[]): Promise<void> {
     const next = steps[row.current_step];
     if (!next) {
-      await this.finish(row.id, EnrollmentStatus.completed, 'exhausted');
-      await this.prisma.lead.updateMany({
-        where: { id: row.lead_id, status: LeadStatus.follow_up },
-        data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
+      await this.prisma.$transaction(async (tx) => {
+        await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
+        await tx.lead.updateMany({
+          where: { id: row.lead_id, status: LeadStatus.follow_up },
+          data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
+        });
       });
       return;
     }
@@ -183,8 +183,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private finish(id: string, status: EnrollmentStatus, reason: string) {
-    return this.prisma.sequenceEnrollment.update({
+  private finish(id: string, status: EnrollmentStatus, reason: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    return db.sequenceEnrollment.update({
       where: { id },
       data: {
         status,
