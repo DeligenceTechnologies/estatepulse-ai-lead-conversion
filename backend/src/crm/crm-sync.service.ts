@@ -7,7 +7,8 @@ import { httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
-import { RunStats, SheetImportService, type Approval, type ChangedValues } from '@/google-sheets/sheet-import.service';
+import { RunStats, SheetImportService, type ChangedValues } from '@/google-sheets/sheet-import.service';
+import { approveTrackingRows } from '@/google-sheets/approval';
 import { applyCrmChanges } from '@/google-sheets/sheet-review.service';
 import { PHONE_UNPARSED_REASON, type BuiltRow, type LeadFields } from '@/google-sheets/sheet-rows';
 import { CrmConnectionsService, integrationProviderOf, sourceProviderOf, type SessionIdentity } from './crm-connections.service';
@@ -103,7 +104,6 @@ interface Claimed {
   sync_remote_version: string | null;
   sync_next_at: Date | null;
   sync_failures: number;
-  created_at: Date;
 }
 
 interface Ctx {
@@ -114,8 +114,6 @@ interface Ctx {
   defaultConsent: ConsentStatus;
   region: string;
   importReason: string;
-  /** When the CRM was first connected (the source's creation): contacts created after it may skip review. */
-  connectedAt: Date;
   /** What the logs show: names and ids only. */
   logTag: string;
 }
@@ -351,7 +349,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
         FROM due
        WHERE s.id = due.id
       RETURNING s.id, s.organization_id, s.provider::text AS provider, s.integration_id, s.default_consent_status,
-                s.sync_remote_version, s.sync_next_at, s.sync_failures, s.created_at`;
+                s.sync_remote_version, s.sync_next_at, s.sync_failures`;
     return rows[0] ?? null;
   }
 
@@ -388,7 +386,6 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
       defaultConsent: c.default_consent_status,
       region: settings?.defaultRegion ?? 'US',
       importReason: adapter ? crmImportReviewReason(adapter.label) : '',
-      connectedAt: c.created_at,
       logTag: `${c.provider} source ${c.id}`,
     };
     const deadline = Date.now() + SLICE_MS;
@@ -720,8 +717,8 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
    *    owner in Import Review. Never a second lead.
    *  - Untracked otherwise: a new lead, paused, awaiting approval. Phone alone
    *    never links: shared office and family numbers would merge strangers.
-   *    A clean contact created in the CRM after the connection skips Import
-   *    Review instead (autoApproval).
+   *  - Any contact still awaiting approval that is complete and unflagged is
+   *    then approved on its own (approveCleanContacts).
    *  - Tracked and approved, changed in the CRM: a field-level three-way merge
    *    against what the CRM said last time (crmMerge).
    *  - Pending drafts, rejected rows, and a lead deleted out of band: the
@@ -731,11 +728,9 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
     const { adapter, organizationId: orgId, sourceId } = ctx;
     const prefix = adapter.label.customPrefix;
     const byKey = new Map<string, BuiltRow>();
-    const createdSinceConnect = new Set<string>();
     for (const contact of contacts) {
       const row = buildCrmRow(adapter.provider, adapter.label, contact, ctx.region);
       byKey.set(row.key!, row);
-      if (contact.createdAt && contact.createdAt >= ctx.connectedAt.getTime()) createdSinceConnect.add(contact.externalId);
     }
     const all = [...byKey.values()];
     const seenKeys = all.map((r) => r.key!);
@@ -898,7 +893,10 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
       // --- everything else through the shared import engine ---
       const applied = new Set(apply.map((a) => a.key));
       const engineRows = rows.filter((r) => !applied.has(r.key!));
-      if (engineRows.length) await this.writeThroughEngine(ctx, engineRows, counts, autoApproval(createdSinceConnect));
+      if (engineRows.length) await this.writeThroughEngine(ctx, engineRows, counts);
+
+      // --- complete contacts skip Import Review, as a sheet's clean rows do ---
+      await this.approveCleanContacts(ctx, rows.map((r) => r.key!));
 
       // The CRM values each record now stands at: the base of the next merge. Only where they were
       // accepted (applied, imported, unchanged); a held change keeps its old hash, so its old base too.
@@ -923,10 +921,10 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
    * for a reason a retry cannot fix, the page is written again one contact at
    * a time, so one bad record cannot hold back the rest; each is counted failed.
    */
-  private async writeThroughEngine(ctx: Ctx, rows: BuiltRow[], counts: CrmCounts, approve: Approval): Promise<void> {
+  private async writeThroughEngine(ctx: Ctx, rows: BuiltRow[], counts: CrmCounts): Promise<void> {
     const write = async (batch: BuiltRow[]) => {
       const stats = new RunStats(0);
-      await this.importer.importRows(ctx.organizationId, ctx.sourceId, ctx.defaultConsent, batch, stats, ctx.importReason, approve, { scopeToRows: true });
+      await this.importer.importRows(ctx.organizationId, ctx.sourceId, ctx.defaultConsent, batch, stats, ctx.importReason, null, { scopeToRows: true });
       counts.created += stats.inserted;
       counts.updated += stats.updated;
       counts.unchanged += stats.unchanged;
@@ -948,6 +946,49 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
         }
       }
     }
+  }
+
+  /**
+   * CRM contacts that already have what a lead needs skip Import Review, as a
+   * sheet's clean rows do when it is switched on: see isCleanCrmLead, and no
+   * other lead may share the phone or email (a possible duplicate the owner
+   * decides). Checked on every sync of a contact still awaiting approval — new,
+   * changed or not — so one completed in the CRM moves on by itself; anything
+   * else keeps waiting. Approved as the system, so released to outreach like
+   * any approved lead.
+   */
+  private async approveCleanContacts(ctx: Ctx, keys: string[]): Promise<void> {
+    const { organizationId: orgId, sourceId } = ctx;
+    if (keys.length === 0) return;
+    const pending = await this.prisma.sheetImportRow.findMany({
+      where: { orgId, leadSourceId: sourceId, rowKey: { in: keys }, reviewState: 'pending', leadId: { not: null } },
+      select: {
+        id: true,
+        lead: { select: { id: true, firstName: true, normalizedEmail: true, normalizedPhone: true, dncStatus: true, reviewReasons: true } },
+      },
+    });
+    const clean = pending.filter((p) => p.lead && isCleanCrmLead(p.lead, ctx.importReason));
+    if (clean.length === 0) return;
+
+    const sharing = await this.prisma.lead.findMany({
+      where: {
+        orgId,
+        OR: [
+          { normalizedPhone: { in: clean.map((p) => p.lead!.normalizedPhone!) } },
+          { normalizedEmail: { in: clean.map((p) => p.lead!.normalizedEmail!) } },
+        ],
+      },
+      select: { id: true, normalizedPhone: true, normalizedEmail: true },
+    });
+    const rowIds = clean
+      .filter(({ lead }) =>
+        !sharing.some((o) => o.id !== lead!.id && (o.normalizedPhone === lead!.normalizedPhone || o.normalizedEmail === lead!.normalizedEmail)),
+      )
+      .map((p) => p.id);
+    if (rowIds.length === 0) return;
+
+    const result = await this.prisma.$transaction((tx) => approveTrackingRows(tx, this.audit, orgId, rowIds, { userId: null }));
+    if (result.approved) this.logger.log(`${ctx.logTag}: ${result.approved} complete contact(s) approved (${result.released} released to outreach)`);
   }
 
   /** Deleted, archived or merged away in the CRM: marked, never deleted. */
@@ -1184,24 +1225,20 @@ export function toRunDTO(r: RunRow): RunDTO {
 }
 
 /**
- * Which new CRM contacts skip Import Review and go straight to the Leads table,
- * as a sheet's clean rows do: created in the CRM after it was connected (the
- * first import of contacts already there always waits for the owner, so
- * connecting never releases a whole CRM to outreach at once), with a first name,
- * a valid email and a dialable phone, nothing flagged on the row, and no other
- * lead or do-not-contact record sharing that phone or email. Approved by the
- * system; anything else waits in Import Review as before.
+ * A CRM lead complete enough to skip Import Review: a first name, a valid email
+ * and a dialable phone, not do-not-contact, and nothing flagged on it — its only
+ * review reason is the import's own "awaiting approval" (no invalid value, no
+ * missing name, no possible duplicate or opt-out found when it was imported).
  */
-export function autoApproval(createdSinceConnect: ReadonlySet<string>): Approval {
-  return {
-    by: { userId: null },
-    rule: (row, { dnc, duplicate }) =>
-      createdSinceConnect.has(row.externalId ?? '') &&
-      row.reviewReasons.length === 0 &&
-      Boolean(row.lead?.first_name && row.lead.normalized_email && row.lead.normalized_phone) &&
-      !dnc &&
-      !duplicate,
-  };
+export function isCleanCrmLead(
+  lead: { firstName: string | null; normalizedEmail: string | null; normalizedPhone: string | null; dncStatus: boolean; reviewReasons: string[] },
+  importReason: string,
+): boolean {
+  return (
+    Boolean(lead.firstName && lead.normalizedEmail && lead.normalizedPhone) &&
+    !lead.dncStatus &&
+    lead.reviewReasons.every((r) => r === importReason)
+  );
 }
 
 /** A database refusal no retry fixes: a value too long, out of range, or otherwise unstorable. */

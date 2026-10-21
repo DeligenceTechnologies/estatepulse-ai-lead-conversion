@@ -10,12 +10,12 @@ import { IntegrationCard } from './IntegrationCard';
 
 /**
  * HubSpot — connect the office's HubSpot account and import its contacts as
- * leads. Contacts already in HubSpot wait in Import Review; none is called or
- * texted until the owner approves it. Contacts created in HubSpot afterwards go
- * straight to Leads (and outreach) when clean — a name, a valid email and phone,
- * nothing flagged — and wait for review otherwise. After the first import,
- * HubSpot's webhooks keep leads in step, with a periodic check for anything a
- * webhook missed.
+ * leads, as a sheet's clean rows are: a contact with a name, a valid email and
+ * phone, and nothing flagged goes straight to Leads (and outreach); one missing
+ * or invalid details, or a possible duplicate or opt-out, waits in Import
+ * Review, and moves on by itself once it is completed in HubSpot. After the
+ * first import, HubSpot's webhooks keep leads in step, with a periodic check
+ * for anything a webhook missed.
  */
 
 const PROVIDER = 'hubspot' as const;
@@ -168,7 +168,7 @@ export const HubSpotCard: React.FC = () => {
           </div>
         }
         title={NAME}
-        blurb="Import your CRM contacts; clean new ones go straight to Leads"
+        blurb="Import your CRM contacts; complete ones go straight to Leads"
         connected={live}
         loading={loading}
         accent="border-orange-500/40"
@@ -182,9 +182,9 @@ export const HubSpotCard: React.FC = () => {
 
         {!loading && status?.configured && s === 'not_connected' && (
           <p className="text-xs text-slate-500">
-            Connecting imports your HubSpot contacts as leads. Contacts already in HubSpot wait in Import Review — nobody is contacted
-            until you approve them. Contacts added to HubSpot later go straight to Leads, and outreach, when they have a name, a valid
-            email and a valid phone; the rest wait for review.
+            Connecting imports your HubSpot contacts as leads. Contacts with a name, a valid email and a valid phone go straight to
+            Leads, and outreach. Contacts with missing or invalid details, or that match another lead, wait in Import Review until
+            you approve them or complete them in HubSpot.
           </p>
         )}
 
