@@ -98,7 +98,9 @@ const sourceLabel = (l: LiveLead): string => {
   // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
   const method = (s.connectionMethod ?? '').toUpperCase();
   if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
-  return s.type ?? 'webhook';
+  // MANUAL means a webhook URL the owner set up by hand (the Webhook card, a pasted form URL), not a lead typed in;
+  // `type` is the provider ("custom", "tally"), so it is not used here.
+  return 'webhook';
 };
 
 /**
@@ -110,10 +112,9 @@ const sourceLabel = (l: LiveLead): string => {
  */
 const sourceIcon = (l: LiveLead): LucideIcon => {
   const s = l.source;
+  // Only a lead typed in has no source: the pen. A MANUAL source is a hand-set webhook URL, so it falls to the webhook glyph.
   if (!s) return PenLine;
   switch ((s.connectionMethod ?? '').toUpperCase()) {
-    case 'MANUAL':
-      return PenLine;
     case 'API':
       return Radio;
     case 'SYNC':

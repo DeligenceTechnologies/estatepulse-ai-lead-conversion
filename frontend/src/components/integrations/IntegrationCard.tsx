@@ -59,7 +59,8 @@ export const IntegrationCard: React.FC<{
       </span>
     </div>
 
-    <div className="flex-1 space-y-2">{children}</div>
+    {/* Scrolls when the card is given a height (Lead Integrations does) and its content outgrows it; otherwise it just grows. */}
+    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2 pr-1 -mr-1">{children}</div>
 
     <button
       type="button"
