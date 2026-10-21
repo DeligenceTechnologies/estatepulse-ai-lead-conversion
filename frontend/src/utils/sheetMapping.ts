@@ -1,4 +1,5 @@
 import type { ApproveResult, ColumnMapping, Identity, RejectResult } from './googleSheetsApi';
+import { startLabel } from './outreachApi';
 
 /**
  * The mapping screen offers ONE choice per column; the API takes a list of
@@ -126,6 +127,13 @@ export function approveMessage(r: ApproveResult): string {
   if (r.approved === 0) return 'Nothing approved — those rows were already decided.';
   const parts = [`Approved ${plural(r.approved, 'lead')}.`];
   if (r.released > 0) parts.push(`${plural(r.released, 'lead is', 'leads are')} now eligible for your outreach strategy.`);
+  if (r.outreach && r.outreach.queued > 0) {
+    parts.push(
+      r.outreach.mode === 'now'
+        ? `${plural(r.outreach.queued, 'lead is', 'leads are')} queued to call now, paced by your call limits.`
+        : `${plural(r.outreach.queued, 'lead is', 'leads are')} scheduled for ${startLabel(r.outreach.startAt, r.outreach.timeZone)}.`,
+    );
+  }
   if (r.held.length > 0) {
     const counts = new Map<string, number>();
     for (const h of r.held) counts.set(h.reason, (counts.get(h.reason) ?? 0) + 1);

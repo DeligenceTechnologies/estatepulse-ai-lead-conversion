@@ -51,6 +51,8 @@ export interface IntegrationEnv {
   FOLLOWUP_POLL_MS: number;
   FOLLOWUP_BATCH_SIZE: number;
   FOLLOWUP_STUCK_AFTER_MS: number;
+  OUTREACH_SCHEDULING_ENABLED: boolean;
+  OUTREACH_POLL_MS: number;
   GOOGLE_SHEETS_ENABLED: boolean;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

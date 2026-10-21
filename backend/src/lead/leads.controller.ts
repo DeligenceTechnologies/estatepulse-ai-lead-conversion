@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { AssignmentType, LeadStatus } from '@prisma/client';
+import { AssignmentType, LeadStatus, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { PrismaService } from '@/common/prisma/prisma.service';
@@ -10,7 +10,33 @@ import { CreateLeadDto } from './dto/create-lead.dto';
 import { ListLeadsQuery } from './dto/list-leads.query';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
+import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
+
+interface OutreachEntry {
+  lead_id: string;
+  state: OutreachItemState;
+  skip_reason: string | null;
+  batch_status: OutreachBatchStatus;
+  start_at: Date;
+  timezone: string;
+}
+
+/** Where a lead stands with outreach, for the line under its status; null when the status says it all. */
+export type LeadOutreach =
+  | { state: 'scheduled'; startAt: Date; timeZone: string }
+  | { state: 'waiting' | 'released' | 'paused' }
+  | { state: 'skipped'; reason: string | null };
+
+function outreachOf(lead: { status: LeadStatus; automationPaused: boolean; dncStatus: boolean }, entry?: OutreachEntry): LeadOutreach | null {
+  if (entry?.state === 'queued') {
+    return entry.batch_status === 'pending' ? { state: 'scheduled', startAt: entry.start_at, timeZone: entry.timezone } : { state: 'waiting' };
+  }
+  if (entry?.state === 'skipped') return { state: 'skipped', reason: entry.skip_reason };
+  if (entry?.state === 'released' && lead.status === LeadStatus.new && !lead.automationPaused) return { state: 'released' };
+  if (lead.automationPaused && !lead.dncStatus && IN_STRATEGY_STATUSES.includes(lead.status)) return { state: 'paused' };
+  return null;
+}
 
 const LEAD_FIELDS = {
   id: true,
@@ -25,6 +51,7 @@ const LEAD_FIELDS = {
   status: true,
   followUpReason: true,
   dncStatus: true,
+  automationPaused: true,
   aiSummary: true,
   temperature: true,
   score: true,
@@ -79,7 +106,7 @@ export class LeadsController {
       take: query.limit ?? 100,
       select: LEAD_FIELDS,
     });
-    const contactCounts = await this.contactLeadCounts(orgId, rows);
+    const [contactCounts, outreach] = await Promise.all([this.contactLeadCounts(orgId, rows), this.outreachEntries(orgId, rows.map((r) => r.id))]);
 
     return rows.map((l) => ({
       id: l.id,
@@ -106,6 +133,8 @@ export class LeadsController {
       motivation: l.motivation,
       consentStatus: l.consentStatus,
       dncStatus: l.dncStatus,
+      automationPaused: l.automationPaused,
+      outreach: outreachOf(l, outreach.get(l.id)),
       customFields: l.customFields,
       submissionCount: l.submissionCount,
       contactLeadCount: contactCounts.get(l.id) ?? 1,
@@ -129,6 +158,18 @@ export class LeadsController {
       createdAt: l.createdAt,
       updatedAt: l.updatedAt,
     }));
+  }
+
+  /** Each listed lead's latest outreach batch entry, if it was ever launched in one. */
+  private async outreachEntries(orgId: string, leadIds: string[]): Promise<Map<string, OutreachEntry>> {
+    if (leadIds.length === 0) return new Map();
+    const entries = await this.prisma.$queryRaw<OutreachEntry[]>`
+      SELECT DISTINCT ON (i.lead_id) i.lead_id, i.state, i.skip_reason, b.status AS batch_status, b.start_at, b.timezone
+        FROM outreach_batch_leads AS i
+        JOIN outreach_batches AS b ON b.id = i.batch_id
+       WHERE i.organization_id = ${orgId}::uuid AND i.lead_id = ANY(${leadIds}::uuid[])
+       ORDER BY i.lead_id, i.created_at DESC`;
+    return new Map(entries.map((e) => [e.lead_id, e]));
   }
 
   @Get('stats')

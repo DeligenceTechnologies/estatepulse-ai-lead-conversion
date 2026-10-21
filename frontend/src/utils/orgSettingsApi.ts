@@ -12,10 +12,14 @@ export interface OrgSettings {
   timezone: string;
   /** Seven days (server default Mon-Fri 09:00-18:00, weekend off). */
   workingHours: WorkingDay[];
+  /** Outreach batches keep live outbound AI calls at or under this (server default 5)... */
+  maxConcurrentAiCalls: number;
+  /** ...with this many kept free for new form leads and follow-ups (server default 1). */
+  reservedCallSlots: number;
   updatedAt: string;
 }
 
-export type OrgSettingsUpdate = Partial<Pick<OrgSettings, 'timezone' | 'workingHours'>>;
+export type OrgSettingsUpdate = Partial<Pick<OrgSettings, 'timezone' | 'workingHours' | 'maxConcurrentAiCalls' | 'reservedCallSlots'>>;
 
 export const getOrgSettings = (): Promise<OrgSettings> => apiFetch<OrgSettings>('/org-settings', { auth: true });
 

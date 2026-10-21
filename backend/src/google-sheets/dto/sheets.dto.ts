@@ -18,6 +18,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { OutreachChoiceDto } from '@/outreach/outreach.dto';
 import { MAPPING_TARGETS } from '../sheet-rows';
 
 export const SPREADSHEET_ID = /^[A-Za-z0-9_-]{20,128}$/;
@@ -94,6 +95,12 @@ export class EnableSheetDto {
   @Min(2, { each: true })
   @Max(10_001, { each: true })
   approveRows?: number[];
+
+  /** How the ticked rows launch; read only with OUTREACH_SCHEDULING_ENABLED, and without it they launch now. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OutreachChoiceDto)
+  outreach?: OutreachChoiceDto;
 }
 
 export class RowIdsDto {
@@ -103,6 +110,14 @@ export class RowIdsDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   rowIds!: string[];
+}
+
+export class ApproveRowsDto extends RowIdsDto {
+  /** Read only with OUTREACH_SCHEDULING_ENABLED; without it the leads launch now. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OutreachChoiceDto)
+  outreach?: OutreachChoiceDto;
 }
 
 export class ResolveChangesDto extends RowIdsDto {

@@ -1,0 +1,71 @@
+/// One owner decision to launch outreach on approved imported leads: now, or at a time.
+/// The release runner unpauses its leads at start_at, paced by the org's call limits.
+model OutreachBatch {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  orgId          String              @map("organization_id") @db.Uuid
+  mode           OutreachBatchMode
+  status         OutreachBatchStatus @default(pending)
+  startAt        DateTime            @map("start_at") @db.Timestamptz(6)
+  timezone       String              @db.VarChar(100)
+  total          Int                 @default(0)
+  /// Approved in the same decision but never queued: do-not-contact, no dialable phone, or no longer new.
+  heldAtApproval Int                 @default(0) @map("held_at_approval")
+  createdBy      String?             @map("created_by") @db.Uuid
+  startedAt      DateTime?           @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime?           @map("completed_at") @db.Timestamptz(6)
+  cancelledAt    DateTime?           @map("cancelled_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leads        OutreachBatchLead[]
+
+  @@index([status, startAt])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("outreach_batches")
+}
+
+model OutreachBatchLead {
+  batchId    String            @map("batch_id") @db.Uuid
+  leadId     String            @map("lead_id") @db.Uuid
+  orgId      String            @map("organization_id") @db.Uuid
+  state      OutreachItemState @default(queued)
+  skipReason String?           @map("skip_reason") @db.VarChar(30)
+  releasedAt DateTime?         @map("released_at") @db.Timestamptz(6)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  batch OutreachBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  lead  Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@id([batchId, leadId])
+  @@index([batchId, state])
+  @@index([orgId, state, releasedAt])
+  @@index([leadId])
+  @@map("outreach_batch_leads")
+}
+
+enum OutreachBatchMode {
+  now
+  scheduled
+
+  @@map("outreach_batch_mode")
+}
+
+enum OutreachBatchStatus {
+  pending
+  running
+  completed
+  cancelled
+
+  @@map("outreach_batch_status")
+}
+
+enum OutreachItemState {
+  queued
+  released
+  skipped
+  cancelled
+
+  @@map("outreach_item_state")
+}

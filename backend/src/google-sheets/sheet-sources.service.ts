@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { ConnectionMethod, IntegrationProvider, IngestStatus, LeadSourceProvider, MappingStatus, Prisma } from '@prisma/client';
 import { AuditService } from '@/audit/audit.service';
 import { AppError, httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import type { IntegrationEnv } from '@/common/utils/interface';
+import { outreachRequest } from '@/outreach/batches';
+import { summaryOf, type OutreachSummary } from '@/outreach/schedule';
 import type { SaveMappingDto, CreateSheetSourceDto, EnableSheetDto, ReviewQueryDto } from './dto/sheets.dto';
 import { GoogleConnectionsService, type SessionIdentity } from './google-connections.service';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
@@ -85,7 +89,7 @@ export interface SheetSourceDTO {
 export interface FirstRun {
   ok: boolean;
   imported: number;
-  approval: { approved: number; released: number; held: RunStats['autoHeld']; skipped: string[] };
+  approval: { approved: number; released: number; held: RunStats['autoHeld']; skipped: string[]; outreach?: OutreachSummary };
 }
 
 /** One Google Sheets tab per lead source: pick it, map its columns, choose its row identity, switch it on. */
@@ -97,6 +101,7 @@ export class SheetSourcesService {
     private readonly google: GoogleClient,
     private readonly importer: SheetImportService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService<IntegrationEnv, true>,
   ) {}
 
   async list(orgId: string): Promise<SheetSourceDTO[]> {
@@ -347,14 +352,18 @@ export class SheetSourcesService {
       );
     }
     if (credential.status !== 'active') throw httpError(409, 'GOOGLE_REAUTH_REQUIRED', 'Reconnect Google before switching this sheet on.');
+    const ticked = new Set(body.approveRows ?? []);
+    const by = { userId: who.userId };
+    // Checked before the sheet goes on: a schedule already past refuses the whole switch-on.
+    const enabled = this.config.get('OUTREACH_SCHEDULING_ENABLED', { infer: true });
+    const outreach = ticked.size > 0 ? await outreachRequest(this.prisma, enabled, orgId, by, body.outreach) : undefined;
 
     await this.prisma.leadSource.updateMany({
       where: { id: sourceId, orgId },
       data: { ingestStatus: IngestStatus.ACTIVE, syncNextAt: new Date(), remoteSyncedAt: null, remoteErrorCode: null, remoteErrorMessage: null },
     });
-    const ticked = new Set(body.approveRows ?? []);
     await this.record(who, 'sheet_source.enabled', sourceId, { ticked: ticked.size });
-    const run = await this.importer.runNow(orgId, sourceId, { rule: (b) => ticked.has(b.rowNumber), by: { userId: who.userId } });
+    const run = await this.importer.runNow(orgId, sourceId, { rule: (b) => ticked.has(b.rowNumber), by, outreach });
     if (!run) this.importer.nudge();
     return {
       ...(await this.dto(orgId, await this.mustFind(orgId, sourceId))),
@@ -362,7 +371,13 @@ export class SheetSourcesService {
         ? {
             ok: run.ok,
             imported: run.stats.inserted,
-            approval: { approved: run.stats.autoApproved, released: run.stats.autoReleased, held: run.stats.autoHeld, skipped: [] },
+            approval: {
+              approved: run.stats.autoApproved,
+              released: run.stats.autoReleased,
+              held: run.stats.autoHeld,
+              skipped: [],
+              ...(outreach?.batchId ? { outreach: summaryOf(outreach) } : {}),
+            },
           }
         : null,
     };

@@ -11,6 +11,7 @@ import {
   type SheetPreview,
   type SheetSource,
 } from '../../utils/googleSheetsApi';
+import { getOutreachConfig, type OutreachConfig } from '../../utils/outreachApi';
 import {
   CHOICES,
   approveMessage,
@@ -19,6 +20,7 @@ import {
   draftProblems,
   type ColumnChoice,
 } from '../../utils/sheetMapping';
+import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch } from '../imports/OutreachPicker';
 import { PreviewRowsTable, flagged } from '../imports/PreviewRowsTable';
 import { SheetError, SheetModal, errorDetails, errorText } from './SheetModal';
 
@@ -52,6 +54,18 @@ export const SheetMappingModal: React.FC<{
   const [busy, setBusy] = useState<null | 'load' | 'save' | 'enable'>('load');
   const [saved, setSaved] = useState<SheetSource | null>(null);
   const [done, setDone] = useState<(SheetSource & { firstRun: FirstRun | null }) | null>(null);
+  /** Outreach scheduling (server switch): how the rows approved on switch-on launch. Null when it is off. */
+  const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
+  const [launch, setLaunch] = useState<Launch | null>(null);
+
+  useEffect(() => {
+    getOutreachConfig()
+      .then((c) => {
+        setOutreach(c);
+        if (c) setLaunch(initialLaunch(c));
+      })
+      .catch(() => setOutreach(null));
+  }, []);
 
   const load = useCallback(async () => {
     setBusy('load');
@@ -107,7 +121,7 @@ export const SheetMappingModal: React.FC<{
     setBusy('enable');
     setError(null);
     try {
-      const source = await enableSheetSource(sourceId, [...selected]);
+      const source = await enableSheetSource(sourceId, [...selected], outreach && launch && selected.size > 0 ? launchChoice(launch) : undefined);
       onChanged(source);
       // Approved leads join the Leads list: tell the shell, so its count follows.
       if ((source.firstRun?.approval.approved ?? 0) > 0) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
@@ -124,6 +138,10 @@ export const SheetMappingModal: React.FC<{
   const ticking = status !== 'ACTIVE';
   const rows = preview?.rows ?? [];
   const importable = useMemo(() => rows.filter((r) => !r.issue), [rows]);
+
+  const launchBlock = outreach && launch && selected.size > 0 ? launchProblem(launch) : null;
+  const approvedNow = (n: number) =>
+    outreach && launch ? `${n.toLocaleString('en-US')} ${launch.mode === 'now' ? 'to call now' : 'scheduled'}` : `${n.toLocaleString('en-US')} approved now`;
 
   const firstRun = done?.firstRun ?? null;
   const pending = firstRun ? firstRun.imported - firstRun.approval.approved : 0;
@@ -290,6 +308,17 @@ export const SheetMappingModal: React.FC<{
             }
           />
 
+          {saved && ticking && outreach && launch && (
+            <div className="rounded-xl border border-slate-800 p-3 space-y-2">
+              <OutreachPicker config={outreach} value={launch} onChange={setLaunch} />
+              <p className="text-2xs text-slate-500">
+                {selected.size > 0
+                  ? `Applies to the ${selected.size.toLocaleString('en-US')} ticked row${selected.size === 1 ? '' : 's'}. Rows the sheet gains later wait in Import Review, where you choose again.`
+                  : 'Nothing is ticked: every row waits in Import Review, and you choose when to call them when you approve them there.'}
+              </p>
+            </div>
+          )}
+
           {/* Save / switch on */}
           {problems.length > 0 && (
             <ul className="text-2xs text-amber-300 list-disc pl-4 space-y-0.5">
@@ -312,7 +341,7 @@ export const SheetMappingModal: React.FC<{
               <button
                 type="button"
                 onClick={enable}
-                disabled={busy !== null}
+                disabled={busy !== null || launchBlock !== null}
                 title={
                   selected.size > 0
                     ? 'Imports every importable row; the ticked ones are approved right away, the rest wait in Import Review'
@@ -324,13 +353,15 @@ export const SheetMappingModal: React.FC<{
                 {busy === 'enable'
                   ? 'Importing…'
                   : `Import ${importable.length.toLocaleString('en-US')} lead${importable.length === 1 ? '' : 's'}${
-                      selected.size > 0 ? ` · ${selected.size.toLocaleString('en-US')} approved now` : ' for review'
+                      selected.size > 0 ? ` · ${approvedNow(selected.size)}` : ' for review'
                     }`}
               </button>
             )}
           </div>
           <p className="text-2xs text-slate-500">
-            {ticking
+            {ticking && outreach
+              ? 'Ticked rows are approved on import and called as chosen above, paced and inside your contact window; the rest wait in Import Review, as do rows the sheet gains later.'
+              : ticking
               ? 'Ticked rows are approved on import; the rest wait in Import Review, as do rows the sheet gains later. Approving makes a lead eligible for your outreach strategy; it never calls or texts anyone by itself.'
               : 'Rows this sheet gains wait in Import Review. Nobody is called or texted until you approve them.'}
           </p>

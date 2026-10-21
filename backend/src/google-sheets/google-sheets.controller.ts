@@ -5,6 +5,7 @@ import { AppError } from '@/common/errors/app-error';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import {
+  ApproveRowsDto,
   ChangesQueryDto,
   CompleteOAuthDto,
   CreateSheetSourceDto,
@@ -152,8 +153,8 @@ export class ImportReviewController {
   @Post('approve')
   @HttpCode(200)
   @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
-  approve(@CurrentAuth() auth: AuthContext, @Body() body: RowIdsDto) {
-    return this.reviews.approve(identity(auth), body.rowIds);
+  approve(@CurrentAuth() auth: AuthContext, @Body() body: ApproveRowsDto) {
+    return this.reviews.approve(identity(auth), body.rowIds, body.outreach);
   }
 
   @Post('reject')

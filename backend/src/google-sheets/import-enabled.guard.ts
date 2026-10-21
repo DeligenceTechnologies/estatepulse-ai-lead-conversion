@@ -48,3 +48,12 @@ export class ImportReviewEnabledGuard extends FeatureGuard {
     );
   }
 }
+
+@Injectable()
+export class OutreachSchedulingEnabledGuard extends FeatureGuard {
+  protected readonly code = 'OUTREACH_SCHEDULING_DISABLED';
+  protected readonly message = 'Outreach scheduling is not enabled on this server.';
+  protected enabled() {
+    return this.config.get('OUTREACH_SCHEDULING_ENABLED', { infer: true });
+  }
+}

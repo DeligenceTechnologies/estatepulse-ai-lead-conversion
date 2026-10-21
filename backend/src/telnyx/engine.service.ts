@@ -7,13 +7,10 @@ import { FollowupService } from '@/followup/followup.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from './activity.service';
 import { SmsService } from './sms.service';
-import { StrategyStoreService, type StrategyStep } from './strategy-store.service';
+import { StrategyStoreService, offsetMs, type StrategyStep } from './strategy-store.service';
 import { VoiceService } from './voice.service';
 
-const UNIT_MS: Record<string, number> = { seconds: 1_000, minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const FINALIZE_AFTER_MS = 90_000;
-
-const offsetMs = (after: StrategyStep['after']): number => (after?.value ?? 0) * (UNIT_MS[after?.unit] ?? 1000);
 
 /**
  * Which steps are still to run after a restart, matched against the calls and

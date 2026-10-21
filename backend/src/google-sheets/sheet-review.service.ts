@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import type { IntegrationEnv } from '@/common/utils/interface';
 import { CRM_INBOUND_FIELDS, NO_NAME_REASON_PREFIX } from '@/crm/crm-records';
+import { outreachRequest, type OutreachChoice } from '@/outreach/batches';
 import { IMPORT_REASONS_SPENT_ON_DECISION, approveTrackingRows, notDecided } from './approval';
 import type { ChangesQueryDto } from './dto/sheets.dto';
 import type { SessionIdentity } from './google-connections.service';
@@ -29,10 +32,15 @@ export class SheetReviewService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService<IntegrationEnv, true>,
   ) {}
 
-  approve(who: SessionIdentity, rowIds: string[]) {
-    return this.prisma.$transaction((tx) => approveTrackingRows(tx, this.audit, who.organizationId, rowIds, { userId: who.userId }));
+  /** With scheduling on, the approved leads launch through an outreach batch: now, or at the owner's chosen time. */
+  async approve(who: SessionIdentity, rowIds: string[], choice?: OutreachChoice) {
+    const by = { userId: who.userId };
+    const enabled = this.config.get('OUTREACH_SCHEDULING_ENABLED', { infer: true });
+    const outreach = await outreachRequest(this.prisma, enabled, who.organizationId, by, choice);
+    return this.prisma.$transaction((tx) => approveTrackingRows(tx, this.audit, who.organizationId, rowIds, by, outreach));
   }
 
   /** A rejected row's lead is closed and kept paused; the row keeps its key, so the next sync does not bring it back. */

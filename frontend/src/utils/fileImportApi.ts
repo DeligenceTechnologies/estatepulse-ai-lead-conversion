@@ -1,6 +1,7 @@
 import { apiFetch, apiUpload } from '../lib/api';
 import { crmEnabled } from './crmApi';
-import { googleSheetsEnabled, isSheetsDisabled, type ColumnMapping, type ImportKind, type PreviewLead } from './googleSheetsApi';
+import { googleSheetsEnabled, isSheetsDisabled, type ApproveResult, type ColumnMapping, type ImportKind, type PreviewLead } from './googleSheetsApi';
+import type { OutreachChoice } from './outreachApi';
 
 /**
  * Lead import from an uploaded CSV / XLSX (owner only).
@@ -71,7 +72,7 @@ export interface ImportBatch {
   errorSample: { row: number; code: RowIssue }[];
   review: { pending: number; approved: number; rejected: number };
   /** On an import: what happened to the rows approved as they landed. Null on a retry that imported nothing. */
-  approval?: { approved: number; released: number; held: { rowId: string; leadId: string; reason: string }[]; skipped: string[] } | null;
+  approval?: ApproveResult | null;
 }
 
 /** How far an upload has got, 0 to 1. */
@@ -121,6 +122,8 @@ export const importFile = (
   /** Import only the rows without any flag, approved at once; flagged rows are left out entirely. */
   onlyClean: boolean,
   onProgress?: Progress,
+  /** How the rows approved on import launch (outreach scheduling on); without it they launch now. */
+  outreach?: OutreachChoice,
 ): Promise<ImportBatch> =>
   apiUpload<ImportBatch>(
     `${BASE}/batches`,
@@ -130,6 +133,7 @@ export const importFile = (
       sheet: sheet ?? undefined,
       approveRows: !onlyClean && approveRows ? JSON.stringify(approveRows) : undefined,
       onlyClean: onlyClean ? '1' : undefined,
+      outreach: outreach ? JSON.stringify(outreach) : undefined,
     }),
     onProgress,
   );

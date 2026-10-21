@@ -94,6 +94,10 @@ export const envValidationSchema = Joi.object({
     FOLLOWUP_POLL_MS: Joi.number().integer().positive().default(60_000),
     FOLLOWUP_BATCH_SIZE: Joi.number().integer().positive().default(20),
     FOLLOWUP_STUCK_AFTER_MS: Joi.number().integer().positive().default(600_000),
+    // "Call now / schedule" for approved imports, paced by the org's call limits.
+    // Off: approving releases leads at once, exactly as before.
+    OUTREACH_SCHEDULING_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    OUTREACH_POLL_MS: Joi.number().integer().positive().default(15_000),
 
     GOOGLE_SHEETS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     GOOGLE_CLIENT_ID: Joi.string().empty('').optional(),

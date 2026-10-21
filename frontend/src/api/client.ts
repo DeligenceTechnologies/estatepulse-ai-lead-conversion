@@ -232,6 +232,16 @@ export const api = {
 
 // --- Leads -----------------------------------------------------------------
 
+/**
+ * Where a lead stands with outreach, for the line under its status: waiting in a
+ * scheduled batch, queued for a call slot, just released to the strategy,
+ * skipped at release, or paused. Null when the status already says it all.
+ */
+export type LeadOutreach =
+  | { state: 'scheduled'; startAt: string; timeZone: string }
+  | { state: 'waiting' | 'released' | 'paused' }
+  | { state: 'skipped'; reason: string | null };
+
 export interface LiveLead {
   id: string;
   firstName: string | null;
@@ -258,6 +268,9 @@ export interface LiveLead {
   motivation: string | null;
   consentStatus: string;
   dncStatus: boolean;
+  /** True: nothing automated contacts this lead until it is released. */
+  automationPaused?: boolean;
+  outreach?: LeadOutreach | null;
   customFields: Record<string, string>;
   /** An answer we could not store, or a contact detail we could not use. */
   needsReview: boolean;

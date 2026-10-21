@@ -12,8 +12,10 @@ import {
   type ImportBatch,
 } from '../../utils/fileImportApi';
 import type { ColumnMapping } from '../../utils/googleSheetsApi';
+import { getOutreachConfig, type OutreachConfig } from '../../utils/outreachApi';
 import { CHOICES, ISSUE_TEXT, approveMessage, choicesFromColumns, columnsFromChoices, type ColumnChoice } from '../../utils/sheetMapping';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
+import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch } from './OutreachPicker';
 import { PreviewRowsTable, flagged } from './PreviewRowsTable';
 
 const select =
@@ -88,6 +90,9 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
   const [error, setError] = useState<{ message: string; details: string[] } | null>(null);
   const [done, setDone] = useState<ImportBatch | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** Outreach scheduling (server switch): how the rows approved on import launch. Null when it is off. */
+  const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
+  const [launch, setLaunch] = useState<Launch | null>(null);
   const input = useRef<HTMLInputElement>(null);
   // One token per chosen file and worksheet: a retry of the same import can never make a second batch.
   const token = useRef<string>(crypto.randomUUID());
@@ -102,6 +107,12 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
       })
       .catch((e) => setError({ message: errorText(e), details: [] }))
       .finally(() => setBusy(null));
+    getOutreachConfig()
+      .then((c) => {
+        setOutreach(c);
+        if (c) setLaunch(initialLaunch(c));
+      })
+      .catch(() => setOutreach(null));
   }, []);
 
   const read = useCallback(async (f: File, columns: ColumnMapping[] | null, ws: string | null) => {
@@ -166,6 +177,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
    */
   const run = async (mode: 'all' | 'clean') => {
     if (!file || !preview) return;
+    const approving = mode === 'clean' || selected.size > 0;
     setBusy('import');
     setProgress({ phase: 'import', fraction: 0 });
     setError(null);
@@ -178,6 +190,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
         mode === 'all' ? [...selected] : null,
         mode === 'clean',
         (fraction) => setProgress({ phase: 'import', fraction }),
+        outreach && launch && approving ? launchChoice(launch) : undefined,
       );
       setDone(batch);
       onImported(batch);
@@ -205,6 +218,10 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
 
   const cleanCount = useMemo(() => (preview?.rows ?? []).filter((r) => !flagged(r)).length, [preview]);
   const flaggedCount = (preview?.rows.length ?? 0) - cleanCount;
+  /** A schedule that cannot be sent blocks the import; with nothing ticked it does not matter (but "clean only" still approves). */
+  const launchBlock = outreach && launch ? launchProblem(launch) : null;
+  const approvedNow = (n: number) =>
+    outreach && launch ? `${n.toLocaleString('en-US')} ${launch.mode === 'now' ? 'to call now' : 'scheduled'}` : `${n.toLocaleString('en-US')} approved now`;
 
   return (
     <SheetModal
@@ -268,6 +285,19 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
       {/* Step 1: choose a file */}
       {!done && !file && (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-bold text-slate-200">Upload leads</div>
+              <div className="text-2xs text-slate-500">Only a name and a phone or email are required; the template shows every column we read.</div>
+            </div>
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-100 hover:bg-slate-700 border border-slate-700 cursor-pointer flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Download the template
+            </button>
+          </div>
           <div
             role="button"
             tabIndex={0}
@@ -304,14 +334,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               }}
             />
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={downloadTemplate}
-              className="text-2xs font-bold text-slate-400 hover:text-white cursor-pointer flex items-center gap-1"
-            >
-              <Download className="w-3 h-3" /> Download a sample CSV
-            </button>
+          <div className="flex items-center justify-end gap-3">
             <button type="button" className={secondary} onClick={onClose}>
               Cancel
             </button>
@@ -426,6 +449,17 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                   </>
                 }
               />
+
+              {outreach && launch && (
+                <div className="rounded-xl border border-slate-800 p-3 space-y-2">
+                  <OutreachPicker config={outreach} value={launch} onChange={setLaunch} />
+                  <p className="text-2xs text-slate-500">
+                    {selected.size > 0
+                      ? `Applies to the ${selected.size.toLocaleString('en-US')} ticked row${selected.size === 1 ? '' : 's'}, approved as they are imported.`
+                      : 'Nothing is ticked: every row waits in Import Review, and you choose when to call them when you approve them there.'}
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -442,7 +476,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                 type="button"
                 className={secondary}
                 onClick={() => void run('clean')}
-                disabled={!canImport || stale}
+                disabled={!canImport || stale || launchBlock !== null}
                 title="Imports and approves only the rows without a flag; flagged rows are left out of this import entirely"
               >
                 {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
@@ -453,7 +487,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               type="button"
               className={primary}
               onClick={() => void run('all')}
-              disabled={!canImport || stale}
+              disabled={!canImport || stale || (selected.size > 0 && launchBlock !== null)}
               title={
                 selected.size > 0
                   ? 'Imports every importable row; the ticked ones are approved right away, the rest wait in Import Review'
@@ -463,14 +497,15 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               {busy === 'import' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
               {preview
                 ? `Import ${preview.counts.importable.toLocaleString('en-US')} lead${preview.counts.importable === 1 ? '' : 's'}${
-                    selected.size > 0 ? ` · ${selected.size.toLocaleString('en-US')} approved now` : ' for review'
+                    selected.size > 0 ? ` · ${approvedNow(selected.size)}` : ' for review'
                   }`
                 : 'Import'}
             </button>
           </div>
           <p className="text-2xs text-slate-500">
-            Ticked rows are approved on import; the rest wait in Import Review. Approving makes a lead eligible for your outreach strategy; it never
-            calls or texts anyone by itself.
+            {outreach
+              ? 'Ticked rows are approved on import and called as chosen above, paced and inside your contact window; the rest wait in Import Review.'
+              : 'Ticked rows are approved on import; the rest wait in Import Review. Approving makes a lead eligible for your outreach strategy; it never calls or texts anyone by itself.'}
           </p>
         </div>
       )}
