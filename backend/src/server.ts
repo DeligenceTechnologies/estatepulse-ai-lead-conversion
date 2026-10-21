@@ -14,8 +14,35 @@ import { sha256Hex } from './common/utils/crypto';
 /** Provider deliveries (lead webhooks, Telnyx, calendars, booking tools) get their own generous per-IP bucket. */
 const INBOUND_PREFIXES = ['/ingest/', '/webhooks/', '/tools/', '/calendar/webhooks/'];
 
+/** Every route the app's own frontend calls lives under this, in development and production alike. */
+const API_PREFIX = '/api';
+
+/**
+ * Routes that stay at the root, outside API_PREFIX: outside services were handed
+ * these URLs (lead webhooks, Telnyx, calendar webhooks, booking tools, the
+ * Calendly OAuth redirect), so moving them would break every connection already
+ * installed. Health stays put for uptime checks.
+ */
+const ROOT_ROUTES = [
+  'health',
+  'v1/health',
+  'ingest/v1/tally/:token',
+  'ingest/v1/typeform/:token',
+  'ingest/v1/webhook/:token',
+  'ingest/v1/custom/:token',
+  'ingest/v1/crm/hubspot/webhook',
+  'webhooks/leads/:token',
+  'webhooks/telnyx/voice',
+  'webhooks/telnyx/messaging',
+  'calendar-webhooks/:connectionId',
+  'tools/telnyx/booking/availability',
+  'tools/telnyx/booking/book',
+  'org-settings/calendar/calendly/callback',
+];
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  app.setGlobalPrefix(API_PREFIX, { exclude: ROOT_ROUTES });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 4000);
@@ -52,12 +79,12 @@ async function bootstrap() {
         const auth = req.headers.authorization;
         return auth?.startsWith('Bearer ') ? `s:${sha256Hex(auth.slice(7)).slice(0, 32)}` : `i:${ipKeyGenerator(req.ip ?? '')}`;
       },
-      skip: (req) => inbound(req.path) || req.path === '/v1/events',
+      skip: (req) => inbound(req.path) || req.path === `${API_PREFIX}/v1/events`,
       handler: limited('Too many requests, please try again later'),
     }),
   );
   app.use(
-    '/auth',
+    `${API_PREFIX}/auth`,
     rateLimit({
       windowMs: 15 * 60_000,
       limit: testing ? Number.MAX_SAFE_INTEGER : 50,
