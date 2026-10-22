@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -39,8 +39,12 @@ const KIND_NAME: Record<ImportKind, string> = { google_sheets: 'Google Sheet', f
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
-/** Nothing an owner would want a second look at: no warning, no opt-out, still in the sheet. Ticked on arrival. */
-const clean = (i: ReviewItem): boolean => !i.missing && !i.lead?.dncStatus && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
+/**
+ * Nothing an owner would want a second look at: no warning, no opt-out, still in the sheet, a phone to call. Ticked on arrival.
+ * No phone at all carries no warning (email alone makes a lead), but approving it keeps it paused; a phone that did not parse is warned already.
+ */
+const clean = (i: ReviewItem): boolean =>
+  !i.missing && !i.lead?.dncStatus && !!i.lead?.phone && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
 type Tab = 'pending' | 'rejected' | 'changes' | 'outreach';
 
@@ -354,7 +358,7 @@ export const ImportReviewView: React.FC = () => {
               .filter(Boolean)
               .join(', ')
               .replace(/, ([^,]*)$/, ' and $1') || 'imports'}{' '}
-            wait here. Rows without a warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
+            wait here. Rows with a phone and no warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -610,6 +614,15 @@ export const ImportReviewView: React.FC = () => {
                                 aria-label={i.source?.kind === 'hubspot' ? 'No longer in HubSpot' : 'Removed from the sheet'}
                               >
                                 <FileX className="w-3 h-3" />
+                              </span>
+                            )}
+                            {i.lead && !i.lead.phone && (
+                              <span
+                                className="p-1 rounded border bg-slate-800 text-slate-400 border-slate-700 inline-flex cursor-help"
+                                title="No phone — approving keeps this lead paused, so it will not be called"
+                                aria-label="No phone"
+                              >
+                                <PhoneOff className="w-3 h-3" />
                               </span>
                             )}
                             {warnings.length > 0 && (
