@@ -4,6 +4,12 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { telnyx } from './telnyx-api';
 
+/**
+ * How long a dial rings before Telnyx gives up. Its default of 30s is too short
+ * abroad: an international call can take 10-15s just to start ringing.
+ */
+const DIAL_TIMEOUT_SECS = 60;
+
 @Injectable()
 export class VoiceService {
   private readonly publicUrl: string;
@@ -27,6 +33,7 @@ export class VoiceService {
         connection_id: connectionId,
         to,
         from: c.fromNumber,
+        timeout_secs: DIAL_TIMEOUT_SECS,
         client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
         ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
       }),
