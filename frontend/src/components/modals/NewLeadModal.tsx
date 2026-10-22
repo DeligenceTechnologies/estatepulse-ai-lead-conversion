@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { leadsApi, type NewLeadInput } from '../../api/client';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
@@ -82,6 +83,8 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
     setError(null);
     try {
       const { id } = await leadsApi.create(body);
+      // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
+      toast.success('Lead added.');
       onCreated(id);
       onClose();
     } catch (err) {

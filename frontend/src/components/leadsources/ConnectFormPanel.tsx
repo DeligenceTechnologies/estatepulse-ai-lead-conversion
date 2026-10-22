@@ -8,6 +8,7 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   ApiError,
   providersApi,
@@ -201,6 +202,7 @@ export const ConnectFormPanel: React.FC<{
       setConnection(conn);
       setStep({ k: 'forms' });
       setError(null);
+      toast.success('Account connected.');
       void loadForms(conn.id);
     } catch (e) {
       setError(mapError(e));
@@ -220,6 +222,7 @@ export const ConnectFormPanel: React.FC<{
       const result = await providersApi.connectForm(connection.id, selectedForm, sourceName.trim() || undefined);
       setStep({ k: 'done', result });
       setError(null);
+      toast.success('Form connected.');
       onConnected(result.id);
     } catch (e) {
       setStep({ k: 'forms' });
@@ -249,6 +252,7 @@ export const ConnectFormPanel: React.FC<{
       setApiKey('');
       setError(null);
       setStep({ k: 'credential' });
+      toast.success('Account disconnected.');
     } catch (e) {
       if (e instanceof ApiError && e.code === 'CREDENTIAL_IN_USE') setConfirmForget(true);
       setError(mapError(e));

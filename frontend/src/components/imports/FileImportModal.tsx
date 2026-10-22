@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Download, FileUp, Loader2, Upload } from 'lucide-react';
+import { toast } from 'react-toastify';
 import {
   downloadTemplate,
   fileProblem,
@@ -193,6 +194,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
         outreach && launch && approving ? launchChoice(launch) : undefined,
       );
       setDone(batch);
+      toast.success('File imported.');
       onImported(batch);
     } catch (e) {
       setError({ message: errorText(e), details: errorDetails(e) });

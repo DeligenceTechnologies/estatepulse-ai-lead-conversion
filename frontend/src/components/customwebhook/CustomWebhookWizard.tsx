@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2, Play, Radio, SlidersHorizontal, Webhook } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useLiveEvents } from '../../lib/liveEvents';
 import {
   activateCustomWebhook,
@@ -152,7 +153,6 @@ export const CustomWebhookWizard: React.FC<{
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'create' | 'load' | 'save' | 'activate'>(sourceId ? 'load' : null);
   const [error, setError] = useState<{ message: string; details: string[] } | null>(null);
-  const [saved, setSaved] = useState(false);
   const [released, setReleased] = useState(0);
 
   const load = useCallback(async (webhookId: string, seedDraft: boolean) => {
@@ -236,6 +236,7 @@ export const CustomWebhookWizard: React.FC<{
       setSecret(made.secret);
       setSample({ ...made, delivery: null, format: null, paths: [], truncated: false, suggested: [] });
       setStep('waiting');
+      toast.success('Webhook created.');
       onChanged();
     } catch (e) {
       setError({ message: errorText(e), details: errorDetails(e) });
@@ -251,7 +252,6 @@ export const CustomWebhookWizard: React.FC<{
     try {
       const updated = await saveCustomWebhookMapping(id, fields);
       setSample((s) => (s ? { ...s, ...updated } : s));
-      setSaved(true);
       onChanged();
       return true;
     } catch (e) {
@@ -270,6 +270,7 @@ export const CustomWebhookWizard: React.FC<{
       setReleased(r.released);
       setSample((s) => (s ? { ...s, ...r } : s));
       setStep('done');
+      toast.success('Webhook switched on.');
       onChanged();
     } catch (e) {
       setError({ message: errorText(e), details: [] });
@@ -549,13 +550,8 @@ export const CustomWebhookWizard: React.FC<{
                   ))}
                 </ul>
               )}
-              {saved && (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-300">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Mapping saved.
-                </div>
-              )}
               <div className="flex flex-col sm:flex-row gap-2">
-                <button type="button" onClick={() => void save()} disabled={busy !== null || problems.length > 0 || fields.length === 0} className={`${secondary} flex-1`}>
+                <button type="button" onClick={() => void save().then((ok) => ok && toast.success('Mapping saved.'))} disabled={busy !== null || problems.length > 0 || fields.length === 0} className={`${secondary} flex-1`}>
                   {busy === 'save' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   Save mapping
                 </button>
