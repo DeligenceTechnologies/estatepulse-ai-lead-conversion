@@ -6,6 +6,7 @@ import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
+import type { OutreachRequest } from '@/outreach/schedule';
 import { approveTrackingRows } from './approval';
 import { GoogleConnectionsService } from './google-connections.service';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
@@ -60,6 +61,8 @@ export class SyncError extends Error {
 export interface Approval {
   rule: (row: BuiltRow) => boolean;
   by: { userId: string };
+  /** Scheduling on: approved leads join this outreach batch instead of being released at once. */
+  outreach?: OutreachRequest;
 }
 
 export interface ChangedValues {
@@ -795,7 +798,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
 
     if (toApprove.length > 0 && approve) {
       stats.dbStatements += 1;
-      const result = await this.prisma.$transaction((tx) => approveTrackingRows(tx, this.audit, orgId, toApprove, approve.by));
+      const result = await this.prisma.$transaction((tx) => approveTrackingRows(tx, this.audit, orgId, toApprove, approve.by, approve.outreach));
       stats.autoApproved += result.approved;
       stats.autoReleased += result.released;
       stats.autoHeld.push(...result.held);

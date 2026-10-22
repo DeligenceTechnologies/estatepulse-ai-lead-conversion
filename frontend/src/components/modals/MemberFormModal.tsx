@@ -16,6 +16,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import {
   createMember,
@@ -179,6 +180,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
     try {
       if (editing) {
         onSaved(await updateMember(member.id, pending));
+        toast.success('Member updated.');
         onClose();
         return;
       }
@@ -194,6 +196,8 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         roleIds,
       });
       onSaved(result);
+      if (result.credentialsEmail.sent) toast.success('Member added.');
+      else toast.warn('Member added, but the sign-in email was not sent. Use Edit to set a password.');
       // Stay open: whether the sign-in details reached them is the one thing
       // the owner must see, and closing would hide a failed email.
       setCreated(result);

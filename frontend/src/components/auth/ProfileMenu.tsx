@@ -11,8 +11,10 @@ import {
   Settings,
   ShieldCheck,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
 import { messageFor, type Role } from '../../lib/api';
+import { confirmToast } from '../../lib/toast';
 import { ChangePasswordModal } from './ChangePasswordModal';
 
 const PROFILE_OPTIONS: Record<Role, { label: string; hint: string; icon: React.ReactNode }> = {
@@ -37,7 +39,6 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
   const [open, setOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const canSwitch = profiles.length > 1;
 
@@ -58,13 +59,12 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
   }, [open]);
 
   const signOutEverywhere = async (): Promise<void> => {
-    if (!window.confirm('Sign out on all devices, including this one?')) return;
-    setError(null);
+    if (!(await confirmToast('Sign out on all devices, including this one?', 'Sign out'))) return;
     setBusy(true);
     try {
       await logoutAll();
     } catch (err) {
-      setError(messageFor(err));
+      toast.error(messageFor(err));
       setBusy(false);
     }
   };
@@ -180,7 +180,6 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
             >
               <MonitorSmartphone className="w-3.5 h-3.5" /> {busy ? 'Signing out…' : 'Sign out on all devices'}
             </button>
-            {error && <p className="px-3 py-1 text-2xs text-rose-300">{error}</p>}
           </div>
 
           <div className="border-t border-slate-800 py-1">

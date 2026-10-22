@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   CalendarDays,
-  CheckCircle2,
   ChevronDown,
   Clock,
   Globe,
@@ -15,8 +14,8 @@ import {
   Settings2,
   ShieldAlert,
   UserCheck,
-  X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
 import {
@@ -99,18 +98,17 @@ const AGENT_ROLE = 'agent';
 const LeadAssignmentCard: React.FC = () => {
   const { roles, refreshSession } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const enabled = roles.some((role) => !role.isSystem && role.name.toLowerCase() === AGENT_ROLE);
 
   const toggle = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
-    setError(null);
     try {
       await setLeadAssignment(!enabled);
       await refreshSession();
+      toast.success(enabled ? 'Lead assignment turned off.' : 'Lead assignment turned on.');
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -150,12 +148,6 @@ const LeadAssignmentCard: React.FC = () => {
           </span>
         </button>
       </div>
-      {error && (
-        <p role="alert" className="mt-3 text-2xs text-rose-300 flex items-center gap-1.5">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          {error}
-        </p>
-      )}
     </Card>
   );
 };
@@ -174,9 +166,7 @@ const GeneralSettings: React.FC = () => {
   const [timezone, setTimezone] = useState('');
   const [hours, setHours] = useState<WorkingDay[]>(DEFAULT_WORKING_HOURS);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [justSaved, setJustSaved] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   const adopt = (settings: OrgSettings): void => {
@@ -203,12 +193,6 @@ const GeneralSettings: React.FC = () => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!justSaved) return;
-    const timer = setTimeout(() => setJustSaved(false), 2500);
-    return () => clearTimeout(timer);
-  }, [justSaved]);
 
   if (loadError) {
     return (
@@ -257,12 +241,11 @@ const GeneralSettings: React.FC = () => {
   const save = async (): Promise<void> => {
     if (!dirty || badDay || saving) return;
     setSaving(true);
-    setSaveError(null);
     try {
       adopt(await updateOrgSettings(changes));
-      setJustSaved(true);
+      toast.success('Settings saved.');
     } catch (e) {
-      setSaveError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setSaving(false);
     }
@@ -270,7 +253,6 @@ const GeneralSettings: React.FC = () => {
 
   const discard = (): void => {
     adopt(saved);
-    setSaveError(null);
   };
 
   const open = isWorkingNow(hours, timezone, now);
@@ -357,62 +339,32 @@ const GeneralSettings: React.FC = () => {
         </div>
       </Card>
 
-      {/* Save bar: appears with unsaved changes, and briefly after a save */}
-      {(dirty || justSaved || saveError) && (
+      {/* Save bar: appears with unsaved changes */}
+      {dirty && (
         <div className="sticky bottom-4 z-30 animate-fade-in">
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl px-4 py-3">
-            {saveError ? (
-              <>
-                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span className="text-xs text-rose-200 flex-1 min-w-0 truncate" title={saveError}>
-                  {saveError}
-                </span>
-              </>
-            ) : dirty ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                <span className="text-xs text-slate-200 flex-1">
-                  {badDay ? 'Fix the highlighted day to save.' : 'You have unsaved changes'}
-                </span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="text-xs text-emerald-200 flex-1">Settings saved</span>
-              </>
-            )}
-            {dirty && (
-              <>
-                <button
-                  type="button"
-                  onClick={discard}
-                  disabled={saving}
-                  className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void save()}
-                  disabled={saving || badDay}
-                  className="h-8 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                  Save changes
-                </button>
-              </>
-            )}
-            {!dirty && saveError && (
-              <button
-                type="button"
-                onClick={() => setSaveError(null)}
-                aria-label="Dismiss"
-                className="p-1 rounded text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+            <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+            <span className="text-xs text-slate-200 flex-1">
+              {badDay ? 'Fix the highlighted day to save.' : 'You have unsaved changes'}
+            </span>
+            <button
+              type="button"
+              onClick={discard}
+              disabled={saving}
+              className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving || badDay}
+              className="h-8 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Save changes
+            </button>
           </div>
         </div>
       )}

@@ -66,9 +66,9 @@ function shape(a: any) {
 
 const DEFAULT_TEMPLATE = {
   name: 'EstatePulse AI Agent',
-  greeting: 'Hi, thanks for reaching out! This is your home-buying assistant. Are you looking to buy a home sometime soon?',
+  greeting: 'Hi, this is your home-buying assistant, calling about your recent enquiry. Are you looking to buy a home sometime soon?',
   instructions:
-    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. Qualify inbound home-buyer leads over the phone.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
+    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. You are calling a home-buyer lead who recently enquired, to qualify them over the phone. You placed this call, so never thank them for calling in.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
 };
 
 const HANGUP_TOOL = {
@@ -133,10 +133,21 @@ export class AssistantService {
     return withBookingSection(String(instructions), cfg.eventTypeName, cfg.durationMinutes);
   }
 
+  /**
+   * "Record calls" is the organization's switch: the call records itself (dual
+   * channel, transcribed) and the assistant never records on its own as well.
+   */
+  private async recordsCalls(orgId: string): Promise<boolean> {
+    const settings = await this.prisma.organizationSetting
+      .findUnique({ where: { orgId }, select: { callRecordingEnabled: true } })
+      .catch(() => null);
+    return settings?.callRecordingEnabled ?? true;
+  }
+
   async getAssistant(orgId: string) {
     const c = await this.creds.getCreds(orgId);
     if (!c || !c.apiKey || !c.assistantId) return null;
-    return shape(await this.fetchRaw(orgId));
+    return { ...shape(await this.fetchRaw(orgId)), record_calls: await this.recordsCalls(orgId) };
   }
 
   async updateAssistant(orgId: string, patch: any) {
@@ -232,7 +243,7 @@ export class AssistantService {
       if (patch.disable_dtmf != null) ts.disable_dtmf = !!patch.disable_dtmf;
       if (patch.noise_suppression != null) ts.noise_suppression = patch.noise_suppression;
       if (patch.fallback_destination != null) ts.fallback_destination = patch.fallback_destination || null;
-      if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: !!patch.record_calls };
+      if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: false };
       if (patch.voicemail_detection != null) {
         ts.voicemail_detection = patch.voicemail_detection
           ? { ...(ts.voicemail_detection ?? {}), action: patch.voicemail_action ?? ts.voicemail_detection?.action ?? 'hangup' }
@@ -246,7 +257,10 @@ export class AssistantService {
     const res = await fetch(`${BASE}/${c.assistantId}`, { method: 'PATCH', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) throw new AppError('UPSTREAM_ERROR', `AI agent update failed ${res.status}: ${await res.text()}`);
     const j = (await res.json()) as any;
-    return shape(j.data ?? j);
+    if (patch.record_calls != null) {
+      await this.prisma.organizationSetting.updateMany({ where: { orgId }, data: { callRecordingEnabled: !!patch.record_calls } });
+    }
+    return { ...shape(j.data ?? j), record_calls: await this.recordsCalls(orgId) };
   }
 
   async setTools(orgId: string, owned: any[]) {
@@ -277,7 +291,8 @@ export class AssistantService {
     return shape(await this.fetchRaw(orgId));
   }
 
-  async ensureHangupTool(orgId: string): Promise<void> {
+  /** Once per assistant: the hangup tool is attached, and the assistant does not record on top of the call's own recording. */
+  async ensureCallSetup(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
 
@@ -293,9 +308,19 @@ export class AssistantService {
         await this.setTools(orgId, [...tools.filter((t) => !t?.shared), HANGUP_TOOL]);
         this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
       }
+      const ts = cur.telephony_settings ?? {};
+      if (ts.recording_settings?.enabled) {
+        const res = await fetch(`${BASE}/${c.assistantId}`, {
+          method: 'PATCH',
+          headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telephony_settings: { ...ts, recording_settings: { ...ts.recording_settings, enabled: false } } }),
+        });
+        if (!res.ok) throw new Error(`turning off the assistant's own recording failed ${res.status}: ${await res.text()}`);
+        this.logger.log(`assistant ${c.assistantId} no longer records on its own; the call's recording covers it`);
+      }
       this.hangupReady.add(key);
     })()
-      .catch((e) => this.logger.warn(`hangup tool setup for org ${orgId}: ${(e as Error).message}`))
+      .catch((e) => this.logger.warn(`assistant call setup for org ${orgId}: ${(e as Error).message}`))
       .finally(() => this.hangupInflight.delete(key));
     this.hangupInflight.set(key, run);
     return run;

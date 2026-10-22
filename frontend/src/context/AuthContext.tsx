@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import {
   ApiError,
   SESSION_ENDED_EVENT,
@@ -116,6 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // a retry, and do not strand the user on a spinner.
         if (err instanceof ApiError && err.code === 'NETWORK') {
           setRestoreError('Cannot reach the server.');
+          toast.error('Cannot reach the server.', { toastId: 'restore-network' });
           reset();
           return;
         }
@@ -148,12 +150,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * and permissions come from /auth/me, which is also what a reload reads, so
    * there is one source for "who is signed in".
    */
-  const startSession = async (session: AuthSessionResponse, keepSignIn: boolean): Promise<void> => {
+  const startSession = async (session: AuthSessionResponse, keepSignIn: boolean): Promise<MeResponse> => {
     setToken(session.accessToken, session.accessTokenExpiresAt);
     rememberSession(keepSignIn);
     setExplicitLogout(false);
     try {
-      applySession(await api.me());
+      const data = await api.me();
+      applySession(data);
+      return data;
     } catch (err) {
       clearToken();
       throw err;
@@ -161,11 +165,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login: AuthContextType['login'] = async (email, password, keepSignIn) => {
-    await startSession(await api.login({ email, password, keepSignIn }), keepSignIn);
+    const data = await startSession(await api.login({ email, password, keepSignIn }), keepSignIn);
+    toast.success(`Welcome back, ${displayName(data)}.`);
   };
 
   const signup: AuthContextType['signup'] = async (input) => {
     await startSession(await api.register(input), false);
+    toast.success('Workspace created. You are its owner.');
   };
 
   const refreshSession: AuthContextType['refreshSession'] = async () => {
@@ -192,6 +198,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     endSession();
     setExplicitLogout(true);
     navigate('/login', { replace: true });
+    toast.info('Signed out.');
   };
 
   const logoutAll: AuthContextType['logoutAll'] = async () => {

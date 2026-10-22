@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -19,8 +19,11 @@ import {
   type ReviewItem,
   type SheetSource,
 } from '../../utils/googleSheetsApi';
+import { getOutreachConfig, type OutreachChoice, type OutreachConfig } from '../../utils/outreachApi';
 import { FIELD_LABEL, approveMessage, formatValue, rejectMessage } from '../../utils/sheetMapping';
+import { ApproveOutreachModal } from '../imports/ApproveOutreachModal';
 import { FileImportModal } from '../imports/FileImportModal';
+import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
 import { errorText } from '../sheets/SheetModal';
 
@@ -36,10 +39,14 @@ const KIND_NAME: Record<ImportKind, string> = { google_sheets: 'Google Sheet', f
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
-/** Nothing an owner would want a second look at: no warning, no opt-out, still in the sheet. Ticked on arrival. */
-const clean = (i: ReviewItem): boolean => !i.missing && !i.lead?.dncStatus && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
+/**
+ * Nothing an owner would want a second look at: no warning, no opt-out, still in the sheet, a phone to call. Ticked on arrival.
+ * No phone at all carries no warning (email alone makes a lead), but approving it keeps it paused; a phone that did not parse is warned already.
+ */
+const clean = (i: ReviewItem): boolean =>
+  !i.missing && !i.lead?.dncStatus && !!i.lead?.phone && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
-type Tab = 'pending' | 'rejected' | 'changes';
+type Tab = 'pending' | 'rejected' | 'changes' | 'outreach';
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
 const btn =
@@ -109,6 +116,11 @@ export const ImportReviewView: React.FC = () => {
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [upload, setUpload] = useState(false);
   const [history, setHistory] = useState(false);
+  /** Outreach scheduling (OUTREACH_SCHEDULING_ENABLED): null when the server has it off, and approving works as before. */
+  const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [outreachKey, setOutreachKey] = useState(0);
 
   const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
   // "Changed since review" is about one source that keeps syncing — a sheet or
@@ -122,25 +134,27 @@ export const ImportReviewView: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sheets, hist, hubspot] = await Promise.all([
+      const [sheets, hist, hubspot, launch] = await Promise.all([
         listSheetSources().catch(unlessOff),
         importHistory().catch(unlessOff),
         getCrmStatus('hubspot').catch(unlessOff),
+        getOutreachConfig(),
       ]);
+      setOutreach(launch);
       setFeatures({ sheets: sheets !== null, files: hist !== null, hubspot: hubspot !== null });
       const list = sheets ?? [];
       setSources(list);
       const crmSource = hubspot?.sourceId ? { id: hubspot.sourceId, name: `HubSpot · ${hubspot.account?.name ?? hubspot.account?.id ?? 'account'}` } : null;
       setCrm(crmSource);
       setBatches((hist ?? []).filter((b) => b.kind === 'file_upload'));
-      if (tab !== 'changes') {
+      if (tab === 'pending' || tab === 'rejected') {
         const page = await reviewQueue({ state: tab, source, sourceId, limit: 50 });
         setItems(page.items);
         setCursor(page.nextCursor);
         setTotals((t) => ({ ...t, [tab]: page.total }));
         // Clean rows start ticked, so one click approves them; the owner unticks what should wait.
         setSelected(new Set(tab === 'pending' ? page.items.filter(clean).map((i) => i.rowId) : []));
-      } else {
+      } else if (tab === 'changes') {
         const ids = [...list.map((s) => s.id), ...(crmSource ? [crmSource.id] : [])];
         const src = sourceId && ids.includes(sourceId) ? sourceId : ids.length === 1 ? ids[0] : '';
         const found = src ? await sheetChanges(src) : [];
@@ -259,9 +273,17 @@ export const ImportReviewView: React.FC = () => {
       return n;
     });
 
-  /** Two clicks for every decision: the first arms, the second acts. */
-  const decide = async (what: 'approve' | 'reject' | 'apply' | 'keep') => {
-    if (armed !== what) {
+  /**
+   * Two clicks for every decision: the first arms, the second acts. With
+   * outreach scheduling on, approving opens the launch dialog instead.
+   */
+  const decide = async (what: 'approve' | 'reject' | 'apply' | 'keep', choice?: OutreachChoice) => {
+    if (what === 'approve' && outreach && !choice) {
+      setLaunchError(null);
+      setLaunching(true);
+      return;
+    }
+    if (!choice && armed !== what) {
       setArmed(what);
       return;
     }
@@ -270,7 +292,7 @@ export const ImportReviewView: React.FC = () => {
     const ids = [...selected];
     try {
       if (what === 'approve') {
-        const rs = await inBatches(ids, approveRows);
+        const rs = await inBatches(ids, (batch) => approveRows(batch, choice));
         const merged = rs.reduce((a, r) => ({
           approved: a.approved + r.approved,
           released: a.released + r.released,
@@ -278,6 +300,8 @@ export const ImportReviewView: React.FC = () => {
           skipped: [...a.skipped, ...r.skipped],
         }));
         toast.success(approveMessage(merged));
+        setLaunching(false);
+        setOutreachKey((k) => k + 1);
       } else if (what === 'reject') {
         const rs = await inBatches(ids, rejectRows);
         toast.success(
@@ -302,7 +326,9 @@ export const ImportReviewView: React.FC = () => {
       if (what === 'approve') window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       await load();
     } catch (e) {
-      toast.error(errorText(e));
+      // In the launch dialog a refused schedule (a time already past) is shown where it was picked.
+      if (choice) setLaunchError(errorText(e));
+      else toast.error(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -332,7 +358,7 @@ export const ImportReviewView: React.FC = () => {
               .filter(Boolean)
               .join(', ')
               .replace(/, ([^,]*)$/, ' and $1') || 'imports'}{' '}
-            wait here. Rows without a warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
+            wait here. Rows with a phone and no warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -422,6 +448,7 @@ export const ImportReviewView: React.FC = () => {
                 ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet']] as const)
                 : []),
               ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
+              ...(outreach ? ([['outreach', 'Outreach']] as const) : []),
             ] as const
           ).map(([id, label]) => (
             <button
@@ -444,7 +471,7 @@ export const ImportReviewView: React.FC = () => {
               {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
               {decisionButton('approve', 'Approve', 'bg-green-600 text-white hover:bg-green-500')}
             </>
-          ) : tab === 'rejected' ? null : (
+          ) : tab === 'rejected' || tab === 'outreach' ? null : (
             <>
               {decisionButton('keep', 'Keep current', 'bg-slate-800 text-slate-200 hover:bg-slate-700')}
               {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
@@ -462,14 +489,16 @@ export const ImportReviewView: React.FC = () => {
           </div>
         )}
 
-        {loading && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
+        {tab === 'outreach' && <OutreachBatches refreshKey={outreachKey} />}
+
+        {loading && tab !== 'outreach' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
           <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading…
           </div>
         )}
 
         {/* Waiting for review, and rejected (read-only) */}
-        {tab !== 'changes' && !loading && items.length === 0 && !error && (
+        {(tab === 'pending' || tab === 'rejected') && !loading && items.length === 0 && !error && (
           <div className="text-center py-10 space-y-2">
             <Inbox className="w-7 h-7 text-slate-600 mx-auto" />
             <div className="text-xs text-slate-400">
@@ -482,7 +511,7 @@ export const ImportReviewView: React.FC = () => {
             )}
           </div>
         )}
-        {tab !== 'changes' && items.length > 0 && (
+        {(tab === 'pending' || tab === 'rejected') && items.length > 0 && (
           <div>
             {/* No horizontal scroll: short columns never wrap, long text truncates (full value on hover),
                 and the source is an icon whose hover names the file or sheet and the row. */}
@@ -587,6 +616,15 @@ export const ImportReviewView: React.FC = () => {
                                 <FileX className="w-3 h-3" />
                               </span>
                             )}
+                            {i.lead && !i.lead.phone && (
+                              <span
+                                className="p-1 rounded border bg-slate-800 text-slate-400 border-slate-700 inline-flex cursor-help"
+                                title="No phone — approving keeps this lead paused, so it will not be called"
+                                aria-label="No phone"
+                              >
+                                <PhoneOff className="w-3 h-3" />
+                              </span>
+                            )}
                             {warnings.length > 0 && (
                               <span
                                 className="p-1 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30 inline-flex cursor-help"
@@ -682,6 +720,17 @@ export const ImportReviewView: React.FC = () => {
         )}
       </div>
 
+      {launching && outreach && (
+        <ApproveOutreachModal
+          count={selected.size}
+          flaggedLeftOut={items.filter((i) => !clean(i) && !selected.has(i.rowId)).length}
+          config={outreach}
+          busy={busy === 'approve'}
+          error={launchError}
+          onClose={() => setLaunching(false)}
+          onConfirm={(choice) => void decide('approve', choice)}
+        />
+      )}
       {upload && (
         <FileImportModal
           onClose={() => setUpload(false)}

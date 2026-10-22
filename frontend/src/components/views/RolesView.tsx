@@ -17,7 +17,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ApiError, messageFor } from '../../lib/api';
+import { confirmToast } from '../../lib/toast';
 import { useAuth } from '../../context/AuthContext';
 import {
   createRole,
@@ -85,7 +87,6 @@ export const RolesView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   /** Phones show one pane at a time. */
   const [mobileEditor, setMobileEditor] = useState(false);
 
@@ -118,13 +119,6 @@ export const RolesView: React.FC = () => {
     });
   }, [load]);
 
-  // A short-lived "Saved" confirmation.
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 2500);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
   const selected = selectedId && selectedId !== NEW ? roles.find((r) => r.id === selectedId) ?? null : null;
   const isNew = selectedId === NEW;
   const isOwnerRole = selected?.isSystem ?? false;
@@ -143,23 +137,23 @@ export const RolesView: React.FC = () => {
         draft.description.trim() !== (selected.description ?? '') ||
         !sameSet(draft.permissions, selected.permissions));
 
-  const confirmDiscard = (): boolean =>
-    !dirty || window.confirm('You have unsaved changes to this role. Discard them?');
+  const confirmDiscard = async (): Promise<boolean> =>
+    !dirty || confirmToast('You have unsaved changes to this role. Discard them?', 'Discard');
 
-  const select = (role: Role): void => {
+  const select = async (role: Role): Promise<void> => {
     if (role.id === selectedId) {
       setMobileEditor(true);
       return;
     }
-    if (!confirmDiscard()) return;
+    if (!(await confirmDiscard())) return;
     setSelectedId(role.id);
     setDraft(draftFor(role));
     setError(null);
     setMobileEditor(true);
   };
 
-  const startNew = (): void => {
-    if (!confirmDiscard()) return;
+  const startNew = async (): Promise<void> => {
+    if (!(await confirmDiscard())) return;
     setSelectedId(NEW);
     setDraft(draftFor(null));
     setError(null);
@@ -220,11 +214,11 @@ export const RolesView: React.FC = () => {
       await load();
       setSelectedId(saved.id);
       setDraft(draftFor(saved));
-      setNotice(isNew ? `Role "${saved.name}" created` : 'Changes saved');
+      toast.success(isNew ? `Role "${saved.name}" created.` : 'Role saved.');
       // Editing your own role changes what you may do right now.
       if (myRoles.some((r) => r.id === saved.id)) void refreshSession();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setSaving(false);
     }
@@ -232,7 +226,7 @@ export const RolesView: React.FC = () => {
 
   const handleDelete = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(`Delete the "${selected.name}" role? This cannot be undone.`)) return;
+    if (!(await confirmToast(`Delete the "${selected.name}" role? This cannot be undone.`, 'Delete'))) return;
     setDeleting(true);
     setError(null);
     try {
@@ -241,10 +235,10 @@ export const RolesView: React.FC = () => {
       const next = loaded.find((r) => !r.isSystem) ?? loaded[0] ?? null;
       setSelectedId(next?.id ?? null);
       setDraft(draftFor(next));
-      setNotice(`Role "${selected.name}" deleted`);
+      toast.success(`Role "${selected.name}" deleted.`);
       setMobileEditor(false);
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setDeleting(false);
     }
@@ -306,7 +300,7 @@ export const RolesView: React.FC = () => {
                     role={role}
                     total={total}
                     active={role.id === selectedId}
-                    onClick={() => select(role)}
+                    onClick={() => void select(role)}
                   />
                 ))}
             {isNew && (
@@ -343,8 +337,8 @@ export const RolesView: React.FC = () => {
               {/* Identity */}
               <div className="shrink-0 p-5 border-b border-slate-800 bg-slate-950/40 space-y-4">
                 <button
-                  onClick={() => {
-                    if (isNew && !confirmDiscard()) return;
+                  onClick={async () => {
+                    if (isNew && !(await confirmDiscard())) return;
                     setMobileEditor(false);
                   }}
                   className="lg:hidden inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
@@ -480,12 +474,6 @@ export const RolesView: React.FC = () => {
                     </button>
                   )}
                   <div className="ml-auto flex items-center gap-2">
-                    {notice && !dirty && (
-                      <span className="text-xs text-emerald-300 inline-flex items-center gap-1 animate-in fade-in">
-                        <Check className="w-3.5 h-3.5" />
-                        {notice}
-                      </span>
-                    )}
                     {dirty && !isNew && <span className="hidden sm:inline text-2xs text-amber-300">Unsaved changes</span>}
                     {!readOnly && (
                       <>

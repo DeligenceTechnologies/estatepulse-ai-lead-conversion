@@ -238,7 +238,7 @@ export class ActivityService {
       const [settings, variables] = await Promise.all([
         this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callRecordingEnabled: true } }),
         c.assistantId ? this.callVariables(orgId, leadId) : Promise.resolve({}),
-        c.assistantId ? this.assistants.ensureHangupTool(orgId) : Promise.resolve(),
+        c.assistantId ? this.assistants.ensureCallSetup(orgId) : Promise.resolve(),
       ]);
       if (c.assistantId) void this.insights.ensureProvisioned(orgId);
       return { apiKey: c.apiKey, assistantId: c.assistantId || null, record: settings?.callRecordingEnabled ?? true, variables };

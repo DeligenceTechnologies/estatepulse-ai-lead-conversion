@@ -21,6 +21,7 @@ model Organization {
   sheetImportRows     SheetImportRow[]
   crmSyncRuns         CrmSyncRun[]
   auditLogs           AuditLog[]
+  outreachBatches     OutreachBatch[]
 
   @@map("organizations")
 }
@@ -40,6 +41,8 @@ model OrganizationSetting {
   maxConcurrentCalls    Int     @default(5) @map("max_concurrent_calls")
   outreachStrategy      Json?   @map("outreach_strategy")
   inCallBooking         Json?   @map("in_call_booking")
+  /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
+  reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)

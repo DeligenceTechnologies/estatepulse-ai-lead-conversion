@@ -11,6 +11,11 @@ export interface StrategyStep {
   message?: string;
 }
 
+const UNIT_MS: Record<string, number> = { seconds: 1_000, minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
+
+/** How long after enrolment a step runs. */
+export const offsetMs = (after: StrategyStep['after']): number => (after?.value ?? 0) * (UNIT_MS[after?.unit] ?? 1000);
+
 export interface Strategy {
   name: string;
   guardrails: Record<string, unknown>;

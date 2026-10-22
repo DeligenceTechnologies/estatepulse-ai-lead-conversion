@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Check, CheckCircle2, RotateCcw, ShieldAlert } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../../lib/api';
 import {
   activateCalendar,
@@ -30,24 +31,21 @@ const SavedAccount: React.FC<{
   onConnectAnother: () => void;
 }> = ({ provider, connection, onConnected, onConnectAnother }) => {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { label, button } = PROVIDERS[provider];
 
   const use = async () => {
     setBusy(true);
-    setError(null);
     try {
       await activateCalendar(provider);
       await onConnected();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
       setBusy(false);
     }
   };
 
   return (
     <div className="space-y-3">
-      {error && <Notice tone="error">{error}</Notice>}
       <div>
         <p className="text-xs text-slate-400 mb-1.5">This organization connected {label} before:</p>
         <AccountLine connection={connection} />

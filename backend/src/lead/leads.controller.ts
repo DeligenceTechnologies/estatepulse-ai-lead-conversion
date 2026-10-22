@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { AssignmentType, LeadStatus, LeadTemperature, Prisma } from '@prisma/client';
+import { AssignmentType, LeadStatus, LeadTemperature, Prisma, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { paginate } from '@/common/pagination/paginate';
@@ -11,7 +11,33 @@ import { AssignLeadDto } from './dto/assign-lead.dto';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
+import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
+
+interface OutreachEntry {
+  lead_id: string;
+  state: OutreachItemState;
+  skip_reason: string | null;
+  batch_status: OutreachBatchStatus;
+  start_at: Date;
+  timezone: string;
+}
+
+/** Where a lead stands with outreach, for the line under its status; null when the status says it all. */
+export type LeadOutreach =
+  | { state: 'scheduled'; startAt: Date; timeZone: string }
+  | { state: 'waiting' | 'released' | 'paused' }
+  | { state: 'skipped'; reason: string | null };
+
+function outreachOf(lead: { status: LeadStatus; automationPaused: boolean; dncStatus: boolean }, entry?: OutreachEntry): LeadOutreach | null {
+  if (entry?.state === 'queued') {
+    return entry.batch_status === 'pending' ? { state: 'scheduled', startAt: entry.start_at, timeZone: entry.timezone } : { state: 'waiting' };
+  }
+  if (entry?.state === 'skipped') return { state: 'skipped', reason: entry.skip_reason };
+  if (entry?.state === 'released' && lead.status === LeadStatus.new && !lead.automationPaused) return { state: 'released' };
+  if (lead.automationPaused && !lead.dncStatus && IN_STRATEGY_STATUSES.includes(lead.status)) return { state: 'paused' };
+  return null;
+}
 
 const LEAD_FIELDS = {
   id: true,
@@ -26,6 +52,7 @@ const LEAD_FIELDS = {
   status: true,
   followUpReason: true,
   dncStatus: true,
+  automationPaused: true,
   aiSummary: true,
   temperature: true,
   score: true,
@@ -53,7 +80,7 @@ const LEAD_FIELDS = {
 type LeadListRow = Prisma.LeadGetPayload<{ select: typeof LEAD_FIELDS }>;
 
 /** One row of the lead list, as the Leads screen reads it. */
-const toLeadRow = (l: LeadListRow, contactLeadCount: number) => ({
+const toLeadRow = (l: LeadListRow, contactLeadCount: number, outreach?: OutreachEntry) => ({
   id: l.id,
   firstName: l.firstName,
   lastName: l.lastName,
@@ -78,6 +105,8 @@ const toLeadRow = (l: LeadListRow, contactLeadCount: number) => ({
   motivation: l.motivation,
   consentStatus: l.consentStatus,
   dncStatus: l.dncStatus,
+  automationPaused: l.automationPaused,
+  outreach: outreachOf(l, outreach),
   customFields: l.customFields,
   submissionCount: l.submissionCount,
   contactLeadCount,
@@ -144,9 +173,24 @@ export class LeadsController {
       findMany: (args) => this.prisma.lead.findMany({ ...args, select: LEAD_FIELDS }),
       count: (args) => this.prisma.lead.count(args),
     });
-    const contactCounts = await this.contactLeadCounts(orgId, page.data);
+    const [contactCounts, outreach] = await Promise.all([
+      this.contactLeadCounts(orgId, page.data),
+      this.outreachEntries(orgId, page.data.map((l) => l.id)),
+    ]);
 
-    return { data: page.data.map((l) => toLeadRow(l, contactCounts.get(l.id) ?? 1)), meta: page.meta };
+    return { data: page.data.map((l) => toLeadRow(l, contactCounts.get(l.id) ?? 1, outreach.get(l.id))), meta: page.meta };
+  }
+
+  /** Each listed lead's latest outreach batch entry, if it was ever launched in one. */
+  private async outreachEntries(orgId: string, leadIds: string[]): Promise<Map<string, OutreachEntry>> {
+    if (leadIds.length === 0) return new Map();
+    const entries = await this.prisma.$queryRaw<OutreachEntry[]>`
+      SELECT DISTINCT ON (i.lead_id) i.lead_id, i.state, i.skip_reason, b.status AS batch_status, b.start_at, b.timezone
+        FROM outreach_batch_leads AS i
+        JOIN outreach_batches AS b ON b.id = i.batch_id
+       WHERE i.organization_id = ${orgId}::uuid AND i.lead_id = ANY(${leadIds}::uuid[])
+       ORDER BY i.lead_id, i.created_at DESC`;
+    return new Map(entries.map((e) => [e.lead_id, e]));
   }
 
   /** Tab counts and the filter options, over every lead in the list, not just the page on screen. */

@@ -1,16 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Ban,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   Contact,
   FileSpreadsheet,
   FileUp,
   Flame,
+  Hourglass,
+  Pause,
   PenLine,
   Plus,
   Radio,
   RefreshCw,
+  Rocket,
   Search,
   ShieldAlert,
   Snowflake,
@@ -26,6 +31,7 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type ListLeadsParams, ty
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
+import { startLabel } from '../../utils/outreachApi';
 import { FileImportModal } from '../imports/FileImportModal';
 import { NewLeadModal } from '../modals/NewLeadModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
@@ -92,7 +98,9 @@ const sourceLabel = (l: LiveLead): string => {
   // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
   const method = (s.connectionMethod ?? '').toUpperCase();
   if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
-  return s.type ?? 'webhook';
+  // MANUAL means a webhook URL the owner set up by hand (the Webhook card, a pasted form URL), not a lead typed in;
+  // `type` is the provider ("custom", "tally"), so it is not used here.
+  return 'webhook';
 };
 
 /**
@@ -104,10 +112,9 @@ const sourceLabel = (l: LiveLead): string => {
  */
 const sourceIcon = (l: LiveLead): LucideIcon => {
   const s = l.source;
+  // Only a lead typed in has no source: the pen. A MANUAL source is a hand-set webhook URL, so it falls to the webhook glyph.
   if (!s) return PenLine;
   switch ((s.connectionMethod ?? '').toUpperCase()) {
-    case 'MANUAL':
-      return PenLine;
     case 'API':
       return Radio;
     case 'SYNC':
@@ -192,6 +199,30 @@ const toLead = (l: LiveLead): Lead => ({
   notes: humanize(l.motivation) ?? undefined,
   customFields: l.customFields,
 });
+
+const SKIP_TEXT: Record<string, string> = {
+  DO_NOT_CONTACT: 'opted out',
+  STATUS_CHANGED: 'already being worked',
+  NO_DIALABLE_PHONE: 'no dialable phone',
+  ALREADY_RELEASED: 'already in outreach',
+};
+
+/** The line under a lead's status that says where it stands with outreach, or null. */
+function outreachLine(o: LiveLead['outreach']): { Icon: LucideIcon; text: string; title: string; tone: string } | null {
+  if (!o) return null;
+  switch (o.state) {
+    case 'scheduled':
+      return { Icon: CalendarClock, text: `Scheduled · ${startLabel(o.startAt, o.timeZone)}`, title: 'Approved in a scheduled outreach batch: released at this time', tone: 'text-sky-300' };
+    case 'waiting':
+      return { Icon: Hourglass, text: 'Waiting for a call slot', title: 'Its batch has started; it is released when a call slot is free and the contact window is open', tone: 'text-amber-300' };
+    case 'released':
+      return { Icon: Rocket, text: 'Released · strategy starting', title: 'Released by its batch: the outreach strategy picks it up within seconds', tone: 'text-emerald-300' };
+    case 'skipped':
+      return { Icon: Ban, text: `Skipped · ${SKIP_TEXT[o.reason ?? ''] ?? 'not contacted'}`, title: 'Approved in a batch but not contacted', tone: 'text-slate-400' };
+    case 'paused':
+      return { Icon: Pause, text: 'Outreach paused', title: 'Nothing automated contacts this lead until it is released', tone: 'text-slate-400' };
+  }
+}
 
 type Tab = 'all' | LeadTemperature | 'new' | 'booked';
 const TABS: readonly Tab[] = ['all', 'hot', 'warm', 'cold', 'new', 'booked'];
@@ -724,6 +755,15 @@ export const LeadsView: React.FC = () => {
                             {followUpReasonLabel(lead.status, lead.followUpReason)}
                           </p>
                         )}
+                        {(() => {
+                          const line = outreachLine(lead.outreach);
+                          return line ? (
+                            <p className={`text-2xs mt-1 flex items-center gap-1 whitespace-nowrap ${line.tone}`} title={line.title}>
+                              <line.Icon className="w-3 h-3 shrink-0" aria-hidden="true" />
+                              {line.text}
+                            </p>
+                          ) : null;
+                        })()}
                       </td>
 
                       {/* Actions */}

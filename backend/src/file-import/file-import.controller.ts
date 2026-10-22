@@ -9,13 +9,14 @@ import { ColumnMappingDto, EnableSheetDto } from '@/google-sheets/dto/sheets.dto
 import { FileImportEnabledGuard } from '@/google-sheets/import-enabled.guard';
 import type { ColumnMapping } from '@/google-sheets/sheet-rows';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
+import { OutreachChoiceDto } from '@/outreach/outreach.dto';
 import { PERMISSIONS } from '@/role/permissions';
 import { CommitUploadDto, PreviewUploadDto } from './dto/upload.dto';
 import { FileImportService, type UploadedFileLike } from './file-import.service';
 
 /** Hard ceiling on the request itself; the configured limit is checked with a friendlier message. */
 const UPLOAD_CEILING_BYTES = 20 * 1024 * 1024;
-const upload = () => FileInterceptor('file', { limits: { fileSize: UPLOAD_CEILING_BYTES, files: 1, fields: 5, fieldSize: 256 * 1024 } });
+const upload = () => FileInterceptor('file', { limits: { fileSize: UPLOAD_CEILING_BYTES, files: 1, fields: 6, fieldSize: 256 * 1024 } });
 
 function parseJson(raw: string, field: string): unknown {
   try {
@@ -45,6 +46,16 @@ function parseApproveRows(raw: string | undefined): number[] {
   const errors = validateSync(dto).flatMap((e) => Object.values(e.constraints ?? {}).map((message) => ({ path: 'approveRows', message })));
   if (errors.length) throw new AppError('VALIDATION_ERROR', 'Invalid approval', errors);
   return dto.approveRows ?? [];
+}
+
+function parseOutreach(raw: string | undefined): OutreachChoiceDto | undefined {
+  if (raw === undefined) return undefined;
+  const dto = plainToInstance(OutreachChoiceDto, parseJson(raw, 'outreach'));
+  const errors = validateSync(dto, { whitelist: true, forbidNonWhitelisted: true }).flatMap((e) =>
+    Object.values(e.constraints ?? {}).map((message) => ({ path: `outreach.${e.property}`, message })),
+  );
+  if (errors.length) throw new AppError('VALIDATION_ERROR', 'Invalid outreach choice', errors);
+  return dto;
 }
 
 @Controller('integrations/file-import')
@@ -79,6 +90,7 @@ export class FileImportController {
       body.sheet ?? null,
       parseApproveRows(body.approveRows),
       body.onlyClean === '1',
+      parseOutreach(body.outreach),
     );
   }
 

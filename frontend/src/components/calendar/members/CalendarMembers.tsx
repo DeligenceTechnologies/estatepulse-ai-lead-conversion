@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { Search, Users } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import { addCalendarMemberAsAgent, listCalendarMembers, type CalendarMember, type CalendarProviderId } from '../../../utils/calendarApi';
 import { RowSkeleton, useProviderData, useReloadOnSync } from '../shared/CalendarPanel';
-import { Empty, Notice, PROVIDERS, SearchField, type NoticeTone } from '../shared/ui';
+import { Empty, Notice, PROVIDERS, SearchField } from '../shared/ui';
 import { MemberList } from './MemberList';
 
 type Filter = 'all' | 'unlinked' | 'linked';
@@ -32,7 +33,6 @@ export const CalendarMembers: React.FC<{
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [adding, setAdding] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(null);
 
   const members = useMemo(() => [...(data ?? [])].sort(byNextAction), [data]);
   const linked = members.filter((m) => m.userId).length;
@@ -50,28 +50,25 @@ export const CalendarMembers: React.FC<{
   const add = async (member: CalendarMember) => {
     if (adding) return;
     setAdding(member.externalId);
-    setNotice(null);
     try {
       const { user, credentialsEmail } = await addCalendarMemberAsAgent(member.externalId);
-      setNotice(
-        !credentialsEmail || credentialsEmail.sent
-          ? {
-              tone: 'success',
-              text: credentialsEmail
-                ? `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.`
-                : `${user.name} is now an agent.`,
-            }
-          : {
-              tone: 'warning',
-              text: `${user.name} is now an agent, but the sign-in email was not sent${
-                credentialsEmail.reason ? ` (${credentialsEmail.reason})` : ''
-              }. Set a password for them from Team.`,
-            },
-      );
+      if (!credentialsEmail || credentialsEmail.sent) {
+        toast.success(
+          credentialsEmail
+            ? `${user.name} is now an agent. Sign-in details were emailed to ${user.email}.`
+            : `${user.name} is now an agent.`,
+        );
+      } else {
+        toast.warn(
+          `${user.name} is now an agent, but the sign-in email was not sent${
+            credentialsEmail.reason ? ` (${credentialsEmail.reason})` : ''
+          }. Set a password for them from Team.`,
+        );
+      }
       onAdded?.();
       await reload();
     } catch (e) {
-      setNotice({ tone: 'error', text: messageFor(e) });
+      toast.error(messageFor(e));
     } finally {
       setAdding(null);
     }
@@ -110,11 +107,6 @@ export const CalendarMembers: React.FC<{
     <div className="space-y-4">
       {toolbar}
       <div className="space-y-3">
-        {notice && (
-          <Notice tone={notice.tone} onDismiss={() => setNotice(null)}>
-            {notice.text}
-          </Notice>
-        )}
         {error ? (
           <Notice tone="error">{error}</Notice>
         ) : data === null ? (

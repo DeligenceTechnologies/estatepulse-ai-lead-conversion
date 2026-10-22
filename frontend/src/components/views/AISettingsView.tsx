@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Sliders,
   Sparkles,
@@ -48,6 +49,7 @@ import {
 } from '../../utils/assistantApi';
 import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
+import { CallPacingCard } from './CallPacingCard';
 import { ContactWindowCard } from './ContactWindowCard';
 import { CallCapacityCard } from './CallCapacityCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
@@ -325,6 +327,41 @@ export const AISettingsView: React.FC = () => {
       el.setSelectionRange(start + token.length, start + token.length);
     });
   };
+
+  // A link such as /ai-settings#contact-window lands on that card and points it out, once per
+  // navigation. The cards render only after the Telnyx status loads, so this runs again then.
+  const { hash, key } = useLocation();
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hash || landed.current === key) return;
+    const el = document.getElementById(hash.slice(1));
+    if (!el) return;
+    const mark = ['ring-2', 'ring-emerald-500/70'];
+    let unmark: ReturnType<typeof setTimeout> | undefined;
+    let release = () => {};
+    const land = setTimeout(() => {
+      landed.current = key;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.classList.add(...mark);
+      unmark = setTimeout(() => el.classList.remove(...mark), 2000);
+      // Sections above are still filling in (the live agent's prompt and tools): keep the card in view
+      // while they settle, until the owner scrolls or types, or for a few seconds at most.
+      const follow = new ResizeObserver(() => el.scrollIntoView({ block: 'start' }));
+      follow.observe(el.parentElement ?? document.body);
+      const stop = setTimeout(() => release(), 4000);
+      release = () => {
+        follow.disconnect();
+        clearTimeout(stop);
+        for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown'] as const) window.removeEventListener(type, release);
+      };
+      for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown'] as const) window.addEventListener(type, release, { passive: true });
+    }, 400);
+    return () => {
+      clearTimeout(land);
+      if (unmark) clearTimeout(unmark);
+      release();
+    };
+  }, [hash, key, status]);
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto text-slate-100">
@@ -1105,9 +1142,18 @@ export const AISettingsView: React.FC = () => {
         {/* The real org-wide guardrails, read by BOTH schedulers. The card
             that used to be here bound to the browser's demo store, so editing
             the contact hours changed nothing the engine ever saw. */}
-        <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+        {/* The ids are link targets (OutreachPicker's "Change" links): /ai-settings#<id>. */}
+        <div id="contact-window" className="scroll-mt-6 rounded-2xl transition-shadow">
+          <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+        </div>
 
-        <CallCapacityCard />
+        <div id="call-capacity" className="scroll-mt-6 rounded-2xl transition-shadow">
+          <CallCapacityCard />
+        </div>
+
+        <div id="call-pacing" className="scroll-mt-6 rounded-2xl transition-shadow">
+          <CallPacingCard />
+        </div>
 
         <LeadTemperatureCard />
 

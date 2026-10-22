@@ -1,4 +1,5 @@
 import { ApiError, apiFetch } from '../lib/api';
+import type { OutreachChoice, OutreachSummary } from './outreachApi';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -196,9 +197,16 @@ export interface FirstRun {
   approval: ApproveResult;
 }
 
-/** Switch the sheet on and run its first import now; `approveRows` (sheet row numbers) are approved as they land. */
-export const enableSheetSource = (id: string, approveRows: number[]): Promise<SheetSource & { firstRun: FirstRun | null }> =>
-  apiFetch<SheetSource & { firstRun: FirstRun | null }>(`${BASE}/sources/${id}/enable`, { method: 'POST', auth: true, body: { approveRows } });
+/**
+ * Switch the sheet on and run its first import now; `approveRows` (sheet row numbers) are approved as they land,
+ * launching as `outreach` says (outreach scheduling on) or now.
+ */
+export const enableSheetSource = (id: string, approveRows: number[], outreach?: OutreachChoice): Promise<SheetSource & { firstRun: FirstRun | null }> =>
+  apiFetch<SheetSource & { firstRun: FirstRun | null }>(`${BASE}/sources/${id}/enable`, {
+    method: 'POST',
+    auth: true,
+    body: outreach ? { approveRows, outreach } : { approveRows },
+  });
 
 export const pauseSheetSource = (id: string): Promise<SheetSource> =>
   apiFetch<SheetSource>(`${BASE}/sources/${id}/pause`, { method: 'POST', auth: true });
@@ -252,6 +260,8 @@ export interface ApproveResult {
   released: number;
   held: { rowId: string; leadId: string; reason: string }[];
   skipped: string[];
+  /** Outreach scheduling on: the releasable leads joined this batch instead of being released at once. */
+  outreach?: OutreachSummary;
 }
 
 export interface RejectResult {
@@ -284,8 +294,9 @@ export const reviewQueue = (q: {
   return apiFetch<ReviewPage>(`${BASE}/review?${p.toString()}`, { auth: true });
 };
 
-export const approveRows = (rowIds: string[]): Promise<ApproveResult> =>
-  apiFetch<ApproveResult>(`${BASE}/review/approve`, { method: 'POST', auth: true, body: { rowIds } });
+/** `outreach` is how they launch (only with outreach scheduling on); without it they launch now. */
+export const approveRows = (rowIds: string[], outreach?: OutreachChoice): Promise<ApproveResult> =>
+  apiFetch<ApproveResult>(`${BASE}/review/approve`, { method: 'POST', auth: true, body: outreach ? { rowIds, outreach } : { rowIds } });
 
 export const rejectRows = (rowIds: string[]): Promise<RejectResult> =>
   apiFetch<RejectResult>(`${BASE}/review/reject`, { method: 'POST', auth: true, body: { rowIds } });

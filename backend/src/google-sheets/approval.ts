@@ -1,6 +1,8 @@
-import { LeadStatus, type Prisma } from '@prisma/client';
+import { LeadStatus, Prisma } from '@prisma/client';
 import type { AuditService } from '@/audit/audit.service';
 import { CRM_IMPORT_REVIEW_REASONS } from '@/crm/crm-records';
+import { enqueueOutreach } from '@/outreach/batches';
+import { summaryOf, type OutreachRequest, type OutreachSummary } from '@/outreach/schedule';
 import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
 
 /** Every reason an import starts with (a sheet, a file, each connected CRM); a decision spends whichever one the lead carries. */
@@ -13,12 +15,19 @@ export interface ApprovalResult {
   released: number;
   held: { rowId: string; leadId: string; reason: HoldReason }[];
   skipped: string[];
+  /** Scheduling on: the releasable leads were queued on this outreach batch instead of released. */
+  outreach?: OutreachSummary;
 }
+
+/** Whether an imported lead (aliased `l`) may start outreach; the outreach runner re-checks it at release. */
+export const RELEASABLE_LEAD = Prisma.sql`l.automation_paused AND NOT l.dnc_status AND l.status = 'new' AND l.normalized_phone IS NOT NULL`;
 
 /**
  * Approves imported rows still pending review. A lead is released to the
  * outreach strategy only when it is still new, has a dialable phone and is
  * not do-not-contact; anything else is approved but held, with the reason.
+ * With an outreach request the releasable leads stay paused and are queued on
+ * its batch instead, for the outreach runner to release at the batch's time.
  * `by.userId` null: a sync approved on its own, recorded as the system.
  */
 export async function approveTrackingRows(
@@ -27,6 +36,7 @@ export async function approveTrackingRows(
   orgId: string,
   rowIds: string[],
   by: { userId: string | null },
+  outreach?: OutreachRequest,
 ): Promise<ApprovalResult> {
   if (rowIds.length === 0) return { approved: 0, released: 0, held: [], skipped: [] };
 
@@ -46,14 +56,18 @@ export async function approveTrackingRows(
            updated_at = now()
      WHERE organization_id = ${orgId}::uuid AND id = ANY(${leadIds}::uuid[])`;
 
-  const released = await tx.$queryRaw<{ id: string }[]>`
-    UPDATE leads
-       SET automation_paused = false, updated_at = now()
-     WHERE organization_id = ${orgId}::uuid AND id = ANY(${leadIds}::uuid[])
-       AND automation_paused AND NOT dnc_status AND status = 'new' AND normalized_phone IS NOT NULL
-    RETURNING id`;
+  const released = outreach
+    ? await tx.$queryRaw<{ id: string }[]>`
+        SELECT l.id FROM leads AS l
+         WHERE l.organization_id = ${orgId}::uuid AND l.id = ANY(${leadIds}::uuid[]) AND ${RELEASABLE_LEAD}`
+    : await tx.$queryRaw<{ id: string }[]>`
+        UPDATE leads AS l
+           SET automation_paused = false, updated_at = now()
+         WHERE l.organization_id = ${orgId}::uuid AND l.id = ANY(${leadIds}::uuid[]) AND ${RELEASABLE_LEAD}
+        RETURNING l.id`;
   const releasedIds = new Set(released.map((r) => r.id));
   const heldIds = leadIds.filter((id) => !releasedIds.has(id));
+  if (outreach) await enqueueOutreach(tx, audit, orgId, outreach, [...releasedIds], heldIds.length);
   const held = heldIds.length
     ? await tx.lead.findMany({
         where: { orgId, id: { in: heldIds } },
@@ -71,7 +85,9 @@ export async function approveTrackingRows(
         action: 'sheet_import.approved',
         entityType: 'lead',
         entityId: d.lead_id,
-        payload: { rowId: d.id, released: releasedIds.has(d.lead_id!) },
+        payload: outreach
+          ? { rowId: d.id, released: false, outreachBatchId: releasedIds.has(d.lead_id!) ? (outreach.batchId ?? null) : null }
+          : { rowId: d.id, released: releasedIds.has(d.lead_id!) },
       })),
     tx,
   );
@@ -79,9 +95,10 @@ export async function approveTrackingRows(
   const rowOf = new Map(decided.map((d) => [d.lead_id, d.id]));
   return {
     approved: decided.length,
-    released: releasedIds.size,
+    released: outreach ? 0 : releasedIds.size,
     held: held.map((l) => ({ rowId: rowOf.get(l.id)!, leadId: l.id, reason: holdReason(l) })),
     skipped: notDecided(rowIds, decided),
+    ...(outreach?.batchId ? { outreach: summaryOf(outreach) } : {}),
   };
 }
 

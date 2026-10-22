@@ -63,6 +63,7 @@ model Lead {
   ingestEvents    IngestEvent[]
   sheetImportRows SheetImportRow[]
   meetings        CalendarMeeting[]
+  outreachItems   OutreachBatchLead[]
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])

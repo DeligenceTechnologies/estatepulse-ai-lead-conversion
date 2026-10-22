@@ -15,7 +15,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ApiError, messageFor } from '../../lib/api';
+import { confirmToast } from '../../lib/toast';
 import { displayName, useAuth } from '../../context/AuthContext';
 import {
   deleteMember,
@@ -221,20 +223,21 @@ export const AgentsView: React.FC = () => {
 
   const handleDelete = async (member: TeamMember): Promise<void> => {
     if (
-      !window.confirm(
+      !(await confirmToast(
         `Delete ${displayName(member)}? Their account is removed and they are signed out immediately. This cannot be undone.`,
-      )
+        'Delete',
+      ))
     ) {
       return;
     }
     setDeletingId(member.id);
-    setError(null);
     try {
       await deleteMember(member.id);
       setOpenId(null);
+      toast.success(`${displayName(member)} deleted.`);
       await load();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setDeletingId(null);
     }

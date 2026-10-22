@@ -1,12 +1,13 @@
-import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
 import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
+import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 
-const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, updatedAt: true } as const;
+const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, reservedCallSlots: true, updatedAt: true } as const;
 
 @Injectable()
 export class OrgSettingService {
@@ -26,6 +27,13 @@ export class OrgSettingService {
   }
 
   async update(orgId: string, { workingHours, ...dto }: UpdateOrgSettingDto) {
+    if (dto.reservedCallSlots !== undefined) {
+      const limit = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { maxConcurrentCalls: true } });
+      const max = limit?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT;
+      if (dto.reservedCallSlots >= max) {
+        throw new BadRequestException(`Keep fewer slots free than your concurrent call limit (${max}), so batches can still call.`);
+      }
+    }
     const data = { ...dto, ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}) };
     try {
       return await this.prisma.organizationSetting.upsert({

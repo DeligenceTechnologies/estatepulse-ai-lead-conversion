@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { consumeSessionEndReason, messageFor, type SessionEndReason } from '../../lib/api';
-import { AuthLayout, Checkbox, Field, FormError, FormNotice, PasswordField, SubmitButton } from './AuthLayout';
+import { AuthLayout, Checkbox, Field, FormNotice, PasswordField, SubmitButton } from './AuthLayout';
 
 interface FromState {
   from?: { pathname?: string };
@@ -23,7 +24,6 @@ export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [keepSignIn, setKeepSignIn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Read once: the reason belongs to this visit of the page, not to the next.
   const [notice] = useState(() => {
@@ -38,13 +38,12 @@ export const LoginPage: React.FC = () => {
 
   const onSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    setError(null);
     setBusy(true);
     try {
       await login(email.trim(), password, keepSignIn);
       navigate(target, { replace: true });
     } catch (err) {
-      setError(messageFor(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -71,8 +70,7 @@ export const LoginPage: React.FC = () => {
           </button>
         </div>
       )}
-      {!error && <FormNotice message={notice} />}
-      <FormError message={error} />
+      <FormNotice message={notice} />
       <form onSubmit={onSubmit} className="space-y-4">
         <Field
           label="Email"

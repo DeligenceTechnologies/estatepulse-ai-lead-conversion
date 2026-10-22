@@ -6,6 +6,8 @@ import { AppError, httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
+import { outreachRequest, type OutreachChoice } from '@/outreach/batches';
+import { summaryOf } from '@/outreach/schedule';
 import type { ApprovalResult } from '@/google-sheets/approval';
 import type { SessionIdentity } from '@/google-sheets/google-connections.service';
 import { RunStats, SheetImportService, contactFlags, type Approval } from '@/google-sheets/sheet-import.service';
@@ -123,6 +125,7 @@ export class FileImportService {
     sheet: string | null,
     approveRows: number[],
     onlyClean = false,
+    choice?: OutreachChoice,
   ) {
     const orgId = who.organizationId;
     const a = await this.analyze(orgId, file, columns, sheet);
@@ -140,7 +143,11 @@ export class FileImportService {
       if (toImport.length === 0) throw httpError(400, 'NO_CLEAN_ROWS', 'Every importable row in this file is flagged, so there is nothing to import this way.');
     }
     const ticked = new Set(approveRows);
-    const approvalRule: Approval = { by: { userId: who.userId }, rule: onlyClean ? () => true : (b) => ticked.has(b.rowNumber) };
+    const by = { userId: who.userId };
+    // Only rows approved on import launch; with none, there is no schedule to check.
+    const approving = onlyClean || ticked.size > 0;
+    const outreach = approving ? await outreachRequest(this.prisma, this.config.get('OUTREACH_SCHEDULING_ENABLED', { infer: true }), orgId, by, choice) : undefined;
+    const approvalRule: Approval = { by, rule: onlyClean ? () => true : (b) => ticked.has(b.rowNumber), outreach };
 
     const code = `upload-${clientToken}`.slice(0, 50);
     const select = { id: true, defaultConsentStatus: true, lastSuccessAt: true } as const;
@@ -189,7 +196,13 @@ export class FileImportService {
     if (!source.lastSuccessAt) {
       const stats = new RunStats(0);
       await this.importer.importRows(orgId, source.id, source.defaultConsentStatus, toImport, stats, FILE_IMPORT_REVIEW_REASON, approvalRule);
-      approval = { approved: stats.autoApproved, released: stats.autoReleased, held: stats.autoHeld as ApprovalResult['held'], skipped: [] };
+      approval = {
+        approved: stats.autoApproved,
+        released: stats.autoReleased,
+        held: stats.autoHeld as ApprovalResult['held'],
+        skipped: [],
+        ...(outreach?.batchId ? { outreach: summaryOf(outreach) } : {}),
+      };
       await this.prisma.leadSource.updateMany({
         where: { id: source.id, orgId },
         data: { lastSuccessAt: new Date(), ingestStatus: IngestStatus.COMPLETED },

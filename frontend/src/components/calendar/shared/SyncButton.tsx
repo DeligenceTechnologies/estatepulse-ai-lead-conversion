@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../../lib/api';
 import { syncCalendarAvailability } from '../../../utils/calendarApi';
 
@@ -43,11 +44,16 @@ export const SyncButton: React.FC<{
     setSyncing(true);
     setError(null);
     try {
-      const { sync: state } = await syncCalendarAvailability();
+      const { outcome, sync: state } = await syncCalendarAvailability();
       if (state.syncedAt) setSyncedAt(state.syncedAt);
-      if (state.error) setError(state.error);
+      if (state.error) {
+        setError(state.error);
+        toast.error(state.error);
+      } else if (outcome === 'busy') toast.info(`A sync with ${providerLabel} is already running.`);
+      else toast.success(`Synced with ${providerLabel}.`);
     } catch (e) {
       setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setNow(Date.now());
       setSyncing(false);

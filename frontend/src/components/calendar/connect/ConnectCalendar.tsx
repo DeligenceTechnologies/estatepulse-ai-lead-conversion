@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import {
@@ -22,14 +23,11 @@ import {
   StatusPill,
   WORKSPACE_LABEL,
   panel,
-  type NoticeTone,
 } from '../shared/ui';
 import { formatDate } from '../../../lib/datetime';
 // Explicit .tsx: on case-insensitive disks '../meetings/Meetings' resolves to the sibling meetings.ts helpers.
 import { Meetings } from '../meetings/Meetings.tsx';
 import { SyncButton } from '../shared/SyncButton';
-
-type Flash = { tone: NoticeTone; text: string };
 
 const Fact: React.FC<{ label: string; value: string | null }> = ({ label, value }) => (
   <div className="min-w-0">
@@ -61,18 +59,16 @@ const ConnectionSummary: React.FC<{
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const broken = connection.status === 'error';
   const { label } = PROVIDERS[provider];
 
   const disconnect = async () => {
     setDisconnecting(true);
-    setError(null);
     try {
       await disconnectOrganizationCalendar();
       await onDisconnected();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
       setDisconnecting(false);
     }
   };
@@ -102,7 +98,6 @@ const ConnectionSummary: React.FC<{
           {connection.lastError ?? `${label} stopped accepting this connection. Reconnect to resume.`}
         </Notice>
       )}
-      {error && <Notice tone="error">{error}</Notice>}
 
       {canEdit && broken && (
         <div className="pt-1">
@@ -172,7 +167,6 @@ export const ConnectCalendar: React.FC = () => {
 
   const [status, setStatus] = useState<OrganizationCalendarStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<Flash | null>(null);
   const [switching, setSwitching] = useState(false);
   /** Bumped by the Sync button; Meetings reloads when it changes. */
   const [syncVersion, setSyncVersion] = useState(0);
@@ -195,11 +189,9 @@ export const ConnectCalendar: React.FC = () => {
   useEffect(() => {
     const outcome = params.get('calendar');
     if (!outcome) return;
-    setFlash(
-      outcome === 'connected'
-        ? { tone: 'success', text: 'Calendly connected.' }
-        : { tone: 'error', text: 'Calendly was not connected. Please try again.' },
-    );
+    // toastId: StrictMode runs this effect twice before the param is cleared.
+    if (outcome === 'connected') toast.success('Calendly connected.', { toastId: 'calendly-return' });
+    else toast.error('Calendly was not connected. Please try again.', { toastId: 'calendly-return' });
     const next = new URLSearchParams(params);
     next.delete('calendar');
     setParams(next, { replace: true });
@@ -215,7 +207,7 @@ export const ConnectCalendar: React.FC = () => {
       setLoadError(null);
       const connected = next.connection?.status === 'active' && connectionKey(next) !== before;
       if (connected && next.provider) {
-        setFlash({ tone: 'success', text: `${PROVIDERS[next.provider].label} connected.` });
+        toast.success(`${PROVIDERS[next.provider].label} connected.`);
         setSwitching(false);
       }
       return connected;
@@ -228,7 +220,7 @@ export const ConnectCalendar: React.FC = () => {
   const afterDisconnect = useCallback(async () => {
     const label = statusRef.current?.provider ? PROVIDERS[statusRef.current.provider].label : 'Calendar';
     await load();
-    setFlash({ tone: 'info', text: `${label} disconnected.` });
+    toast.success(`${label} disconnected.`);
   }, [load]);
 
   const provider = status?.provider ?? null;
@@ -326,11 +318,6 @@ export const ConnectCalendar: React.FC = () => {
         </header>
 
         <div className="p-5 space-y-4">
-          {flash && (
-            <Notice tone={flash.tone} onDismiss={() => setFlash(null)}>
-              {flash.text}
-            </Notice>
-          )}
           {loadError && status && <Notice tone="error">{loadError}</Notice>}
           {body}
         </div>
