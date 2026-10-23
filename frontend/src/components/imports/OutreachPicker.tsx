@@ -2,8 +2,7 @@ import React from 'react';
 import { CalendarClock, Clock, PhoneCall } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { pathForView } from '../../context/AppContext';
-import { wallClockNow, type OutreachChoice, type OutreachConfig, type OutreachMode } from '../../utils/outreachApi';
-import { todayIn } from '../calendar/availability/time';
+import { earliestStart, upcoming, wallClockNow, type OutreachChoice, type OutreachConfig, type OutreachMode } from '../../utils/outreachApi';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 
 const field = 'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-600';
@@ -15,7 +14,7 @@ export interface Launch {
   timeZone: string;
 }
 
-export const initialLaunch = (config: OutreachConfig): Launch => ({ mode: 'now', date: todayIn(config.timeZone), time: '10:00', timeZone: config.timeZone });
+export const initialLaunch = (config: OutreachConfig): Launch => ({ mode: 'now', timeZone: config.timeZone, ...earliestStart(config.timeZone) });
 
 export const launchChoice = (l: Launch): OutreachChoice =>
   l.mode === 'now' ? { mode: 'now' } : { mode: 'scheduled', date: l.date, time: l.time, timeZone: l.timeZone };
@@ -49,12 +48,16 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
     </button>
   );
   const set = (patch: Partial<Launch>) => onChange({ ...value, ...patch });
+  /** Clicks, zones and today picked as the date also move a past time up to now. A typed time stays as typed (snapping mid-keystroke fights the input) and is flagged. */
+  const move = (patch: Partial<Launch>) => onChange(upcoming({ ...value, ...patch }));
+  const now = wallClockNow(value.timeZone);
+  const today = now.slice(0, 10);
   const problem = launchProblem(value);
 
   const option = (mode: OutreachMode, icon: React.ReactNode, label: string, hint: string) => (
     <button
       type="button"
-      onClick={() => set({ mode })}
+      onClick={() => move({ mode })}
       aria-pressed={value.mode === mode}
       className={`flex-1 text-left rounded-xl border p-3 transition-colors cursor-pointer ${
         value.mode === mode ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-slate-800 hover:border-slate-700'
@@ -82,16 +85,28 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
           <div className="grid grid-cols-2 gap-2">
             <label className="text-2xs text-slate-400 space-y-1">
               <span className="block font-semibold text-slate-300">Date</span>
-              <input type="date" value={value.date} min={todayIn(value.timeZone)} onChange={(e) => set({ date: e.target.value })} className={`${field} w-full`} />
+              <input
+                type="date"
+                value={value.date}
+                min={today}
+                onChange={(e) => (e.target.value === today ? move : set)({ date: e.target.value })}
+                className={`${field} w-full`}
+              />
             </label>
             <label className="text-2xs text-slate-400 space-y-1">
               <span className="block font-semibold text-slate-300">Time</span>
-              <input type="time" value={value.time} onChange={(e) => set({ time: e.target.value })} className={`${field} w-full`} />
+              <input
+                type="time"
+                value={value.time}
+                min={value.date === today ? now.slice(11) : undefined}
+                onChange={(e) => set({ time: e.target.value })}
+                className={`${field} w-full`}
+              />
             </label>
           </div>
           <label className="text-2xs text-slate-400 space-y-1 block">
             <span className="block font-semibold text-slate-300">Time zone</span>
-            <TimezoneSelect value={value.timeZone} onChange={(timeZone) => set({ timeZone })} className={`${field} w-full`} />
+            <TimezoneSelect value={value.timeZone} onChange={(timeZone) => move({ timeZone })} className={`${field} w-full`} />
           </label>
           {problem && <div className="text-2xs text-rose-300">{problem}</div>}
         </div>

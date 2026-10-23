@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link2, Loader2 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../../lib/api';
 import { openCalendlyPopup, startCalendlyConnect } from '../../../utils/calendarApi';
@@ -10,14 +10,23 @@ export const CalendlyConnect: React.FC<{ onConnected: () => Promise<boolean>; re
   reconnect,
 }) => {
   const [busy, setBusy] = useState(false);
+  const pending = useRef<AbortController | null>(null);
+
+  useEffect(() => () => pending.current?.abort(), []);
 
   const connect = async () => {
+    if (busy) {
+      pending.current?.abort();
+      return;
+    }
     setBusy(true);
+    const ac = new AbortController();
+    pending.current = ac;
     try {
       const { authorizeUrl } = await startCalendlyConnect();
-      const result = await openCalendlyPopup(authorizeUrl);
+      const result = await openCalendlyPopup(authorizeUrl, ac.signal);
       const connected = await onConnected();
-      if (!connected) {
+      if (!connected && !ac.signal.aborted) {
         toast.error(
           result.outcome === 'failed'
             ? (result.message ?? 'Calendly was not connected.')
@@ -39,11 +48,10 @@ export const CalendlyConnect: React.FC<{ onConnected: () => Promise<boolean>; re
       </ol>
       <PrimaryButton
         onClick={() => void connect()}
-        busy={busy}
         className={PROVIDERS.calendly.button}
-        icon={<Link2 className="w-3.5 h-3.5" />}
+        icon={busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
       >
-        {busy ? 'Waiting for Calendly…' : reconnect ? 'Reconnect Calendly' : 'Connect with Calendly'}
+        {busy ? 'Waiting for Calendly… (cancel)' : reconnect ? 'Reconnect Calendly' : 'Connect with Calendly'}
       </PrimaryButton>
     </div>
   );

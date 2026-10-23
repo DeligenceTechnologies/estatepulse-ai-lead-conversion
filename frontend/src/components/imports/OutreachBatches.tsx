@@ -7,11 +7,11 @@ import {
   listOutreachBatches,
   rescheduleOutreachBatch,
   startLabel,
+  upcoming,
   wallClockNow,
   type OutreachBatch,
   type OutreachBatchStatus,
 } from '../../utils/outreachApi';
-import { todayIn } from '../calendar/availability/time';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { errorText } from '../sheets/SheetModal';
 
@@ -61,15 +61,24 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState<null | 'cancel' | 'reschedule'>(null);
   const [editing, setEditing] = useState(false);
-  const [date, setDate] = useState(() => todayIn(b.timeZone));
-  const [time, setTime] = useState('10:00');
-  const [timeZone, setTimeZone] = useState(b.timeZone);
+  const [when, setWhen] = useState({ date: '', time: '', timeZone: b.timeZone });
 
   const [label, cls] = BADGE[b.status];
   const p = b.progress;
   const total = Math.max(1, p.called + p.failed + p.pending + p.skipped + p.cancelled);
   const due = b.status === 'pending' && Date.parse(b.startAt) <= Date.now();
-  const past = `${date} ${time}` <= wallClockNow(timeZone);
+  const now = wallClockNow(when.timeZone);
+  const today = now.slice(0, 10);
+  const past = `${when.date} ${when.time}` <= now;
+  /** Same rule as the launch picker: a zone or today picked moves a past time up to now; a typed time is flagged instead. */
+  const move = (patch: Partial<typeof when>) => setWhen(upcoming({ ...when, ...patch }));
+
+  /** The editor opens on the batch's own start, or the earliest start once that has passed. */
+  const startEditing = () => {
+    const [date, time] = wallClockNow(b.timeZone, new Date(b.startAt)).split(' ');
+    setWhen(upcoming({ date, time, timeZone: b.timeZone }));
+    setEditing(true);
+  };
 
   const cancel = async () => {
     if (!armed) return setArmed(true);
@@ -89,7 +98,7 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
   const reschedule = async () => {
     setBusy('reschedule');
     try {
-      const r = await rescheduleOutreachBatch(b.id, { date, time, timeZone });
+      const r = await rescheduleOutreachBatch(b.id, when);
       toast.success(`Batch moved to ${startLabel(r.startAt, r.timeZone)}.`);
       setEditing(false);
       onChanged();
@@ -126,7 +135,7 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
         </span>
         <div className="flex-1" />
         {b.status === 'pending' && !editing && (
-          <button type="button" onClick={() => setEditing(true)} disabled={busy !== null} className={`${btn} bg-slate-800 text-slate-200 hover:bg-slate-700`}>
+          <button type="button" onClick={startEditing} disabled={busy !== null} className={`${btn} bg-slate-800 text-slate-200 hover:bg-slate-700`}>
             Reschedule
           </button>
         )}
@@ -146,9 +155,23 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
 
       {editing && (
         <div className="flex flex-wrap items-center gap-2">
-          <input type="date" value={date} min={todayIn(timeZone)} onChange={(e) => setDate(e.target.value)} className={field} aria-label="New date" />
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={field} aria-label="New time" />
-          <TimezoneSelect value={timeZone} onChange={setTimeZone} className={`${field} max-w-[14rem]`} />
+          <input
+            type="date"
+            value={when.date}
+            min={today}
+            onChange={(e) => (e.target.value === today ? move({ date: e.target.value }) : setWhen({ ...when, date: e.target.value }))}
+            className={field}
+            aria-label="New date"
+          />
+          <input
+            type="time"
+            value={when.time}
+            min={when.date === today ? now.slice(11) : undefined}
+            onChange={(e) => setWhen({ ...when, time: e.target.value })}
+            className={field}
+            aria-label="New time"
+          />
+          <TimezoneSelect value={when.timeZone} onChange={(timeZone) => move({ timeZone })} className={`${field} max-w-[14rem]`} />
           <button type="button" onClick={() => void reschedule()} disabled={busy !== null || past} className={`${btn} bg-green-600 text-white hover:bg-green-500`}>
             {busy === 'reschedule' && <Loader2 className="w-3 h-3 animate-spin" />}
             Save
