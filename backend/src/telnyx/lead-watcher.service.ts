@@ -4,14 +4,16 @@ import { IntegrationProvider, IntegrationStatus, LeadStatus } from '@prisma/clie
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { IN_STRATEGY_STATUSES } from '@/lead/lead-status';
+import { retellEnabled } from '@/retell/retell-enabled.guard';
 import { EngineService } from './engine.service';
 
 const NEW_LEADS_PER_TICK = 10;
 
 /**
  * Starts the outreach strategy for new leads of every organization with an
- * active Telnyx account, resumes in-flight leads after a restart, and parks
- * leads whose strategy stalled for longer than it could resume. Off unless
+ * active calling account (Telnyx, or Retell when RETELL_ENABLED), resumes
+ * in-flight leads after a restart, and parks leads whose strategy stalled for
+ * longer than it could resume. Off unless
  * STRATEGY_ENGINE is set, because it calls and texts real people.
  */
 @Injectable()
@@ -51,8 +53,9 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
+      const provider = retellEnabled(this.config) ? { in: [IntegrationProvider.telnyx, IntegrationProvider.retell] } : IntegrationProvider.telnyx;
       const orgs = await this.prisma.integration.findMany({
-        where: { provider: IntegrationProvider.telnyx, status: IntegrationStatus.active },
+        where: { provider, status: IntegrationStatus.active },
         select: { orgId: true },
         distinct: ['orgId'],
       });

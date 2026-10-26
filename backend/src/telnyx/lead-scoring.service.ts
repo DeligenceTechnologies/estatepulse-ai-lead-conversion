@@ -18,7 +18,7 @@ import {
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 
 export interface Qualification {
-  source: 'telnyx_insights' | 'transcript';
+  source: 'telnyx_insights' | 'transcript' | 'retell_analysis';
   score: number;
   temperature: LeadTemperature;
   reasons: ScoreReason[];
@@ -65,6 +65,13 @@ export class LeadScoringService {
     const extraction = results.map((r) => parseExtraction(r?.result)).find((x) => x != null);
     if (!extraction) return;
     await this.apply(call, extraction, 'telnyx_insights');
+  }
+
+  /** A qualification another provider extracted itself (Retell's post-call analysis). A call is scored once. */
+  async onProviderAnalysis(callId: string, extraction: Extraction, source: Qualification['source']): Promise<Qualification | null> {
+    const call = await this.prisma.call.findUnique({ where: { id: callId } });
+    if (!call || (call.extractedIntel as { qualification?: unknown } | null)?.qualification) return null;
+    return this.apply(call, extraction, source);
   }
 
   onTranscriptSaved(ccid: string, delayMs = TRANSCRIPT_FALLBACK_MS): void {

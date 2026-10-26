@@ -95,20 +95,24 @@ export class TelnyxCredentialsService {
     const existing = (await this.activeRow(orgId)) ?? (await this.latestRow(orgId));
     const current = existing ? this.fromRow(existing) : null;
     const next = { ...(current ?? emptyCreds()), ...patch };
-    return this.prisma.$transaction(async (tx) => {
-      await this.deactivateAll(tx, orgId, existing?.id);
-      const row = existing
-        ? await tx.integration.update({ where: { id: existing.id }, data: { ...this.columns(orgId, existing.id, next), status: IntegrationStatus.active } })
-        : await this.insert(tx, orgId, next);
-      return this.fromRow(row);
-    });
+    return this.prisma
+      .$transaction(async (tx) => {
+        await this.deactivateAll(tx, orgId, existing?.id);
+        const row = existing
+          ? await tx.integration.update({ where: { id: existing.id }, data: { ...this.columns(orgId, existing.id, next), status: IntegrationStatus.active } })
+          : await this.insert(tx, orgId, next);
+        return this.fromRow(row);
+      })
+      .catch((error) => this.oneCallingProvider(orgId, error));
   }
 
   async createAccount(orgId: string, creds: Partial<TelnyxCreds>): Promise<string> {
-    return this.prisma.$transaction(async (tx) => {
-      await this.deactivateAll(tx, orgId);
-      return (await this.insert(tx, orgId, { ...emptyCreds(), ...creds })).id;
-    });
+    return this.prisma
+      .$transaction(async (tx) => {
+        await this.deactivateAll(tx, orgId);
+        return (await this.insert(tx, orgId, { ...emptyCreds(), ...creds })).id;
+      })
+      .catch((error) => this.oneCallingProvider(orgId, error));
   }
 
   async listAccounts(orgId: string): Promise<TelnyxAccount[]> {
@@ -134,10 +138,12 @@ export class TelnyxCredentialsService {
 
   async activateAccount(orgId: string, id: string): Promise<void> {
     await this.ownedRow(orgId, id);
-    await this.prisma.$transaction(async (tx) => {
-      await this.deactivateAll(tx, orgId, id);
-      await tx.integration.update({ where: { id }, data: { status: IntegrationStatus.active } });
-    });
+    await this.prisma
+      .$transaction(async (tx) => {
+        await this.deactivateAll(tx, orgId, id);
+        await tx.integration.update({ where: { id }, data: { status: IntegrationStatus.active } });
+      })
+      .catch((error) => this.oneCallingProvider(orgId, error));
   }
 
   async renameAccount(orgId: string, id: string, label: string): Promise<void> {
@@ -228,6 +234,19 @@ export class TelnyxCredentialsService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * One calling provider per organization (integrations_one_active_calling):
+   * activating a Telnyx account while Retell is the provider is refused by the
+   * database, and said so plainly. Any other error is rethrown unchanged.
+   */
+  private async oneCallingProvider(orgId: string, error: unknown): Promise<never> {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const retell = await this.prisma.integration.count({ where: { orgId, provider: IntegrationProvider.retell, status: IntegrationStatus.active } });
+      if (retell) throw new AppError('CONFLICT', 'Retell is this organization’s calling provider. Switch to Telnyx in Settings → Calling first, then connect the Telnyx account.');
+    }
+    throw error;
   }
 
   private activeRow(orgId: string) {

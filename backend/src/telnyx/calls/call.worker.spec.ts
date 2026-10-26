@@ -1,5 +1,6 @@
 import { DelayedError } from 'bullmq';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CallingProviders, TelnyxCallingProvider } from '@/calling/calling-providers';
 import { CallWorker, isCapacityError } from './call.worker';
 
 const ORG = 'org-1';
@@ -20,7 +21,9 @@ function setup(overrides: { lead?: Record<string, unknown> | null; slot?: boolea
     rename: vi.fn(),
     release: vi.fn(),
   };
-  const worker = new CallWorker(prisma as any, config as any, followup as any, voice as any, activity as any, slots as any);
+  // RETELL_ENABLED off: the real registry hands the call to the real Telnyx wrapper, which hands it to `voice`.
+  const providers = new CallingProviders({ get: () => undefined } as any, {} as any, new TelnyxCallingProvider(voice as any, {} as any, {} as any), {} as any);
+  const worker = new CallWorker(prisma as any, config as any, followup as any, providers, activity as any, slots as any);
   const job = { id: 'job-1', name: 'dial', data: { orgId: ORG, leadId: LEAD, source: 'strategy' }, moveToDelayed: vi.fn() };
   return { worker, job, prisma, voice, activity, slots };
 }
@@ -36,7 +39,7 @@ describe('CallWorker', () => {
     expect(slots.acquire).toHaveBeenCalledWith(ORG, 'job-1', 2);
     expect(voice.placeCall).toHaveBeenCalledWith(ORG, '+12895550100', { leadId: LEAD, orgId: ORG });
     expect(slots.rename).toHaveBeenCalledWith(ORG, 'job-1', 'ccid-1');
-    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1');
+    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1', 'telnyx');
   });
 
   it('waits without dialing when the org is at its limit', async () => {
@@ -57,7 +60,7 @@ describe('CallWorker', () => {
     const { worker, job, slots, activity } = setup({ placeCall: () => Promise.reject(new Error('Telnyx POST /calls failed 422: invalid number')) });
     await worker.process(job as any, 'tok');
     expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
-    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('invalid number'));
+    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('invalid number'), 'telnyx');
   });
 
   it('frees the slot and waits when Telnyx is at capacity', async () => {
@@ -65,6 +68,27 @@ describe('CallWorker', () => {
     await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
     expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
     expect(activity.recordCallFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('CallWorker with a non-Telnyx provider', () => {
+  it('dials through the organization’s provider and labels the call with it', async () => {
+    const { job, prisma, activity, slots } = setup();
+    const retell = { name: 'retell', capabilities: { sms: false }, startCall: vi.fn().mockResolvedValue({ providerCallId: 'call_abc' }) };
+    const worker = new CallWorker(prisma as any, { get: vi.fn() } as any, { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC' }) } as any, { for: vi.fn().mockResolvedValue(retell) } as any, activity as any, slots as any);
+    await worker.process(job as any, 'tok');
+    expect(retell.startCall).toHaveBeenCalledWith(ORG, '+12895550100', { leadId: LEAD, orgId: ORG });
+    expect(slots.rename).toHaveBeenCalledWith(ORG, 'job-1', 'call_abc');
+    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'call_abc', 'retell');
+  });
+
+  it('labels a refused call with that provider', async () => {
+    const { job, prisma, activity, slots } = setup();
+    const retell = { name: 'retell', capabilities: { sms: false }, startCall: vi.fn().mockRejectedValue(new Error('Retell POST /v2/create-phone-call failed 402: trial ended')) };
+    const worker = new CallWorker(prisma as any, { get: vi.fn() } as any, { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC' }) } as any, { for: vi.fn().mockResolvedValue(retell) } as any, activity as any, slots as any);
+    await worker.process(job as any, 'tok');
+    expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
+    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('trial ended'), 'retell');
   });
 });
 

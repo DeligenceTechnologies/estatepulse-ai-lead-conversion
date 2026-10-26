@@ -34,9 +34,12 @@ const ROOT_ROUTES = [
   'webhooks/leads/:token',
   'webhooks/telnyx/voice',
   'webhooks/telnyx/messaging',
+  'webhooks/retell',
   'calendar-webhooks/:connectionId',
   'tools/telnyx/booking/availability',
   'tools/telnyx/booking/book',
+  'tools/booking/availability',
+  'tools/booking/book',
   'org-settings/calendar/calendly/callback',
 ];
 

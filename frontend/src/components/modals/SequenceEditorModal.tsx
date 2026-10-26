@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Info,
@@ -57,10 +58,12 @@ interface Props {
   sequence: Sequence | null;
   onClose: () => void;
   onSaved: () => void;
+  /** Set when the calling provider sends no SMS (Retell): SMS steps stay, marked as not sent, and no new ones are offered. */
+  smsDisabledReason?: string;
 }
 
-const blankStep = (): StepDraft => ({
-  actionType: 'sms',
+const blankStep = (actionType: ActionType = 'sms'): StepDraft => ({
+  actionType,
   delayMinutes: DAY,
   messageTemplate: '',
   voicePrompt: '',
@@ -85,7 +88,8 @@ const GROUPS = [
   },
 ];
 
-export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSaved }) => {
+export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSaved, smsDisabledReason }) => {
+  const newStepType: ActionType = smsDisabledReason ? 'voice' : 'sms';
   const isNew = sequence === null;
 
   const [name, setName] = useState(sequence?.name ?? '');
@@ -100,7 +104,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
       messageTemplate: s.messageTemplate ?? '',
       voicePrompt: s.voicePrompt ?? '',
       maxAttempts: s.maxAttempts,
-    })) ?? [blankStep()],
+    })) ?? [blankStep(newStepType)],
   );
   const [saving, setSaving] = useState(false);
 
@@ -574,7 +578,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                 </p>
               </div>
               <button
-                onClick={() => setSteps((p) => [...p, blankStep()])}
+                onClick={() => setSteps((p) => [...p, blankStep(newStepType)])}
                 className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
@@ -583,10 +587,15 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
             </div>
 
             <div className="space-y-2">
+              {smsDisabledReason && steps.some((s) => s.actionType === 'sms') && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {smsDisabledReason} SMS steps below are kept but not sent.
+                </div>
+              )}
               {steps.map((step, i) => (
                 <div
                   key={i}
-                  className="bg-slate-950/70 border border-slate-800/60 rounded-xl p-3 space-y-2"
+                  className={`bg-slate-950/70 border border-slate-800/60 rounded-xl p-3 space-y-2 ${smsDisabledReason && step.actionType === 'sms' ? 'opacity-60' : ''}`}
                 >
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="w-5 h-5 rounded-full bg-slate-800 text-2xs font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
@@ -598,9 +607,12 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       value={step.actionType}
                       onChange={(e) => patchStep(i, { actionType: e.target.value as ActionType })}
                     >
-                      <option value="sms">SMS</option>
+                      <option value="sms" disabled={!!smsDisabledReason && step.actionType !== 'sms'}>SMS</option>
                       <option value="voice">AI callback</option>
                     </select>
+                    {smsDisabledReason && step.actionType === 'sms' && (
+                      <span className="text-2xs font-bold uppercase text-amber-300" title={smsDisabledReason}>Not sent</span>
+                    )}
 
                     <span className="text-xs text-slate-500">after</span>
                     <input
@@ -650,6 +662,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                         className={`${input} h-16 resize-none`}
                         value={step.messageTemplate ?? ''}
                         onChange={(e) => patchStep(i, { messageTemplate: e.target.value })}
+                        readOnly={!!smsDisabledReason}
+                        title={smsDisabledReason}
                         placeholder="Hi {{firstName}}, ..."
                       />
                       <p className="text-2xs text-slate-500 mt-1 flex items-center gap-1">

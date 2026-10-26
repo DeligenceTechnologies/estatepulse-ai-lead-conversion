@@ -2,6 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
+import { CallingProviders, type CallingProvider } from '@/calling/calling-providers';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt } from '@/common/utils/quiet-hours';
@@ -9,7 +10,6 @@ import { FollowupService } from '@/followup/followup.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
-import { VoiceService } from '../voice.service';
 import { CallSlots } from './call-slots';
 import { DEFAULT_CALL_LIMIT, type CallJobData } from './call.types';
 
@@ -30,7 +30,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<QueueEnv, true>,
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
-    private readonly voice: VoiceService,
+    private readonly providers: CallingProviders,
     private readonly activity: ActivityService,
     private readonly slots: CallSlots,
   ) {
@@ -69,23 +69,26 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       return this.delay(job, Date.now() + SLOT_WAIT_MS + Math.floor(Math.random() * SLOT_WAIT_JITTER_MS), token);
     }
 
-    let call: { call_control_id?: string };
+    // Resolved at dial time, so a job queued before a provider switch dials through the new provider.
+    let provider: CallingProvider | undefined;
+    let call: { providerCallId?: string };
     try {
-      call = await this.voice.placeCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}) });
+      provider = await this.providers.for(orgId);
+      call = await provider.startCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}) });
     } catch (error) {
       await this.slots.release(orgId, slotId);
       const message = (error as Error).message;
       if (isCapacityError(message)) {
-        this.logger.warn(`Telnyx is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
+        this.logger.warn(`${provider?.name === 'retell' ? 'Retell' : 'Telnyx'} is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
         return this.delay(job, Date.now() + SLOT_WAIT_MS * 6, token);
       }
-      await this.activity.recordCallFailed(orgId, leadId, message);
+      await this.activity.recordCallFailed(orgId, leadId, message, provider?.name);
       return;
     }
 
-    if (call.call_control_id) await this.slots.rename(orgId, slotId, call.call_control_id);
+    if (call.providerCallId) await this.slots.rename(orgId, slotId, call.providerCallId);
     else await this.slots.release(orgId, slotId);
-    await this.activity.startCall(orgId, leadId, call.call_control_id);
+    await this.activity.startCall(orgId, leadId, call.providerCallId, provider.name);
   }
 
   private async delay(job: Job<CallJobData>, until: number, token?: string): Promise<never> {

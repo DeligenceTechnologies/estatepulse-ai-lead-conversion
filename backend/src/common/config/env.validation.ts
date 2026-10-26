@@ -124,6 +124,12 @@ export const envValidationSchema = Joi.object({
     // the card is hidden. Switching it off changes no data.
     CUSTOM_WEBHOOK_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
 
+    // Retell AI as an organization's calling provider instead of Telnyx (voice only, no SMS).
+    // Off unless RETELL_ENABLED: its routes answer 404 and every organization calls through
+    // Telnyx exactly as before. An organization left on Retell when it is switched off cannot
+    // call (fails closed); switch such organizations back to Telnyx first.
+    RETELL_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+
     // HubSpot CRM import. Off unless HUBSPOT_ENABLED: its endpoints answer 404 and nothing syncs.
     // Unset client id/secret = the card says "not configured" instead of failing at boot.
     HUBSPOT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),

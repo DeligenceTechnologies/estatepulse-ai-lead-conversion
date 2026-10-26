@@ -133,7 +133,7 @@ export class HistoryService {
     }
     return {
       ...row,
-      transcript: labelSpeakers(call.transcript, call.lead?.firstName ?? null),
+      transcript: labelSpeakers(call.transcript, call.lead?.firstName ?? null, call.provider),
       aiSummary: call.aiSummary,
       extractedIntel: call.extractedIntel,
       handoffRequested: call.handoffRequested,
@@ -229,9 +229,13 @@ export class HistoryService {
   }
 }
 
-/** Telnyx labels speakers by recording channel; channel 1 is the lead, channel 2 the assistant. */
-export function labelSpeakers(transcript: string | null, leadFirstName: string | null): string | null {
+/**
+ * Telnyx labels speakers by recording channel; channel 1 is the lead, channel 2 the assistant.
+ * Retell writes "User:" for the lead and "Agent:" for its agent.
+ */
+export function labelSpeakers(transcript: string | null, leadFirstName: string | null, provider = 'telnyx'): string | null {
   if (!transcript) return transcript;
   const lead = leadFirstName?.trim() || 'User';
+  if (provider === 'retell') return transcript.replace(/^\s*user\s*:/gim, `${lead}:`).replace(/^\s*agent\s*:/gim, 'Assistant:');
   return transcript.replace(/^\s*channel\s*1\s*:/gim, `${lead}:`).replace(/^\s*channel\s*2\s*:/gim, 'Assistant:');
 }

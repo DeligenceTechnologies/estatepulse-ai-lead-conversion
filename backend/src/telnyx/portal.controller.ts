@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { CallingProviders } from '@/calling/calling-providers';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { LeadOutcomeDto, LeadQualifiedDto, SetLeadStatusDto } from '@/lead/dto/lead-status.dto';
@@ -187,6 +188,7 @@ export class PortalLeadsController {
     private readonly prisma: PrismaService,
     private readonly engine: EngineService,
     private readonly strategies: StrategyStoreService,
+    private readonly providers: CallingProviders,
   ) {}
 
   @Get()
@@ -217,7 +219,7 @@ export class PortalLeadsController {
     const orgId = auth.organizationId;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) } });
     if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-    const [strategy, calls, messages] = await Promise.all([
+    const [strategy, calls, messages, provider] = await Promise.all([
       this.strategies.getStrategy(orgId),
       this.prisma.call.findMany({ where: { orgId, leadId }, orderBy: { createdAt: 'asc' }, select: { status: true } }),
       this.prisma.message.findMany({
@@ -225,9 +227,12 @@ export class PortalLeadsController {
         orderBy: { createdAt: 'asc' },
         select: { deliveryStatus: true },
       }),
+      this.providers.for(orgId),
     ]);
 
     const steps = strategy.steps ?? [];
+    // A provider without SMS (Retell) never sends these steps: they are marked, not left waiting forever.
+    const sendsSms = provider.capabilities.sms;
     const callOutcome = (s: string) =>
       s === 'no_answer'
         ? { state: 'failed', label: 'No answer' }
@@ -241,6 +246,9 @@ export class PortalLeadsController {
     let ci = 0;
     let mi = 0;
     const stepsOut = steps.map((s, index) => {
+      if (!sendsSms && s.channel === 'sms') {
+        return { index, channel: s.channel, action: s.action ?? s.channel, after: s.after, state: 'skipped', outcome: 'Not sent' };
+      }
       let outcome: string | null = null;
       let state = 'pending';
       const o = s.channel === 'voice' ? (ci < calls.length ? callOutcome(calls[ci++].status) : null) : mi < messages.length ? smsOutcome(messages[mi++].deliveryStatus) : null;

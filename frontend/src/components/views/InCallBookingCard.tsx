@@ -45,15 +45,20 @@ export const InCallBookingCard: React.FC = () => {
     }
   };
 
+  // The calling provider's agent; a server without Retell reports only Telnyx.
+  const voice = status?.voice ?? (status && { provider: 'telnyx' as const, connected: status.telnyx.connected, hasAgent: status.telnyx.hasAssistant });
+
   // What must be true before it can be switched on, in the order to fix it.
-  const blocker = !status
+  const blocker = !status || !voice
     ? null
     : !status.calendly.connected
       ? 'Connect Calendly in Settings → Calendly first.'
       : !status.calendly.scopesOk
         ? 'Calendly has not granted booking permission yet: add availability:read and scheduled_events:write to your Calendly OAuth app, set CALENDLY_BOOKING_SCOPES=1 in the backend .env, restart, then reconnect Calendly in Settings → Calendly.'
-        : !status.telnyx.connected || !status.telnyx.hasAssistant
-          ? 'Connect Telnyx and create your AI assistant first.'
+        : !voice.connected || !voice.hasAgent
+          ? voice.provider === 'retell'
+            ? 'Connect Retell and create your AI agent first (Settings → Calling).'
+            : 'Connect Telnyx and create your AI assistant first.'
           : status.eventTypes.length === 0
             ? 'No round-robin or multi-pool event type found in Calendly. Create one (Calendly Teams plan) with your agents in a rotating host pool.'
             : null;

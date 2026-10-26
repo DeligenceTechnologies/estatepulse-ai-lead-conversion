@@ -56,8 +56,27 @@ import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
+import { useCallingProvider } from '../../utils/callingProviderApi';
+import { RetellAISettingsView } from './RetellAISettingsView';
 
+/**
+ * A Telnyx assistant and a Retell agent have different settings, so the
+ * organization's calling provider picks the page. Without Retell on the
+ * server every organization gets the Telnyx page, as before.
+ */
 export const AISettingsView: React.FC = () => {
+  const calling = useCallingProvider();
+  if (!calling) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto text-xs text-slate-400 flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading AI settings…
+      </div>
+    );
+  }
+  return calling.provider === 'retell' ? <RetellAISettingsView /> : <TelnyxAISettingsView />;
+};
+
+const TelnyxAISettingsView: React.FC = () => {
   const { orgSettings, updateOrgSettings, setActiveView } = useApp();
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);

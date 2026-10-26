@@ -102,7 +102,7 @@ export class OrgIntegrationsController {
       integrations: rows.map((r) => ({
         id: r.id,
         provider: r.provider,
-        type: r.provider === 'telnyx' ? 'voice' : r.provider === 'google' ? 'other' : 'crm',
+        type: r.provider === 'telnyx' || r.provider === 'retell' ? 'voice' : r.provider === 'google' ? 'other' : 'crm',
         status: r.status,
         externalAccountId: r.externalAccountId,
         metadata: { label: r.label ?? '' },

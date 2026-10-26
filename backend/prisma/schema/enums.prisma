@@ -110,6 +110,8 @@ enum IntegrationProvider {
   google
   typeform
   hubspot
+  /// Calling only (no SMS), behind RETELL_ENABLED. One active calling integration (telnyx or retell) per organization.
+  retell
 
   @@map("integration_provider")
 }

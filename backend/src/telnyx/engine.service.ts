@@ -1,12 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { ConsentStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
+import { CallingProviders } from '@/calling/calling-providers';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { deferredResume, inQuietHours, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from './activity.service';
-import { SmsService } from './sms.service';
 import { StrategyStoreService, offsetMs, type StrategyStep } from './strategy-store.service';
 import { CallQueue } from './calls/call.queue';
 
@@ -73,7 +73,7 @@ export class EngineService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly strategies: StrategyStoreService,
-    private readonly sms: SmsService,
+    private readonly providers: CallingProviders,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
@@ -269,8 +269,13 @@ export class EngineService implements OnModuleDestroy {
     if (step.channel === 'sms') {
       const text = (step.message ?? '').replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{brokerage\}\}/g, brokerage);
       try {
-        const sent = await this.sms.sendSms(e.orgId, lead.phone ?? '', text);
-        await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
+        const provider = await this.providers.for(e.orgId);
+        if (provider.capabilities.sms) {
+          const sent = await provider.sendSms(e.orgId, lead.phone ?? '', text);
+          await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
+        } else {
+          this.logger.log(`lead ${e.leadId}: SMS step ${step.id} skipped — ${provider.name} sends no SMS`);
+        }
       } catch (error) {
         await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
       }
@@ -282,7 +287,8 @@ export class EngineService implements OnModuleDestroy {
           { dedupeKey: `strategy:${e.leadId}:${e.enrolledAt}:${e.voiceAttempts}` },
         );
       } catch (error) {
-        await this.activity.recordCallFailed(e.orgId, e.leadId, (error as Error).message);
+        const provider = await this.providers.nameFor(e.orgId).catch(() => undefined);
+        await this.activity.recordCallFailed(e.orgId, e.leadId, (error as Error).message, provider);
       }
     }
     e.ran += 1;

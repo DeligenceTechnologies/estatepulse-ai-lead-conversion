@@ -9,6 +9,8 @@ export interface InCallBookingStatus {
   eventType: { uri: string; name: string; durationMinutes: number } | null;
   calendly: { connected: boolean; scopesOk: boolean };
   telnyx: { connected: boolean; hasAssistant: boolean };
+  /** The organization's calling provider and whether its agent is ready; absent on servers older than Retell support. */
+  voice?: { provider: 'telnyx' | 'retell'; connected: boolean; hasAgent: boolean };
   /** Round-robin event types the owner may choose. */
   eventTypes: { uri: string; name: string; durationMinutes: number }[];
   /** Calendly members not linked to an agent. */

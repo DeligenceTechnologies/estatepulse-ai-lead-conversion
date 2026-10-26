@@ -1,5 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { CallingProviders, TelnyxCallingProvider } from '@/calling/calling-providers';
 import { FollowupModule } from '@/followup/followup.module';
+import { RetellCallingProvider } from '@/retell/retell-calling.provider';
+import { RetellCredentialsService } from '@/retell/retell-credentials.service';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
 import { CallCapacityService } from './calls/call-capacity.service';
@@ -28,6 +31,7 @@ import { VoiceService } from './voice.service';
     ActivityService,
     AssistantService,
     CallCapacityService,
+    CallingProviders,
     CallQueue,
     CallSlots,
     CallWorker,
@@ -37,10 +41,25 @@ import { VoiceService } from './voice.service';
     LeadScoringService,
     LeadWatcherService,
     NumbersService,
+    RetellCallingProvider,
+    RetellCredentialsService,
     SmsService,
     StrategyStoreService,
+    TelnyxCallingProvider,
     VoiceService,
   ],
-  exports: [CallQueue, CallSlots, EngineService, TelnyxCredentialsService, SmsService, ActivityService, StrategyStoreService, AssistantService],
+  exports: [
+    CallingProviders,
+    CallQueue,
+    CallSlots,
+    EngineService,
+    TelnyxCredentialsService,
+    SmsService,
+    ActivityService,
+    StrategyStoreService,
+    AssistantService,
+    LeadScoringService,
+    RetellCredentialsService,
+  ],
 })
 export class TelnyxModule {}

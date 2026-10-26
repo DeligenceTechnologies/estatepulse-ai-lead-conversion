@@ -403,8 +403,9 @@ export interface LeadFlowStep {
   channel: string;   // 'sms' | 'voice'
   action: string;    // 'send_sms' | 'ai_call' | ...
   after: { value: number; unit: string };
-  state: 'done' | 'failed' | 'current' | 'pending';
-  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Call failed' | null
+  /** 'skipped': an SMS step for a provider that sends no SMS (Retell). */
+  state: 'done' | 'failed' | 'current' | 'pending' | 'skipped';
+  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Call failed' | 'Not sent' | null
 }
 export interface LeadFlow {
   phase: 'not_started' | 'strategy' | 'exited' | 'done';

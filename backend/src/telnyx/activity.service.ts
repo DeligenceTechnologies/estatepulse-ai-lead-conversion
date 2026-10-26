@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CallStatus, FollowUpReason, LeadStatus } from '@prisma/client';
+import type { CallingProviderName } from '@/calling/calling-providers';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
@@ -18,7 +19,8 @@ interface AttachPlan {
 
 const PREPARED_TTL_MS = 5 * 60 * 1000;
 const RECORDING_LINK_REUSE_MS = 5 * 60 * 1000;
-const INVALID_NUMBER_CAUSES = new Set(['unallocated_number', 'invalid_number_format', 'number_changed']);
+/** Telnyx hangup causes, plus Retell's disconnection reason for the same thing. */
+const INVALID_NUMBER_CAUSES = new Set(['unallocated_number', 'invalid_number_format', 'number_changed', 'invalid_destination']);
 
 /**
  * What happened on the phone and over SMS, recorded as calls and messages,
@@ -63,11 +65,12 @@ export class ActivityService {
     else await this.noteAttemptFailure(leadId, providerIdOrReason ? `SMS failed: ${providerIdOrReason}` : 'SMS failed');
   }
 
-  async startCall(orgId: string, leadId: string, providerCallId?: string | null): Promise<void> {
-    if (providerCallId) this.prepareAttach(providerCallId, orgId, leadId);
+  /** Only a Telnyx call needs its assistant attached on answer; another provider runs its own agent. */
+  async startCall(orgId: string, leadId: string, providerCallId?: string | null, provider: CallingProviderName = 'telnyx'): Promise<void> {
+    if (providerCallId && provider === 'telnyx') this.prepareAttach(providerCallId, orgId, leadId);
     try {
       await this.prisma.call.create({
-        data: { orgId, leadId, provider: 'telnyx', providerCallId: providerCallId ?? null, status: CallStatus.ringing, startedAt: new Date() },
+        data: { orgId, leadId, provider, providerCallId: providerCallId ?? null, status: CallStatus.ringing, startedAt: new Date() },
       });
     } catch (error) {
       this.logger.error(`startCall: ${(error as Error).message}`);
@@ -75,10 +78,10 @@ export class ActivityService {
     await this.markContacted(leadId);
   }
 
-  async recordCallFailed(orgId: string, leadId: string, reason?: string): Promise<void> {
+  async recordCallFailed(orgId: string, leadId: string, reason?: string, provider: CallingProviderName = 'telnyx'): Promise<void> {
     try {
       await this.prisma.call.create({
-        data: { orgId, leadId, provider: 'telnyx', status: CallStatus.failed, startedAt: new Date(), endedAt: new Date() },
+        data: { orgId, leadId, provider, status: CallStatus.failed, startedAt: new Date(), endedAt: new Date() },
       });
     } catch (error) {
       this.logger.error(`recordCallFailed: ${(error as Error).message}`);
@@ -124,7 +127,7 @@ export class ActivityService {
     let plan = this.prepared.get(ccid);
     if (!plan) {
       const call = await bookkeeping;
-      if (!call) return;
+      if (!call || call.provider !== 'telnyx') return;
       plan = this.prepareAttach(ccid, call.orgId, call.leadId);
     }
     const p = await plan;
@@ -269,8 +272,8 @@ export class ActivityService {
     }
   }
 
-  /** The lead's details as the assistant's dynamic variables. */
-  private async callVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
+  /** The lead's details as the assistant's dynamic variables (Telnyx assistant and Retell agent alike). */
+  async callVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
     const [lead, org] = await Promise.all([
       this.prisma.lead.findFirst({ where: { id: leadId, orgId } }),
       this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),

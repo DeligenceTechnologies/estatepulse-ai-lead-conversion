@@ -22,6 +22,7 @@ import { messageFor } from '../../lib/api';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { EnrollLeadsModal } from '../modals/EnrollLeadsModal';
 import { SequenceEditorModal } from '../modals/SequenceEditorModal';
+import { SMS_UNAVAILABLE_ON_RETELL, useCallingProvider } from '../../utils/callingProviderApi';
 import { ContactWindowCard } from './ContactWindowCard';
 import {
   archiveSequence,
@@ -83,6 +84,8 @@ export const FollowUpsView: React.FC = () => {
   const { setSelectedLeadId } = useApp();
   const { role } = useAuth();
   const isOwner = role === 'owner';
+  const calling = useCallingProvider();
+  const smsDisabledReason = calling && !calling.capabilities.sms ? SMS_UNAVAILABLE_ON_RETELL : undefined;
 
   const [editing, setEditing] = useState<Sequence | null | undefined>(undefined);
   const [enrolling, setEnrolling] = useState<Sequence | null>(null);
@@ -309,6 +312,11 @@ export const FollowUpsView: React.FC = () => {
                         <span className="capitalize">
                           {step.actionType === 'sms' ? 'SMS' : 'AI callback'}
                         </span>
+                        {smsDisabledReason && step.actionType === 'sms' && (
+                          <span className="text-2xs font-bold uppercase text-amber-300" title={smsDisabledReason}>
+                            Not sent
+                          </span>
+                        )}
                         <span className="text-slate-600">•</span>
                         <span className="text-amber-400 flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -481,6 +489,7 @@ export const FollowUpsView: React.FC = () => {
           sequence={editing}
           onClose={() => setEditing(undefined)}
           onSaved={refreshAll}
+          smsDisabledReason={smsDisabledReason}
         />
       )}
 

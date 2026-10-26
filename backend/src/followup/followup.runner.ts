@@ -2,12 +2,12 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { CallingProviders } from '@/calling/calling-providers';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { nextAllowedAt } from '@/common/utils/quiet-hours';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from '@/telnyx/activity.service';
-import { SmsService } from '@/telnyx/sms.service';
 import { CallQueue } from '@/telnyx/calls/call.queue';
 import { FollowupService, stepsOf, type SequenceStep } from './followup.service';
 
@@ -40,7 +40,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly followup: FollowupService,
-    private readonly sms: SmsService,
+    private readonly providers: CallingProviders,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
   ) {}
@@ -141,8 +141,13 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         .replace(/\{\{brokerage\}\}/g, org?.name ?? 'our team');
       if (!text) return;
       try {
-        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+        const provider = await this.providers.for(row.organization_id);
+        if (provider.capabilities.sms) {
+          const sent = await provider.sendSms(row.organization_id, lead.phone ?? '', text);
+          await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+        } else {
+          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name} sends no SMS`);
+        }
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
       }
@@ -154,7 +159,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         { dedupeKey: `followup:${row.id}:${row.current_step}` },
       );
     } catch (error) {
-      await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
+      const provider = await this.providers.nameFor(row.organization_id).catch(() => undefined);
+      await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message, provider);
     }
   }
 
