@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CallStatus, FollowUpReason, LeadStatus } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import type { IntegrationEnv } from '@/common/utils/interface';
 import { IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
 import { AssistantService } from './assistant.service';
@@ -31,6 +33,8 @@ export class ActivityService {
   private readonly logger = new Logger(ActivityService.name);
   private readonly recordingLinks = new Map<string, { url: string; until: number }>();
   private readonly prepared = new Map<string, Promise<AttachPlan | null>>();
+  /** Answered calls whose assistant waits for the lead to speak first. */
+  private readonly awaitingLead = new Map<string, { plan: AttachPlan; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -38,6 +42,7 @@ export class ActivityService {
     private readonly insights: LeadInsightsService,
     private readonly assistants: AssistantService,
     private readonly slots: CallSlots,
+    private readonly config: ConfigService<IntegrationEnv, true>,
   ) {}
 
   async recordSms(orgId: string, leadId: string, text: string, ok: boolean, providerIdOrReason?: string | null): Promise<void> {
@@ -133,6 +138,11 @@ export class ActivityService {
   }
 
   async onCallHangup(ccid: string, payload: { hangup_cause?: string } = {}): Promise<void> {
+    const waiting = this.awaitingLead.get(ccid);
+    if (waiting) {
+      clearTimeout(waiting.timer);
+      this.awaitingLead.delete(ccid);
+    }
     const call = await this.callByProvider(ccid);
     if (!call) return;
     await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
@@ -253,7 +263,39 @@ export class ActivityService {
 
   private async attach(ccid: string, p: AttachPlan): Promise<void> {
     if (p.record) await this.action(ccid, p.apiKey, 'record_start', { format: 'mp3', channels: 'dual', transcription: true });
-    if (p.assistantId) await this.action(ccid, p.apiKey, 'ai_assistant_start', { assistant: { id: p.assistantId }, dynamic_variables: p.variables });
+    if (!p.assistantId) return;
+    const waitMs = this.config.get('AI_OPENING_WAIT_MS', { infer: true });
+    if (!waitMs) return this.startAssistant(ccid, p);
+    // The lead answers first ("Hello?"): the assistant, and with it the greeting,
+    // starts on their first words, or once they have stayed silent for waitMs.
+    // A live transcript of their side tells us when they speak.
+    const timer = setTimeout(() => void this.releaseAssistant(ccid), waitMs);
+    timer.unref();
+    this.awaitingLead.set(ccid, { plan: p, timer });
+    await this.action(ccid, p.apiKey, 'transcription_start', {
+      transcription_engine: 'Google',
+      transcription_tracks: 'inbound',
+      transcription_engine_config: { transcription_engine: 'Google', language: 'en', interim_results: true },
+    });
+  }
+
+  /** A live transcript of the lead's side: their first words start the waiting assistant. */
+  async onCallSpeech(ccid: string, payload: { transcription_data?: { transcript?: string } } = {}): Promise<void> {
+    if (payload.transcription_data?.transcript?.trim()) await this.releaseAssistant(ccid);
+  }
+
+  /** Starts the assistant held back by attach(); once per call, whichever comes first. */
+  private async releaseAssistant(ccid: string): Promise<void> {
+    const waiting = this.awaitingLead.get(ccid);
+    if (!waiting) return;
+    this.awaitingLead.delete(ccid);
+    clearTimeout(waiting.timer);
+    void this.action(ccid, waiting.plan.apiKey, 'transcription_stop', {});
+    await this.startAssistant(ccid, waiting.plan);
+  }
+
+  private async startAssistant(ccid: string, p: AttachPlan): Promise<void> {
+    await this.action(ccid, p.apiKey, 'ai_assistant_start', { assistant: { id: p.assistantId }, dynamic_variables: p.variables });
   }
 
   private async action(ccid: string, apiKey: string, name: string, body: object): Promise<void> {

@@ -47,6 +47,7 @@ export interface IntegrationEnv {
   WORKER_STUCK_AFTER_MS: number;
   STRATEGY_ENGINE: boolean;
   ENGINE_POLL_MS: number;
+  AI_OPENING_WAIT_MS: number;
   STRATEGY_STALE_MS: number;
   FOLLOWUP_POLL_MS: number;
   FOLLOWUP_BATCH_SIZE: number;
