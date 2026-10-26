@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { FORM_PROVIDER_ADAPTERS, ProviderRegistry } from './provider.registry';
 import { TallyClient } from './tally/tally.client';
 import { TallyProviderAdapter } from './tally/tally.provider';
+import { TypeformClient } from './typeform/typeform.client';
+import { TypeformProviderAdapter } from './typeform/typeform.provider';
 import type { FormProviderAdapter } from './types';
 
 /**
@@ -25,9 +27,22 @@ import type { FormProviderAdapter } from './types';
     },
     TallyProviderAdapter,
     {
+      provide: TypeformClient,
+      useFactory: (config: ConfigService) =>
+        new TypeformClient(
+          config.get<string>('TYPEFORM_API_BASE_URL') ?? 'https://api.typeform.com',
+          Number(config.get<string>('PROVIDER_HTTP_TIMEOUT_MS') ?? 10_000),
+        ),
+      inject: [ConfigService],
+    },
+    TypeformProviderAdapter,
+    {
       provide: FORM_PROVIDER_ADAPTERS,
-      useFactory: (tally: TallyProviderAdapter): FormProviderAdapter[] => [tally],
-      inject: [TallyProviderAdapter],
+      useFactory: (tally: TallyProviderAdapter, typeform: TypeformProviderAdapter): FormProviderAdapter[] => [
+        tally,
+        typeform,
+      ],
+      inject: [TallyProviderAdapter, TypeformProviderAdapter],
     },
     ProviderRegistry,
   ],

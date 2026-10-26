@@ -7,9 +7,13 @@ import { EventsModule } from './modules/events/events.module';
 import { PortalIngestModule } from './ingest/portal-ingest.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { CustomWebhookModule } from './modules/custom-webhook/custom-webhook.module';
+import { CrmModule } from './modules/crm/crm.module';
 import { FollowupModule } from './modules/followup/followup.module';
 import { HistoryModule } from './modules/history/history.module';
 import { IngestModule } from './modules/ingest/ingest.module';
+import { FileImportModule } from './modules/file-import/file-import.module';
+import { GoogleSheetsModule } from './modules/google-sheets/google-sheets.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { LeadSourcesModule } from './modules/lead-sources/lead-sources.module';
 import { LeadsModule } from './modules/leads/leads.module';
@@ -101,6 +105,7 @@ export const envSchema = z.object({
   // Absent simply omits the link.
   APP_BASE_URL: z.string().optional(),
   TALLY_API_BASE_URL: z.string().url().default('https://api.tally.so'),
+  TYPEFORM_API_BASE_URL: z.string().url().default('https://api.typeform.com'),
   PROVIDER_HTTP_TIMEOUT_MS: z.coerce.number().default(10_000),
 
   // --- calendar (Calendly) ---
@@ -149,6 +154,70 @@ export const envSchema = z.object({
   // Cal.com versions endpoints by date; an unset header silently selects an
   // older response shape rather than failing.
   CALCOM_API_VERSION: z.string().default('2026-06-12'),
+  // Google Sheets import, off unless GOOGLE_SHEETS_ENABLED=1: its endpoints
+  // answer 404 and nothing syncs. Switching it off changes no data. Unset
+  // client id/secret = the Google card says "not configured" instead of
+  // failing at boot.
+  GOOGLE_SHEETS_ENABLED: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  // Defaults to `${PUBLIC_APP_URL}/oauth/google-callback.html`; must match the
+  // Google Cloud console exactly.
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  // Public (browser) values for the Google Picker: an API key restricted to the
+  // app's origin, and the Cloud project NUMBER, which drive.file needs.
+  GOOGLE_PICKER_API_KEY: z.string().optional(),
+  GOOGLE_APP_ID: z.string().optional(),
+  // Periodic sheet sync, off unless SHEETS_SYNC=1 (owner-triggered syncs run
+  // either way). Poll = how often due sources are looked for; interval = how
+  // often each source is synced.
+  SHEETS_SYNC: z.string().optional(),
+  SHEETS_POLL_MS: z.coerce.number().default(60_000),
+  SHEETS_SYNC_INTERVAL_MS: z.coerce.number().default(300_000),
+  // Skip reading a sheet whose Drive version has not moved — never for longer
+  // than SHEETS_FULL_READ_MAX_AGE_MS. Off unless SHEETS_VERSION_PROBE=1.
+  SHEETS_VERSION_PROBE: z.string().optional(),
+  // CSV / XLSX lead upload, off unless FILE_IMPORT_ENABLED=1: its endpoints
+  // answer 404 and the card is hidden. Import Review is open while either this
+  // or GOOGLE_SHEETS_ENABLED is on. Switching it off changes no data.
+  FILE_IMPORT_ENABLED: z.string().optional(),
+  // Largest CSV / XLSX an owner may upload to import leads.
+  FILE_IMPORT_MAX_BYTES: z.coerce.number().default(5 * 1024 * 1024),
+  SHEETS_FULL_READ_MAX_AGE_MS: z.coerce.number().default(21_600_000),
+  // Custom webhook sources, off unless CUSTOM_WEBHOOK_ENABLED=1: the public
+  // ingest route and the management routes answer 404 and the card is hidden.
+  // Switching it off changes no data.
+  CUSTOM_WEBHOOK_ENABLED: z.string().optional(),
+
+  // --- CRM sync (HubSpot) ---
+  // Off unless HUBSPOT_ENABLED=1: its endpoints answer 404 and nothing syncs.
+  // Switching it off changes no data. Unset client id/secret = the card says
+  // "not configured" instead of failing at boot.
+  HUBSPOT_ENABLED: z.string().optional(),
+  // From the HubSpot app's Auth tab (HubSpot CLI project, developer platform
+  // 2025.2+). The client secret also keys HubSpot's webhook signatures.
+  HUBSPOT_CLIENT_ID: z.string().optional(),
+  HUBSPOT_CLIENT_SECRET: z.string().optional(),
+  // Defaults to `${PUBLIC_APP_URL}/oauth/hubspot-callback.html`; must be listed
+  // in the app's redirectUrls exactly.
+  HUBSPOT_REDIRECT_URI: z.string().url().optional(),
+  // Space-separated. Must include every REQUIRED scope of the HubSpot app, or
+  // HubSpot's authorize page errors. Default: "oauth crm.objects.contacts.read".
+  HUBSPOT_SCOPES: z.string().optional(),
+  // The webhook target URL exactly as registered with HubSpot — what HubSpot
+  // signs. Defaults to `${PUBLIC_API_BASE_URL}/ingest/v1/crm/hubspot/webhook`.
+  HUBSPOT_WEBHOOK_URL: z.string().url().optional(),
+  // Overridable so a fake server can stand in for HubSpot in tests.
+  HUBSPOT_API_BASE_URL: z.string().url().default('https://api.hubapi.com'),
+  HUBSPOT_AUTH_BASE_URL: z.string().url().default('https://app.hubspot.com'),
+  // HubSpot's date-versioned API. Moving to the next version is a deploy.
+  HUBSPOT_API_VERSION: z.string().regex(/^\d{4}-\d{2}$/).default('2026-09'),
+  HUBSPOT_RETRY_BASE_MS: z.coerce.number().default(1000),
+  // How often the worker looks for due CRM work (queued webhooks, runs to
+  // resume, reconciliation); 0 = only when nudged. And how often each
+  // connection is reconciled against the CRM's modified dates.
+  CRM_POLL_MS: z.coerce.number().default(30_000),
+  CRM_RECONCILE_INTERVAL_MS: z.coerce.number().default(3_600_000),
 });
 
 @Module({
@@ -194,6 +263,10 @@ export const envSchema = z.object({
     ProcessingModule,
     ProvidersModule,
     IntegrationsModule,
+    GoogleSheetsModule,
+    FileImportModule,
+    CustomWebhookModule,
+    CrmModule,
   ],
   controllers: [HealthController],
 })

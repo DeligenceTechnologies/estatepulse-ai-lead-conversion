@@ -13,6 +13,7 @@ import {
   FileText,
   ChevronDown,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
@@ -183,8 +184,10 @@ export const LeadDetailModal: React.FC = () => {
     try {
       await enrollLead(selectedLeadId);
       setFlow(await getLeadFlow(selectedLeadId));
+      toast.success('AI outreach started.');
     } catch (e) {
       setEnrollError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setEnrolling(false);
     }
@@ -220,9 +223,19 @@ export const LeadDetailModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] text-slate-100">
-        
+        {/* Pinned to the corner, outside the header's wrapping rows, so it is
+            always in the same place however the actions wrap. */}
+        <button
+          onClick={() => setSelectedLeadId(null)}
+          aria-label="Close"
+          title="Close (Esc)"
+          className="absolute top-4 right-4 z-10 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
         {/* Header (PRD Section 38: Name, HOT - 87, Actions) */}
-        <div className="p-5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+        <div className="p-5 pr-16 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg ${
               lead.temperature === 'hot'
@@ -299,12 +312,6 @@ export const LeadDetailModal: React.FC = () => {
               </button>
             )}
 
-            <button
-              onClick={() => setSelectedLeadId(null)}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
         </div>
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, Loader2, UserPlus } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ApiError as ClientApiError, LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -87,16 +88,16 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
 
   const choose = async (m: Assignable): Promise<void> => {
     setSavingId(m.profileId);
-    setError(null);
     try {
       const res = await leadsApi.assign(leadId, m.profileId);
       onAssigned(res.agent);
       window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       setOpen(false);
+      toast.success(`Assigned to ${memberName(m)}.`);
     } catch (e) {
       // The bridge client carries the server's own sentence ("… is at their
       // lead cap (25/25) …"), which says more than a generic code mapping.
-      setError(e instanceof ClientApiError ? e.message : messageFor(e));
+      toast.error(e instanceof ClientApiError ? e.message : messageFor(e));
     } finally {
       setSavingId(null);
     }

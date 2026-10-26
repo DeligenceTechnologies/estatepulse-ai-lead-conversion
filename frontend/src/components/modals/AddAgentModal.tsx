@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, MailWarning, UserPlus, X } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { createAgent, memberName, type CreateAgentResult } from '../../utils/agentsApi';
 
@@ -81,7 +82,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({ isOpen, onClose, o
     } catch (err) {
       // The server's own message is preferred where it has one — "Password must
       // be at least 8 characters" beats a generic form error.
-      setError(messageFor(err));
+      toast.error(messageFor(err));
     } finally {
       setSaving(false);
     }

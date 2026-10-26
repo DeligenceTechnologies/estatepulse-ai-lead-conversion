@@ -33,6 +33,7 @@ import { TENANT_PRISMA, type GuardedPrisma } from '../prisma/prisma.service';
 import { AssistantService } from './assistant.service';
 import { EngineService } from './engine.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
+import { OUTSIDE_IMPORT_REVIEW } from '../modules/google-sheets/sheet-rows';
 
 
 
@@ -56,16 +57,6 @@ const OUTCOME_LABELS: Partial<Record<string, string>> = {
   [LeadStatus.CLOSED]: 'Closed',
 };
 
-/**
- * Where the lead came from, as the pipeline badges it (LeadsView's sourceLabel
- * on the frontend): the provider for a form we connected through its API, the
- * transport for a URL the customer pasted, 'manual' when there is no source.
- */
-function sourceLabel(s: { source_type: string; provider: string; connection_method: string } | undefined) {
-  if (!s) return 'manual';
-  return s.connection_method.toUpperCase() === 'API' && s.provider ? s.provider.toLowerCase() : s.source_type;
-}
-
 /** A follow-up reason from a request body: absent is fine, anything else must be valid. */
 function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
   if (v === undefined || v === null || v === '') return undefined;
@@ -73,6 +64,19 @@ function followUpReasonFrom(v: unknown): FollowUpReason | undefined {
     throw new AppError('VALIDATION_ERROR', `followUpReason must be one of ${FOLLOW_UP_REASONS.join('|')}`);
   }
   return v;
+}
+
+/**
+ * Where a lead came from, by the rule the Leads table uses (LeadsView
+ * sourceLabel): a connected integration names its provider ("tally", "google
+ * sheets", "file upload"), a pasted webhook URL its transport, and no source at
+ * all is manual.
+ */
+function sourceLabel(s: { source_type: string | null; provider: string | null; connection_method: string | null } | undefined): string {
+  if (!s) return 'manual';
+  const method = (s.connection_method ?? '').toUpperCase();
+  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
+  return s.source_type ?? 'webhook';
 }
 
 /** Map a DB leads row to the frontend Lead shape. Enum-ish fields are cast client-side. */
@@ -210,7 +214,8 @@ export class PortalLeadsController {
       select: { id: true, source_type: true, provider: true, connection_method: true },
     });
     const rowsP = this.prisma.leads.findMany({
-      where: { organization_id: orgId },
+      // Same rule as GET /api/v1/leads: unapproved sheet imports stay in Import Review.
+      where: { organization_id: orgId, ...OUTSIDE_IMPORT_REVIEW },
       orderBy: { created_at: 'desc' },
       take: 500,
       // Exactly the columns mapLead reads. The row also carries extracted_intel,

@@ -6,7 +6,10 @@ import { IngestStatus, MappingStatus } from '../../common/domain';
 import { newId } from '../../common/ids';
 import { generateIngestToken, generateSigningSecret, secretPreview } from '../../common/tokens';
 import { TENANT_PRISMA, type GuardedPrisma } from '../../prisma/prisma.service';
-import { TallyAdapter } from '../ingest/adapters/tally.adapter';
+import { CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER } from '../custom-webhook/constants';
+import { detectAdapter } from '../custom-webhook/detect';
+import { flatten } from '../custom-webhook/flatten';
+import { ingestAdapterFor } from '../ingest/adapters/registry';
 
 export interface CreateLeadSourceInput {
   name: string;
@@ -33,7 +36,6 @@ interface DeliveryAnswerDto {
 
 @Injectable()
 export class LeadSourcesService {
-  private readonly adapter = new TallyAdapter();
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -46,9 +48,12 @@ export class LeadSourcesService {
     );
   }
 
-  /** Public so the connect flow builds the same URL rather than its own. */
-  ingestUrl(token: string): string {
-    return `${this.config.get<string>('PUBLIC_API_BASE_URL')}/ingest/v1/tally/${token}`;
+  /**
+   * Public so the connect flow builds the same URL rather than its own. One
+   * route per provider; a manual source has the column default, TALLY.
+   */
+  ingestUrl(token: string, provider: string | null = 'TALLY'): string {
+    return `${this.config.get<string>('PUBLIC_API_BASE_URL')}/ingest/v1/${(provider ?? 'TALLY').toLowerCase()}/${token}`;
   }
 
   /**
@@ -272,6 +277,7 @@ export class LeadSourcesService {
       // roughly doubling what crosses the wire for nothing.
       select: {
         id: true,
+        provider: true,
         received_at: true,
         external_event_id: true,
         signature_state: true,
@@ -289,6 +295,7 @@ export class LeadSourcesService {
     return rows.map((r) => {
       let answers: DeliveryAnswerDto[] = [];
       let parseError: string | null = null;
+      let formName: string | null = null;
 
       // What the mapping engine decided about each field, recorded when the
       // delivery was processed. Joining it onto the answers is what turns
@@ -308,9 +315,31 @@ export class LeadSourcesService {
         }
       }
 
-      if (r.payload) {
+      if (r.payload && r.provider === CUSTOM_PROVIDER) {
+        // A custom delivery: a form provider's questions when the payload has
+        // a known shape, else every leaf of the payload as a path — either way
+        // joined to what the owner's mapping did with it. A field mapped to an
+        // extra field was traced under a prefixed key.
+        const known = detectAdapter(r.payload)?.parse(r.payload) ?? null;
+        if (known) formName = known.providerFormName;
+        const fields = known
+          ? known.answers.map((a) => ({ key: a.key, label: a.label, type: a.type, value: a.scalarText }))
+          : flatten(r.payload).leaves.map((leaf) => ({ key: leaf.path, label: leaf.path, type: leaf.type.toUpperCase(), value: leaf.value }));
+        answers = fields.map((f) => {
+          const entries = trace.get(f.key) ?? trace.get(`${CUSTOM_KEY_PREFIX}${f.key}`) ?? [];
+          return {
+            label: f.label,
+            type: f.type,
+            value: f.value,
+            targetFields: entries.map((t) => t.targetField).filter((t): t is string => Boolean(t)),
+            mappingOutcome: entries[0]?.outcome ?? null,
+            warnings: entries.map((t) => t.warning).filter((w): w is string => Boolean(w)),
+          };
+        });
+      } else if (r.payload) {
         try {
-          const parsed = this.adapter.parse(r.payload);
+          const parsed = ingestAdapterFor(r.provider).parse(r.payload);
+          formName = parsed.providerFormName;
           answers = parsed.answers.map((a) => {
             const entries = trace.get(a.key) ?? [];
             return {
@@ -345,7 +374,7 @@ export class LeadSourcesService {
         outcomeReason: r.outcome_reason,
         errorMessage: r.error_message,
         bodyBytes: r.content_length,
-        formName: (r.payload as Record<string, never> | null)?.['data']?.['formName'] ?? null,
+        formName,
         answers,
         parseError,
         /**
@@ -411,7 +440,7 @@ export class LeadSourcesService {
       externalFormName: row.external_form_name,
       lastEventAt: row.last_event_at,
       createdAt: row.created_at,
-      webhookUrl: token ? this.ingestUrl(token) : null,
+      webhookUrl: token ? this.ingestUrl(token, row.provider) : null,
       // Only meaningful for an API-connected source; null on a manual one, which
       // is exactly what the UI needs to tell them apart.
       provider: row.provider ?? null,

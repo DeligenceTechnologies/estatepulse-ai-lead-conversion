@@ -13,6 +13,7 @@ import {
   Unlink,
   Users,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ApiError, messageFor } from '../../lib/api';
 import {
   connectCalCom,
@@ -154,13 +155,13 @@ const CalComConnectModal: React.FC<{
   const connect = async () => {
     if (teamId === null) return;
     setBusy(true);
-    setError(null);
     try {
       await connectCalCom(apiKey, teamId);
+      toast.success('Cal.com connected.');
       onConnected();
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? messageFor(e) : String(e));
+      toast.error(e instanceof ApiError ? messageFor(e) : String(e));
     } finally {
       setBusy(false);
     }
@@ -380,13 +381,12 @@ const ManageModal: React.FC<{
 
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
-    setError(null);
     try {
       await fn();
       await load();
       onChange();
     } catch (err) {
-      setError(err instanceof ApiError ? messageFor(err) : String(err));
+      toast.error(err instanceof ApiError ? messageFor(err) : String(err));
     } finally {
       setBusy(null);
     }
@@ -612,6 +612,7 @@ const ManageModal: React.FC<{
                   setArmedDisconnect(false);
                   void run('disconnect', async () => {
                     await disconnectOrganizationCalendar();
+                    toast.success('Calendar disconnected.');
                     onClose();
                   });
                 }}
@@ -673,7 +674,6 @@ export const SchedulingCards: React.FC = () => {
 
   const connectCalendly = async () => {
     setConnecting(true);
-    setError(null);
     try {
       const { authorizeUrl } = await startOrganizationCalendarConnect();
       // The popup's own result is only a hint; the reload below is what
@@ -681,7 +681,7 @@ export const SchedulingCards: React.FC = () => {
       await openCalendlyPopup(authorizeUrl);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? messageFor(e) : String(e));
+      toast.error(e instanceof ApiError ? messageFor(e) : String(e));
     } finally {
       setConnecting(false);
     }

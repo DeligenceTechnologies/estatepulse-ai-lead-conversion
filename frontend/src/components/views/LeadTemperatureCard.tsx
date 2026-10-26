@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Flame, Loader2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { getThresholds, saveThresholds } from '../../utils/leadScoringApi';
 
@@ -15,7 +16,6 @@ export const LeadTemperatureCard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const [hot, setHot] = useState(75);
   const [warm, setWarm] = useState(45);
 
@@ -39,10 +39,9 @@ export const LeadTemperatureCard: React.FC = () => {
       const t = await saveThresholds({ hotThreshold: hot, warmThreshold: warm });
       setHot(t.hotThreshold);
       setWarm(t.warmThreshold);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.success('Thresholds saved.');
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setSaving(false);
     }
@@ -95,7 +94,6 @@ export const LeadTemperatureCard: React.FC = () => {
               {valid ? `${hot}–100 hot • ${warm}–${hot - 1} warm • 0–${warm - 1} cold` : 'Warm must be lower than hot, both whole numbers 1–100.'}
             </p>
             <div className="flex items-center gap-2 shrink-0">
-              {saved && <span className="text-xs text-emerald-400 font-semibold">Saved</span>}
               <button
                 type="button"
                 onClick={() => void save()}

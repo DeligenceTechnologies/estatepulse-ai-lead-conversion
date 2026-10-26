@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { toast } from 'react-toastify';
 import {
   ArrowDown,
   ArrowUp,
@@ -102,7 +103,6 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
     })) ?? [blankStep()],
   );
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   /**
    * Status is a toggle, but the column holds three values.
@@ -164,7 +164,6 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
   const voiceCount = steps.length - smsCount;
 
   const save = async () => {
-    setError(null);
     setSaving(true);
     try {
       const payloadSteps: StepDraft[] = steps.map((s) => ({
@@ -197,10 +196,11 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
         });
         await replaceSteps(sequence.id, payloadSteps);
       }
+      toast.success(isNew ? 'Sequence created.' : 'Sequence saved.');
       onSaved();
       onClose();
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setSaving(false);
     }
@@ -255,12 +255,6 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-5 md:p-6 space-y-5">
-          {error && (
-            <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
-              {error}
-            </div>
-          )}
-
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* ---- Left: what the sequence is ----
                 Sticky because it is the shorter column: it stays beside the

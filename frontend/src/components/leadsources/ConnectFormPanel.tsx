@@ -131,11 +131,13 @@ const ErrorBlock: React.FC<{ e: PanelError }> = ({ e }) => (
 );
 
 export const ConnectFormPanel: React.FC<{
+  /** Provider code as the registry reports it: 'TALLY' | 'TYPEFORM'. */
+  provider: string;
   onClose: () => void;
   onConnected: (leadSourceId: string) => void;
   onOpenSource: (leadSourceId: string) => void;
   onSetUpManually: () => void;
-}> = ({ onClose, onConnected, onOpenSource, onSetUpManually }) => {
+}> = ({ provider: providerCode, onClose, onConnected, onOpenSource, onSetUpManually }) => {
   const [provider, setProvider] = useState<ProviderInfo | null>(null);
   const [connection, setConnection] = useState<ProviderConnection | null>(null);
   const [step, setStep] = useState<Step>({ k: 'credential' });
@@ -177,8 +179,9 @@ export const ConnectFormPanel: React.FC<{
           providersApi.list(),
           providersApi.connections(),
         ]);
-        setProvider(providers[0] ?? null);
-        const live = connections.find((c) => c.status !== 'REVOKED');
+        setProvider(providers.find((p) => p.code === providerCode) ?? null);
+        // Only this provider's account: a Tally key must not stand in for Typeform.
+        const live = connections.find((c) => c.provider === providerCode && c.status !== 'REVOKED');
         if (live) {
           setConnection(live);
           setStep({ k: 'forms' });
@@ -188,13 +191,13 @@ export const ConnectFormPanel: React.FC<{
         setError(mapError(e));
       }
     })();
-  }, [loadForms]);
+  }, [loadForms, providerCode]);
 
   const submitKey = async () => {
     if (!apiKey || busy) return;
     setBusy(true);
     try {
-      const conn = await providersApi.connect(provider?.code ?? 'TALLY', apiKey);
+      const conn = await providersApi.connect(providerCode, apiKey);
       setConnection(conn);
       setStep({ k: 'forms' });
       setError(null);

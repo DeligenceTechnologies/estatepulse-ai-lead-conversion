@@ -18,6 +18,8 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { confirmToast } from '../../lib/toast';
 import { ApiError, messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -119,21 +121,22 @@ export const AgentsView: React.FC = () => {
     // front of the undo is how people stay stuck.
     if (
       status === 'suspended' &&
-      !window.confirm(
+      !(await confirmToast(
         `Suspend ${memberName(member)}? They are signed out immediately and ` +
           `cannot sign in until you reactivate them.`,
-      )
+        'Suspend',
+      ))
     ) {
       return;
     }
 
     setPendingId(member.id);
-    setError(null);
     try {
       await setAgentStatus(member.id, status);
       await load();
+      toast.success(`${memberName(member)} ${status === 'suspended' ? 'suspended' : 'reactivated'}.`);
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setPendingId(null);
     }
@@ -141,14 +144,14 @@ export const AgentsView: React.FC = () => {
 
   const handleTakingLeads = async (enabled: boolean): Promise<void> => {
     setSwitching(true);
-    setError(null);
     try {
       await setTakingLeads(enabled);
       // The session too: the first switch-on gives this owner an agent profile,
       // which is what their own availability and "Mine" filters key on.
       await Promise.all([load(), refreshSession()]);
+      toast.success(enabled ? 'You are now taking leads.' : 'You are no longer taking new leads.');
     } catch (e) {
-      setError(messageFor(e));
+      toast.error(messageFor(e));
     } finally {
       setSwitching(false);
     }

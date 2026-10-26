@@ -88,7 +88,7 @@ export class ApiError extends Error {
  */
 const MESSAGES: Record<ErrorCode, string> = {
   VALIDATION_ERROR: 'Please check the highlighted fields and try again.',
-  INVALID_CREDENTIALS: 'That email and password combination is not correct.',
+  INVALID_CREDENTIALS: 'Incorrect email or password.',
   UNAUTHENTICATED: 'Please sign in to continue.',
   TOKEN_EXPIRED: 'Your session has expired. Please sign in again.',
   EMAIL_TAKEN: 'An account with that email already exists.',
@@ -255,6 +255,42 @@ export async function apiFetch<T>(
   }
 
   return payload as T;
+}
+
+/**
+ * A multipart upload on the session, with upload progress — which fetch cannot
+ * report, so this one call uses XMLHttpRequest. Same envelope, same session
+ * handling as apiFetch. `onProgress` gets the fraction sent so far, 0 to 1.
+ */
+export function apiUpload<T>(path: string, body: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/api${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onerror = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onabort = () => reject(new ApiError('NETWORK', MESSAGES.NETWORK, 0));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* fall through to the generic error below */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as T);
+        return;
+      }
+      const envelope = (payload as { error?: { code?: string; message?: string; details?: ErrorDetail[] } } | null)?.error;
+      const code = (envelope?.code ?? 'INTERNAL') as ErrorCode;
+      endSessionIfUnauthenticated(xhr.status, code);
+      reject(new ApiError(code, envelope?.message ?? MESSAGES[code] ?? MESSAGES.INTERNAL, xhr.status, envelope?.details));
+    };
+    xhr.send(body);
+  });
 }
 
 /**

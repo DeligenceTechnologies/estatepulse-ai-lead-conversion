@@ -100,7 +100,12 @@ export class CalendarConnectionsService {
   /** The owner's view of the office calendar, whichever provider it is. */
   async status(organizationId: string): Promise<OrganizationCalendarStatusDTO> {
     const row = await this.activeOrgRow(organizationId);
-    const visible = row && !this.isPending(row) ? row : null;
+    // Only a live row, or one parked in 'error' for reauth, is the office
+    // calendar. Every 'inactive' row is something that is NOT connected — a
+    // disconnect, a provider switched away from, or a half-finished OAuth
+    // attempt — and reporting one as the provider made the screen offer
+    // "Manage" for a calendar that is gone, and never "Connect".
+    const visible = row && row.status !== 'inactive' ? row : null;
     const meta = (visible?.metadata ?? {}) as CalComConnectionMetadata;
 
     return {
@@ -180,12 +185,6 @@ export class CalendarConnectionsService {
       schedulingUrl: profile?.calendly_url ?? null,
       lastSyncedAt: live ? (row.last_synced_at?.toISOString() ?? null) : null,
     };
-  }
-
-  /** An 'inactive' row that is really a half-finished OAuth attempt. */
-  private isPending(row: { status: string; metadata: unknown }): boolean {
-    const meta = (row.metadata ?? {}) as CalendarConnectionMetadata;
-    return row.status === 'inactive' && Boolean(meta.stateHash);
   }
 
   /**
