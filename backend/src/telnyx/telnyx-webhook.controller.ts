@@ -38,6 +38,7 @@ export class TelnyxWebhookController {
         const call = await this.activity.callByProvider(ccid);
         if (!call || !(await this.signedFor(call.orgId, delivery))) return;
         if (type === 'call.answered') await this.activity.onCallAnswered(ccid);
+        else if (type === 'call.transcription') await this.activity.onCallSpeech(ccid, payload);
         else if (type === 'call.hangup') await this.activity.onCallHangup(ccid, payload);
         else if (type === 'call.recording.saved') await this.activity.onRecordingSaved(ccid, payload);
         else if (type === 'call.recording.transcription.saved') {

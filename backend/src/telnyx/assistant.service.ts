@@ -190,7 +190,13 @@ export class AssistantService {
       if (patch.stt_model != null) tr.model = patch.stt_model;
       if (patch.stt_language != null) tr.language = patch.stt_language;
       tr.settings = { ...(tr.settings ?? {}) };
-      if (patch.eot_threshold != null) tr.settings.eot_threshold = Number(patch.eot_threshold);
+      if (patch.eot_threshold != null) {
+        tr.settings.eot_threshold = Number(patch.eot_threshold);
+        // Telnyx rejects an eager end-of-turn threshold above the main one (400).
+        if (tr.settings.eager_eot_threshold != null && tr.settings.eager_eot_threshold > tr.settings.eot_threshold) {
+          tr.settings.eager_eot_threshold = tr.settings.eot_threshold;
+        }
+      }
       if (patch.eot_timeout_ms != null) tr.settings.eot_timeout_ms = Number(patch.eot_timeout_ms);
       body.transcription = tr;
     }
