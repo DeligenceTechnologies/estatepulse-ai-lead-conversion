@@ -191,7 +191,7 @@ export const DashboardContent: React.FC<ReturnType<typeof useDashboardData>> = (
         },
         {
           label: 'Flagged for review',
-          hint: 'Ingested with a data problem (e.g. invalid phone).',
+          hint: 'A data problem from import (e.g. invalid phone), or a call or callback that needs a look.',
           count: data.attention.needsReview,
           to: '/leads',
         },

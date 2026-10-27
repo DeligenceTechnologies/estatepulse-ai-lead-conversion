@@ -9,6 +9,9 @@ import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from '@/telnyx/activity.service';
 import { SmsService } from '@/telnyx/sms.service';
 import { CallQueue } from '@/telnyx/calls/call.queue';
+import { onlyIfOf } from '@/outreach/conditions';
+import { leadStop } from '@/outreach/safety-rules';
+import { RECHECK_MS, StepGuard, type StepRun, type Unmet } from '@/outreach/step-guard.service';
 import { FollowupService, stepsOf, type SequenceStep } from './followup.service';
 
 interface ClaimedEnrollment {
@@ -18,6 +21,7 @@ interface ClaimedEnrollment {
   sequence_id: string;
   current_step: number;
   attempts: number;
+  enrolled_at: Date;
 }
 
 const MAX_ATTEMPTS = 6;
@@ -25,7 +29,8 @@ const MAX_ATTEMPTS = 6;
 /**
  * Sends the sequence step each due enrolment is on. Claims with FOR UPDATE
  * SKIP LOCKED so several instances share the queue, re-checks the lead before
- * every send, defers into the next allowed hour, and retries with backoff.
+ * every send, defers into the next allowed hour, holds while a call is live or
+ * waiting on its score, and retries with backoff.
  */
 @Injectable()
 export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
@@ -43,6 +48,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly sms: SmsService,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
+    private readonly guard: StepGuard,
   ) {}
 
   onModuleInit(): void {
@@ -93,7 +99,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
          SET locked_by = ${this.instanceId}, locked_at = now(), attempts = e.attempts + 1
         FROM claimed
        WHERE e.id = claimed.id
-      RETURNING e.id, e.organization_id, e.lead_id, e.sequence_id, e.current_step, e.attempts`;
+      RETURNING e.id, e.organization_id, e.lead_id, e.sequence_id, e.current_step, e.attempts, e.enrolled_at`;
   }
 
   private async requeueStuck(): Promise<void> {
@@ -110,14 +116,16 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
       });
       if (!lead) return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted'));
-      if (lead.dncStatus) return void (await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out'));
-      if (lead.automationPaused) return void (await this.pause(row.id));
-      if (OUTCOME_STATUSES.includes(lead.status)) return void (await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`));
+      // The safety rules on the lead's own state: an opt-out or an outcome stops the enrolment, a pause holds it.
+      const stop = leadStop(lead);
+      if (stop === 'opted_out') return void (await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out'));
+      if (stop === 'automation_paused') return void (await this.pause(row.id));
+      if (stop) return void (await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`));
 
       const sequence = await this.prisma.sequence.findUnique({ where: { id: row.sequence_id }, select: { steps: true } });
       const steps = sequence ? stepsOf(sequence) : [];
       const step = steps[row.current_step - 1];
-      if (!step) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
+      if (!step) return void (await this.afterLastStep(row));
 
       const { timeZone, quiet } = await this.followup.guardrailsFor(row.organization_id);
       const now = new Date();
@@ -126,8 +134,21 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         await this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: allowed, lockedBy: null, lockedAt: null } });
         return;
       }
-      await this.fire(row, step, lead);
-      await this.advance(row, steps);
+      const hold = await this.guard.check({ orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, endOnAnswer: false });
+      if (hold.kind === 'booked') {
+        await this.guard.markBooked(row.organization_id, row.lead_id);
+        await this.guard.record({ ...this.runOf(row, step, 'skipped'), reason: 'booked' });
+        return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_appointment_booked'));
+      }
+      if (hold.kind === 'wait') return void (await this.holdUntil(row, hold.until));
+      // "The last call" is the lead's last call, even one from before this enrolment (the strategy's).
+      const unmet: Unmet | null =
+        hold.kind === 'stuck'
+          ? { reason: 'call_still_queued' }
+          : await this.guard.conditionUnmet(onlyIfOf(step), { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, callsSince: null });
+      if (unmet) await this.guard.record({ ...this.runOf(row, step, 'skipped'), reason: unmet.reason, detail: unmet.detail });
+      else await this.fire(row, step, lead);
+      await this.advance(row, steps, !unmet && step.actionType === 'voice');
     } catch (error) {
       await this.onFailure(row, (error as Error).message);
     }
@@ -143,34 +164,61 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       try {
         const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
         await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+        await this.guard.record(this.runOf(row, step, 'sent'));
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
+        await this.guard.record(this.runOf(row, step, 'failed'));
       }
       return;
     }
+    const dedupeKey = `followup:${row.id}:${row.current_step}`;
     try {
       await this.calls.enqueue(
-        { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id },
-        { dedupeKey: `followup:${row.id}:${row.current_step}` },
+        { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id, enrollmentId: row.id },
+        { dedupeKey },
       );
+      await this.guard.record({ ...this.runOf(row, step, 'queued'), callKey: dedupeKey });
     } catch (error) {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
+      await this.guard.record(this.runOf(row, step, 'failed'));
     }
   }
 
-  /** After the last step a lead that never responded is closed out as not interested. */
-  private async advance(row: ClaimedEnrollment, steps: SequenceStep[]): Promise<void> {
+  private runOf(row: ClaimedEnrollment, step: SequenceStep, outcome: StepRun['outcome']): StepRun {
+    return {
+      orgId: row.organization_id,
+      leadId: row.lead_id,
+      source: 'followup',
+      enrollmentId: row.id,
+      runKey: `followup:${row.id}:${row.current_step}`,
+      stepNumber: row.current_step,
+      channel: step.actionType,
+      outcome,
+    };
+  }
+
+  /** A held step is looked at again later; holding is not a failed attempt. */
+  private holdUntil(row: ClaimedEnrollment, until: number) {
+    return this.prisma.sequenceEnrollment.update({
+      where: { id: row.id },
+      data: { nextActionAt: new Date(until), lockedBy: null, lockedAt: null, attempts: Math.max(0, row.attempts - 1) },
+    });
+  }
+
+  /**
+   * Moves to the next step. After the last one the enrolment closes, except after a call just
+   * queued: it stays open past the end until that call has an outcome (afterLastStep).
+   */
+  private async advance(row: ClaimedEnrollment, steps: SequenceStep[], calledNow: boolean): Promise<void> {
     const next = steps[row.current_step];
-    if (!next) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
-        await tx.lead.updateMany({
-          where: { id: row.lead_id, status: LeadStatus.follow_up },
-          data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
-        });
+    if (!next && calledNow) {
+      await this.prisma.sequenceEnrollment.update({
+        where: { id: row.id },
+        data: { currentStep: row.current_step + 1, nextActionAt: new Date(Date.now() + RECHECK_MS), lockedBy: null, lockedAt: null, lastError: null },
       });
       return;
     }
+    if (!next) return this.closeOut(row);
     await this.prisma.sequenceEnrollment.update({
       where: { id: row.id },
       data: {
@@ -180,6 +228,30 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         lockedAt: null,
         lastError: null,
       },
+    });
+  }
+
+  /** Past the last step: waits out a call still queued, live or awaiting its analysis, then closes the enrolment. */
+  private async afterLastStep(row: ClaimedEnrollment): Promise<void> {
+    const hold = await this.guard.check({ orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, endOnAnswer: false });
+    if (hold.kind === 'wait') return void (await this.holdUntil(row, hold.until));
+    if (hold.kind === 'booked') {
+      await this.guard.markBooked(row.organization_id, row.lead_id);
+      return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_appointment_booked'));
+    }
+    await this.closeOut(row);
+  }
+
+  /** The sequence ran out. A lead it never reached (no answered call, no reply) is closed out as not interested. */
+  private async closeOut(row: ClaimedEnrollment): Promise<void> {
+    const reached = await this.guard.conditionUnmet('not_reached', { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at });
+    await this.prisma.$transaction(async (tx) => {
+      await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
+      if (reached) return;
+      await tx.lead.updateMany({
+        where: { id: row.lead_id, status: LeadStatus.follow_up },
+        data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
+      });
     });
   }
 

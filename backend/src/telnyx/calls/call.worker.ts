@@ -1,12 +1,13 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EnrollmentStatus } from '@prisma/client';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
-import { OUTCOME_STATUSES } from '@/lead/lead-status';
+import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
 import { VoiceService } from '../voice.service';
@@ -49,7 +50,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
   async process(job: Job<CallJobData>, token?: string): Promise<void> {
     if (job.name !== CallJob.Dial) throw new UnrecoverableError(`Unknown call job "${job.name}"`);
-    const { orgId, leadId, sequenceId } = job.data;
+    const { orgId, leadId, sequenceId, source, enrollmentId } = job.data;
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
@@ -57,6 +58,19 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     });
     if (!lead || lead.dncStatus || lead.automationPaused || OUTCOME_STATUSES.includes(lead.status)) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead can no longer be called`);
+      return;
+    }
+    // Queued for an enrolment the lead has since left (the strategy ended, the sequence was stopped or swapped).
+    const stillEnrolled =
+      source === 'strategy'
+        ? IN_STRATEGY_STATUSES.includes(lead.status)
+        : !(enrollmentId ?? sequenceId) ||
+          !!(await this.prisma.sequenceEnrollment.findFirst({
+            where: enrollmentId ? { id: enrollmentId, leadId, status: EnrollmentStatus.active } : { sequenceId, leadId, status: EnrollmentStatus.active },
+            select: { id: true },
+          }));
+    if (!stillEnrolled) {
+      this.logger.log(`Call for lead ${leadId} dropped: the lead has left the ${source} that queued it`);
       return;
     }
 

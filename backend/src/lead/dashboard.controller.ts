@@ -46,9 +46,14 @@ export class DashboardController {
       WITH l AS (
         SELECT * FROM leads WHERE organization_id = ${org}::uuid
       ),
+      -- Speed to lead: from arrival to the strategy's first step that really went (a text sent, a call
+      -- queued), so a "start after" delay counts; leads from before step runs were kept use first_contact_at.
       delays AS (
-        SELECT extract(epoch FROM date_trunc('milliseconds', first_contact_at)
-                                - date_trunc('milliseconds', created_at))::float8 AS s
+        SELECT extract(epoch FROM date_trunc('milliseconds', coalesce(
+                 (SELECT min(r.created_at) FROM outreach_step_runs r
+                   WHERE r.lead_id = l.id AND r.source = 'strategy' AND r.outcome IN ('sent', 'queued')),
+                 first_contact_at))
+               - date_trunc('milliseconds', created_at))::float8 AS s
           FROM l
          WHERE created_at >= ${since30} AND first_contact_at IS NOT NULL
       )

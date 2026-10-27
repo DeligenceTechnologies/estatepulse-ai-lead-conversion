@@ -9,6 +9,10 @@ export type Financing = (typeof FINANCING)[number];
 const maybe = <T extends z.ZodTypeAny>(t: T) => t.nullable().optional();
 
 export const extractionSchema = z.object({
+  /** Absent from analyses made before it was asked: the caller then decides from the other answers. */
+  reached_person: maybe(z.boolean()),
+  /** Absent from analyses made before it was asked: "not interested" alone never sets do-not-contact. */
+  do_not_contact: maybe(z.boolean()),
   timeline: z.enum(TIMELINES),
   budget_identified: z.boolean(),
   location_identified: z.boolean(),
@@ -33,6 +37,8 @@ export const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: [
+    'reached_person',
+    'do_not_contact',
     'timeline',
     'budget_identified',
     'location_identified',
@@ -52,6 +58,18 @@ export const EXTRACTION_JSON_SCHEMA = {
     'motivation',
   ],
   properties: {
+    reached_person: {
+      type: 'boolean',
+      description:
+        'A real person answered and spoke with the assistant. False for voicemail, an answering machine, ' +
+        'an automated phone menu, or a call where only the assistant spoke.',
+    },
+    do_not_contact: {
+      type: 'boolean',
+      description:
+        'The caller asked not to be called, texted or contacted again (for example "stop calling me", "take me off your list"). ' +
+        'Saying they are not interested is not enough.',
+    },
     timeline: {
       type: 'string',
       enum: [...TIMELINES],
@@ -70,7 +88,7 @@ export const EXTRACTION_JSON_SCHEMA = {
       type: 'boolean',
       description: 'The caller answered questions willingly and in substance, not with one-word or evasive replies.',
     },
-    not_interested: { type: 'boolean', description: 'The caller said they are not interested or asked not to be contacted.' },
+    not_interested: { type: 'boolean', description: 'The caller said they are not interested in buying or in our help.' },
     invalid_lead: {
       type: 'boolean',
       description: 'Wrong number, spam, a test, or the person never enquired about buying a home.',

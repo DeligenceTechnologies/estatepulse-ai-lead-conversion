@@ -64,6 +64,7 @@ model Lead {
   sheetImportRows SheetImportRow[]
   meetings        CalendarMeeting[]
   outreachItems   OutreachBatchLead[]
+  stepRuns        OutreachStepRun[]
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])
@@ -110,6 +111,12 @@ model Call {
   direction        String     @default("outbound") @db.VarChar(10)
   status           CallStatus @default(queued)
   startedAt        DateTime?  @map("started_at") @db.Timestamptz(6)
+  /// When a person (or a machine) picked up; started_at is when it was dialed.
+  answeredAt       DateTime?  @map("answered_at") @db.Timestamptz(6)
+  /// Why the call ended, as the provider said: Telnyx's hangup_cause (user_busy, timeout, not_found, ...), SIP folded in.
+  endReason        String?    @map("end_reason") @db.VarChar(40)
+  /// Answering machine detection: 'human' or 'machine'.
+  answeredBy       String?    @map("answered_by") @db.VarChar(20)
   endedAt          DateTime?  @map("ended_at") @db.Timestamptz(6)
   durationSeconds  Int?       @map("duration_seconds")
   recordingUrl     String?    @map("recording_url")

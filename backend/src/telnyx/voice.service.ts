@@ -34,6 +34,8 @@ export class VoiceService {
         to,
         from: c.fromNumber,
         timeout_secs: DIAL_TIMEOUT_SECS,
+        // A machine (voicemail, a fax, silence) is told from a person, so the call's result is right.
+        answering_machine_detection: 'premium',
         client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
         ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
       }),

@@ -10,6 +10,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -55,6 +56,16 @@ export class SequenceStepDto {
   @Min(1)
   @Max(10)
   maxAttempts?: number;
+
+  /** Only send this step if…: 'call_not_answered' (the lead's last call rang out) or 'not_reached' (no answer or reply since enrolment). */
+  @IsOptional()
+  @IsIn(['always', 'call_not_answered', 'not_reached'])
+  condition?: 'always' | 'call_not_answered' | 'not_reached';
+
+  /** "Only if": { match: 'all' | 'any', rules: [{ field, op, value }] }; checked against the sequence fields. */
+  @IsOptional()
+  @IsObject()
+  onlyIf?: Record<string, unknown>;
 }
 
 export class ReplaceStepsDto {

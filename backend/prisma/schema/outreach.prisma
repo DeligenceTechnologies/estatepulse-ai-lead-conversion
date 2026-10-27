@@ -69,3 +69,35 @@ enum OutreachItemState {
 
   @@map("outreach_item_state")
 }
+
+/// What happened to each strategy or sequence step for a lead: sent, queued (a call), failed, or
+/// skipped with the reason. One row per step run; run_key makes a repeated run a no-op.
+model OutreachStepRun {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  orgId        String   @map("organization_id") @db.Uuid
+  leadId       String   @map("lead_id") @db.Uuid
+  /// 'strategy' or 'followup'.
+  source       String   @db.VarChar(20)
+  /// The sequence enrolment the step belongs to; null for the strategy.
+  enrollmentId String?  @map("enrollment_id") @db.Uuid
+  /// 'strategy:<enrolled ms>:<step>' or 'followup:<enrolment id>:<step>'.
+  runKey       String   @map("run_key") @db.VarChar(120)
+  /// 1-based position of the step in the strategy or sequence when it ran.
+  stepNumber   Int      @map("step_number")
+  channel      String   @db.VarChar(10)
+  /// 'sent' | 'queued' | 'failed' | 'skipped'.
+  outcome      String   @db.VarChar(20)
+  reason       String?  @db.VarChar(40)
+  /// Why a skipped step did not go, in words the lead's page shows.
+  detail       String?  @db.VarChar(300)
+  /// The call queue's dedupe key for a queued call.
+  callKey      String?  @map("call_key") @db.VarChar(200)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, runKey])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("outreach_step_runs")
+}

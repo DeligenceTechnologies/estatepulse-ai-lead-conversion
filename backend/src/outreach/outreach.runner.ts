@@ -8,7 +8,7 @@ import { inQuietHours, type QuietHours } from '@/common/utils/quiet-hours';
 import { RELEASABLE_LEAD } from '@/google-sheets/approval';
 import { CallSlots } from '@/telnyx/calls/call-slots';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
-import { StrategyStoreService, type Strategy } from '@/telnyx/strategy-store.service';
+import { StrategyStoreService, type Strategy, isTwoStep } from '@/telnyx/strategy-store.service';
 import { awaitingWindowMs, releaseCapacity } from './schedule';
 
 const BATCHES_PER_TICK = 50;
@@ -21,6 +21,7 @@ interface OrgRules {
   maxConcurrent: number;
   reserved: number;
   steps: Strategy['steps'];
+  afterPrevious: boolean;
 }
 
 /**
@@ -101,6 +102,7 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
       maxConcurrent: settings?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT,
       reserved: settings?.reservedCallSlots ?? 1,
       steps: strategy.steps,
+      afterPrevious: isTwoStep(strategy),
     };
   }
 
@@ -129,7 +131,7 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
 
       let released = 0;
       if (!inQuietHours(rules.timeZone, rules.quiet, now)) {
-        const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps)).toISOString();
+        const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps, rules.afterPrevious)).toISOString();
         // Released leads whose first call is not on record yet: queued for a slot, or not yet enrolled.
         const [load] = await tx.$queryRaw<{ awaiting: number }[]>`
           SELECT count(*)::int AS awaiting FROM outreach_batch_leads AS i

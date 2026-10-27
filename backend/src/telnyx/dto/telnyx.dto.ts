@@ -152,6 +152,16 @@ export class StrategyStepDto {
   @IsString()
   @MaxLength(1600)
   message?: string;
+
+  /** Older clients' single condition; mapped onto onlyIf. */
+  @IsOptional()
+  @IsIn(['always', 'call_not_answered', 'no_reply'])
+  condition?: 'always' | 'call_not_answered' | 'no_reply';
+
+  /** Step 2's "Only if": { match: 'all' | 'any', rules: [{ field, op, value }] }, checked by the strategy's rules. */
+  @IsOptional()
+  @IsObject()
+  onlyIf?: Record<string, unknown>;
 }
 
 export class StrategyDto {

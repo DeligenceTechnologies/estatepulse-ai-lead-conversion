@@ -15,6 +15,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { nextAllowedAt, type QuietHours } from '@/common/utils/quiet-hours';
 import { IN_STRATEGY_STATUSES, isLeadStatus } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
+import { onlyIfError, onlyIfOf, type OnlyIf } from '@/outreach/conditions';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
 import type { CreateSequenceDto, EnrollLeadsDto, LeadFilterDto, ReplaceStepsDto, UpdateSequenceDto } from './dto/sequence.dto';
 
@@ -35,6 +36,10 @@ export interface SequenceStep {
   messageTemplate: string | null;
   voicePrompt: string | null;
   maxAttempts: number;
+  /** Older single condition, read through onlyIfOf; never written again. */
+  condition?: 'always' | 'call_not_answered' | 'not_reached';
+  /** "Only if"; absent = always. */
+  onlyIf?: OnlyIf;
 }
 
 export interface EnrollSkip {
@@ -44,6 +49,16 @@ export interface EnrollSkip {
 }
 
 const MAX_ENROLL_PER_CALL = 500;
+
+/** A hot lead is handed to an agent (interested is an outcome), so a sequence on this condition never sends. */
+export const HOT_TRIGGER_NOTE = 'Hot leads go straight to an agent, so a sequence for "Qualified as hot" never sends anything.';
+
+/** Refuses the hot condition when it is newly added; a sequence that already carries it may keep it (it is warned about). */
+function assertNoNewHotTrigger(triggers: SequenceTrigger[], had: SequenceTrigger[] = []): void {
+  if (triggers.includes('qualified_hot') && !had.includes('qualified_hot')) {
+    throw new AppError('VALIDATION_ERROR', HOT_TRIGGER_NOTE, [{ path: 'enrollTriggers', message: HOT_TRIGGER_NOTE }]);
+  }
+}
 const LIVE: EnrollmentStatus[] = [EnrollmentStatus.active, EnrollmentStatus.paused];
 
 export const stepsOf = (sequence: Pick<Sequence, 'steps'>): SequenceStep[] =>
@@ -107,6 +122,13 @@ export class FollowupService {
     return true;
   }
 
+  liveEnrollment(orgId: string, leadId: string) {
+    return this.prisma.sequenceEnrollment.findFirst({
+      where: { orgId, leadId, status: { in: LIVE } },
+      select: { id: true, enrolledBy: true, sequence: { select: { code: true } } },
+    });
+  }
+
   async stopForLead(
     orgId: string,
     leadId: string,
@@ -130,6 +152,7 @@ export class FollowupService {
   async createSequence(orgId: string, input: CreateSequenceDto) {
     const status = input.status ?? SequenceStatus.active;
     const triggers = input.enrollTriggers ?? [];
+    assertNoNewHotTrigger(triggers);
     const created = await this.prisma.$transaction(async (tx) => {
       await lockOrganization(tx, orgId);
       const existing = await tx.sequence.findFirst({ where: { orgId, code: input.code }, select: { name: true, status: true } });
@@ -164,6 +187,7 @@ export class FollowupService {
       const current = await this.owned(orgId, id, tx);
       const status = input.status ?? current.status;
       const triggers = input.enrollTriggers ?? current.triggers;
+      assertNoNewHotTrigger(triggers, current.triggers);
       if (status === SequenceStatus.active) await this.assertTriggersFree(tx, orgId, triggers, id);
       await tx.sequence.update({
         where: { id },
@@ -176,6 +200,15 @@ export class FollowupService {
       });
     });
     return this.getSequence(orgId, id);
+  }
+
+  /** Automation back on for a lead: its paused enrolment picks up with the step it was on, now or when contact hours allow. */
+  async resumeForLead(orgId: string, leadId: string): Promise<number> {
+    const { count } = await this.prisma.sequenceEnrollment.updateMany({
+      where: { orgId, leadId, status: EnrollmentStatus.paused },
+      data: { status: EnrollmentStatus.active, nextActionAt: await this.dueAt(orgId, 0), lockedBy: null, lockedAt: null },
+    });
+    return count;
   }
 
   /** Live enrolments past the new last step are moved onto it rather than dropped. */
@@ -321,6 +354,7 @@ export class FollowupService {
       description: s.description,
       status: s.status,
       enrollTriggers: [...s.triggers].sort(),
+      warnings: s.triggers.includes('qualified_hot') ? [HOT_TRIGGER_NOTE] : [],
       activeCount: countOf(s.id, EnrollmentStatus.active),
       pausedCount: countOf(s.id, EnrollmentStatus.paused),
       completedCount: countOf(s.id, EnrollmentStatus.completed),
@@ -408,12 +442,21 @@ export class FollowupService {
   }
 }
 
+/** A step's "Only if" in the stored shape (an older condition mapped), checked against the sequence fields. */
+function stepOnlyIf(s: ReplaceStepsDto['steps'][number], i: number): { onlyIf?: OnlyIf } {
+  const onlyIf = onlyIfOf({ onlyIf: (s.onlyIf as OnlyIf | undefined) ?? null, condition: s.condition ?? null });
+  const problem = onlyIfError(onlyIf, 'sequence');
+  if (problem) throw new AppError('VALIDATION_ERROR', `Step ${i + 1}: ${problem}`, [{ path: `steps.${i}.onlyIf`, message: problem }]);
+  return onlyIf.rules.length ? { onlyIf } : {};
+}
+
 function toSteps(steps: ReplaceStepsDto['steps']): SequenceStep[] {
-  return steps.map((s) => ({
+  return steps.map((s, i) => ({
     actionType: s.actionType,
     delayMinutes: s.delayMinutes,
     messageTemplate: s.actionType === 'sms' ? (s.messageTemplate ?? null) : null,
     voicePrompt: s.actionType === 'voice' ? (s.voicePrompt ?? null) : null,
     maxAttempts: s.maxAttempts ?? 1,
+    ...stepOnlyIf(s, i),
   }));
 }

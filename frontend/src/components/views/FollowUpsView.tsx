@@ -272,6 +272,14 @@ export const FollowUpsView: React.FC = () => {
                       ? `auto: ${seq.enrollTriggers.length} condition${seq.enrollTriggers.length > 1 ? 's' : ''}`
                       : 'manual only'}
                   </span>
+                  {seq.warnings?.length ? (
+                    <span
+                      className="text-2xs font-bold uppercase px-2 py-0.5 rounded-full border bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      title={seq.warnings.join(' ')}
+                    >
+                      never sends to hot leads
+                    </span>
+                  ) : null}
                   <span
                     className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
                       STATUS_STYLES[seq.status] ?? STATUS_STYLES.completed

@@ -179,6 +179,11 @@ export class InCallBookingService {
         .catch((error) => this.logger.warn(`saving email for lead ${ctx.leadId}: ${(error as Error).message}`));
     }
 
+    // Calendly has the invitee: the lead is booked now, whether or not the meeting can be read back or recorded below.
+    await this.engine
+      .appointmentBooked(ctx.orgId, ctx.leadId)
+      .catch((error) => this.logger.error(`marking lead ${ctx.leadId} booked: ${(error as Error).message}`));
+
     const { event } = booked;
     const hosts = event?.event_memberships ?? [];
     const hostEmails = hosts.map((h) => h.user_email).filter((e): e is string => !!e);
@@ -195,7 +200,6 @@ export class InCallBookingService {
     if (event) {
       try {
         await this.recordMeeting(ctx, booked.connection, event, { name, email, timezone: tz }, agent?.id ?? null, booked);
-        await this.engine.appointmentBooked(ctx.orgId, ctx.leadId);
       } catch (error) {
         this.logger.error(`recording in-call booking for lead ${ctx.leadId}: ${(error as Error).message}`);
       }

@@ -403,8 +403,8 @@ export interface LeadFlowStep {
   channel: string;   // 'sms' | 'voice'
   action: string;    // 'send_sms' | 'ai_call' | ...
   after: { value: number; unit: string };
-  state: 'done' | 'failed' | 'current' | 'pending';
-  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Call failed' | null
+  state: 'done' | 'failed' | 'current' | 'pending' | 'skipped';
+  outcome: string | null; // 'SMS sent' | 'Answered' | 'No answer' | 'Skipped — the call was answered' | … | null
 }
 export interface LeadFlow {
   phase: 'not_started' | 'strategy' | 'exited' | 'done';
@@ -416,8 +416,16 @@ export interface LeadFlow {
   currentStep: LeadFlowStep | null;
   steps: LeadFlowStep[];
   reason: string | null;
+  automationPaused: boolean;
+  dncStatus: boolean;
 }
 export const getLeadFlow = (id: string) => apiFetch<LeadFlow>(`/leads/${id}/flow`, { auth: true });
+/** Pause stops every automated call and text to the lead; resume picks the strategy or sequence up where it was. */
+export const setLeadAutomation = (id: string, paused: boolean) =>
+  apiFetch<{ ok: true; automationPaused: boolean }>(`/leads/${id}/automation`, { method: 'POST', body: { paused }, auth: true });
+/** A meeting set outside the app: the lead is booked and every automated step stops. */
+export const markLeadBooked = (id: string, note?: string) =>
+  apiFetch<{ ok: true; status: string }>(`/leads/${id}/booked`, { method: 'POST', body: note ? { note } : {}, auth: true });
 /** Start the strategy now. A no-op server-side for a lead already contacted. */
 export const enrollLead = (id: string) =>
   apiFetch<{ ok: boolean }>(`/leads/${id}/enroll`, { method: 'POST', auth: true });

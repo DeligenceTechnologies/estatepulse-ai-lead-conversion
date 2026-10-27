@@ -13,7 +13,10 @@ import { AssistantService } from './assistant.service';
 import { SetToolsDto, StrategyDto, TestToolDto, ThresholdsDto } from './dto/telnyx.dto';
 import { EngineService } from './engine.service';
 import { LeadScoringService } from './lead-scoring.service';
-import { StrategyStoreService, type Strategy } from './strategy-store.service';
+import { SAFETY_RULES } from '@/outreach/safety-rules';
+import { StrategyStoreService, toTwoStep, type Strategy } from './strategy-store.service';
+import { callResult } from '@/outreach/step-guard.service';
+import { strategyFlowSteps } from '@/outreach/strategy-flow';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',
@@ -139,6 +142,14 @@ export class AssistantController {
   }
 }
 
+/** The saved strategy as it runs, and its two-step form for the editor (converted from an older one without saving it). */
+const withEditor = (strategy: Strategy) => ({
+  strategy,
+  editor: toTwoStep(strategy),
+  // The built-in rules, from the one list the engine and the sequence runner enforce.
+  safetyRules: SAFETY_RULES,
+});
+
 @Controller('strategy')
 export class StrategyController {
   constructor(private readonly strategies: StrategyStoreService) {}
@@ -146,13 +157,13 @@ export class StrategyController {
   @Get()
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
   async get(@CurrentAuth() auth: AuthContext) {
-    return { strategy: await this.strategies.getStrategy(auth.organizationId) };
+    return withEditor(await this.strategies.getStrategy(auth.organizationId));
   }
 
   @Put()
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
   async save(@CurrentAuth() auth: AuthContext, @Body() body: StrategyDto) {
-    return { strategy: await this.strategies.saveStrategy(auth.organizationId, body as Partial<Strategy>) };
+    return withEditor(await this.strategies.saveStrategy(auth.organizationId, body as Partial<Strategy>));
   }
 }
 
@@ -217,14 +228,25 @@ export class PortalLeadsController {
     const orgId = auth.organizationId;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) } });
     if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-    const [strategy, calls, messages] = await Promise.all([
+    const [strategy, calls, messages, runs] = await Promise.all([
       this.strategies.getStrategy(orgId),
-      this.prisma.call.findMany({ where: { orgId, leadId }, orderBy: { createdAt: 'asc' }, select: { status: true } }),
+      this.prisma.call.findMany({
+        where: { orgId, leadId },
+        orderBy: { createdAt: 'asc' },
+        select: { status: true, createdAt: true, startedAt: true, answeredAt: true, endedAt: true, durationSeconds: true, extractedIntel: true, id: true },
+      }),
       this.prisma.message.findMany({
         where: { orgId, leadId, direction: 'outbound', channel: 'sms' },
         orderBy: { createdAt: 'asc' },
         select: { deliveryStatus: true },
       }),
+      lead.firstContactAt
+        ? this.prisma.outreachStepRun.findMany({
+            where: { orgId, leadId, runKey: { startsWith: `strategy:${lead.firstContactAt.getTime()}:` } },
+            orderBy: { createdAt: 'asc' },
+            select: { stepNumber: true, outcome: true, reason: true, detail: true, createdAt: true },
+          })
+        : [],
     ]);
 
     const steps = strategy.steps ?? [];
@@ -240,20 +262,23 @@ export class PortalLeadsController {
 
     let ci = 0;
     let mi = 0;
-    const stepsOut = steps.map((s, index) => {
-      let outcome: string | null = null;
-      let state = 'pending';
-      const o = s.channel === 'voice' ? (ci < calls.length ? callOutcome(calls[ci++].status) : null) : mi < messages.length ? smsOutcome(messages[mi++].deliveryStatus) : null;
-      if (o) ({ state, label: outcome } = o);
-      return { index, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
-    });
+    // A lead run before step runs were recorded is matched to its calls and texts in order, as it always was.
+    const stepsOut = runs.length
+      ? strategyFlowSteps(steps, runs, calls)
+      : steps.map((s, index) => {
+          let outcome: string | null = null;
+          let state = 'pending';
+          const o = s.channel === 'voice' ? (ci < calls.length ? callOutcome(calls[ci++].status) : null) : mi < messages.length ? smsOutcome(messages[mi++].deliveryStatus) : null;
+          if (o) ({ state, label: outcome } = o);
+          return { index, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
+        });
     const nextIndex = stepsOut.findIndex((s) => s.outcome === null);
     if (nextIndex >= 0) stepsOut[nextIndex].state = 'current';
 
-    const fired = calls.length + messages.length;
+    const fired = runs.length ? runs.filter((r) => r.outcome !== 'skipped').length : calls.length + messages.length;
     const status = lead.status;
     const phase = OUTCOME_STATUSES.includes(status) ? 'done' : status === LeadStatus.follow_up ? 'exited' : lead.firstContactAt ? 'strategy' : 'not_started';
-    const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
+    const answered = calls.some((c) => callResult(c) === 'answered' || c.status === 'in_progress');
     const outcome =
       OUTCOME_LABELS[status] ??
       (answered
@@ -272,10 +297,13 @@ export class PortalLeadsController {
       outcome,
       strategyName: strategy.name,
       stepsTotal: steps.length,
-      completed: Math.min(fired, steps.length),
+      completed: Math.min(runs.length || fired, steps.length),
       currentStep: phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null,
       steps: stepsOut,
       reason: lead.aiSummary ?? null,
+      // For the quick actions: read here, fresh, rather than from a copy of the lead the page may hold.
+      automationPaused: lead.automationPaused,
+      dncStatus: lead.dncStatus,
     };
   }
 

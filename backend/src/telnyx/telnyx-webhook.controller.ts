@@ -40,6 +40,9 @@ export class TelnyxWebhookController {
         if (type === 'call.answered') await this.activity.onCallAnswered(ccid);
         else if (type === 'call.transcription') await this.activity.onCallSpeech(ccid, payload);
         else if (type === 'call.hangup') await this.activity.onCallHangup(ccid, payload);
+        else if (type === 'call.machine.premium.detection.ended' || type === 'call.machine.detection.ended') {
+          await this.activity.onMachineDetection(ccid, payload);
+        }
         else if (type === 'call.recording.saved') await this.activity.onRecordingSaved(ccid, payload);
         else if (type === 'call.recording.transcription.saved') {
           await this.activity.onTranscriptionSaved(ccid, payload);

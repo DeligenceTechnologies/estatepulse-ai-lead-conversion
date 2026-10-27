@@ -7,6 +7,8 @@ export interface CallJobData {
   leadId: string;
   source: CallSource;
   sequenceId?: string;
+  /** The sequence enrolment that queued it: the call is dropped once that enrolment has stopped. */
+  enrollmentId?: string;
 }
 
 export interface EnqueueCallOptions {

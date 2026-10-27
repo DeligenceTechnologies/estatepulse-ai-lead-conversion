@@ -7,13 +7,14 @@ import { normalizePhone } from './phone';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 
 const STOP_WORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit', 'revoke', 'optout', 'opt-out']);
-const START_WORDS = new Set(['start', 'unstop', 'yes']);
+/** The opt-in words Telnyx itself honours: anything else leaves its block in place, so it must leave ours too. */
+const START_WORDS = new Set(['start', 'unstop']);
 const keyword = (text: string) => text.trim().toLowerCase().replace(/[.!?,]+$/, '');
 
 /**
  * Texts a lead sends back. STOP is honoured at once (do-not-contact, every
- * sequence stopped), START lifts it, and any other reply pauses automation so
- * a person takes over the conversation.
+ * sequence stopped), START or UNSTOP from an opted-out lead lifts it, and any
+ * other reply pauses automation so a person takes over the conversation.
  */
 @Injectable()
 export class InboundSmsService {
@@ -44,7 +45,7 @@ export class InboundSmsService {
     const lead = await this.prisma.lead.findFirst({
       where: { orgId, normalizedPhone: from },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, firstResponseAt: true },
+      select: { id: true, firstResponseAt: true, dncStatus: true },
     });
     if (!lead) {
       this.logger.warn(`Inbound SMS matches no lead in org ${orgId}`);
@@ -70,7 +71,8 @@ export class InboundSmsService {
 
     const word = keyword(text);
     if (STOP_WORDS.has(word)) return this.onOptOut(orgId, lead.id);
-    if (START_WORDS.has(word)) return this.onOptIn(lead.id);
+    // START lifts an opt-out; from a lead who never opted out it is just a reply ("Yes" to "Still looking?").
+    if (START_WORDS.has(word) && lead.dncStatus) return this.onOptIn(lead.id);
     return this.onHumanReply(orgId, lead.id, !lead.firstResponseAt);
   }
 

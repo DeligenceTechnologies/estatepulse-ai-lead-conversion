@@ -129,14 +129,31 @@ export class LeadScoringService {
       },
     });
 
-    const latest = await this.prisma.call.findFirst({ where: { leadId: call.leadId, orgId }, orderBy: { createdAt: 'desc' }, select: { id: true } });
-    if (latest && latest.id !== call.id) return qualification;
+    // Voicemail, a phone menu, the agent talking alone: nobody to score. The call counts as not answered and the lead stays where it was.
+    if (extraction.reached_person === false) {
+      this.logger.log(`call ${call.id} reached no one (${source}) — the lead is left as it was`);
+      return qualification;
+    }
 
     const lead = await this.prisma.lead.findFirst({ where: { id: call.leadId, orgId }, select: { status: true, dncStatus: true } });
     if (!lead) return qualification;
+    // Asked not to be contacted: honoured from any call and whatever the lead's status, like a STOP text.
+    if (extraction.do_not_contact && !lead.dncStatus) {
+      await this.engine.setStatus(orgId, call.leadId, LeadStatus.not_interested, 'Asked on the call not to be contacted again', { optOut: true });
+      return qualification;
+    }
+
+    const latest = await this.prisma.call.findFirst({ where: { leadId: call.leadId, orgId }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+    if (latest && latest.id !== call.id) return qualification;
+
     await this.prisma.lead.update({ where: { id: call.leadId }, data: { score: result.score, ...leadDetailsFrom(extraction) } });
+    const asked = extraction.appointment_requested || extraction.human_requested;
     if (SETTLED_STATUSES.includes(lead.status) || lead.dncStatus) {
       await this.prisma.lead.update({ where: { id: call.leadId }, data: { temperature: result.temperature } });
+    } else if (extraction.invalid_lead) {
+      await this.engine.endJourney(orgId, call.leadId, LeadStatus.invalid, 'Wrong number, or not a real enquiry (from the call)');
+    } else if (extraction.not_interested && !asked) {
+      await this.engine.endJourney(orgId, call.leadId, LeadStatus.not_interested, 'Said on the call they are not interested');
     } else {
       await this.engine.qualified(orgId, call.leadId, result.temperature, leadReason(qualification), {
         callbackRequested: Boolean(extraction.callback_requested),

@@ -75,3 +75,34 @@ describe('isCapacityError', () => {
     expect(isCapacityError('Telnyx POST /calls failed 422: invalid number')).toBe(false);
   });
 });
+
+describe('CallWorker: a call queued for an enrolment the lead has left (audit A4)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a strategy call is dropped once the lead has left the strategy (parked in follow-up, say)', async () => {
+    const { worker, job, voice } = setup({ lead: { phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false } });
+    await worker.process(job as any, 'tok');
+    expect(voice.placeCall).not.toHaveBeenCalled();
+  });
+
+  it('a strategy call to a lead still in the strategy is dialed', async () => {
+    const { worker, job, voice } = setup();
+    await worker.process(job as any, 'tok');
+    expect(voice.placeCall).toHaveBeenCalledOnce();
+  });
+
+  it('a sequence call is dropped once its enrolment has stopped (re-scored into another sequence, say), and dialed while it is live', async () => {
+    const lead = { phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false };
+    const stopped = setup({ lead });
+    (stopped.prisma as any).sequenceEnrollment = { findFirst: vi.fn().mockResolvedValue(null) };
+    const followupJob = { ...stopped.job, data: { orgId: ORG, leadId: LEAD, source: 'followup', sequenceId: 'seq-1', enrollmentId: 'enr-1' } };
+    await stopped.worker.process(followupJob as any, 'tok');
+    expect(stopped.voice.placeCall).not.toHaveBeenCalled();
+    expect((stopped.prisma as any).sequenceEnrollment.findFirst).toHaveBeenCalledWith({ where: { id: 'enr-1', leadId: LEAD, status: 'active' }, select: { id: true } });
+
+    const live = setup({ lead });
+    (live.prisma as any).sequenceEnrollment = { findFirst: vi.fn().mockResolvedValue({ id: 'enr-1' }) };
+    await live.worker.process({ ...live.job, data: followupJob.data } as any, 'tok');
+    expect(live.voice.placeCall).toHaveBeenCalledOnce();
+  });
+});

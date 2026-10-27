@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import {
   ArrowDown,
@@ -28,6 +28,13 @@ import {
   ENROLL_TRIGGERS,
   type EnrollTrigger,
 } from '../../utils/sequencesApi';
+import { ConditionSelect } from '../outreach/ConditionSelect';
+import { SafetyRulesList } from '../outreach/SafetyRulesList';
+import { onlyIfOfStep } from '../../utils/conditions';
+import { getStrategyEditor, type SafetyRule } from '../../utils/strategiesApi';
+
+/** Hot leads go to an agent, so a sequence on "Qualified as hot" never sends; new sequences cannot take it. */
+const HOT_NOTE = 'Hot leads go straight to an agent, so a sequence for this never sends anything.';
 
 /**
  * Author a nurture sequence.
@@ -100,9 +107,17 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
       messageTemplate: s.messageTemplate ?? '',
       voicePrompt: s.voicePrompt ?? '',
       maxAttempts: s.maxAttempts,
+      onlyIf: onlyIfOfStep(s),
     })) ?? [blankStep()],
   );
   const [saving, setSaving] = useState(false);
+  // Read once: the built-in rules (one list with the strategy's).
+  const [safetyRules, setSafetyRules] = useState<SafetyRule[]>([]);
+  useEffect(() => {
+    getStrategyEditor().then((p) => setSafetyRules(p.safetyRules ?? [])).catch(() => setSafetyRules([]));
+  }, []);
+  // A sequence that already carries "Qualified as hot" may keep it (and is warned); nothing new may take it.
+  const hadHot = !!sequence?.enrollTriggers.includes('qualified_hot');
 
   /**
    * Status is a toggle, but the column holds three values.
@@ -170,6 +185,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
         actionType: s.actionType,
         delayMinutes: s.delayMinutes,
         maxAttempts: s.maxAttempts ?? 1,
+        ...(s.onlyIf?.rules.length ? { onlyIf: s.onlyIf } : {}),
         // Send only the field the channel uses. The server nulls the other one
         // regardless; not sending it keeps the failing field unambiguous when
         // validation rejects an empty message.
@@ -498,8 +514,10 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                               <input
                                 type="checkbox"
                                 checked={on}
+                                disabled={t.value === 'qualified_hot' && !hadHot}
+                                title={t.value === 'qualified_hot' ? HOT_NOTE : undefined}
                                 onChange={() => toggle(t.value)}
-                                className="mt-0.5 w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer"
+                                className="mt-0.5 w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer disabled:cursor-not-allowed"
                               />
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-2 flex-wrap">
@@ -521,6 +539,9 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                                 <span className="block text-xs text-slate-500 mt-0.5 leading-normal">
                                   {t.hint}
                                 </span>
+                                {t.value === 'qualified_hot' && (
+                                  <span className="block text-xs text-amber-300 mt-0.5 leading-normal">{HOT_NOTE}</span>
+                                )}
                               </span>
                             </label>
                           );
@@ -642,6 +663,19 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+
+                  <div className="pl-7 space-y-1.5">
+                    <div className="flex items-start gap-2 flex-wrap">
+                      <span className="text-xs text-slate-500 py-1.5">send</span>
+                      <ConditionSelect
+                        value={step.onlyIf}
+                        onChange={(onlyIf) => patchStep(i, { onlyIf })}
+                        context="sequence"
+                        className={`${input} w-auto`}
+                      />
+                    </div>
+                    <SafetyRulesList rules={safetyRules} scope="sequence" />
                   </div>
 
                   {step.actionType === 'sms' ? (

@@ -63,9 +63,12 @@ export function releaseCapacity(p: { maxConcurrent: number; reserved: number; ac
  * How long a released lead holds a call slot before its first call is on
  * record: the strategy's first voice step plus a margin for the watcher's
  * poll. Zero when the strategy places no calls, so nothing waits on a slot.
+ * A two-step strategy's waits add up (step 1 may start late, step 2 waits after it).
  */
 // ponytail: only the first voice attempt is counted; later attempts (maxVoiceAttempts) wait in the call queue, whose worker enforces the limit. Count per-step if release pacing must account for them.
-export function awaitingWindowMs(steps: StrategyStep[]): number {
-  const voice = steps.filter((s) => s.channel === 'voice').map((s) => offsetMs(s.after));
+export function awaitingWindowMs(steps: StrategyStep[], afterPrevious = false): number {
+  let elapsed = 0;
+  const at = steps.map((s) => (afterPrevious ? (elapsed += offsetMs(s.after)) : offsetMs(s.after)));
+  const voice = steps.flatMap((s, i) => (s.channel === 'voice' ? [at[i]] : []));
   return voice.length ? Math.min(...voice) + 5 * 60_000 : 0;
 }

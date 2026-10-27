@@ -12,12 +12,16 @@ import {
   ShieldCheck,
   FileText,
   ChevronDown,
+  PauseCircle,
+  PlayCircle,
+  CalendarCheck,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
-import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import { enrollLead, getLeadFlow, markLeadBooked, setLeadAutomation, type LeadFlow, type LeadFlowStep } from '../../utils/assistantApi';
+import { confirmToast } from '../../lib/toast';
 import {
   getCall,
   listCalls,
@@ -64,6 +68,26 @@ const EmptyTab: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, tex
   <div className="py-12 text-center space-y-2">
     <div className="w-12 h-12 mx-auto rounded-xl bg-slate-800/70 text-slate-500 flex items-center justify-center">{icon}</div>
     <p className="text-sm text-slate-400">{text}</p>
+  </div>
+);
+
+/** The strategy's steps as chips: sent, failed, current, pending, or skipped with the reason in its label. */
+const FlowSteps: React.FC<{ steps: LeadFlowStep[] }> = ({ steps }) => (
+  <div className="flex flex-wrap items-center gap-1">
+    {steps.map((s) => {
+      const name = s.channel === 'voice' ? 'Call' : 'SMS';
+      const cls =
+        s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
+        : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
+        : s.state === 'current' ? 'bg-emerald-500 text-on-accent border-emerald-400 shadow shadow-emerald-950'
+        : s.state === 'skipped' ? 'bg-slate-900 text-slate-400 border-dashed border-slate-600'
+        : 'bg-slate-800 text-slate-500 border-slate-700';
+      return (
+        <span key={s.index} title={`Step ${s.index + 1}: ${name}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}>
+          {s.index + 1}·{s.outcome ?? name}
+        </span>
+      );
+    })}
   </div>
 );
 
@@ -194,6 +218,37 @@ export const LeadDetailModal: React.FC = () => {
     }
   };
 
+  // The two quick actions: switch the lead's automation off or on, and record a meeting set outside the app.
+  const [acting, setActing] = useState<'automation' | 'booked' | null>(null);
+  const toggleAutomation = async () => {
+    if (!selectedLeadId || !flow) return;
+    const pause = !flow.automationPaused;
+    setActing('automation');
+    try {
+      await setLeadAutomation(selectedLeadId, pause);
+      setFlow(await getLeadFlow(selectedLeadId));
+      toast.success(pause ? 'Automation paused. No AI calls or texts until you resume it.' : 'Automation resumed.');
+    } catch (e) {
+      toast.error(messageFor(e));
+    } finally {
+      setActing(null);
+    }
+  };
+  const markBooked = async () => {
+    if (!selectedLeadId) return;
+    if (!(await confirmToast('Mark this lead as booked? Every AI call and text to them stops.', 'Mark as booked'))) return;
+    setActing('booked');
+    try {
+      await markLeadBooked(selectedLeadId);
+      setFlow(await getLeadFlow(selectedLeadId));
+      toast.success('Marked as booked. Automation stopped.');
+    } catch (e) {
+      toast.error(messageFor(e));
+    } finally {
+      setActing(null);
+    }
+  };
+
   // findLead, not leads.find: a lead opened from the pipeline lives in Postgres,
   // not in the demo store.
   const lead = findLead(selectedLeadId);
@@ -303,6 +358,31 @@ export const LeadDetailModal: React.FC = () => {
               </button>
             )}
 
+            {isLive && flow && !flow.dncStatus && !(flow.automationPaused && flow.phase === 'not_started') && (
+              <button
+                onClick={() => void toggleAutomation()}
+                disabled={acting !== null}
+                title={flow.automationPaused ? 'Pick the strategy or sequence back up where it was' : 'Stop every automated call and text to this lead'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+              >
+                {flow.automationPaused ? <PlayCircle className="w-3.5 h-3.5 text-emerald-400" /> : <PauseCircle className="w-3.5 h-3.5 text-amber-400" />}
+                <span>{acting === 'automation' ? 'Saving…' : flow.automationPaused ? 'Resume automation' : 'Pause automation'}</span>
+              </button>
+            )}
+
+            {/* A booking wins from any status but invalid (a wrong number). */}
+            {isLive && flow && !['appointment_booked', 'invalid'].includes(flow.leadStatus) && (
+              <button
+                onClick={() => void markBooked()}
+                disabled={acting !== null}
+                title="A meeting was set outside the app: book the lead and stop automation"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+              >
+                <CalendarCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{acting === 'booked' ? 'Saving…' : 'Mark as booked'}</span>
+              </button>
+            )}
+
             {lead.temperature === 'hot' && (
               <button
                 onClick={() => setPreCallLeadId(lead.id)}
@@ -337,21 +417,7 @@ export const LeadDetailModal: React.FC = () => {
             {flow.phase === 'strategy' && flow.steps.length > 0 && (
               <>
                 <span className="text-slate-400">{flow.strategyName}</span>
-                <div className="flex flex-wrap items-center gap-1">
-                  {flow.steps.map((s) => {
-                    const name = s.channel === 'voice' ? 'Call' : 'SMS';
-                    const cls =
-                      s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
-                      : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
-                      : s.state === 'current' ? 'bg-emerald-500 text-on-accent border-emerald-400 shadow shadow-emerald-950'
-                      : 'bg-slate-800 text-slate-500 border-slate-700';
-                    return (
-                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}`} className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}>
-                        {s.index + 1}·{s.outcome ?? name}
-                      </span>
-                    );
-                  })}
-                </div>
+                <FlowSteps steps={flow.steps} />
                 {flow.currentStep ? (
                   <span className="text-emerald-300 font-medium">
                     Current: Step {flow.currentStep.index + 1} of {flow.stepsTotal} — {flow.currentStep.channel === 'voice' ? 'AI Call' : 'SMS'}
@@ -367,9 +433,12 @@ export const LeadDetailModal: React.FC = () => {
 
             {flow.phase === 'exited' && (
               <span className="text-rose-300 break-words" title={flow.reason ?? undefined}>
-                Left the strategy — not reached{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
+                Left the strategy{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
               </span>
             )}
+            {/* After the strategy, its skipped steps still say why they did not go. */}
+            {flow.phase !== 'strategy' && flow.steps.some((s) => s.state === 'skipped') && <FlowSteps steps={flow.steps} />}
+            {flow.automationPaused && !flow.dncStatus && <span className="text-amber-300 font-medium">Automation paused</span>}
             {flow.phase === 'not_started' && <span className="text-slate-500">Waiting to enter the strategy</span>}
           </div>
         )}

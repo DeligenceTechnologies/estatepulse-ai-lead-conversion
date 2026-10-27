@@ -9,6 +9,8 @@ import { apiFetch } from '../lib/api';
  */
 
 /** The two values sequence_steps_action_check allows. 'call' is not one. */
+import type { OnlyIf } from './conditions';
+
 export type ActionType = 'sms' | 'voice';
 
 /** followup_sequences_status_check. */
@@ -71,6 +73,9 @@ export const ENROLL_TRIGGERS: Array<{
     hint: 'Moved to follow-up for any other reason.' },
 ];
 
+/** Older single condition on a step, read as a rule set (onlyIfOfStep); never written again. */
+export type StepCondition = 'always' | 'call_not_answered' | 'not_reached';
+
 export interface SequenceStep {
   stepOrder: number;
   actionType: ActionType;
@@ -79,6 +84,10 @@ export interface SequenceStep {
   messageTemplate: string | null;
   voicePrompt: string | null;
   maxAttempts: number;
+  /** Absent on steps saved before conditions: always. */
+  condition?: StepCondition;
+  /** "Only if"; absent = always. */
+  onlyIf?: OnlyIf;
 }
 
 /** What the editor sends. `stepOrder` is absent: the server uses array order. */
@@ -88,6 +97,7 @@ export interface StepDraft {
   messageTemplate?: string | null;
   voicePrompt?: string | null;
   maxAttempts?: number;
+  onlyIf?: OnlyIf;
 }
 
 export interface Sequence {
@@ -104,6 +114,8 @@ export interface Sequence {
   stoppedCount: number;
   createdAt: string;
   steps: SequenceStep[];
+  /** Why part of this sequence never runs (e.g. "Qualified as hot"). */
+  warnings?: string[];
 }
 
 export interface Enrollment {

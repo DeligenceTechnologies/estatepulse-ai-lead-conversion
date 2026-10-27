@@ -20,7 +20,24 @@ interface AttachPlan {
 
 const PREPARED_TTL_MS = 5 * 60 * 1000;
 const RECORDING_LINK_REUSE_MS = 5 * 60 * 1000;
-const INVALID_NUMBER_CAUSES = new Set(['unallocated_number', 'invalid_number_format', 'number_changed']);
+/** SIP answers that mean the number does not exist: Not Found, Gone, Address Incomplete, Does Not Exist Anywhere. */
+const DEAD_NUMBER_SIP = new Set(['404', '410', '484', '604']);
+const MACHINE_RESULTS = new Set(['machine', 'silence', 'fax_detected']);
+
+/**
+ * Why a call ended, in Telnyx's hangup_cause words (call_rejected, normal_clearing, originator_cancel,
+ * timeout, time_limit, user_busy, not_found, no_answer, unspecified), with the SIP code folded in
+ * when the cause is unspecified: a dead number is 'not_found', busy 'user_busy', declined 'call_rejected'.
+ */
+export function endReasonOf(cause: string | undefined, sip: string | undefined): string {
+  const c = (cause ?? '').trim() || 'unspecified';
+  const s = (sip ?? '').trim();
+  if (c === 'not_found' || DEAD_NUMBER_SIP.has(s)) return 'not_found';
+  if (c !== 'unspecified') return c.slice(0, 40);
+  if (s === '486' || s === '600') return 'user_busy';
+  if (s === '603') return 'call_rejected';
+  return c;
+}
 
 /**
  * What happened on the phone and over SMS, recorded as calls and messages,
@@ -117,7 +134,7 @@ export class ActivityService {
     const bookkeeping = (async () => {
       const call = await this.callByProvider(ccid);
       if (!call) return null;
-      await this.prisma.call.update({ where: { id: call.id }, data: { status: CallStatus.in_progress } });
+      await this.prisma.call.update({ where: { id: call.id }, data: { status: CallStatus.in_progress, answeredAt: new Date() } });
       await this.slots.extend(call.orgId, ccid).catch(() => undefined);
       await this.markContacted(call.leadId, true);
       return call;
@@ -137,7 +154,7 @@ export class ActivityService {
     await bookkeeping;
   }
 
-  async onCallHangup(ccid: string, payload: { hangup_cause?: string } = {}): Promise<void> {
+  async onCallHangup(ccid: string, payload: { hangup_cause?: string; sip_hangup_cause?: string } = {}): Promise<void> {
     const waiting = this.awaitingLead.get(ccid);
     if (waiting) {
       clearTimeout(waiting.timer);
@@ -147,22 +164,31 @@ export class ActivityService {
     if (!call) return;
     await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
     const answered = call.status === CallStatus.in_progress;
+    const endReason = endReasonOf(payload.hangup_cause, payload.sip_hangup_cause);
     await this.prisma.call.update({
       where: { id: call.id },
       data: {
         status: answered ? CallStatus.completed : CallStatus.no_answer,
         endedAt: new Date(),
         durationSeconds: call.startedAt ? Math.round((Date.now() - call.startedAt.getTime()) / 1000) : null,
+        endReason,
       },
     });
     const cause = String(payload.hangup_cause ?? '');
-    if (INVALID_NUMBER_CAUSES.has(cause)) {
-      await this.markInvalid(call.leadId, `Invalid number (${cause})`);
+    if (endReason === 'not_found') {
+      await this.markInvalid(call.leadId, `Invalid number (${cause}${payload.sip_hangup_cause ? `, SIP ${payload.sip_hangup_cause}` : ''})`);
       return;
     }
     if (!answered) {
       await this.noteAttemptFailure(call.leadId, cause ? `No answer on the last call (${cause})` : 'No answer on the last call');
     }
+  }
+
+  /** Answering machine detection's verdict (premium or standard): a machine is voicemail; not sure is taken as a person. */
+  async onMachineDetection(ccid: string, payload: { result?: string } = {}): Promise<void> {
+    const call = await this.callByProvider(ccid);
+    if (!call || !payload.result) return;
+    await this.prisma.call.update({ where: { id: call.id }, data: { answeredBy: MACHINE_RESULTS.has(payload.result) ? 'machine' : 'human' } });
   }
 
   async onRecordingSaved(ccid: string, payload: any): Promise<void> {

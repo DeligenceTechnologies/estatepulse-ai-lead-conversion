@@ -1,11 +1,12 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { StepGuardModule } from '@/outreach/step-guard.module';
 import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { FollowupController } from './followup.controller';
 import { FollowupRunner } from './followup.runner';
 import { FollowupService } from './followup.service';
 
 @Module({
-  imports: [forwardRef(() => TelnyxModule)],
+  imports: [forwardRef(() => TelnyxModule), StepGuardModule],
   controllers: [FollowupController],
   providers: [FollowupService, FollowupRunner],
   exports: [FollowupService],

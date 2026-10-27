@@ -22,6 +22,7 @@ model Organization {
   crmSyncRuns         CrmSyncRun[]
   auditLogs           AuditLog[]
   outreachBatches     OutreachBatch[]
+  outreachStepRuns    OutreachStepRun[]
 
   @@map("organizations")
 }

@@ -64,7 +64,8 @@ describe('releaseCapacity', () => {
 
 describe('awaitingWindowMs', () => {
   it('is the first voice step plus a margin, and zero when the strategy never calls', () => {
-    expect(awaitingWindowMs(defaultStrategy().steps)).toBe(6 * 60_000);
+    // The default strategy calls at once (2026-10-26; it called a minute in before), so the window is the 5-minute margin alone.
+    expect(awaitingWindowMs(defaultStrategy().steps)).toBe(5 * 60_000);
     expect(awaitingWindowMs(defaultStrategy().steps.filter((s) => s.channel === 'sms'))).toBe(0);
   });
 });
