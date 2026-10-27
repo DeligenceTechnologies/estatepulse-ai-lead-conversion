@@ -11,12 +11,14 @@ const input = 'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-wh
  * card) an outreach batch leaves free for calls outside it. Only with outreach
  * scheduling on (the card hides itself otherwise): nothing else reads this.
  */
-export const CallPacingCard: React.FC = () => {
+export const CallPacingCard: React.FC<{ limit?: number }> = ({ limit: saved }) => {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [limit, setLimit] = useState(5);
+  const [loaded, setLimit] = useState(5);
+  /** A limit just saved on the Call Capacity card beats the one read on load. */
+  const limit = saved ?? loaded;
   const [reserved, setReserved] = useState(1);
 
   useEffect(() => {

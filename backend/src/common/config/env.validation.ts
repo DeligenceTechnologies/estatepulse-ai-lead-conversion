@@ -113,6 +113,8 @@ export const envValidationSchema = Joi.object({
     // Calls and texts real people: off unless explicitly switched on.
     STRATEGY_ENGINE: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     ENGINE_POLL_MS: Joi.number().integer().positive().default(15_000),
+    // On an AI call the lead speaks first: the assistant starts on their first words, or after this much silence. 0 starts it at once.
+    AI_OPENING_WAIT_MS: Joi.number().integer().min(0).default(5_000),
     STRATEGY_STALE_MS: Joi.number().integer().positive().default(86_400_000),
     FOLLOWUP_POLL_MS: Joi.number().integer().positive().default(60_000),
     FOLLOWUP_BATCH_SIZE: Joi.number().integer().positive().default(20),
