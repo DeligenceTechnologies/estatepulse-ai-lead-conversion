@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
-import { telnyx } from './telnyx-api';
+import { isTelnyxKeyRejected, telnyx } from './telnyx-api';
 
 /**
  * How long a dial rings before Telnyx gives up. Its default of 30s is too short
@@ -27,17 +27,24 @@ export class VoiceService {
     if (!c.fromNumber) throw new Error('No from number configured');
     const connectionId = await this.creds.ensureConnectionId(orgId, c);
     if (!connectionId) throw new Error('No Call Control application found on the Telnyx account for outbound calls');
-    const res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
-      method: 'POST',
-      body: JSON.stringify({
-        connection_id: connectionId,
-        to,
-        from: c.fromNumber,
-        timeout_secs: DIAL_TIMEOUT_SECS,
-        client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
-        ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
-      }),
-    });
+    let res: { data?: { call_control_id?: string } };
+    try {
+      res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
+        method: 'POST',
+        body: JSON.stringify({
+          connection_id: connectionId,
+          to,
+          from: c.fromNumber,
+          timeout_secs: DIAL_TIMEOUT_SECS,
+          client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
+          ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
+        }),
+      });
+    } catch (error) {
+      if (isTelnyxKeyRejected(error)) await this.creds.keyRejected(orgId).catch(() => undefined);
+      throw error;
+    }
+    await this.creds.keyAccepted(orgId, c).catch(() => undefined);
     return res.data ?? {};
   }
 }

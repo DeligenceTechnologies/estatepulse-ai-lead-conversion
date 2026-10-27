@@ -33,7 +33,7 @@ export class UserController {
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.USER_UPDATE)
   update(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserDto: UpdateUserDto, @CurrentAuth() auth: AuthContext) {
-    return this.userService.update(id, auth.organizationId, updateUserDto);
+    return this.userService.update(id, auth.organizationId, updateUserDto, auth);
   }
 
   @Delete(':id')

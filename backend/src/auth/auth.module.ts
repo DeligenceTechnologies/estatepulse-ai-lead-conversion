@@ -4,6 +4,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthTokenService } from './auth-token.service';
+import { EmailVerificationService } from './email-verification.service';
+import { PasswordResetService } from './password-reset.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from '@/role/guards/permissions.guard';
 
@@ -13,6 +15,8 @@ import { PermissionsGuard } from '@/role/guards/permissions.guard';
   providers: [
     AuthService,
     AuthTokenService,
+    PasswordResetService,
+    EmailVerificationService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],

@@ -46,6 +46,7 @@ interface FieldProps {
   placeholder?: string;
   /** Shown under the input in place of the hint. */
   error?: string | null;
+  autoFocus?: boolean;
 }
 
 export const Field: React.FC<FieldProps> = ({
@@ -96,6 +97,7 @@ export const PasswordField: React.FC<Omit<FieldProps, 'type'>> = ({
   minLength,
   maxLength,
   error,
+  autoFocus,
 }) => {
   const [visible, setVisible] = useState(false);
   return (
@@ -111,6 +113,7 @@ export const PasswordField: React.FC<Omit<FieldProps, 'type'>> = ({
           required={required}
           minLength={minLength}
           maxLength={maxLength}
+          autoFocus={autoFocus}
           aria-invalid={error ? true : undefined}
           onChange={(e) => onChange(e.target.value)}
           className={`${inputClass} pr-10 ${error ? 'border-red-800' : ''}`}

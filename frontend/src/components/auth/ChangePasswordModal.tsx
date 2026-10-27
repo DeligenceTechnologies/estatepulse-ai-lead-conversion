@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, KeyRound, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
@@ -8,6 +10,10 @@ import { MIN_PASSWORD_LENGTH, PasswordField } from './AuthLayout';
  * Changing the password signs the user out everywhere, this browser included
  * (the server revokes every session). The modal says so up front, and on
  * success AuthContext takes the user to the login page.
+ *
+ * Rendered into <body>: it is opened from the navbar, whose backdrop-filter
+ * makes it the containing block for `position: fixed`, which would squeeze the
+ * overlay into the 56px header instead of covering the screen.
  */
 export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { changePassword } = useAuth();
@@ -26,6 +32,12 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
   }, [onClose, saving]);
 
   const mismatch = confirmPassword.length > 0 && confirmPassword !== newPassword;
+
+  // A stale error stops describing the form as soon as the user edits it.
+  const edit = (set: (value: string) => void) => (value: string) => {
+    set(value);
+    setError(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -52,9 +64,9 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="change-password-title"
@@ -73,6 +85,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             disabled={saving}
             aria-label="Close"
@@ -94,17 +107,23 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
             name="oldPassword"
             value={oldPassword}
             autoComplete="current-password"
-            onChange={setOldPassword}
+            onChange={edit(setOldPassword)}
             disabled={saving}
             required
             maxLength={128}
+            autoFocus
           />
+          <div className="-mt-2 text-right">
+            <Link to="/forgot-password" className="text-xs text-emerald-400 hover:text-emerald-300 font-medium">
+              Forgot your current password?
+            </Link>
+          </div>
           <PasswordField
             label="New password"
             name="newPassword"
             value={newPassword}
             autoComplete="new-password"
-            onChange={setNewPassword}
+            onChange={edit(setNewPassword)}
             disabled={saving}
             required
             minLength={MIN_PASSWORD_LENGTH}
@@ -116,7 +135,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
             name="confirmPassword"
             value={confirmPassword}
             autoComplete="new-password"
-            onChange={setConfirmPassword}
+            onChange={edit(setConfirmPassword)}
             disabled={saving}
             required
             maxLength={128}
@@ -142,6 +161,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

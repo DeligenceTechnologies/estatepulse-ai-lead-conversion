@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import {
   ConnectionMethod,
   ConsentStatus,
@@ -87,6 +88,7 @@ export class CrmConnectionsService {
     private readonly prisma: PrismaService,
     private readonly secrets: SecretBoxService,
     private readonly audit: AuditService,
+    private readonly connectionAlerts: ConnectionAlertService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -501,11 +503,20 @@ export class CrmConnectionsService {
   /** active -> invalid, audited once. A connection that is already parked stays as it is. */
   private async markInvalid(adapter: CrmAdapter, row: { id: string; orgId: string }, code: string): Promise<void> {
     this.accessTokens.delete(row.id);
+    const brokenAt = new Date();
     const changed = await this.prisma.integration.updateMany({
       where: { id: row.id, orgId: row.orgId, status: IntegrationStatus.active },
-      data: { status: IntegrationStatus.invalid, lastErrorAt: new Date(), lastErrorCode: code },
+      data: { status: IntegrationStatus.invalid, lastErrorAt: brokenAt, lastErrorCode: code },
     });
     if (changed.count === 0) return;
+    this.connectionAlerts.connectionBroken({
+      orgId: row.orgId,
+      connectionId: row.id,
+      providerLabel: adapter.label.displayName,
+      impact: `Leads are not syncing to ${adapter.label.displayName}.`,
+      reconnectPath: '/integrations',
+      brokenAt,
+    });
     this.logger.warn(`${adapter.provider} credential ${row.id} needs reauthorization (${code})`);
     await this.audit.record({
       orgId: row.orgId,
