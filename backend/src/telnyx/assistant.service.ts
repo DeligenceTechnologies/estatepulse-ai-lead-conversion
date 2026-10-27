@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { DEFAULT_VOICEMAIL_MESSAGE, StrategyStoreService, VOICEMAIL_MESSAGE_MAX, voicemailOf, type VoicemailConfig } from './strategy-store.service';
+import { DEFAULT_VOICEMAIL_MESSAGE, StrategyStoreService, VOICEMAIL_MESSAGE_MAX, voicemailSettingOf, type VoicemailConfig } from './strategy-store.service';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
 
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
@@ -104,12 +104,18 @@ export class AssistantService {
   ) {}
 
   /**
-   * "Detect voicemail" and what follows it are the office's own settings (voicemailOf), read at
-   * dial time. They are not the assistant's: Telnyx's assistant-level detection stays off, so one
-   * mechanism acts on a machine.
+   * "Detect voicemail" as the office has it: the setting it saved (detection on the call itself,
+   * voicemailOf, read at dial time) or, until it saves one, the assistant's own Telnyx-side
+   * detection, which keeps working exactly as it did. The screen shows whichever stands.
    */
-  private async voicemailFields(orgId: string) {
-    const vm = voicemailOf(await this.strategies.getStrategy(orgId).catch(() => null));
+  private async effectiveVoicemail(orgId: string, raw: any): Promise<VoicemailConfig> {
+    const saved = voicemailSettingOf(await this.strategies.getStrategy(orgId).catch(() => null));
+    if (saved) return saved;
+    const vm = raw?.telephony_settings?.voicemail_detection;
+    return { detect: !!vm, action: vm?.action === 'leave_message' ? 'leave_message' : 'hangup', message: DEFAULT_VOICEMAIL_MESSAGE };
+  }
+
+  private static voicemailFields(vm: VoicemailConfig) {
     return { voicemail_detection: vm.detect, voicemail_action: vm.action, voicemail_message: vm.message };
   }
 
@@ -159,12 +165,26 @@ export class AssistantService {
   async getAssistant(orgId: string) {
     const c = await this.creds.getCreds(orgId);
     if (!c || !c.apiKey || !c.assistantId) return null;
-    return { ...shape(await this.fetchRaw(orgId)), record_calls: await this.recordsCalls(orgId), ...(await this.voicemailFields(orgId)) };
+    const raw = await this.fetchRaw(orgId);
+    return { ...shape(raw), record_calls: await this.recordsCalls(orgId), ...AssistantService.voicemailFields(await this.effectiveVoicemail(orgId, raw)) };
   }
 
   async updateAssistant(orgId: string, patch: any) {
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
+    // Only the owner's own change to "Detect voicemail" moves it from the assistant to the call
+    // (voicemail saved with the strategy, the assistant's own detection switched off). An unrelated
+    // save, or the screen sending back what it showed, leaves both exactly as they are.
+    const voicemailKeys = ['voicemail_detection', 'voicemail_action', 'voicemail_message'];
+    const current = await this.effectiveVoicemail(orgId, cur);
+    const wanted: VoicemailConfig = voicemailKeys.some((k) => patch[k] != null)
+      ? {
+          detect: patch.voicemail_detection == null ? current.detect : !!patch.voicemail_detection,
+          action: patch.voicemail_action == null ? current.action : patch.voicemail_action === 'leave_message' ? 'leave_message' : 'hangup',
+          message: String(patch.voicemail_message ?? current.message).trim().slice(0, VOICEMAIL_MESSAGE_MAX) || DEFAULT_VOICEMAIL_MESSAGE,
+        }
+      : current;
+    const voicemailChanged = wanted.detect !== current.detect || wanted.action !== current.action || wanted.message !== current.message;
     const body: any = {};
     if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
     if (patch.greeting != null) body.greeting = patch.greeting;
@@ -250,12 +270,8 @@ export class AssistantService {
       'disable_dtmf',
       'noise_suppression',
       'fallback_destination',
-      'voicemail_detection',
-      'voicemail_action',
-      'voicemail_message',
     ];
-    const voicemailKeys = ['voicemail_detection', 'voicemail_action', 'voicemail_message'];
-    if (telephonyKeys.some((k) => patch[k] != null)) {
+    if (telephonyKeys.some((k) => patch[k] != null) || voicemailChanged) {
       const ts: any = { ...(cur.telephony_settings ?? {}) };
       if (patch.max_call_secs != null) ts.time_limit_secs = Number(patch.max_call_secs);
       if (patch.user_idle_timeout_secs != null) ts.user_idle_timeout_secs = patch.user_idle_timeout_secs ? Number(patch.user_idle_timeout_secs) : null;
@@ -264,8 +280,8 @@ export class AssistantService {
       if (patch.noise_suppression != null) ts.noise_suppression = patch.noise_suppression;
       if (patch.fallback_destination != null) ts.fallback_destination = patch.fallback_destination || null;
       if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: false };
-      // Voicemail is handled on the call itself (voicemailFields), never by the assistant as well.
-      if (voicemailKeys.some((k) => patch[k] != null)) ts.voicemail_detection = null;
+      // From the owner's change on, voicemail is handled on the call itself (effectiveVoicemail), never by the assistant as well.
+      if (voicemailChanged) ts.voicemail_detection = null;
       body.telephony_settings = ts;
     }
 
@@ -275,17 +291,11 @@ export class AssistantService {
     if (patch.record_calls != null) {
       await this.prisma.organizationSetting.updateMany({ where: { orgId }, data: { callRecordingEnabled: !!patch.record_calls } });
     }
-    if (voicemailKeys.some((k) => patch[k] != null)) {
+    if (voicemailChanged) {
       const strategy = await this.strategies.getStrategy(orgId);
-      const current = voicemailOf(strategy);
-      const voicemail: VoicemailConfig = {
-        detect: patch.voicemail_detection == null ? current.detect : !!patch.voicemail_detection,
-        action: patch.voicemail_action == null ? current.action : patch.voicemail_action === 'leave_message' ? 'leave_message' : 'hangup',
-        message: String(patch.voicemail_message ?? current.message).trim().slice(0, VOICEMAIL_MESSAGE_MAX) || DEFAULT_VOICEMAIL_MESSAGE,
-      };
-      await this.strategies.saveStrategy(orgId, { guardrails: { ...strategy.guardrails, voicemail } });
+      await this.strategies.saveStrategy(orgId, { guardrails: { ...strategy.guardrails, voicemail: wanted } });
     }
-    return { ...shape(j.data ?? j), record_calls: await this.recordsCalls(orgId), ...(await this.voicemailFields(orgId)) };
+    return { ...shape(j.data ?? j), record_calls: await this.recordsCalls(orgId), ...AssistantService.voicemailFields(wanted) };
   }
 
   async setTools(orgId: string, owned: any[]) {

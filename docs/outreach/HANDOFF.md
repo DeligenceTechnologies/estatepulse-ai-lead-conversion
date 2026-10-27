@@ -19,10 +19,10 @@ This file is enough to carry on without the chat that produced the work. File an
 | | Lead quick actions: Pause/Resume automation and Mark as booked. |
 | | **Review fixes (this commit):** H1 resume from the step record + stable call keys; M1 one-way call row moves; M2 12-hour cap on step 2 + long timers in pieces; M3 retry with backoff, give-up with a flag, watcher resumes every poll; M4 queue-read timeout; L1 lead scope on the quick actions; L2 lead re-checked right before a send; L3 honest label; L4 step-1 start kept; L5 fired timers dropped. |
 | | **Rollout flag** `CONDITIONAL_OUTREACH_ENABLED` (default off): see §3.0. |
-| | **"Detect voicemail"** in AI Settings now drives call-level answering machine detection (off for every office until turned on), with "Hang up" or "Leave a short voicemail": see §3.7. |
+| | **"Detect voicemail"** in AI Settings drives call-level answering machine detection once an owner changes it (until then an office's assistant-level detection stands, as before), with "Hang up" or "Leave a short voicemail": see §3.7. |
 | Migrations | `20261026000001_outreach_step_runs` and `20261026000002_call_end_reason_amd`. Both additive, both applied to the dev DB `estate_manish`. **No new migration in this commit**: the voicemail settings live in the strategy's guardrails JSON (§4). |
 | Feature flag | `CONDITIONAL_OUTREACH_ENABLED` (backend `.env`). Off: the strategy, the engine, the sequence runner and the strategy screen behave as before this feature. The audit bug fixes stay on either way. |
-| Tests at commit | Backend: tsc clean on tracked files, unit 295/295. Integration: `conditional-outreach.int.ts` 36/36, `outreach-schedule.int.ts` 21/21. |
+| Tests at commit | Backend: tsc clean on tracked files, unit 301/301. Integration: `conditional-outreach.int.ts` 36/36, `outreach-schedule.int.ts` 21/21. |
 | | Frontend: unit 130/135 (the 5 failures are the stray `LeadsView.spec.tsx`), tsc 2 errors in strays, build ok. |
 | UI verification | Not done in a browser. The strategy screen has a jsdom component test (`StrategyEditor.spec.tsx`); the rest was checked by tests and the owner's own screenshots. |
 
@@ -169,8 +169,8 @@ Provider-neutral: reads the `calls` table, the step runs, the calendar meetings 
 - Covered by `activity-calls.spec.ts` and, against the real DB with the real webhook controller, by the "end to end" and "M1" tests in `conditional-outreach.int.ts`.
 
 **"Detect voicemail"** (AI Settings; `voicemailOf` in `strategy-store.service.ts`, stored in `guardrails.voicemail`)
-- **Off for every office** until the owner turns it on; nothing in the DB was switched on. Existing orgs whose Telnyx *assistant-level* `voicemail_detection` was on will see the toggle **off** (the screen now reads this setting, not the assistant's), and the next save of AI Settings sets the assistant-level detection to `null`: one mechanism acts on a machine, the call-level one below.
-- Off: `VoiceService.placeCall` sends no `answering_machine_detection`; a voicemail is caught only by the analysis (`reached_person: false`), as before.
+- **Nothing changes for any office until its owner changes the setting.** An office that never saved it keeps its assistant's own Telnyx-side `voicemail_detection` exactly as it was, and the screen shows that value (`AssistantService.effectiveVoicemail`: the saved setting, else the assistant's). An unrelated AI Settings save, or the screen sending back what it showed, touches neither. Only when the owner changes the toggle, the action or the message is the setting saved with the strategy and the assistant-level detection set to `null`, so one mechanism acts on a machine: the call-level one below. (`assistant-voicemail.spec.ts`.)
+- Not saved, or saved off: `VoiceService.placeCall` sends no `answering_machine_detection`; a voicemail is caught by the assistant's own detection (if it has it) or by the analysis (`reached_person: false`), as before.
 - On: every AI call is dialed with `answering_machine_detection: 'premium'` (a per-call charge, see §6). On `call.machine.premium.detection.ended`:
   - `human_residence` / `human_business` / **`not_sure` → `answered_by: human`**, the assistant carries on.
   - `machine` / `silence` / `fax_detected` → `answered_by: machine`; the assistant is silenced (dropped while still waiting for the lead's first words, `ai_assistant_stop` once started), then
@@ -208,7 +208,7 @@ Provider-neutral: reads the `calls` table, the step runs, the calendar meetings 
 **Migrations** (unchanged): `20261026000001_outreach_step_runs` (`calls.answered_at`, table `outreach_step_runs` unique on `(lead_id, run_key)`), `20261026000002_call_end_reason_amd` (`calls.end_reason`, `calls.answered_by`, `outreach_step_runs.detail`).
 
 **Strategy JSON** (`org_settings.outreach_strategy`): `{ name, guardrails, steps: [...], timing?: 'after_previous' }`.
-- `guardrails.voicemail?: { detect: boolean, action: 'hangup' | 'leave_message', message: string }` — the AI Settings voicemail setting (§3.7). Absent = detection off. `ponytail:` kept in the guardrails JSON to avoid a migration while the dev server held the Prisma DLL; move to columns if more call-level settings accrue.
+- `guardrails.voicemail?: { detect: boolean, action: 'hangup' | 'leave_message', message: string }` — the AI Settings voicemail setting (§3.7). Absent = never saved: no call-level detection, the assistant's own stands (`voicemailSettingOf` → null; `voicemailOf` → off). `ponytail:` kept in the guardrails JSON to avoid a migration while the dev server held the Prisma DLL; move to columns if more call-level settings accrue.
 - Older rows may carry `condition` on steps and `guardrails.stopOn`; both are read tolerantly, nothing reads `stopOn`.
 
 **Call dedupe key** (BullMQ job id): `strategy:<leadId>:<firstContactAt ms>:<stepNumber>` (strategy), `followup:<enrolment id>:<step>` (sequences).
@@ -233,7 +233,8 @@ Provider-neutral: reads the `calls` table, the step runs, the calendar meetings 
 - H1, M1, M2, M3, M4, L1, L2, L4, L5 fixed as in §3.
 - L3: label, not behaviour ("The lead replied by SMS (until you resume automation)"). Simpler and honest: a resume is the owner's own choice to send again.
 - Flag `CONDITIONAL_OUTREACH_ENABLED`, default off; the audit bug fixes stay on.
-- "Detect voicemail": the existing AI Settings toggle drives call-level premium AMD; off for every office; "Hang up" or "Leave a short voicemail" with an editable message; `not_sure` = human. Premium implemented; basic vs premium comparison left to the owner (§6).
+- "Detect voicemail": the existing AI Settings toggle drives call-level premium AMD; "Hang up" or "Leave a short voicemail" with an editable message; `not_sure` = human. Premium implemented; basic vs premium comparison left to the owner (§6).
+- **Round 4b:** an office whose assistant-level detection was already on must not change silently: that value is the starting value (shown on the screen), an unrelated save never touches it, and only the owner's own change of the toggle/action/message moves voicemail to the call.
 - Backlog L6–L14 recorded in §6, not fixed.
 - One commit, not pushed.
 
@@ -294,7 +295,7 @@ The code uses `premium`; switching to a basic mode is one string in `voice.servi
 - [ ] `npx prisma migrate deploy` (two additive migrations; nothing new in this commit).
 - [ ] Stop the backend, run `npx prisma generate`, then start it.
 - [ ] `CONDITIONAL_OUTREACH_ENABLED` stays **unset/0** for the first deploy: nothing changes for any org. Set it to `1` and restart to switch the engine, the runner, the strategy editor and the sequence editor to the new behaviour, for every org at once.
-- [ ] "Detect voicemail" is **off for every org** after deploy (the screen reads the new setting). Tell owners who want it to turn it on in AI Settings; it adds $0.0065 per call (premium) on their Telnyx account. Their assistant-level detection is switched off on their next AI Settings save.
+- [ ] "Detect voicemail": no org changes on deploy. An org with its assistant-level detection on keeps it and sees it on; one without sees it off. Call-level premium AMD ($0.0065 per call on their Telnyx account) starts only once an owner changes the setting in AI Settings, and that is when their assistant-level detection is switched off.
 - [ ] Set `CALENDAR_WEBHOOK_BASE_URL` in the production backend `.env` (bookings found only by the 5-minute poll without it).
 - [ ] Watch the leads list for `STEP_FAILED_REVIEW` flags in the first days: they mean a step kept throwing (database / Redis).
 - [ ] Tell owners: an older strategy keeps running as it is until they open and save it in the new two-step form (flag on).
@@ -305,15 +306,15 @@ The code uses `premium`; switching to a basic mode is one string in `voice.servi
 
 **Baseline vs current**
 
-| Suite | master aaf9e84 (before the feature) | a237ab4 (feature, reviewed) | This commit (review fixes) |
-|---|---|---|---|
-| Backend unit | 25/25 | 258/258 | **295/295** |
-| `conditional-outreach.int.ts` | — | 30/30 (one run hit a network blip on 2 tests; both passed on rerun) | **36/36** |
-| `outreach-schedule.int.ts` | 21/21 | 21/21 | **21/21** |
-| Backend tsc (tracked files) | clean | clean | **clean** |
-| Frontend unit | 105/110 (5 strays) | 125/130 (5 strays) | **130/135** (5 strays) |
-| Frontend tsc | 2 errors (strays) | 2 errors (strays) | 2 errors (strays) |
-| Frontend build | ok | ok | **ok** |
+| Suite | master aaf9e84 (before the feature) | a237ab4 (feature, reviewed) | 1033ac2 (review fixes) | This commit (voicemail: assistant-level stands) |
+|---|---|---|---|---|
+| Backend unit | 25/25 | 258/258 | 295/295 | **301/301** |
+| `conditional-outreach.int.ts` | — | 30/30 (one run hit a network blip on 2 tests; both passed on rerun) | 36/36 | **36/36** |
+| `outreach-schedule.int.ts` | 21/21 | 21/21 | 21/21 | **21/21** |
+| Backend tsc (tracked files) | clean | clean | clean | **clean** |
+| Frontend unit | 105/110 (5 strays) | 125/130 (5 strays) | 130/135 (5 strays) | **130/135** (5 strays) |
+| Frontend tsc | 2 errors (strays) | 2 errors (strays) | 2 errors (strays) | 2 errors (strays) |
+| Frontend build | ok | ok | ok | **ok** |
 
 The strays are untracked files listed in `.git/info/exclude`: `backend/src/modules/*.test.ts` (91 tsc errors) and `frontend/src/components/**/{LeadsView,LeadDetailModal,…}.spec.tsx` (the 5 frontend failures and the 2 tsc errors). They come from another lineage; leave them.
 
@@ -335,7 +336,7 @@ The strays are untracked files listed in `.git/info/exclude`: `backend/src/modul
 | **Recovery and resume** | **`telnyx/engine-recovery.spec.ts`**: retry with backoff, give-up with the flag, a failed enrol stays claimed, the lead re-checked before a send (reply / booking / opt-out), resume from the step record (pause/resume and restart with a queued call), stable call key, a 30-day timer |
 | **Watcher, quick actions** | **`telnyx/lead-watcher.service.spec.ts`**, **`telnyx/lead-automation.controller.spec.ts`** (the real `PermissionsGuard` on both handlers, the lead scope) |
 | Audit fixes | `telnyx/lead-scoring-outcomes.spec.ts`, `telnyx/lead-scoring-reached.spec.ts`, `telnyx/engine-booking.spec.ts`, `calendar/booking/in-call-booking-booked.spec.ts`, `telnyx/inbound-sms-keywords.spec.ts`, `telnyx/voice-amd.spec.ts` (**rewritten**), `telnyx/calls/call.worker.spec.ts`, `followup/followup-hot-trigger.spec.ts`, `telnyx/lead-insights-provision.spec.ts` |
-| **Voicemail detection** | **`telnyx/activity-calls.spec.ts` "answering machine detection"** (not sure = human; hang up; leave message with variables; beep before verdict; no beep), `voice-amd.spec.ts`, the int test |
+| **Voicemail detection** | **`telnyx/activity-calls.spec.ts` "answering machine detection"** (not sure = human; hang up; leave message with variables; beep before verdict; no beep), `voice-amd.spec.ts`, **`telnyx/assistant-voicemail.spec.ts`** (assistant-level value is the starting value; an unrelated save or the form resent changes nothing; only the owner's change saves the setting and switches the assistant's detection off), the int test |
 | Real DB | `outreach/conditional-outreach.int.ts` (**+ "review fixes" describe: H1 pause/resume and restart with a queued call, end to end through `TelnyxWebhookController` with a repeated hang-up, M1 race, L1 agent scope, voicemail timing**) |
 | Frontend | `utils/strategiesApi.spec.ts` (**+ step-2 cap**), `utils/conditions.spec.ts`, **`components/views/StrategyEditor.spec.tsx`** |
 

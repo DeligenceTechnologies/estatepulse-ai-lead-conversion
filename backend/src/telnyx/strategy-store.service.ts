@@ -53,14 +53,20 @@ export interface VoicemailConfig {
 export const DEFAULT_VOICEMAIL_MESSAGE = "Hi {{firstName}}, this is {{brokerage}} calling about your home search. We'll send you a quick text.";
 export const VOICEMAIL_MESSAGE_MAX = 300;
 
-/** The voicemail settings a strategy carries; detection off for an office that never set them. */
-export function voicemailOf(strategy: Pick<Strategy, 'guardrails'> | null | undefined): VoicemailConfig {
-  const v = (strategy?.guardrails?.voicemail ?? {}) as Partial<VoicemailConfig>;
+/** The voicemail setting an office saved, or null when it never saved one (its assistant's own Telnyx-side detection then stands, as before). */
+export function voicemailSettingOf(strategy: Pick<Strategy, 'guardrails'> | null | undefined): VoicemailConfig | null {
+  const v = strategy?.guardrails?.voicemail as Partial<VoicemailConfig> | undefined;
+  if (!v || typeof v !== 'object') return null;
   return {
     detect: v.detect === true,
     action: v.action === 'leave_message' ? 'leave_message' : 'hangup',
     message: (typeof v.message === 'string' ? v.message : '').trim().slice(0, VOICEMAIL_MESSAGE_MAX) || DEFAULT_VOICEMAIL_MESSAGE,
   };
+}
+
+/** The call-level voicemail handling: the saved setting, or off (no detection on the call) for an office that never saved one. */
+export function voicemailOf(strategy: Pick<Strategy, 'guardrails'> | null | undefined): VoicemailConfig {
+  return voicemailSettingOf(strategy) ?? { detect: false, action: 'hangup', message: DEFAULT_VOICEMAIL_MESSAGE };
 }
 
 export interface Strategy {
