@@ -48,7 +48,7 @@ function setup(steps: StrategyStep[]) {
     isScoredCall: vi.fn().mockResolvedValue(true),
   };
   const followup = { stopForLead: vi.fn(), sequenceForTrigger: vi.fn(), enroll: vi.fn(), liveEnrollment: vi.fn() };
-  const engine = new EngineService(prisma as any, strategies as any, smsSvc as any, calls as any, { exitStrategy: vi.fn(), recordSms: vi.fn() } as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, strategies as any, smsSvc as any, calls as any, { exitStrategy: vi.fn(), recordSms: vi.fn() } as any, followup as any, guard as any, { get: () => true } as any);
   const runs = () => guard.record.mock.calls.map(([r]) => `${r.stepNumber}:${r.outcome}${r.reason ? `:${r.reason}` : ''}`);
   return { engine, smsSvc, calls, guard, runs };
 }

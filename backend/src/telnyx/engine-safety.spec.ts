@@ -49,7 +49,7 @@ function setup(opts: { steps?: StrategyStep[]; maxVoiceAttempts?: number } = {})
     flagReview: vi.fn(),
     clearReview: vi.fn(),
   };
-  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any, { get: () => true } as any);
   const runs = () => guard.record.mock.calls.map(([r]) => `${r.stepNumber}:${r.outcome}${r.reason ? `:${r.reason}` : ''}`);
   return { engine, prisma, sms, calls, activity, followup, guard, runs };
 }
@@ -66,7 +66,7 @@ describe('EngineService safety rules', () => {
     await engine.enroll(ORG, LEAD);
     await vi.advanceTimersByTimeAsync(5 * MIN);
     expect(runs()).toEqual(['1:sent', '2:queued', '3:sent']);
-    expect(guard.record).toHaveBeenCalledWith(expect.objectContaining({ runKey: `strategy:${NOW.getTime()}:2`, callKey: `strategy:${LEAD}:${NOW.getTime()}:1` }));
+    expect(guard.record).toHaveBeenCalledWith(expect.objectContaining({ runKey: `strategy:${NOW.getTime()}:2`, callKey: `strategy:${LEAD}:${NOW.getTime()}:2` }));
   });
 
   it('holds the step after a call while the call is live, then sends it once the call ends unanswered', async () => {

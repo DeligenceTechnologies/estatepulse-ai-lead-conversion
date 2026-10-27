@@ -43,6 +43,8 @@ import {
   AssistantTool,
   NoiseSuppression,
   VoicemailAction,
+  DEFAULT_VOICEMAIL_MESSAGE,
+  VOICEMAIL_MESSAGE_MAX,
   toolLabel,
   setTools as saveTools,
   detachTool,
@@ -128,6 +130,7 @@ export const AISettingsView: React.FC = () => {
   const [fallbackDestination, setFallbackDestination] = useState('');
   const [voicemailDetection, setVoicemailDetection] = useState(false);
   const [voicemailAction, setVoicemailAction] = useState<VoicemailAction>('hangup');
+  const [voicemailMessage, setVoicemailMessage] = useState(DEFAULT_VOICEMAIL_MESSAGE);
   const [disableDtmf, setDisableDtmf] = useState(false);
   const [disableGreetingInterruption, setDisableGreetingInterruption] = useState(false);
   const [interruptThreshold, setInterruptThreshold] = useState<number | null>(null);
@@ -179,6 +182,7 @@ export const AISettingsView: React.FC = () => {
         setFallbackDestination(a.fallback_destination);
         setVoicemailDetection(a.voicemail_detection);
         setVoicemailAction(a.voicemail_action);
+        setVoicemailMessage(a.voicemail_message || DEFAULT_VOICEMAIL_MESSAGE);
         setDisableDtmf(a.disable_dtmf);
         setDisableGreetingInterruption(a.disable_greeting_interruption);
         setInterruptThreshold(a.interrupt_prediction_threshold);
@@ -243,6 +247,7 @@ export const AISettingsView: React.FC = () => {
         fallback_destination: fallbackDestination,
         voicemail_detection: voicemailDetection,
         voicemail_action: voicemailAction,
+        voicemail_message: voicemailMessage,
         disable_dtmf: disableDtmf,
         disable_greeting_interruption: disableGreetingInterruption,
         interrupt_prediction_threshold: interruptThreshold,
@@ -869,17 +874,39 @@ export const AISettingsView: React.FC = () => {
               ))}
             </div>
 
+            <p className="md:col-span-2 text-xs text-slate-500 -mt-1">
+              Detect voicemail: detects voicemail so the call ends quickly and the follow-up SMS goes right away. This adds a per-call charge on your
+              Telnyx account.
+            </p>
+
             {voicemailDetection && (
-              <div className="md:col-span-2">
-                <label className="block text-slate-300 font-semibold mb-1">When it reaches voicemail</label>
-                <select
-                  value={voicemailAction}
-                  onChange={(e) => setVoicemailAction(e.target.value as VoicemailAction)}
-                  className="w-full md:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="hangup">Hang up without leaving a message</option>
-                  <option value="leave_message">Leave a message</option>
-                </select>
+              <div className="md:col-span-2 space-y-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">When voicemail is detected</label>
+                  <select
+                    value={voicemailAction}
+                    onChange={(e) => setVoicemailAction(e.target.value as VoicemailAction)}
+                    className="w-full md:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="hangup">Hang up</option>
+                    <option value="leave_message">Leave a short voicemail</option>
+                  </select>
+                </div>
+                {voicemailAction === 'leave_message' && (
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Voicemail message</label>
+                    <textarea
+                      value={voicemailMessage}
+                      maxLength={VOICEMAIL_MESSAGE_MAX}
+                      onChange={(e) => setVoicemailMessage(e.target.value)}
+                      rows={2}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500 resize-y"
+                    />
+                    <span className="text-xs text-slate-500 mt-1 block">
+                      Played after the beep, then the call hangs up. Use {'{{firstName}}'} and {'{{brokerage}}'}. {voicemailMessage.length}/{VOICEMAIL_MESSAGE_MAX}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>

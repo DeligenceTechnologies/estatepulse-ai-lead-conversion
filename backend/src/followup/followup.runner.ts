@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { nextAllowedAt } from '@/common/utils/quiet-hours';
-import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { ActivityService } from '@/telnyx/activity.service';
 import { SmsService } from '@/telnyx/sms.service';
 import { CallQueue } from '@/telnyx/calls/call.queue';
@@ -24,18 +23,29 @@ interface ClaimedEnrollment {
   enrolled_at: Date;
 }
 
+interface LeadRow {
+  firstName: string | null;
+  phone: string | null;
+  status: LeadStatus;
+  dncStatus: boolean;
+  automationPaused: boolean;
+}
+
 const MAX_ATTEMPTS = 6;
 
 /**
  * Sends the sequence step each due enrolment is on. Claims with FOR UPDATE
  * SKIP LOCKED so several instances share the queue, re-checks the lead before
  * every send, defers into the next allowed hour, holds while a call is live or
- * waiting on its score, and retries with backoff.
+ * waiting on its score, and retries with backoff. With conditional outreach
+ * off, the step guard, the conditions and the step record are not used, as
+ * before them.
  */
 @Injectable()
 export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FollowupRunner.name);
   private readonly instanceId = `followup-${randomUUID()}`;
+  private readonly conditional: boolean;
   private timer?: NodeJS.Timeout;
   private running = false;
   private stopped = false;
@@ -49,7 +59,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
     private readonly guard: StepGuard,
-  ) {}
+  ) {
+    this.conditional = config.get('CONDITIONAL_OUTREACH_ENABLED', { infer: true }) === true;
+  }
 
   onModuleInit(): void {
     if (!this.config.get('STRATEGY_ENGINE', { infer: true })) return;
@@ -111,21 +123,13 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
 
   private async execute(row: ClaimedEnrollment): Promise<void> {
     try {
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: row.lead_id },
-        select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
-      });
-      if (!lead) return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted'));
-      // The safety rules on the lead's own state: an opt-out or an outcome stops the enrolment, a pause holds it.
-      const stop = leadStop(lead);
-      if (stop === 'opted_out') return void (await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out'));
-      if (stop === 'automation_paused') return void (await this.pause(row.id));
-      if (stop) return void (await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`));
+      const lead = await this.liveLead(row);
+      if (!lead) return;
 
       const sequence = await this.prisma.sequence.findUnique({ where: { id: row.sequence_id }, select: { steps: true } });
       const steps = sequence ? stepsOf(sequence) : [];
       const step = steps[row.current_step - 1];
-      if (!step) return void (await this.afterLastStep(row));
+      if (!step) return void (await (this.conditional ? this.afterLastStep(row) : this.closeOut(row)));
 
       const { timeZone, quiet } = await this.followup.guardrailsFor(row.organization_id);
       const now = new Date();
@@ -134,24 +138,53 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         await this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: allowed, lockedBy: null, lockedAt: null } });
         return;
       }
-      const hold = await this.guard.check({ orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, endOnAnswer: false });
-      if (hold.kind === 'booked') {
-        await this.guard.markBooked(row.organization_id, row.lead_id);
-        await this.guard.record({ ...this.runOf(row, step, 'skipped'), reason: 'booked' });
-        return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_appointment_booked'));
+      let unmet: Unmet | null = null;
+      if (this.conditional) {
+        const hold = await this.guard.check({ orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, endOnAnswer: false });
+        if (hold.kind === 'booked') {
+          await this.guard.markBooked(row.organization_id, row.lead_id);
+          await this.record({ ...this.runOf(row, step, 'skipped'), reason: 'booked' });
+          return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_appointment_booked'));
+        }
+        if (hold.kind === 'wait') return void (await this.holdUntil(row, hold.until));
+        // "The last call" is the lead's last call, even one from before this enrolment (the strategy's).
+        unmet =
+          hold.kind === 'stuck'
+            ? { reason: 'call_still_queued' }
+            : await this.guard.conditionUnmet(onlyIfOf(step), { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, callsSince: null });
       }
-      if (hold.kind === 'wait') return void (await this.holdUntil(row, hold.until));
-      // "The last call" is the lead's last call, even one from before this enrolment (the strategy's).
-      const unmet: Unmet | null =
-        hold.kind === 'stuck'
-          ? { reason: 'call_still_queued' }
-          : await this.guard.conditionUnmet(onlyIfOf(step), { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at, callsSince: null });
-      if (unmet) await this.guard.record({ ...this.runOf(row, step, 'skipped'), reason: unmet.reason, detail: unmet.detail });
-      else await this.fire(row, step, lead);
-      await this.advance(row, steps, !unmet && step.actionType === 'voice');
+      if (unmet) await this.record({ ...this.runOf(row, step, 'skipped'), reason: unmet.reason, detail: unmet.detail });
+      else {
+        // Looked at once more right before sending: a reply or a booking seconds ago still holds.
+        const fresh = await this.liveLead(row);
+        if (!fresh) return;
+        await this.fire(row, step, fresh);
+      }
+      await this.advance(row, steps, this.conditional && !unmet && step.actionType === 'voice');
     } catch (error) {
       await this.onFailure(row, (error as Error).message);
     }
+  }
+
+  /**
+   * The lead as it is now, or null once its own state has stopped or paused the enrolment (which
+   * this records): a deleted lead, an opt-out or an outcome stops it, a pause holds it.
+   */
+  private async liveLead(row: ClaimedEnrollment): Promise<LeadRow | null> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: row.lead_id },
+      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
+    });
+    if (!lead) {
+      await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
+      return null;
+    }
+    const stop = leadStop(lead);
+    if (!stop) return lead;
+    if (stop === 'opted_out') await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
+    else if (stop === 'automation_paused') await this.pause(row.id);
+    else await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`);
+    return null;
   }
 
   private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<void> {
@@ -164,10 +197,10 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       try {
         const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
         await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
-        await this.guard.record(this.runOf(row, step, 'sent'));
+        await this.record(this.runOf(row, step, 'sent'));
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
-        await this.guard.record(this.runOf(row, step, 'failed'));
+        await this.record(this.runOf(row, step, 'failed'));
       }
       return;
     }
@@ -177,11 +210,16 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id, enrollmentId: row.id },
         { dedupeKey },
       );
-      await this.guard.record({ ...this.runOf(row, step, 'queued'), callKey: dedupeKey });
+      await this.record({ ...this.runOf(row, step, 'queued'), callKey: dedupeKey });
     } catch (error) {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
-      await this.guard.record(this.runOf(row, step, 'failed'));
+      await this.record(this.runOf(row, step, 'failed'));
     }
+  }
+
+  /** The step record is kept only with conditional outreach. */
+  private record(run: StepRun): Promise<void> {
+    return this.conditional ? this.guard.record(run) : Promise.resolve();
   }
 
   private runOf(row: ClaimedEnrollment, step: SequenceStep, outcome: StepRun['outcome']): StepRun {
@@ -242,9 +280,15 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     await this.closeOut(row);
   }
 
-  /** The sequence ran out. A lead it never reached (no answered call, no reply) is closed out as not interested. */
+  /**
+   * The sequence ran out. With conditional outreach a lead it reached (an answered call, a reply)
+   * is left in follow-up; one it never reached — every lead, before conditional outreach — is
+   * closed out as not interested.
+   */
   private async closeOut(row: ClaimedEnrollment): Promise<void> {
-    const reached = await this.guard.conditionUnmet('not_reached', { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at });
+    const reached = this.conditional
+      ? await this.guard.conditionUnmet('not_reached', { orgId: row.organization_id, leadId: row.lead_id, since: row.enrolled_at })
+      : null;
     await this.prisma.$transaction(async (tx) => {
       await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
       if (reached) return;

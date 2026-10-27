@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, MessageSquare, Phone, Save, ArrowUpDown, Info } from 'lucide-react';
+import { Loader2, AlertTriangle, MessageSquare, Phone, Save, ArrowUpDown, Info, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { ConditionSelect } from '../outreach/ConditionSelect';
 import { SafetyRulesList } from '../outreach/SafetyRulesList';
@@ -8,7 +8,9 @@ import {
   StrategyStep,
   callFirst,
   channelLabel,
+  emptyStep,
   getStrategyEditor,
+  saveStrategy,
   saveStrategySteps,
   stepSummary,
   stepsError,
@@ -41,12 +43,17 @@ const WaitInput: React.FC<{ after: StrategyStep['after']; disabled?: boolean; on
   </>
 );
 
-// The outreach strategy for new leads: one AI call and one SMS, in the order the owner picks.
+/**
+ * The outreach strategy for new leads. With conditional outreach on (the server sends `editor`):
+ * one AI call and one SMS, in the order the owner picks. Without it: the older free-form list.
+ */
 export const StrategyEditor: React.FC<Props> = ({ smsUnavailableReason }) => {
   const [steps, setSteps] = useState<StrategyStep[]>([]);
   // The saved strategy's step count while the editor shows its two-step form instead.
   const [olderCount, setOlderCount] = useState<number | null>(null);
   const [safetyRules, setSafetyRules] = useState<SafetyRule[]>([]);
+  // The older editor's steps, when the server has conditional outreach off.
+  const [legacySteps, setLegacySteps] = useState<StrategyStep[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +64,10 @@ export const StrategyEditor: React.FC<Props> = ({ smsUnavailableReason }) => {
   useEffect(() => {
     getStrategyEditor()
       .then(({ strategy, editor, safetyRules: rules }) => {
+        if (!editor) {
+          setLegacySteps(strategy.steps || []);
+          return;
+        }
         setSteps(shown(editor.steps));
         setOlderCount(editor.converted ? strategy.steps.length : null);
         setSafetyRules(rules ?? []);
@@ -81,7 +92,7 @@ export const StrategyEditor: React.FC<Props> = ({ smsUnavailableReason }) => {
     setError(null);
     try {
       const { editor } = await saveStrategySteps(steps);
-      setSteps(shown(editor.steps));
+      setSteps(shown(editor?.steps ?? steps));
       setOlderCount(null);
       toast.success('Strategy saved.');
     } catch (e: any) {
@@ -105,6 +116,7 @@ export const StrategyEditor: React.FC<Props> = ({ smsUnavailableReason }) => {
       </div>
     );
   }
+  if (legacySteps) return <LegacyStrategyEditor initial={legacySteps} />;
 
   const card = (step: StrategyStep, i: number) => {
     const off = step.channel === 'sms' && !!smsUnavailableReason;
@@ -206,6 +218,122 @@ export const StrategyEditor: React.FC<Props> = ({ smsUnavailableReason }) => {
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           {saving ? 'Saving…' : 'Save Strategy'}
         </button>
+      </div>
+    </div>
+  );
+};
+
+/** The editor from before conditional outreach: any number of SMS and call steps, each timed from when the lead comes in. */
+const LegacyStrategyEditor: React.FC<{ initial: StrategyStep[] }> = ({ initial }) => {
+  const [steps, setSteps] = useState<StrategyStep[]>(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const setStep = (i: number, patch: Partial<StrategyStep>) =>
+    setSteps((ss) => ss.map((s, k) => (k === i ? { ...s, ...patch } : s)));
+  const move = (i: number, dir: number) =>
+    setSteps((ss) => {
+      const j = i + dir;
+      if (j < 0 || j >= ss.length) return ss;
+      const copy = ss.slice();
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+      return copy;
+    });
+  const addStep = (channel: 'sms' | 'voice') => {
+    setError(null);
+    setSteps((ss) => [...ss, { ...emptyStep(), channel, action: channel === 'voice' ? 'ai_call' : 'send_sms' }]);
+  };
+  const removeStep = (i: number) => setSteps((ss) => ss.filter((_, k) => k !== i));
+
+  const save = async () => {
+    if (steps.length === 0) {
+      setError('At least one call or SMS is required.');
+      return;
+    }
+    if (steps.some((s) => s.channel === 'sms' && !(s.message || '').trim())) {
+      setError('Every SMS step needs a message.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const s = await saveStrategy({ steps });
+      setSteps(s.steps || []);
+      toast.success('Strategy saved.');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 pt-1">
+      {error && (
+        <div className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-900/40 rounded-lg px-3 py-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" /> {error}
+        </div>
+      )}
+      {steps.length === 0 && <p className="text-xs text-slate-500">No steps yet — add at least one call or SMS below.</p>}
+
+      {steps.map((step, i) => (
+        <div key={step.id} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-slate-500 font-mono text-2xs w-5">{i + 1}</span>
+
+            <select
+              value={step.channel}
+              onChange={(e) => setStep(i, { channel: e.target.value as 'sms' | 'voice', action: e.target.value === 'voice' ? 'ai_call' : 'send_sms' })}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-emerald-500"
+            >
+              <option value="sms">💬 SMS</option>
+              <option value="voice">📞 AI Voice Call</option>
+            </select>
+
+            <span className="text-slate-400 text-xs">wait</span>
+            <WaitInput after={step.after} onChange={(after) => setStep(i, { after })} />
+
+            <div className="ml-auto flex items-center gap-1">
+              <button type="button" onClick={() => move(i, -1)} className="text-slate-500 hover:text-slate-200 p-1"><ArrowUp className="w-3.5 h-3.5" /></button>
+              <button type="button" onClick={() => move(i, 1)} className="text-slate-500 hover:text-slate-200 p-1"><ArrowDown className="w-3.5 h-3.5" /></button>
+              <button type="button" onClick={() => removeStep(i)} className="text-rose-400 hover:text-rose-300 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          </div>
+
+          {step.channel === 'sms' ? (
+            <textarea
+              value={step.message || ''}
+              onChange={(e) => setStep(i, { message: e.target.value })}
+              rows={2}
+              placeholder="Message text… use {{firstName}} and {{brokerage}}"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
+            />
+          ) : (
+            <p className="text-xs text-slate-500 flex items-center gap-1.5 pl-7">
+              <Phone className="w-3 h-3" /> AI voice agent calls the lead and qualifies them.
+            </p>
+          )}
+        </div>
+      ))}
+
+      <div className="flex items-center gap-2 pt-1">
+        <button type="button" onClick={() => addStep('sms')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">
+          <MessageSquare className="w-3.5 h-3.5" /> Add SMS
+        </button>
+        <button type="button" onClick={() => addStep('voice')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">
+          <Phone className="w-3.5 h-3.5" /> Add Call
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {saving ? 'Saving…' : 'Save Strategy'}
+          </button>
+        </div>
       </div>
     </div>
   );

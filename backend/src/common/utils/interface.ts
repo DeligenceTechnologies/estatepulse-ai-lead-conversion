@@ -54,6 +54,7 @@ export interface IntegrationEnv {
   FOLLOWUP_STUCK_AFTER_MS: number;
   OUTREACH_SCHEDULING_ENABLED: boolean;
   OUTREACH_POLL_MS: number;
+  CONDITIONAL_OUTREACH_ENABLED: boolean;
   GOOGLE_SHEETS_ENABLED: boolean;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

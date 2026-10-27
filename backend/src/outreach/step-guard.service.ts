@@ -27,6 +27,8 @@ export const QUEUED_CALL_MAX_WAIT_MS = 24 * 60 * 60_000;
 export const RECHECK_MS = 60_000;
 /** A queued call's row can be written a moment before its step run is. */
 export const CALL_ROW_LEEWAY_MS = 30_000;
+/** How long a look at the call queue may take; past it the job is taken as still waiting, like an unreadable queue. */
+export const QUEUE_READ_TIMEOUT_MS = 5_000;
 
 export const SCORE_MISSING_REVIEW = 'The call was answered, but no score came back within 15 minutes. Open the call to see how it went.';
 export const CALLBACK_UNHANDLED_REVIEW = 'Asked for a callback, but no active sequence handles "Follow-up: Callback requested". Call them back.';
@@ -57,6 +59,14 @@ export interface StepRun {
   callKey?: string | null;
 }
 
+/** A step run on record, as a restart reads it back. */
+export interface RecordedRun {
+  stepNumber: number;
+  channel: string;
+  outcome: string;
+  createdAt: Date;
+}
+
 export interface Unmet {
   reason: SkipReason;
   detail?: string;
@@ -81,6 +91,9 @@ const qualificationOf = (call: Pick<Call, 'extractedIntel'>) =>
 
 export const isScored = (call: Pick<Call, 'extractedIntel'>): boolean => qualificationOf(call) !== null;
 
+/** A pick-up recorded after the hang-up (events out of order) is no pick-up. */
+const pickedUp = (call: CallRow): boolean => !!call.answeredAt && (!call.endedAt || call.answeredAt.getTime() <= call.endedAt.getTime());
+
 /**
  * What a call amounts to, from its row alone, whichever provider placed it. Answered means a
  * person was reached. The call's analysis decides that when it has: a voicemail, a phone menu or
@@ -104,7 +117,7 @@ export function callResult(call: CallRow, now = Date.now()): CallResult {
       // Answering machine detection heard a machine: voicemail, decided now rather than after the analysis.
       if (call.answeredBy === 'machine') return 'not_answered';
       // Only a call someone picked up (answered_at) waits for its analysis; a row from before the column is judged by its time.
-      if (!isScored(call) && call.answeredAt && now - (call.endedAt ?? call.createdAt).getTime() < SCORE_WAIT_MS) return 'awaiting_analysis';
+      if (!isScored(call) && pickedUp(call) && now - (call.endedAt ?? call.createdAt).getTime() < SCORE_WAIT_MS) return 'awaiting_analysis';
       return talkedLongEnough(call) ? 'answered' : 'not_answered';
     }
     case CallStatus.in_progress:
@@ -141,7 +154,7 @@ export function callOutcomeOf(call: CallRow | null, now = Date.now()): CallOutco
 function talkedLongEnough(call: CallRow): boolean {
   // Rows from before answered_at existed only have the time from dialing, ring included.
   const talked =
-    call.answeredAt && call.endedAt ? (call.endedAt.getTime() - call.answeredAt.getTime()) / 1000 : (call.durationSeconds ?? 0);
+    call.answeredAt && call.endedAt ? Math.max(0, (call.endedAt.getTime() - call.answeredAt.getTime()) / 1000) : (call.durationSeconds ?? 0);
   return talked >= MIN_ANSWERED_SECONDS;
 }
 
@@ -232,14 +245,17 @@ export class StepGuard {
     return facts;
   }
 
-  /** When this strategy run last ran or skipped a step: a two-step strategy's next wait counts from it. */
-  async lastRunAt(leadId: string, runKeyPrefix: string): Promise<Date | null> {
-    const run = await this.prisma.outreachStepRun.findFirst({
+  /**
+   * This strategy run's step record, oldest first: what went, was queued or was skipped. A restart
+   * (or a resume) reads it rather than the calls on record, because a call still in the queue has
+   * no row yet and would be queued a second time.
+   */
+  stepRuns(leadId: string, runKeyPrefix: string): Promise<RecordedRun[]> {
+    return this.prisma.outreachStepRun.findMany({
       where: { leadId, runKey: { startsWith: runKeyPrefix } },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
+      orderBy: { createdAt: 'asc' },
+      select: { stepNumber: true, channel: true, outcome: true, createdAt: true },
     });
-    return run?.createdAt ?? null;
   }
 
   async isScoredCall(orgId: string, callId: string): Promise<boolean> {
@@ -309,10 +325,19 @@ export class StepGuard {
     });
   }
 
-  /** The call queued under this key has not been dialed or dropped yet. */
+  /** The call queued under this key has not been dialed or dropped yet. A look that outlasts QUEUE_READ_TIMEOUT_MS throws, like an unreadable queue. */
   private async isPending(callKey: string): Promise<boolean> {
-    const job = await this.callQueue.getJob(callJobId(callKey));
-    return job ? PENDING_JOB_STATES.has(await job.getState()) : false;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('call queue read timed out')), QUEUE_READ_TIMEOUT_MS);
+      timer.unref();
+    });
+    try {
+      const job = await Promise.race([this.callQueue.getJob(callJobId(callKey)), timeout]);
+      return job ? PENDING_JOB_STATES.has(await Promise.race([job.getState(), timeout])) : false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -336,4 +361,3 @@ export class StepGuard {
     return 'none';
   }
 }
-

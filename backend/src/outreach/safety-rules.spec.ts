@@ -41,7 +41,7 @@ async function sends(lead: Record<string, unknown>, hold: Record<string, unknown
     isScoredCall: vi.fn(),
   };
   const followup = { stopForLead: vi.fn(), sequenceForTrigger: vi.fn(), enroll: vi.fn() };
-  const engine = new EngineService(prisma as any, strategies as any, sms as any, { enqueue: vi.fn() } as any, { exitStrategy: vi.fn(), recordSms: vi.fn() } as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, strategies as any, sms as any, { enqueue: vi.fn() } as any, { exitStrategy: vi.fn(), recordSms: vi.fn() } as any, followup as any, guard as any, { get: () => true } as any);
   await engine.enroll(ORG, LEAD);
   await vi.advanceTimersByTimeAsync(1_000);
   engine.onModuleDestroy();

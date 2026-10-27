@@ -40,13 +40,13 @@ function setup(steps: StrategyStep[] = callThenSms) {
   const guard = {
     check: vi.fn().mockResolvedValue({ kind: 'go' }),
     conditionUnmet: vi.fn().mockResolvedValue(null),
-    lastRunAt: vi.fn().mockResolvedValue(null),
+    stepRuns: vi.fn().mockResolvedValue([]),
     lastCallEndedAt: vi.fn().mockResolvedValue(null),
     record: vi.fn(),
     flagReview: vi.fn(),
     clearReview: vi.fn(),
   };
-  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any, { get: () => true } as any);
   const runs = () => guard.record.mock.calls.map(([r]) => `${r.stepNumber}:${r.outcome}${r.reason ? `:${r.reason}` : ''}`);
   return { engine, prisma, sms, calls, guard, runs };
 }
@@ -131,10 +131,9 @@ describe('EngineService two-step strategy', () => {
     const { engine, prisma, sms, guard } = setup();
     const contacted = new Date(NOW.getTime() - 10 * MIN);
     prisma.lead.findFirst.mockResolvedValue({ firstContactAt: contacted, status: 'contacting', dncStatus: false, automationPaused: false });
-    prisma.call.count.mockResolvedValue(1);
-    guard.lastRunAt.mockResolvedValue(new Date(NOW.getTime() - 2 * MIN));
+    guard.stepRuns.mockResolvedValue([{ stepNumber: 1, channel: 'voice', outcome: 'queued', createdAt: new Date(NOW.getTime() - 2 * MIN) }]);
     expect(await engine.resume(ORG, LEAD)).toBe(true);
-    expect(guard.lastRunAt).toHaveBeenCalledWith(LEAD, `strategy:${contacted.getTime()}:`);
+    expect(guard.stepRuns).toHaveBeenCalledWith(LEAD, `strategy:${contacted.getTime()}:`);
     await vi.advanceTimersByTimeAsync(3 * MIN - 1);
     expect(sms.sendSms).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);

@@ -29,6 +29,8 @@ describe('stepsError', () => {
     expect(stepsError([{ ...call, after: { value: 13, unit: 'hours' } }, sms])).toBe('Step 1 can start at most 12 hours after the lead comes in.');
     expect(stepsError([call, { ...sms, message: '  ' }])).toBe('The SMS step needs a message.');
     expect(stepsError([call, { ...sms, after: { value: -1, unit: 'minutes' } }])).toBe('Step 2 needs a wait of zero or more.');
+    expect(stepsError([call, { ...sms, after: { value: 12, unit: 'hours' } }])).toBeNull();
+    expect(stepsError([call, { ...sms, after: { value: 30, unit: 'days' } }])).toBe('Step 2 can wait at most 12 hours after step 1.');
   });
 });
 

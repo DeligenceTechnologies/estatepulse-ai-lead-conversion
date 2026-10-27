@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callJobId } from '@/queue/queue.constants';
-import { QUEUE_STUCK_REVIEW, SCORE_MISSING_REVIEW, StepGuard, callOutcomeOf, callResult } from './step-guard.service';
+import { QUEUE_READ_TIMEOUT_MS, QUEUE_STUCK_REVIEW, SCORE_MISSING_REVIEW, StepGuard, callOutcomeOf, callResult } from './step-guard.service';
 
 const ORG = 'org-1';
 const LEAD = 'lead-1';
@@ -274,5 +274,39 @@ describe('callOutcomeOf: the last call in the owner\'s terms', () => {
     ['a call still awaiting its analysis', pickedUp(2, 45), 'pending'],
   ])('%s → %s', (_label, row, expected) => {
     expect(callOutcomeOf(row as any, NOW)).toBe(expected);
+  });
+});
+
+describe('StepGuard reads the call queue with a timeout', () => {
+  beforeEach(() => {
+    // The describes above fake only Date and never restore; a second useFakeTimers would keep that config, so restore first.
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('a look at the queue that never answers (Redis hanging) counts as the job still waiting, after QUEUE_READ_TIMEOUT_MS', async () => {
+    const { guard, queue } = setup({ queued: [{ callKey: 'k', createdAt: ago(2 * MIN) }] });
+    queue.getJob.mockReturnValue(new Promise(() => undefined));
+    const pending = guard.check({ orgId: ORG, leadId: LEAD, since: ago(30 * MIN), endOnAnswer: true });
+    // The timeout timer is set once the meetings and calls have been read: let those settle (setImmediate is real), then run it down.
+    for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(QUEUE_READ_TIMEOUT_MS);
+    expect(await pending).toEqual({ kind: 'wait', until: NOW + MIN, reason: 'call_queued' });
+  });
+});
+
+describe('StepGuard.stepRuns', () => {
+  it('reads this run\'s record oldest first, by its key prefix', async () => {
+    const { guard, prisma } = setup();
+    const rows = [{ stepNumber: 1, channel: 'voice', outcome: 'queued', createdAt: ago(MIN) }];
+    prisma.outreachStepRun.findMany.mockResolvedValue(rows);
+    expect(await guard.stepRuns(LEAD, 'strategy:123:')).toEqual(rows);
+    expect(prisma.outreachStepRun.findMany).toHaveBeenCalledWith({
+      where: { leadId: LEAD, runKey: { startsWith: 'strategy:123:' } },
+      orderBy: { createdAt: 'asc' },
+      select: { stepNumber: true, channel: true, outcome: true, createdAt: true },
+    });
   });
 });

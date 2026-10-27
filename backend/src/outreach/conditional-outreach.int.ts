@@ -13,6 +13,8 @@ import { EngineService } from '@/telnyx/engine.service';
 import { InboundSmsService } from '@/telnyx/inbound-sms.service';
 import { LeadAutomationController } from '@/telnyx/lead-automation.controller';
 import { StrategyStoreService, toTwoStep, type StrategyStep } from '@/telnyx/strategy-store.service';
+import { TelnyxWebhookController } from '@/telnyx/telnyx-webhook.controller';
+import { PERMISSIONS } from '@/role/permissions';
 import { StepGuard } from './step-guard.service';
 
 /**
@@ -26,7 +28,9 @@ import { StepGuard } from './step-guard.service';
 
 const prisma = new PrismaService({ get: () => undefined } as unknown as ConfigService);
 const audit = new AuditService(prisma);
-const strategies = new StrategyStoreService(prisma);
+/** Conditional outreach on, as this suite is about it. */
+const flagOn = { get: () => true } as never;
+const strategies = new StrategyStoreService(prisma, flagOn);
 const followup = new FollowupService(prisma, strategies);
 
 const texts: { orgId: string; to: string; text: string }[] = [];
@@ -48,11 +52,17 @@ const waitingJobs = new Set<string>();
 const callQueue = { getJob: async (id: string) => (waitingJobs.has(id) ? { getState: async () => 'delayed' } : null) };
 
 const guard = new StepGuard(prisma, callQueue as never);
-const activity = new ActivityService(prisma, {} as never, {} as never, {} as never, { extend: async () => undefined, release: async () => undefined } as never, { get: () => 0 } as never);
-const engine = new EngineService(prisma, strategies, sms as never, calls as never, activity, followup, guard);
-const runnerEnv = { get: (k: string) => ({ FOLLOWUP_BATCH_SIZE: 20, FOLLOWUP_STUCK_AFTER_MS: 600_000, STRATEGY_ENGINE: false })[k] };
+/** No Telnyx account on file: webhooks need no signature and nothing is ever attached to a call. */
+const noCreds = { getCreds: async () => null } as never;
+const activity = new ActivityService(prisma, noCreds, {} as never, {} as never, { extend: async () => undefined, release: async () => undefined } as never, { get: () => 0 } as never);
+const engine = new EngineService(prisma, strategies, sms as never, calls as never, activity, followup, guard, flagOn);
+const runnerEnv = { get: (k: string) => ({ FOLLOWUP_BATCH_SIZE: 20, FOLLOWUP_STUCK_AFTER_MS: 600_000, STRATEGY_ENGINE: false, CONDITIONAL_OUTREACH_ENABLED: true })[k] };
 const runner = new FollowupRunner(prisma, runnerEnv as never, followup, sms as never, calls as never, activity, guard);
-const automation = new LeadAutomationController(engine, audit);
+const automation = new LeadAutomationController(engine, audit, prisma);
+/** Telnyx's voice webhooks, delivered as the controller sees them (no account on file, so unsigned). */
+const webhook = new TelnyxWebhookController(activity, {} as never, {} as never, noCreds);
+const telnyxEvent = (ccid: string, event_type: string, extra: Record<string, unknown> = {}) =>
+  webhook.voice({ data: { event_type, payload: { call_control_id: ccid, ...extra } } }, { header: () => undefined, rawBody: undefined } as never);
 
 const orgs: string[] = [];
 const SEC = 1_000;
@@ -87,7 +97,8 @@ async function setupOrg(strategy: Record<string, unknown>) {
   const user = await prisma.user.create({
     data: { orgId: org.id, firstName: 'Test', lastName: 'Owner', email: `conditional-${randomUUID()}@example.test`, password: 'not-a-real-hash' },
   });
-  const auth: AuthContext = { organizationId: org.id, userId: user.id, sessionId: randomUUID(), roleIds: [], permissions: [] };
+  // An owner: sees every lead of the organization.
+  const auth: AuthContext = { organizationId: org.id, userId: user.id, sessionId: randomUUID(), roleIds: [], permissions: [PERMISSIONS.LEAD_READ, PERMISSIONS.LEAD_UPDATE] };
   return { orgId: org.id, auth };
 }
 const twoStep = (steps: StrategyStep[]) => setupOrg({ timing: 'after_previous', steps });
@@ -584,5 +595,97 @@ describe('audit fixes against the real database', () => {
     const worker = new CallWorker(prisma, { get: () => undefined } as never, followup, voice as never, activity, slots as never);
     await worker.process({ id: 'job-a4', name: 'dial', data: { orgId, leadId: lead.id, source: 'strategy' } } as never, 'tok');
     expect(placed).toBe(0);
+  });
+});
+
+describe('review fixes against the real database', () => {
+  it('H1: a call still in the queue when the owner pauses and resumes is never queued again; the text follows the one call', async () => {
+    const { orgId, auth } = await twoStep(callThenSms('call_not_answered', 2));
+    const lead = await newLead(orgId);
+    await engine.enroll(orgId, lead.id);
+    await waitFor(() => dialsFor(lead.id).length, (n) => n === 1);
+    const contacted = (await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).firstContactAt!.getTime();
+    expect(dialsFor(lead.id)[0].dedupeKey).toBe(`strategy:${lead.id}:${contacted}:1`);
+    // The call waits in the queue (no row yet) while the owner pauses and resumes.
+    await automation.setAutomation(auth, lead.id, { paused: true });
+    expect(engine.isRunning(lead.id)).toBe(false);
+    await automation.setAutomation(auth, lead.id, { paused: false });
+    expect(engine.isRunning(lead.id)).toBe(true);
+    // Then it is dialled and rings out, before step 2's time is up.
+    await callHappened(orgId, lead.id, 'no_answer');
+    expect(await waitFor(() => runsOf(lead.id), (r) => r.length === 2)).toEqual(['1:queued', '2:sent']);
+    expect(dialsFor(lead.id)).toHaveLength(1);
+    expect(textsTo(lead.phone)).toHaveLength(1);
+  });
+
+  it('H1: the same across a restart: the step record, not the calls on record, says what already went', async () => {
+    const { orgId } = await twoStep(callThenSms('call_not_answered', 2));
+    const lead = await newLead(orgId);
+    await engine.enroll(orgId, lead.id);
+    await waitFor(() => dialsFor(lead.id).length, (n) => n === 1);
+    // The process goes down with the call still in the queue, and comes back.
+    engine.onModuleDestroy();
+    expect(await engine.resume(orgId, lead.id)).toBe(true);
+    await callHappened(orgId, lead.id, 'no_answer');
+    expect(await waitFor(() => runsOf(lead.id), (r) => r.length === 2)).toEqual(['1:queued', '2:sent']);
+    expect(dialsFor(lead.id)).toHaveLength(1);
+  });
+
+  it('end to end: a Telnyx hang-up webhook → the call row → the step guard → the text goes; the same hang-up again changes nothing', async () => {
+    const { orgId } = await twoStep(callThenSms('call_not_answered', 2));
+    const lead = await newLead(orgId);
+    await engine.enroll(orgId, lead.id);
+    await waitFor(() => dialsFor(lead.id).length, (n) => n === 1);
+    // The worker placed the call: its row rings, keyed by Telnyx's call id.
+    const ccid = `cc-${randomUUID()}`;
+    await activity.startCall(orgId, lead.id, ccid);
+    telnyxEvent(ccid, 'call.hangup', { hangup_cause: 'timeout' });
+    const row = await waitFor(() => prisma.call.findFirstOrThrow({ where: { providerCallId: ccid } }), (c) => c.endedAt !== null);
+    expect([row.status, row.endReason]).toEqual(['no_answer', 'timeout']);
+    telnyxEvent(ccid, 'call.hangup', { hangup_cause: 'normal_clearing' });
+    expect(await waitFor(() => runsOf(lead.id), (r) => r.length === 2)).toEqual(['1:queued', '2:sent']);
+    const again = await prisma.call.findFirstOrThrow({ where: { providerCallId: ccid } });
+    expect([again.status, again.endReason, again.endedAt]).toEqual(['no_answer', 'timeout', row.endedAt]);
+  });
+
+  it('M1: a short pick-up whose answered and hang-up events land together never leaves the row live', async () => {
+    const { orgId } = await twoStep(callThenSms('always', 2));
+    const lead = await newLead(orgId);
+    const ccid = `cc-${randomUUID()}`;
+    await activity.startCall(orgId, lead.id, ccid);
+    telnyxEvent(ccid, 'call.answered');
+    telnyxEvent(ccid, 'call.hangup', { hangup_cause: 'normal_clearing' });
+    telnyxEvent(ccid, 'call.hangup', { hangup_cause: 'normal_clearing' });
+    const row = await waitFor(
+      () => prisma.call.findFirstOrThrow({ where: { providerCallId: ccid } }),
+      (c) => c.endedAt !== null && c.status !== 'in_progress',
+      4_000,
+    );
+    expect(['completed', 'no_answer']).toContain(row.status);
+    if (row.status === 'completed') expect(row.answeredAt!.getTime()).toBeLessThanOrEqual(row.endedAt!.getTime());
+    else expect(row.answeredAt).toBeNull();
+  });
+
+  it('L1: an agent who sees only their own leads can pause only those', async () => {
+    const { orgId, auth } = await twoStep(callThenSms('always'));
+    const lead = await newLead(orgId);
+    await prisma.lead.update({ where: { id: lead.id }, data: { firstContactAt: new Date(), status: 'contacting' } });
+    const agent: AuthContext = { ...auth, permissions: [PERMISSIONS.LEAD_UPDATE] };
+    await expect(automation.setAutomation(agent, lead.id, { paused: true })).rejects.toThrow(/No such lead/);
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: auth.userId } });
+    await automation.setAutomation(agent, lead.id, { paused: true });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).automationPaused).toBe(true);
+  });
+
+  it('voicemail detection: a machine answered → the text goes at its own time, with no wait for an analysis', async () => {
+    const { orgId } = await twoStep(callThenSms('call_not_answered', 2));
+    const lead = await newLead(orgId);
+    await callStepWent(orgId, lead.id, null);
+    const now = Date.now();
+    await prisma.call.create({
+      data: { orgId, leadId: lead.id, status: 'completed', startedAt: new Date(now - 40_000), answeredAt: new Date(now - 30_000), endedAt: new Date(now), answeredBy: 'machine' },
+    });
+    expect(await waitFor(() => runsOf(lead.id), (r) => r.length === 2)).toEqual(['1:queued', '2:sent']);
+    expect(Date.now() - now).toBeLessThan(6_000);
   });
 });

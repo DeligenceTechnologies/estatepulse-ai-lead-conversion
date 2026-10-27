@@ -8,6 +8,7 @@ import { fullName } from '@/lead/lead-scope';
 import { AssistantService } from './assistant.service';
 import { CallSlots } from './calls/call-slots';
 import { LeadInsightsService } from './lead-insights.service';
+import { voicemailOf, type Strategy } from './strategy-store.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TELNYX_API } from './telnyx-api';
 
@@ -43,7 +44,9 @@ export function endReasonOf(cause: string | undefined, sip: string | undefined):
  * What happened on the phone and over SMS, recorded as calls and messages,
  * and the lead status moves that follow from it. Everything a call needs once
  * it is answered (assistant, recording, the lead's details) is prepared while
- * it rings, so the caller never hears a gap.
+ * it rings, so the caller never hears a gap. A call's row only ever moves
+ * forward (ringing → in progress → completed, or ringing → no answer), so a
+ * repeated or late event changes nothing.
  */
 @Injectable()
 export class ActivityService {
@@ -52,6 +55,12 @@ export class ActivityService {
   private readonly prepared = new Map<string, Promise<AttachPlan | null>>();
   /** Answered calls whose assistant waits for the lead to speak first. */
   private readonly awaitingLead = new Map<string, { plan: AttachPlan; timer: NodeJS.Timeout }>();
+  /** Calls a machine picked up, waiting for its beep to leave the owner's message. */
+  private readonly leaving = new Map<string, { apiKey: string; text: string }>();
+  /** Beeps heard before the machine verdict came. */
+  private readonly beepHeard = new Set<string>();
+  /** Calls on which the message is being left; the hang-up follows its end. */
+  private readonly spoken = new Map<string, string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -134,7 +143,12 @@ export class ActivityService {
     const bookkeeping = (async () => {
       const call = await this.callByProvider(ccid);
       if (!call) return null;
-      await this.prisma.call.update({ where: { id: call.id }, data: { status: CallStatus.in_progress, answeredAt: new Date() } });
+      // Only a call still ringing is answered: a hang-up that got here first, or the same event again, changes nothing.
+      const { count } = await this.prisma.call.updateMany({
+        where: { id: call.id, status: { in: [CallStatus.queued, CallStatus.ringing] } },
+        data: { status: CallStatus.in_progress, answeredAt: new Date() },
+      });
+      if (count === 0) return null;
       await this.slots.extend(call.orgId, ccid).catch(() => undefined);
       await this.markContacted(call.leadId, true);
       return call;
@@ -143,15 +157,11 @@ export class ActivityService {
       return null;
     });
 
-    let plan = this.prepared.get(ccid);
-    if (!plan) {
-      const call = await bookkeeping;
-      if (!call) return;
-      plan = this.prepareAttach(ccid, call.orgId, call.leadId);
-    }
-    const p = await plan;
+    const prepared = this.prepared.get(ccid);
+    const call = await bookkeeping;
+    if (!call) return;
+    const p = await (prepared ?? this.prepareAttach(ccid, call.orgId, call.leadId));
     if (p) await this.attach(ccid, p);
-    await bookkeeping;
   }
 
   async onCallHangup(ccid: string, payload: { hangup_cause?: string; sip_hangup_cause?: string } = {}): Promise<void> {
@@ -160,20 +170,25 @@ export class ActivityService {
       clearTimeout(waiting.timer);
       this.awaitingLead.delete(ccid);
     }
+    this.leaving.delete(ccid);
+    this.beepHeard.delete(ccid);
+    this.spoken.delete(ccid);
     const call = await this.callByProvider(ccid);
     if (!call) return;
     await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
-    const answered = call.status === CallStatus.in_progress;
     const endReason = endReasonOf(payload.hangup_cause, payload.sip_hangup_cause);
-    await this.prisma.call.update({
-      where: { id: call.id },
-      data: {
-        status: answered ? CallStatus.completed : CallStatus.no_answer,
-        endedAt: new Date(),
-        durationSeconds: call.startedAt ? Math.round((Date.now() - call.startedAt.getTime()) / 1000) : null,
-        endReason,
-      },
-    });
+    // One move, decided on the row as it is at that moment: answered → completed, never answered →
+    // no answer. A call already over (the same hang-up twice) is left as it is.
+    const [ended] = await this.prisma.$queryRaw<{ status: CallStatus }[]>`
+      UPDATE calls
+         SET status = CASE WHEN status = 'in_progress'::call_status THEN 'completed'::call_status ELSE 'no_answer'::call_status END,
+             ended_at = now(),
+             duration_seconds = CASE WHEN started_at IS NULL THEN NULL ELSE round(extract(epoch FROM now() - started_at))::int END,
+             end_reason = ${endReason}
+       WHERE id = ${call.id}::uuid AND status IN ('queued'::call_status, 'ringing'::call_status, 'in_progress'::call_status)
+       RETURNING status`;
+    if (!ended) return;
+    const answered = ended.status === CallStatus.completed;
     const cause = String(payload.hangup_cause ?? '');
     if (endReason === 'not_found') {
       await this.markInvalid(call.leadId, `Invalid number (${cause}${payload.sip_hangup_cause ? `, SIP ${payload.sip_hangup_cause}` : ''})`);
@@ -184,11 +199,77 @@ export class ActivityService {
     }
   }
 
-  /** Answering machine detection's verdict (premium or standard): a machine is voicemail; not sure is taken as a person. */
+  /**
+   * Answering machine detection's verdict (premium or standard): a machine is voicemail; not sure
+   * is taken as a person and the assistant carries on. On a machine the assistant is silenced and,
+   * as "Detect voicemail" in AI Settings says, the call hangs up or the owner's message is left
+   * after the beep. The call's row says a machine answered either way, so the step after it goes
+   * at once ("not answered") without waiting for an analysis.
+   */
   async onMachineDetection(ccid: string, payload: { result?: string } = {}): Promise<void> {
     const call = await this.callByProvider(ccid);
     if (!call || !payload.result) return;
-    await this.prisma.call.update({ where: { id: call.id }, data: { answeredBy: MACHINE_RESULTS.has(payload.result) ? 'machine' : 'human' } });
+    const machine = MACHINE_RESULTS.has(payload.result);
+    await this.prisma.call.update({ where: { id: call.id }, data: { answeredBy: machine ? 'machine' : 'human' } });
+    if (!machine) return;
+    const c = await this.creds.getCreds(call.orgId);
+    if (!c?.apiKey) return;
+    await this.silenceAssistant(ccid, c.apiKey);
+    const vm = voicemailOf(await this.strategyOf(call.orgId));
+    if (vm.action !== 'leave_message') return this.action(ccid, c.apiKey, 'hangup', {});
+    const text = await this.fillVariables(call.orgId, call.leadId, vm.message);
+    // The beep may have come before the verdict; otherwise the message waits for it.
+    if (this.beepHeard.delete(ccid)) return this.speakVoicemail(ccid, c.apiKey, text);
+    this.leaving.set(ccid, { apiKey: c.apiKey, text });
+  }
+
+  /** The machine's greeting ended: after a beep the message is left; without one there is nothing to leave it on. */
+  async onMachineGreetingEnded(ccid: string, payload: { result?: string } = {}): Promise<void> {
+    const beep = payload.result === 'beep_detected';
+    const waiting = this.leaving.get(ccid);
+    if (!waiting) {
+      if (beep) this.beepHeard.add(ccid);
+      return;
+    }
+    this.leaving.delete(ccid);
+    if (beep) return this.speakVoicemail(ccid, waiting.apiKey, waiting.text);
+    await this.action(ccid, waiting.apiKey, 'hangup', {});
+  }
+
+  /** The message has been left: hang up. */
+  async onSpeakEnded(ccid: string): Promise<void> {
+    const apiKey = this.spoken.get(ccid);
+    if (!apiKey) return;
+    this.spoken.delete(ccid);
+    await this.action(ccid, apiKey, 'hangup', {});
+  }
+
+  private async speakVoicemail(ccid: string, apiKey: string, text: string): Promise<void> {
+    this.spoken.set(ccid, apiKey);
+    // The basic service level: en-US text, the voice named by gender. Enough for a short message.
+    await this.action(ccid, apiKey, 'speak', { payload: text, voice: 'female', service_level: 'basic', language: 'en-US' });
+  }
+
+  /** The assistant has nothing to say to a machine: dropped while still waiting for the lead's first words, stopped once started. */
+  private async silenceAssistant(ccid: string, apiKey: string): Promise<void> {
+    const waiting = this.awaitingLead.get(ccid);
+    if (waiting) {
+      this.awaitingLead.delete(ccid);
+      clearTimeout(waiting.timer);
+      await this.action(ccid, apiKey, 'transcription_stop', {});
+      return;
+    }
+    await this.action(ccid, apiKey, 'ai_assistant_stop', {});
+  }
+
+  private async strategyOf(orgId: string): Promise<Strategy | null> {
+    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { outreachStrategy: true } }).catch(() => null);
+    return (settings?.outreachStrategy as unknown as Strategy | null) ?? null;
+  }
+
+  private async fillVariables(orgId: string, leadId: string, template: string): Promise<string> {
+    const v = await this.callVariables(orgId, leadId);
+    return template.replace(/\{\{firstName\}\}/g, v.firstName || 'there').replace(/\{\{brokerage\}\}/g, v.brokerage || 'our team');
   }
 
   async onRecordingSaved(ccid: string, payload: any): Promise<void> {

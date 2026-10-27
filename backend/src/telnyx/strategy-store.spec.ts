@@ -21,12 +21,25 @@ describe('toTwoStep', () => {
     ]);
   });
 
-  it('keeps the order the steps really ran in, whatever order they were listed in', () => {
+  it('keeps the order the steps really ran in, whatever order they were listed in, and the first step\'s own start', () => {
     const { steps, converted } = toTwoStep(legacy([sms('late', 10), call('early', 2)]));
     expect(converted).toBe(true);
     expect(steps.map((s) => [s.id, s.after])).toEqual([
-      ['early', { value: 0, unit: 'minutes' }],
+      ['early', { value: 2, unit: 'minutes' }],
       ['late', { value: 8, unit: 'minutes' }],
+    ]);
+  });
+
+  it('caps a first step that started more than 12 hours in, and a gap longer than that, at 12 hours', () => {
+    const late = toTwoStep(legacy([call('a', 2, 'days'), sms('b', 5, 'days')]));
+    expect(late.converted).toBe(true);
+    expect(late.steps.map((s) => s.after)).toEqual([
+      { value: 12, unit: 'hours' },
+      { value: 12, unit: 'hours' },
+    ]);
+    expect(toTwoStep(legacy([call('a', 2, 'hours'), sms('b', 3, 'hours')])).steps.map((s) => s.after)).toEqual([
+      { value: 2, unit: 'hours' },
+      { value: 1, unit: 'hours' },
     ]);
   });
 
@@ -63,7 +76,8 @@ describe('validateTwoStep', () => {
     ['a third step', [...ok, sms('c', 9)], /exactly two steps/],
     ['one step', [sms('a', 0)], /exactly two steps/],
     ['two of a kind', [sms('a', 0), sms('b', 1)], /exactly two steps/],
-    ['step 1 starting more than 12 hours in', [sms('a', 13, 'hours'), call('b', 1)], /at most 12 hours/],
+    ['step 1 starting more than 12 hours in', [sms('a', 13, 'hours'), call('b', 1)], /at most 12 hours after the lead/],
+    ['step 2 waiting more than 12 hours', [sms('a', 0), call('b', 30, 'days')], /at most 12 hours after step 1/],
     ['a condition on the first step', [{ ...sms('a', 0), condition: 'no_reply' as const }, call('b', 1)], /no condition/],
     ['a condition the channel does not take', [call('a', 0), { ...sms('b', 1), condition: 'no_reply' as const }], /cannot be used on this step/],
     ['an empty text', [sms('a', 0, 'minutes', '  '), call('b', 1)], /needs a message/],
@@ -74,7 +88,7 @@ function store(saved: unknown) {
   const prisma = {
     organizationSetting: { findUnique: vi.fn().mockResolvedValue(saved === undefined ? null : { outreachStrategy: saved }), upsert: vi.fn() },
   };
-  return { svc: new StrategyStoreService(prisma as any), prisma };
+  return { svc: new StrategyStoreService(prisma as any, { get: () => true } as any), prisma };
 }
 
 describe('StrategyStoreService.saveStrategy', () => {
@@ -114,5 +128,35 @@ describe('StrategyStoreService.saveStrategy', () => {
     ]);
     expect(s.steps[1].message).toBe("Hi {{firstName}}, just tried you with a quick call about your home search. When's a good time to chat?");
     expect(s.guardrails).not.toHaveProperty('stopOn');
+  });
+});
+
+describe('StrategyStoreService with conditional outreach off (the behaviour before it)', () => {
+  const off = (saved: unknown) => {
+    const prisma = {
+      organizationSetting: { findUnique: vi.fn().mockResolvedValue(saved === undefined ? null : { outreachStrategy: saved }), upsert: vi.fn() },
+    };
+    return { svc: new StrategyStoreService(prisma as any, { get: () => false } as any), prisma };
+  };
+
+  it('an office that never saved one runs the older default: a text at once, a call a minute in, a text at five minutes', async () => {
+    const s = await off(undefined).svc.getStrategy('org-1');
+    expect(s.timing).toBeUndefined();
+    expect(s.steps.map((x) => [x.channel, x.after.value])).toEqual([
+      ['sms', 0],
+      ['voice', 1],
+      ['sms', 5],
+    ]);
+    expect(s.steps[0].message).toMatch(/thanks for reaching out to \{\{brokerage\}\}/);
+    expect(s.guardrails).toHaveProperty('stopOn');
+  });
+
+  it('saving stores the steps as sent, any number of them, with no two-step rules and no timing', async () => {
+    const { svc, prisma } = off(undefined);
+    const steps = [sms('a', 0), sms('b', 1), call('c', 2)];
+    const saved = await svc.saveStrategy('org-1', { steps });
+    expect(saved.steps).toEqual(steps);
+    expect(saved.timing).toBeUndefined();
+    expect(prisma.organizationSetting.upsert).toHaveBeenCalledOnce();
   });
 });

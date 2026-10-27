@@ -142,13 +142,19 @@ export class AssistantController {
   }
 }
 
-/** The saved strategy as it runs, and its two-step form for the editor (converted from an older one without saving it). */
-const withEditor = (strategy: Strategy) => ({
-  strategy,
-  editor: toTwoStep(strategy),
-  // The built-in rules, from the one list the engine and the sequence runner enforce.
-  safetyRules: SAFETY_RULES,
-});
+/**
+ * The saved strategy as it runs and, with conditional outreach on, its two-step form for the editor
+ * (converted from an older one without saving it). Without `editor` the app shows the older editor.
+ */
+const withEditor = (strategy: Strategy, conditional: boolean) =>
+  conditional
+    ? {
+        strategy,
+        editor: toTwoStep(strategy),
+        // The built-in rules, from the one list the engine and the sequence runner enforce.
+        safetyRules: SAFETY_RULES,
+      }
+    : { strategy };
 
 @Controller('strategy')
 export class StrategyController {
@@ -157,13 +163,13 @@ export class StrategyController {
   @Get()
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
   async get(@CurrentAuth() auth: AuthContext) {
-    return withEditor(await this.strategies.getStrategy(auth.organizationId));
+    return withEditor(await this.strategies.getStrategy(auth.organizationId), this.strategies.conditional);
   }
 
   @Put()
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
   async save(@CurrentAuth() auth: AuthContext, @Body() body: StrategyDto) {
-    return withEditor(await this.strategies.saveStrategy(auth.organizationId, body as Partial<Strategy>));
+    return withEditor(await this.strategies.saveStrategy(auth.organizationId, body as Partial<Strategy>), this.strategies.conditional);
   }
 }
 

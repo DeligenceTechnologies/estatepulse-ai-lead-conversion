@@ -103,6 +103,12 @@ export const envValidationSchema = Joi.object({
     // Off: approving releases leads at once, exactly as before.
     OUTREACH_SCHEDULING_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     OUTREACH_POLL_MS: Joi.number().integer().positive().default(15_000),
+    // Conditional outreach: the two-step strategy (call + SMS with a condition), the step guard
+    // (no step while a call is live or queued, none after a booking or an answered call) and the
+    // step record. Off: the strategy, the engine and the sequence runner behave as they did before,
+    // and the strategy screen shows the older editor. The audit fixes (dead numbers, opt-out on a
+    // call, START words, a booking from any status, the worker's enrolment check) are always on.
+    CONDITIONAL_OUTREACH_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
 
     GOOGLE_SHEETS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     GOOGLE_CLIENT_ID: Joi.string().empty('').optional(),

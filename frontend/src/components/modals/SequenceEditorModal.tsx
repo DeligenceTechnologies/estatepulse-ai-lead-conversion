@@ -111,10 +111,17 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
     })) ?? [blankStep()],
   );
   const [saving, setSaving] = useState(false);
-  // Read once: the built-in rules (one list with the strategy's).
+  // Read once: the built-in rules (one list with the strategy's). Absent when the server has
+  // conditional outreach off: then neither the rules nor a step's "Only if" apply, so neither is shown.
   const [safetyRules, setSafetyRules] = useState<SafetyRule[]>([]);
+  const [conditional, setConditional] = useState(false);
   useEffect(() => {
-    getStrategyEditor().then((p) => setSafetyRules(p.safetyRules ?? [])).catch(() => setSafetyRules([]));
+    getStrategyEditor()
+      .then((p) => {
+        setSafetyRules(p.safetyRules ?? []);
+        setConditional(!!p.editor);
+      })
+      .catch(() => setSafetyRules([]));
   }, []);
   // A sequence that already carries "Qualified as hot" may keep it (and is warned); nothing new may take it.
   const hadHot = !!sequence?.enrollTriggers.includes('qualified_hot');
@@ -665,18 +672,20 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     </button>
                   </div>
 
-                  <div className="pl-7 space-y-1.5">
-                    <div className="flex items-start gap-2 flex-wrap">
-                      <span className="text-xs text-slate-500 py-1.5">send</span>
-                      <ConditionSelect
-                        value={step.onlyIf}
-                        onChange={(onlyIf) => patchStep(i, { onlyIf })}
-                        context="sequence"
-                        className={`${input} w-auto`}
-                      />
+                  {conditional && (
+                    <div className="pl-7 space-y-1.5">
+                      <div className="flex items-start gap-2 flex-wrap">
+                        <span className="text-xs text-slate-500 py-1.5">send</span>
+                        <ConditionSelect
+                          value={step.onlyIf}
+                          onChange={(onlyIf) => patchStep(i, { onlyIf })}
+                          context="sequence"
+                          className={`${input} w-auto`}
+                        />
+                      </div>
+                      <SafetyRulesList rules={safetyRules} scope="sequence" />
                     </div>
-                    <SafetyRulesList rules={safetyRules} scope="sequence" />
-                  </div>
+                  )}
 
                   {step.actionType === 'sms' ? (
                     <div>

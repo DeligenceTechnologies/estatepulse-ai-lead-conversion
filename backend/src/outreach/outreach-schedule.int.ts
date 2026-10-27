@@ -38,7 +38,7 @@ const env = (scheduling: boolean) =>
 
 const prisma = new PrismaService({ get: () => undefined } as unknown as ConfigService);
 const audit = new AuditService(prisma);
-const strategies = new StrategyStoreService(prisma);
+const strategies = new StrategyStoreService(prisma, { get: () => true } as any);
 const reviewsOn = new SheetReviewService(prisma, audit, env(true));
 const reviewsOff = new SheetReviewService(prisma, audit, env(false));
 const outreach = new OutreachService(prisma, strategies, audit);

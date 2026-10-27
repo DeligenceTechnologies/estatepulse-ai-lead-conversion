@@ -15,7 +15,7 @@ function setup(lead: Record<string, unknown> | null) {
   const activity = { exitStrategy: vi.fn() };
   const followup = { stopForLead: vi.fn(), sequenceForTrigger: vi.fn(), enroll: vi.fn() };
   const guard = { clearReview: vi.fn().mockResolvedValue(undefined) };
-  const engine = new EngineService(prisma as any, {} as any, {} as any, {} as any, activity as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, {} as any, {} as any, {} as any, activity as any, followup as any, guard as any, { get: () => true } as any);
   return { engine, prisma, followup, guard };
 }
 

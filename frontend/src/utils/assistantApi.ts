@@ -100,9 +100,12 @@ export interface AssistantConfig {
   disable_dtmf: boolean;
   noise_suppression: NoiseSuppression;
   fallback_destination: string;
-  /** Answering-machine detection: skip the pitch when a machine picks up. */
+  /** "Detect voicemail": the call is dialed with answering machine detection (a per-call charge). Off until the office turns it on. */
   voicemail_detection: boolean;
+  /** On a machine: hang up, or leave `voicemail_message` after the beep. */
   voicemail_action: VoicemailAction;
+  /** {{firstName}} and {{brokerage}} are filled in; at most 300 characters. */
+  voicemail_message: string;
   post_call_processing: boolean;
   enabled_features: string[];
   messaging_profile_id: string;
@@ -116,6 +119,8 @@ export interface AssistantConfig {
 
 export type NoiseSuppression = 'disabled' | 'krisp' | 'aicoustics' | 'deepfilternet';
 export type VoicemailAction = 'hangup' | 'leave_message';
+export const DEFAULT_VOICEMAIL_MESSAGE = "Hi {{firstName}}, this is {{brokerage}} calling about your home search. We'll send you a quick text.";
+export const VOICEMAIL_MESSAGE_MAX = 300;
 
 export const NOISE_SUPPRESSION_OPTIONS: Array<{ value: NoiseSuppression; label: string }> = [
   { value: 'disabled', label: 'Off' },

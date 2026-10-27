@@ -21,7 +21,7 @@ function setup(stepList: Record<string, unknown>[]) {
     sequenceEnrollment: { update: vi.fn().mockResolvedValue({}) },
     $transaction: vi.fn(async (run: (t: unknown) => Promise<unknown>) => run({ sequenceEnrollment: prisma.sequenceEnrollment, lead: { updateMany: vi.fn() } })),
   };
-  const config = { get: vi.fn((key: string) => ({ FOLLOWUP_BATCH_SIZE: 20, FOLLOWUP_STUCK_AFTER_MS: 600_000 })[key]) };
+  const config = { get: vi.fn((key: string) => ({ FOLLOWUP_BATCH_SIZE: 20, FOLLOWUP_STUCK_AFTER_MS: 600_000, CONDITIONAL_OUTREACH_ENABLED: true })[key]) };
   const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined }), dueAt: vi.fn().mockResolvedValue(new Date()) };
   const sms = { sendSms: vi.fn().mockResolvedValue({ id: 'msg-1' }) };
   const calls = { enqueue: vi.fn().mockResolvedValue('job-1') };
@@ -145,5 +145,61 @@ describe('FollowupRunner when the last step is a call (audit D1)', () => {
     await tick();
     expect(prisma.sequenceEnrollment.update).toHaveBeenCalledWith({ where: { id: 'enr-1' }, data: expect.objectContaining({ status: 'completed' }) });
     expect(txLead.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('FollowupRunner looks at the lead once more right before sending', () => {
+  it.each([
+    ['replied (automation paused)', { automationPaused: true }, 'paused'],
+    ['booked', { status: 'appointment_booked' }, 'stopped'],
+    ['opted out', { dncStatus: true }, 'stopped'],
+  ])('a lead that %s while the step was being decided gets nothing; the enrolment is %s', async (_label, change, status) => {
+    const { tick, guard, sms, prisma } = setup([voiceStep, smsStep]);
+    const lead = { firstName: 'Asha', phone: '+12895550111', status: 'follow_up', dncStatus: false, automationPaused: false };
+    guard.check.mockImplementation(async () => {
+      prisma.lead.findUnique.mockResolvedValue({ ...lead, ...change });
+      return { kind: 'go' };
+    });
+    await tick();
+    expect(sms.sendSms).not.toHaveBeenCalled();
+    expect(guard.record).not.toHaveBeenCalled();
+    expect(prisma.sequenceEnrollment.update).toHaveBeenCalledWith({ where: { id: 'enr-1' }, data: expect.objectContaining({ status }) });
+  });
+});
+
+describe('FollowupRunner with conditional outreach off (the behaviour before it)', () => {
+  function legacy(stepList: Record<string, unknown>[], currentStep = 2) {
+    const s = setup(stepList);
+    const config = { get: vi.fn((key: string) => ({ FOLLOWUP_BATCH_SIZE: 20, FOLLOWUP_STUCK_AFTER_MS: 600_000, CONDITIONAL_OUTREACH_ENABLED: false })[key]) };
+    s.prisma.$queryRaw.mockResolvedValue([{ ...row, current_step: currentStep }]);
+    const runner = new FollowupRunner(
+      s.prisma as any,
+      config as any,
+      { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined }), dueAt: vi.fn().mockResolvedValue(new Date()) } as any,
+      s.sms as any,
+      s.calls as any,
+      { recordSms: vi.fn(), recordCallFailed: vi.fn() } as any,
+      s.guard as any,
+    );
+    return { ...s, tick: () => (runner as any).tick() as Promise<void> };
+  }
+
+  it('sends the step without asking the guard, reading a condition or keeping a record', async () => {
+    const { tick, guard, sms } = legacy([voiceStep, { ...smsStep, condition: 'call_not_answered' }]);
+    await tick();
+    expect(sms.sendSms).toHaveBeenCalledOnce();
+    expect(guard.check).not.toHaveBeenCalled();
+    expect(guard.conditionUnmet).not.toHaveBeenCalled();
+    expect(guard.record).not.toHaveBeenCalled();
+  });
+
+  it('past the last step the enrolment completes and the lead is closed out as not interested, reached or not', async () => {
+    const { tick, guard, prisma } = legacy([smsStep, voiceStep], 3);
+    const txLead = { updateMany: vi.fn() };
+    prisma.$transaction.mockImplementation(async (run: any) => run({ sequenceEnrollment: prisma.sequenceEnrollment, lead: txLead }));
+    await tick();
+    expect(guard.conditionUnmet).not.toHaveBeenCalled();
+    expect(prisma.sequenceEnrollment.update).toHaveBeenCalledWith({ where: { id: 'enr-1' }, data: expect.objectContaining({ status: 'completed' }) });
+    expect(txLead.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'not_interested' }) }));
   });
 });

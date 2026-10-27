@@ -31,7 +31,8 @@ const BOTH: SafetyRule['appliesTo'] = ['strategy', 'sequence'];
 
 export const SAFETY_RULES: SafetyRule[] = [
   { id: 'meeting_booked', label: 'A meeting is booked', kind: 'never_sends', check: 'meeting_booked', appliesTo: BOTH },
-  { id: 'lead_replied', label: 'The lead replied by SMS', kind: 'never_sends', check: 'automation_paused', appliesTo: BOTH },
+  // A reply pauses automation; "Resume automation" on the lead lifts that pause, reply or not — so the label says so.
+  { id: 'lead_replied', label: 'The lead replied by SMS (until you resume automation)', kind: 'never_sends', check: 'automation_paused', appliesTo: BOTH },
   { id: 'opted_out', label: 'The lead opted out (STOP, or asked on a call)', kind: 'never_sends', check: 'opted_out', appliesTo: BOTH },
   { id: 'not_interested', label: 'The lead said they are not interested', kind: 'never_sends', check: 'not_interested', appliesTo: BOTH },
   { id: 'wrong_number', label: 'Wrong or invalid number', kind: 'never_sends', check: 'wrong_number', appliesTo: BOTH },

@@ -50,10 +50,11 @@ export interface StrategyEditorView {
   converted: boolean;
 }
 
+/** `editor` and `safetyRules` come only with conditional outreach on; without them the older editor is shown. */
 export interface StrategyEditorPayload {
   strategy: Strategy;
-  editor: StrategyEditorView;
-  safetyRules: SafetyRule[];
+  editor?: StrategyEditorView;
+  safetyRules?: SafetyRule[];
 }
 
 export const getStrategy = () =>
@@ -67,10 +68,17 @@ export const getStrategyEditor = () => apiFetch<StrategyEditorPayload>('/strateg
 export const saveStrategySteps = (steps: StrategyStep[]) =>
   apiFetch<StrategyEditorPayload>('/strategy', { method: 'PUT', body: { steps }, auth: true });
 
+/** A new step for the older, free-form editor. */
+export function emptyStep(): StrategyStep {
+  return { id: `s${Math.random().toString(36).slice(2, 7)}`, after: { value: 5, unit: 'minutes' }, channel: 'sms', action: 'send_sms', message: '' };
+}
+
 export const channelLabel = (channel: StrategyStep['channel']) => (channel === 'voice' ? 'AI Voice Call' : 'SMS');
 
 const UNIT_MS: Record<StrategyStep['after']['unit'], number> = { seconds: 1_000, minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 export const afterMs = (after: StrategyStep['after']) => (Number(after.value) || 0) * UNIT_MS[after.unit];
+/** Either step may wait at most this long (the server applies the same limit). */
+export const STEP_MAX_DELAY_MS = 12 * 3_600_000;
 
 /** "5 min", "1 hour", "2 days" */
 export function waitText(after: StrategyStep['after']): string {
@@ -95,8 +103,10 @@ export function stepsError(steps: StrategyStep[]): string | null {
   const sms = steps.find((s) => s.channel === 'sms');
   if (sms && !(sms.message ?? '').trim()) return 'The SMS step needs a message.';
   const start = afterMs(steps[0]?.after ?? { value: 0, unit: 'minutes' });
-  if (start < 0 || start > 12 * 3_600_000) return 'Step 1 can start at most 12 hours after the lead comes in.';
-  if (!Number.isFinite(steps[1]?.after.value) || (steps[1]?.after.value ?? 0) < 0) return 'Step 2 needs a wait of zero or more.';
+  if (start < 0 || start > STEP_MAX_DELAY_MS) return 'Step 1 can start at most 12 hours after the lead comes in.';
+  const wait = afterMs(steps[1]?.after ?? { value: 0, unit: 'minutes' });
+  if (!Number.isFinite(steps[1]?.after.value) || wait < 0) return 'Step 2 needs a wait of zero or more.';
+  if (wait > STEP_MAX_DELAY_MS) return 'Step 2 can wait at most 12 hours after step 1.';
   return null;
 }
 

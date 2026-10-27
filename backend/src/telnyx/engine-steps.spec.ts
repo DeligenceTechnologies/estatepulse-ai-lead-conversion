@@ -60,7 +60,7 @@ function setup(opts: { lead?: Record<string, unknown>; steps?: StrategyStep[]; g
     flagReview: vi.fn(),
     clearReview: vi.fn(),
   };
-  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any);
+  const engine = new EngineService(prisma as any, strategies as any, sms as any, calls as any, activity as any, followup as any, guard as any, { get: () => false } as any);
   return { engine, prisma, tx, strategies, sms, calls, activity, followup, guard, live };
 }
 
@@ -110,7 +110,8 @@ describe('EngineService steps', () => {
     await engine.enroll(ORG, LEAD);
     await vi.advanceTimersByTimeAsync(MIN);
     expect(calls.enqueue).toHaveBeenCalledOnce();
-    expect(calls.enqueue).toHaveBeenCalledWith({ orgId: ORG, leadId: LEAD, source: 'strategy' }, { dedupeKey: `strategy:${LEAD}:${NOW.getTime()}:1` });
+    // Keyed by the run (first_contact_at) and the step's place, so a resume or a retry reuses it.
+    expect(calls.enqueue).toHaveBeenCalledWith({ orgId: ORG, leadId: LEAD, source: 'strategy' }, { dedupeKey: `strategy:${LEAD}:${NOW.getTime()}:2` });
   });
 
   it('stops queueing calls at the attempt limit', async () => {
@@ -273,6 +274,39 @@ describe('EngineService resume', () => {
     expect(calls.enqueue).not.toHaveBeenCalled();
     expect(sms.sendSms).toHaveBeenCalledOnce();
     expect(sms.sendSms).toHaveBeenCalledWith(ORG, '+12895550111', 'Just tried you, Asha.');
+  });
+});
+
+describe('EngineService with conditional outreach off (the behaviour before it)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+    vi.mocked(inQuietHours).mockReturnValue(false);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('never asks the step guard, keeps no step record, and times every step from enrolment', async () => {
+    const { engine, guard, sms, calls } = setup();
+    await engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sms.sendSms).toHaveBeenCalledTimes(2);
+    expect(calls.enqueue).toHaveBeenCalledOnce();
+    expect(guard.check).not.toHaveBeenCalled();
+    expect(guard.conditionUnmet).not.toHaveBeenCalled();
+    expect(guard.record).not.toHaveBeenCalled();
+  });
+
+  it('a saved two-step strategy still runs, timed from enrolment, with no condition read', async () => {
+    const two: StrategyStep[] = [
+      { id: 'a', after: { value: 0, unit: 'minutes' }, channel: 'voice' },
+      { id: 'b', after: { value: 5, unit: 'minutes' }, channel: 'sms', message: 'Missed you', condition: 'call_not_answered' },
+    ];
+    const { engine, strategies, guard, sms } = setup({ steps: two });
+    strategies.getStrategy.mockResolvedValue({ name: 'Two', timing: 'after_previous', guardrails: {}, steps: two });
+    await engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sms.sendSms).toHaveBeenCalledOnce();
+    expect(guard.conditionUnmet).not.toHaveBeenCalled();
   });
 });
 
