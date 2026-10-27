@@ -2,6 +2,7 @@ import { Global, Module, Provider, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 
 import { AuditService } from '@/audit/audit.service';
+import { LeadStateService } from '@/lead/lead-state.service';
 import { MailService } from '@/common/service/mail.service';
 import { RedisService } from '@/common/service/redis.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
@@ -16,6 +17,7 @@ const SERVICES: Provider[] = [
   SecretBoxService,
   UserService,
   AuditService,
+  LeadStateService,
 ];
 
 const TENANT_PRISMA_PROVIDER: Provider = {

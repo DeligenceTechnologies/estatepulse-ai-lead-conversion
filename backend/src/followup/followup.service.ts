@@ -5,18 +5,20 @@ import {
   LeadStatus,
   Prisma,
   SequenceStatus,
+  SequenceTrigger,
   type EnrolledBy,
   type Sequence,
-  type SequenceTrigger,
 } from '@prisma/client';
 import { lockOrganization } from '@/calendar/connection/calendar-access.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { nextAllowedAt, type QuietHours } from '@/common/utils/quiet-hours';
-import { IN_STRATEGY_STATUSES, isLeadStatus } from '@/lead/lead-status';
+import { minutesOfDay, nextContactAt, nextLocalMidnight, type QuietHours } from '@/common/utils/quiet-hours';
+import { LeadStateService } from '@/lead/lead-state.service';
+import { IN_STRATEGY_STATUSES, callbackPending, isLeadStatus } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
 import type { CreateSequenceDto, EnrollLeadsDto, LeadFilterDto, ReplaceStepsDto, UpdateSequenceDto } from './dto/sequence.dto';
+import { fitConditions, limitSlot, limitsOf, skipDaysOf, type ContactLimits, type StepConditions, type StepVoicemail } from './journey';
 
 export const TRIGGER_LABELS: Record<SequenceTrigger, string> = {
   qualified_hot: 'Qualified as hot',
@@ -33,8 +35,19 @@ export interface SequenceStep {
   actionType: 'sms' | 'voice';
   delayMinutes: number;
   messageTemplate: string | null;
+  /** A call step: why the AI is calling, given to it as {{call_context}}. */
   voicePrompt: string | null;
   maxAttempts: number;
+  onlyIf?: StepConditions;
+  voicemail?: StepVoicemail;
+}
+
+/** The organization's contact window and limits, shared by the strategy, every sequence and the call worker. */
+export interface Guardrails {
+  timeZone: string;
+  quiet?: QuietHours;
+  skipDays: number[];
+  limits: ContactLimits;
 }
 
 export interface EnrollSkip {
@@ -64,18 +77,50 @@ export class FollowupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly strategies: StrategyStoreService,
+    private readonly state: LeadStateService,
   ) {}
 
-  async guardrailsFor(orgId: string): Promise<{ timeZone: string; quiet?: QuietHours }> {
+  async guardrailsFor(orgId: string): Promise<Guardrails> {
     const [settings, strategy] = await Promise.all([
       this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } }),
       this.strategies.getStrategy(orgId).catch(() => null),
     ]);
-    const g = (strategy?.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours };
-    return { timeZone: settings?.timezone ?? 'UTC', quiet: g.respectQuietHours === false ? undefined : g.quietHours };
+    const g = (strategy?.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours; skipDays?: unknown; limits?: unknown };
+    return {
+      timeZone: settings?.timezone ?? 'UTC',
+      quiet: g.respectQuietHours === false ? undefined : g.quietHours,
+      skipDays: skipDaysOf(g.skipDays),
+      limits: limitsOf(g.limits),
+    };
   }
 
+  /**
+   * When our next call or text to the lead may go: now, once the gap since the
+   * last one on that channel has passed, or in the next day's contact window
+   * when today's limit is used. Texts count the journey's own (strategy and
+   * sequence steps), not the AI's chat replies; calls count every call placed.
+   */
+  async contactSlot(orgId: string, leadId: string, channel: 'sms' | 'voice', now = new Date()): Promise<{ at: Date; reason: string | null }> {
+    const g = await this.guardrailsFor(orgId);
+    if (!(channel === 'voice' ? g.limits.callsPerDay : g.limits.smsPerDay) && !g.limits.minGapMinutes) return { at: now, reason: null };
+    const dayStart = new Date(now.getTime() - minutesOfDay(g.timeZone, now) * 60_000 - (now.getTime() % 60_000));
+    const [sentToday, last] =
+      channel === 'voice'
+        ? await Promise.all([
+            this.prisma.call.count({ where: { leadId, providerCallId: { not: null }, createdAt: { gte: dayStart } } }),
+            this.prisma.call.findFirst({ where: { leadId, providerCallId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+          ])
+        : await Promise.all([
+            this.prisma.leadEvent.count({ where: { leadId, type: 'step_sent', channel: 'sms', createdAt: { gte: dayStart } } }),
+            this.prisma.leadEvent.findFirst({ where: { leadId, type: 'step_sent', channel: 'sms' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+          ]);
+    const tomorrow = nextContactAt(g.timeZone, g.quiet, g.skipDays, nextLocalMidnight(g.timeZone, now));
+    return limitSlot({ channel, now, limits: g.limits, sentToday, lastAt: last?.createdAt ?? null, tomorrow });
+  }
+
+  /** Not every follow-up reason has a trigger (a canceled meeting has none yet); those find no sequence. */
   async sequenceForTrigger(orgId: string, trigger: SequenceTrigger): Promise<string | undefined> {
+    if (!(Object.values(SequenceTrigger) as string[]).includes(trigger)) return undefined;
     const sequence = await this.prisma.sequence.findFirst({
       where: { orgId, status: SequenceStatus.active, triggers: { has: trigger } },
       select: { code: true },
@@ -87,9 +132,14 @@ export class FollowupService {
   async enroll(orgId: string, leadId: string, code: string): Promise<boolean> {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, orgId },
-      select: { dncStatus: true, status: true, firstContactAt: true, automationPaused: true },
+      select: { dncStatus: true, status: true, firstContactAt: true, automationPaused: true, callbackAt: true },
     });
     if (!lead || lead.dncStatus || isInStrategy(lead)) return false;
+    // The lead asked to be called at a set time: nothing else contacts them before it.
+    if (callbackPending(lead)) {
+      this.logger.log(`lead ${leadId} not enrolled into ${code}: a callback is due ${lead.callbackAt?.toISOString()}`);
+      return false;
+    }
     const sequence = await this.prisma.sequence.findFirst({ where: { orgId, code, status: SequenceStatus.active } });
     const first = sequence ? stepsOf(sequence)[0] : undefined;
     if (!sequence || !first) return false;
@@ -178,16 +228,25 @@ export class FollowupService {
     return this.getSequence(orgId, id);
   }
 
-  /** Live enrolments past the new last step are moved onto it rather than dropped. */
+  /**
+   * Live enrolments past the new last step are moved onto it rather than dropped.
+   * Those already waiting out the close-out after the old last step stay in that
+   * wait when the sequence got shorter, so their last step is not sent again;
+   * when it got longer they go on to the new steps.
+   */
   async replaceSteps(orgId: string, id: string, input: ReplaceStepsDto) {
-    await this.owned(orgId, id);
+    const before = stepsOf(await this.owned(orgId, id)).length;
     const steps = toSteps(input.steps);
+    const live = { orgId, sequenceId: id, status: EnrollmentStatus.active };
     await this.prisma.$transaction([
       this.prisma.sequence.update({ where: { id }, data: { steps: steps as unknown as Prisma.InputJsonArray } }),
       this.prisma.sequenceEnrollment.updateMany({
-        where: { orgId, sequenceId: id, status: EnrollmentStatus.active, currentStep: { gt: steps.length } },
+        where: { ...live, currentStep: { gt: steps.length, lte: before } },
         data: { currentStep: steps.length },
       }),
+      ...(steps.length < before
+        ? [this.prisma.sequenceEnrollment.updateMany({ where: { ...live, currentStep: { gt: before } }, data: { currentStep: steps.length + 1 } })]
+        : []),
     ]);
     return this.getSequence(orgId, id);
   }
@@ -283,9 +342,12 @@ export class FollowupService {
       if (!insertedIds.has(lead.id)) skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'already_enrolled' });
     }
     if (insertedIds.size > 0) {
-      await this.prisma.lead.updateMany({
-        where: { orgId, id: { in: [...insertedIds] }, status: { in: IN_STRATEGY_STATUSES } },
-        data: { status: LeadStatus.follow_up, followUpReason: FollowUpReason.needs_time },
+      await this.state.moveMany([...insertedIds], LeadStatus.follow_up, {
+        source: 'followup',
+        reason: `Added to ${sequence.code} by hand`,
+        onlyFrom: IN_STRATEGY_STATUSES,
+        actor: { type: userId ? 'user' : 'system', id: userId },
+        data: { followUpReason: FollowUpReason.needs_time },
       });
     }
     this.logger.log(`${enrolledBy} enrolment into ${sequence.code}: ${insertedIds.size} added, ${skipped.length} skipped`);
@@ -337,7 +399,7 @@ export class FollowupService {
       take: Math.min(Math.max(limit, 1), 200),
       include: {
         lead: { select: { firstName: true, lastName: true, phone: true, temperature: true } },
-        sequence: { select: { code: true, name: true } },
+        sequence: { select: { code: true, name: true, steps: true } },
       },
     });
     return rows.map((e) => ({
@@ -349,6 +411,8 @@ export class FollowupService {
       sequenceCode: e.sequence?.code ?? null,
       sequenceName: e.sequence?.name ?? null,
       currentStep: e.currentStep,
+      /** Every step has run; the lead has until nextActionAt to answer before the close-out. */
+      awaitingReply: e.status === EnrollmentStatus.active && e.sequence !== null && e.currentStep > stepsOf(e.sequence).length,
       status: e.status,
       nextActionAt: e.nextActionAt?.toISOString() ?? null,
       enrolledAt: e.enrolledAt.toISOString(),
@@ -359,8 +423,8 @@ export class FollowupService {
   }
 
   async dueAt(orgId: string, delayMinutes: number): Promise<Date> {
-    const { timeZone, quiet } = await this.guardrailsFor(orgId);
-    return nextAllowedAt(timeZone, quiet, new Date(Date.now() + delayMinutes * 60_000));
+    const { timeZone, quiet, skipDays } = await this.guardrailsFor(orgId);
+    return nextContactAt(timeZone, quiet, skipDays, new Date(Date.now() + delayMinutes * 60_000));
   }
 
   private async owned(orgId: string, id: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
@@ -409,11 +473,16 @@ export class FollowupService {
 }
 
 function toSteps(steps: ReplaceStepsDto['steps']): SequenceStep[] {
-  return steps.map((s) => ({
-    actionType: s.actionType,
-    delayMinutes: s.delayMinutes,
-    messageTemplate: s.actionType === 'sms' ? (s.messageTemplate ?? null) : null,
-    voicePrompt: s.actionType === 'voice' ? (s.voicePrompt ?? null) : null,
-    maxAttempts: s.maxAttempts ?? 1,
-  }));
+  return steps.map((s, i) => {
+    const onlyIf = fitConditions(s.onlyIf, steps[i - 1]?.actionType);
+    return {
+      actionType: s.actionType,
+      delayMinutes: s.delayMinutes,
+      messageTemplate: s.actionType === 'sms' ? (s.messageTemplate ?? null) : null,
+      voicePrompt: s.actionType === 'voice' ? (s.voicePrompt ?? null) : null,
+      maxAttempts: s.maxAttempts ?? 1,
+      ...(onlyIf ? { onlyIf } : {}),
+      ...(s.actionType === 'voice' && s.voicemail && s.voicemail !== 'default' ? { voicemail: s.voicemail } : {}),
+    };
+  });
 }

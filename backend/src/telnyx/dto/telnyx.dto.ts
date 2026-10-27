@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -15,6 +16,10 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { StepConditionsDto } from '@/followup/dto/sequence.dto';
+import { CALL_CONTEXT_MAX_CHARS, STEP_VOICEMAILS, type StepVoicemail } from '@/followup/journey';
+import { CONFIRM_MESSAGE_MAX_CHARS } from '../tools/call-tools';
+import { VOICEMAIL_MAX_CHARS } from '../voicemail/voicemail';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -152,6 +157,22 @@ export class StrategyStepDto {
   @IsString()
   @MaxLength(1600)
   message?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StepConditionsDto)
+  onlyIf?: StepConditionsDto;
+
+  /** A call step only: the organization's voicemail setting, always leave the message, or never. */
+  @IsOptional()
+  @IsIn(STEP_VOICEMAILS)
+  voicemail?: StepVoicemail;
+
+  /** A call step only: why the AI is calling, given to it as {{call_context}}. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(CALL_CONTEXT_MAX_CHARS)
+  context?: string;
 }
 
 export class StrategyDto {
@@ -206,4 +227,32 @@ export class CallCapacityDto {
   @Min(1)
   @Max(500)
   maxConcurrentCalls!: number;
+}
+
+export class UpdateVoicemailDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  /** {{firstName}}, {{brokerage}} and the other lead variables are filled in per call. Empty restores the default. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(VOICEMAIL_MAX_CHARS)
+  message?: string;
+}
+
+export class UpdateCallToolsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  confirmSms?: boolean;
+
+  /** {{firstName}}, {{callbackTime}} and the other lead variables are filled in. Empty restores the default. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
+  confirmMessage?: string;
 }

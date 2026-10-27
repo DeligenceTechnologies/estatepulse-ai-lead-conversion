@@ -22,6 +22,7 @@ model Organization {
   crmSyncRuns         CrmSyncRun[]
   auditLogs           AuditLog[]
   outreachBatches     OutreachBatch[]
+  leadEvents          LeadEvent[]
 
   @@map("organizations")
 }
@@ -41,6 +42,12 @@ model OrganizationSetting {
   maxConcurrentCalls    Int     @default(5) @map("max_concurrent_calls")
   outreachStrategy      Json?   @map("outreach_strategy")
   inCallBooking         Json?   @map("in_call_booking")
+  /// When set, the AI assistant answers a lead's texts (what was linked on Telnyx to do it).
+  smsConversation       Json?   @map("sms_conversation")
+  /// What an AI call leaves on an answering machine ({ enabled, message }); unset means the default message.
+  voicemail             Json?   @map("voicemail")
+  /// The AI's call-outcome tools on Telnyx (callback, outcome), as provisioned there.
+  callTools             Json?   @map("call_tools")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
 

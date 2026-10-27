@@ -282,7 +282,10 @@ export class PortalLeadsController {
   @Patch(':id/status')
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async setStatus(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: SetLeadStatusDto) {
-    await this.engine.setStatus(auth.organizationId, id, body.status, body.reason, { followUpReason: body.followUpReason });
+    await this.engine.setStatus(auth.organizationId, id, body.status, body.reason, {
+      followUpReason: body.followUpReason,
+      actor: { type: 'user', id: auth.userId },
+    });
     return { ok: true, status: body.status };
   }
 
@@ -294,6 +297,7 @@ export class PortalLeadsController {
     await this.engine.setStatus(auth.organizationId, id, optOut ? LeadStatus.not_interested : (body.outcome as LeadStatus), body.summary, {
       followUpReason: body.followUpReason ?? FollowUpReason.callback_requested,
       optOut,
+      actor: { type: 'user', id: auth.userId },
     });
     return { ok: true };
   }
@@ -302,7 +306,35 @@ export class PortalLeadsController {
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async qualified(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: LeadQualifiedDto) {
-    await this.engine.qualified(auth.organizationId, id, body.temperature, body.summary);
+    await this.engine.qualified(auth.organizationId, id, body.temperature, body.summary, { actor: { type: 'user', id: auth.userId } });
     return { ok: true };
+  }
+
+  /** What the outreach decided about the lead, newest first: status moves, steps sent, held or skipped, calls ended. */
+  @Get(':id/events')
+  async events(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) leadId: string) {
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) }, select: { id: true } });
+    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
+    const rows = await this.prisma.leadEvent.findMany({
+      where: { leadId, orgId: auth.organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    return {
+      events: rows.map((e) => ({
+        id: e.id,
+        type: e.type,
+        fromStatus: e.fromStatus,
+        toStatus: e.toStatus,
+        reason: e.reason,
+        channel: e.channel,
+        source: e.source,
+        actorType: e.actorType,
+        actorId: e.actorId,
+        callId: e.callId,
+        payload: e.payload,
+        createdAt: e.createdAt.toISOString(),
+      })),
+    };
   }
 }

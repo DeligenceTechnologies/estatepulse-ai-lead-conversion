@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { SmsConversationService } from './sms/sms-conversation.service';
+import { withSmsSection } from './sms/sms-prompt';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
+import { callToolsSettings, withCallToolsSection } from './tools/call-tools';
 
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
 
@@ -81,6 +84,7 @@ const HANGUP_TOOL = {
 };
 
 const RECORDING_NOTICE = 'Just so you know, this call is recorded for quality and training.';
+const VOICE_CACHE_MS = 10 * 60 * 1000;
 
 const ASSISTANT_MODELS = [
   'meta-llama/Llama-3.3-70B-Instruct',
@@ -95,13 +99,16 @@ export class AssistantService {
 
   private readonly hangupReady = new Set<string>();
   private readonly hangupInflight = new Map<string, Promise<void>>();
+  private readonly voices = new Map<string, { voice: string | null; until: number }>();
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
     private readonly prisma: PrismaService,
+    private readonly conversations: SmsConversationService,
   ) {}
 
-  private async greetingFor(orgId: string, base: string): Promise<string> {
+  /** The greeting with the recording notice in front of it, when the organization announces recording. */
+  async greetingFor(orgId: string, base: string): Promise<string> {
     const settings = await this.prisma.organizationSetting
       .findUnique({ where: { orgId }, select: { callRecordingEnabled: true, callRecordingAnnounce: true } })
       .catch(() => null);
@@ -115,6 +122,17 @@ export class AssistantService {
     return c;
   }
 
+  /** The assistant's own voice, so a voicemail sounds like the AI that would have talked. Null when it cannot be read. */
+  async voiceFor(orgId: string): Promise<string | null> {
+    const hit = this.voices.get(orgId);
+    if (hit && hit.until > Date.now()) return hit.voice;
+    const voice = await this.fetchRaw(orgId)
+      .then((a) => (typeof a?.voice_settings?.voice === 'string' && a.voice_settings.voice) || null)
+      .catch(() => null);
+    this.voices.set(orgId, { voice, until: Date.now() + VOICE_CACHE_MS });
+    return voice;
+  }
+
   private async fetchRaw(orgId: string): Promise<any> {
     const c = await this.requireCreds(orgId);
     if (!c.assistantId) throw new AppError('CONFLICT', 'No AI assistant yet — create one or paste an existing assistant id.');
@@ -122,6 +140,13 @@ export class AssistantService {
     if (!res.ok) throw new AppError('UPSTREAM_ERROR', `AI agent fetch failed ${res.status}: ${await res.text()}`);
     const j = (await res.json()) as any;
     return j.data ?? j;
+  }
+
+  /** While the call-outcome tools are on the assistant, a form save keeps their prompt section. */
+  private async keepCallToolsSection(orgId: string, instructions: string): Promise<string> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
+    const tools = callToolsSettings(row?.callTools);
+    return tools.enabled && tools.telnyx ? withCallToolsSection(instructions) : instructions;
   }
 
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
@@ -151,18 +176,27 @@ export class AssistantService {
   }
 
   async updateAssistant(orgId: string, patch: any) {
+    this.voices.delete(orgId);
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
+    // While the AI answers texts, the pieces that switch it on are managed by SmsConversationService; a form save keeps them.
+    const texting = await this.conversations.isEnabled(orgId);
     const body: any = {};
-    if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
+    if (patch.instructions != null) {
+      const withBooking = await this.keepBookingSection(orgId, patch.instructions);
+      const withTexting = texting ? withSmsSection(withBooking) : withBooking;
+      body.instructions = await this.keepCallToolsSection(orgId, withTexting);
+    }
     if (patch.greeting != null) body.greeting = patch.greeting;
     if (patch.model != null) body.model = patch.model;
     if (patch.description != null) body.description = patch.description;
     if (patch.dynamic_variables != null) body.dynamic_variables = patch.dynamic_variables;
-    if (patch.dynamic_variables_webhook_url != null) {
+    if (patch.dynamic_variables_webhook_url != null && !texting) {
       body.dynamic_variables_webhook_url = patch.dynamic_variables_webhook_url || null;
     }
-    if (patch.enabled_features != null) body.enabled_features = patch.enabled_features;
+    if (patch.enabled_features != null) {
+      body.enabled_features = texting ? [...new Set<string>([...patch.enabled_features, 'messaging'])] : patch.enabled_features;
+    }
     if (patch.data_retention != null) {
       body.privacy_settings = { ...(cur.privacy_settings ?? {}), data_retention: !!patch.data_retention };
     }

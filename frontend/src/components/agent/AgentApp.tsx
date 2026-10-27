@@ -1,18 +1,20 @@
 import React from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { CalendarCheck, Clock, LayoutDashboard, Users } from 'lucide-react';
+import { CalendarCheck, Clock, LayoutDashboard, MessageSquare, Users } from 'lucide-react';
 import { AppShell } from '../layout/AppShell';
 import type { NavItem } from '../layout/DashboardSidebar';
 import { AgentAppointments } from './AgentAppointments';
 import { AgentAvailability } from './AgentAvailability';
+import { AgentConversations } from './AgentConversations';
 import { AgentDashboard } from './AgentDashboard';
 import { AgentLeads } from './AgentLeads';
 
-type AgentView = 'dashboard' | 'leads' | 'appointments' | 'availability';
+type AgentView = 'dashboard' | 'leads' | 'conversations' | 'appointments' | 'availability';
 
 const NAV_ITEMS: Array<NavItem & { id: AgentView }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'leads', label: 'My Leads', icon: Users },
+  { id: 'conversations', label: 'Conversations', icon: MessageSquare },
   { id: 'appointments', label: 'Appointments', icon: CalendarCheck },
   { id: 'availability', label: 'My Availability', icon: Clock },
 ];
@@ -51,6 +53,7 @@ export const AgentApp: React.FC = () => {
     >
       {view === 'dashboard' && <AgentDashboard />}
       {view === 'leads' && <AgentLeads />}
+      {view === 'conversations' && <AgentConversations />}
       {view === 'appointments' && <AgentAppointments />}
       {view === 'availability' && <AgentAvailability />}
     </AppShell>

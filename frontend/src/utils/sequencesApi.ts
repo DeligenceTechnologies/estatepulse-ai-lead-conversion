@@ -1,4 +1,5 @@
 import { apiFetch } from '../lib/api';
+import type { StepConditions, StepVoicemail } from './journey';
 
 /**
  * Nurture sequences: authoring them, and putting leads into them.
@@ -77,8 +78,11 @@ export interface SequenceStep {
   /** Gap before this step, measured from the PREVIOUS step — not from enrolment. */
   delayMinutes: number;
   messageTemplate: string | null;
+  /** A call step: why the AI is calling, given to it as {{call_context}}. */
   voicePrompt: string | null;
   maxAttempts: number;
+  onlyIf?: StepConditions;
+  voicemail?: StepVoicemail;
 }
 
 /** What the editor sends. `stepOrder` is absent: the server uses array order. */
@@ -88,6 +92,8 @@ export interface StepDraft {
   messageTemplate?: string | null;
   voicePrompt?: string | null;
   maxAttempts?: number;
+  onlyIf?: StepConditions;
+  voicemail?: StepVoicemail;
 }
 
 export interface Sequence {
@@ -115,6 +121,8 @@ export interface Enrollment {
   sequenceCode: string | null;
   sequenceName: string | null;
   currentStep: number;
+  /** Every step has run; the lead has until nextActionAt to answer before being closed out. */
+  awaitingReply?: boolean;
   status: string;
   nextActionAt: string | null;
   enrolledAt: string;

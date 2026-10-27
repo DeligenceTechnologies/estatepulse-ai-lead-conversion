@@ -51,6 +51,7 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'RATE_LIMITED'
+  | 'UPSTREAM_ERROR'
   | 'INTERNAL'
   | 'NETWORK';
 
@@ -169,6 +170,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: 'That page or resource does not exist.',
   CONFLICT: 'That conflicts with something that already exists.',
   RATE_LIMITED: 'Too many attempts. Please wait a minute and try again.',
+  UPSTREAM_ERROR: 'A connected service (Telnyx, Calendly or your CRM) did not respond in time. Please try again in a moment.',
   INTERNAL: 'Something went wrong on our end. Please try again.',
   NETWORK: 'Cannot reach the server. Check that the API is running.',
 };

@@ -22,8 +22,21 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { STEP_VOICEMAILS, type StepVoicemail } from '../journey';
+
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const unique = ({ value }: { value: unknown }) => (Array.isArray(value) ? [...new Set(value)] : value);
+
+/** When a strategy or sequence step runs; both set means both must hold. */
+export class StepConditionsDto {
+  @IsOptional()
+  @IsBoolean()
+  lastCallMissed?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  noReply?: boolean;
+}
 
 export class SequenceStepDto {
   @IsIn(['sms', 'voice'])
@@ -55,6 +68,16 @@ export class SequenceStepDto {
   @Min(1)
   @Max(10)
   maxAttempts?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StepConditionsDto)
+  onlyIf?: StepConditionsDto;
+
+  /** A call step only: the organization's voicemail setting, always leave the message, or never. */
+  @IsOptional()
+  @IsIn(STEP_VOICEMAILS)
+  voicemail?: StepVoicemail;
 }
 
 export class ReplaceStepsDto {

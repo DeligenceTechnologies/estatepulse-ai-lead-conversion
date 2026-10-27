@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { LeadStatus, type Call, type LeadTemperature, type Prisma } from '@prisma/client';
+import { CallDisposition, LeadStatus, type Call, type LeadTemperature, type Prisma } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { verifyTelnyxSignature } from '@/common/utils/crypto';
@@ -55,7 +55,7 @@ export class LeadScoringService {
   /** The Insight's result for a call. Signed by Telnyx; refused when the signature does not verify. */
   async onInsightsGenerated(ccid: string, payload: any, delivery: SignedDelivery): Promise<void> {
     const call = await this.prisma.call.findFirst({ where: { providerCallId: ccid }, orderBy: { createdAt: 'desc' } });
-    if (!call) return;
+    if (!call || call.disposition === CallDisposition.voicemail) return;
     const c = await this.creds.getCreds(call.orgId).catch(() => null);
     if (c?.publicKey && !verifyTelnyxSignature({ publicKey: c.publicKey, ...delivery })) {
       this.logger.warn(`insights for call ${call.id}: bad Telnyx signature — ignored`);
@@ -82,7 +82,8 @@ export class LeadScoringService {
 
   async scoreIfUnscored(orgId: string, callId: string): Promise<Qualification | null> {
     const call = await this.prisma.call.findFirst({ where: { id: callId, orgId } });
-    if (!call?.transcript?.trim()) return null;
+    // A voicemail's transcript is the machine's greeting, not anything the lead said.
+    if (!call?.transcript?.trim() || call.disposition === CallDisposition.voicemail) return null;
     if ((call.extractedIntel as { qualification?: unknown } | null)?.qualification) return null;
     return this.classifyCall(orgId, callId);
   }
@@ -135,8 +136,13 @@ export class LeadScoringService {
     const lead = await this.prisma.lead.findFirst({ where: { id: call.leadId, orgId }, select: { status: true, dncStatus: true } });
     if (!lead) return qualification;
     await this.prisma.lead.update({ where: { id: call.leadId }, data: { score: result.score, ...leadDetailsFrom(extraction) } });
+    const ended = endingOutcome(extraction);
     if (SETTLED_STATUSES.includes(lead.status) || lead.dncStatus) {
       await this.prisma.lead.update({ where: { id: call.leadId }, data: { temperature: result.temperature } });
+    } else if (ended) {
+      // A wrong number or a clear "no" ends the outreach here instead of parking the lead for nurture.
+      await this.prisma.lead.update({ where: { id: call.leadId }, data: { temperature: result.temperature } });
+      await this.engine.setStatus(orgId, call.leadId, ended, leadReason(qualification), { source: 'scoring' });
     } else {
       await this.engine.qualified(orgId, call.leadId, result.temperature, leadReason(qualification), {
         callbackRequested: Boolean(extraction.callback_requested),
@@ -145,6 +151,17 @@ export class LeadScoringService {
     this.logger.log(`lead ${call.leadId} scored ${result.score} → ${result.temperature} (${source})`);
     return qualification;
   }
+}
+
+/**
+ * The status a call ends the outreach with, if any: a wrong number, or a "no"
+ * that came without a request for a meeting or a callback (a mixed answer
+ * stays with the score).
+ */
+export function endingOutcome(x: Extraction): LeadStatus | null {
+  if (x.invalid_lead) return LeadStatus.invalid;
+  if (x.not_interested && !x.appointment_requested && !x.callback_requested) return LeadStatus.not_interested;
+  return null;
 }
 
 function leadReason(q: Qualification): string {

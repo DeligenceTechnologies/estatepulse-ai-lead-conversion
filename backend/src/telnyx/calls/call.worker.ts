@@ -1,24 +1,46 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CallDisposition, CallStatus, LeadStatus } from '@prisma/client';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
-import { nextAllowedAt } from '@/common/utils/quiet-hours';
+import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
 import { VoiceService } from '../voice.service';
 import { CallSlots } from './call-slots';
-import { DEFAULT_CALL_LIMIT, type CallJobData } from './call.types';
+import { DEFAULT_CALL_LIMIT, type CallIntent, type CallJobData } from './call.types';
 
 const LIMIT_CACHE_MS = 30_000;
 const SLOT_WAIT_MS = 5_000;
 const SLOT_WAIT_JITTER_MS = 5_000;
+/** A callback due while the lead is still on our previous call waits this long and looks again. */
+const LIVE_CALL_WAIT_MS = 30_000;
+/** A call row older than this still marked live is a lost hangup, not a call in progress. */
+const LIVE_CALL_MAX_AGE_MS = 30 * 60_000;
+/** A lead who declined or was busy is not dialled again this soon, except for a callback they asked for. */
+export const REDIAL_GAP_MS = 30 * 60_000;
+/** Telnyx or the network failing the dial (not the lead, not the number) is tried once more after this. */
+export const DIAL_RETRY_MS = 10 * 60_000;
+
+/** A callback the lead asked for is kept even after a hot result: the AI promised it. */
+const CALLBACK_BLOCKED = OUTCOME_STATUSES.filter((s) => s !== LeadStatus.interested && s !== LeadStatus.appointment_requested);
 
 export function isCapacityError(message: string): boolean {
   return /failed 429|channel limit|concurrent call|too many/i.test(message);
+}
+
+/** Telnyx unreachable, or failing on its side: the dial may work a little later. */
+export function isTransientDialError(message: string): boolean {
+  return /Telnyx unreachable|failed 5\d\d\b/i.test(message);
+}
+
+/** Telnyx refuses the dial itself for a number that does not exist (error 10010, D50: no valid LRN); no webhook follows. */
+export function isInvalidNumberError(message: string): boolean {
+  return /destination number is invalid/i.test(message);
 }
 
 @Processor(CALL_QUEUE, { autorun: false })
@@ -49,19 +71,42 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
   async process(job: Job<CallJobData>, token?: string): Promise<void> {
     if (job.name !== CallJob.Dial) throw new UnrecoverableError(`Unknown call job "${job.name}"`);
-    const { orgId, leadId, sequenceId } = job.data;
+    const { orgId, leadId, sequenceId, callbackAt } = job.data;
+    const callback = job.data.source === 'callback';
+    const intent: CallIntent = {
+      ...(job.data.voicemail && job.data.voicemail !== 'default' ? { voicemail: job.data.voicemail } : {}),
+      ...(job.data.context ? { context: job.data.context } : {}),
+    };
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true },
+      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true },
     });
-    if (!lead || lead.dncStatus || lead.automationPaused || OUTCOME_STATUSES.includes(lead.status)) {
+    if (!lead || lead.dncStatus || lead.automationPaused || (callback ? CALLBACK_BLOCKED : OUTCOME_STATUSES).includes(lead.status)) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead can no longer be called`);
       return;
     }
+    if (callback && lead.callbackAt?.toISOString() !== callbackAt) {
+      this.logger.log(`Callback for lead ${leadId} at ${callbackAt} dropped: it was moved or cleared since`);
+      return;
+    }
+    if (callback) {
+      const live = await this.prisma.call.count({
+        where: { leadId, status: { in: [CallStatus.ringing, CallStatus.in_progress] }, createdAt: { gte: new Date(Date.now() - LIVE_CALL_MAX_AGE_MS) } },
+      });
+      if (live > 0) return this.delay(job, Date.now() + LIVE_CALL_WAIT_MS, token);
+    } else {
+      const last = await this.prisma.call.findFirst({ where: { leadId }, orderBy: { createdAt: 'desc' }, select: { disposition: true, endedAt: true } });
+      const declined = last?.disposition === CallDisposition.busy || last?.disposition === CallDisposition.rejected;
+      if (declined && last.endedAt && last.endedAt.getTime() + REDIAL_GAP_MS > Date.now()) {
+        this.logger.log(`Call for lead ${leadId} waits: they declined or were busy at ${last.endedAt.toISOString()}`);
+        return this.delay(job, last.endedAt.getTime() + REDIAL_GAP_MS, token);
+      }
+    }
 
-    const { timeZone, quiet } = await this.followup.guardrailsFor(orgId);
-    const allowed = nextAllowedAt(timeZone, quiet, new Date());
+    // A callback the lead asked for keeps to quiet hours only; everything else also skips the organization's days off.
+    const { timeZone, quiet, skipDays } = await this.followup.guardrailsFor(orgId);
+    const allowed = callback ? nextAllowedAt(timeZone, quiet, new Date()) : nextContactAt(timeZone, quiet, skipDays, new Date());
     if (allowed.getTime() > Date.now()) return this.delay(job, allowed.getTime(), token);
 
     const slotId = String(job.id);
@@ -71,7 +116,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
     let call: { call_control_id?: string };
     try {
-      call = await this.voice.placeCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}) });
+      call = await this.voice.placeCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}), ...intent });
     } catch (error) {
       await this.slots.release(orgId, slotId);
       const message = (error as Error).message;
@@ -79,13 +124,20 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
         this.logger.warn(`Telnyx is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
         return this.delay(job, Date.now() + SLOT_WAIT_MS * 6, token);
       }
-      await this.activity.recordCallFailed(orgId, leadId, message);
+      if (isTransientDialError(message) && !job.data.dialRetried) {
+        this.logger.warn(`Dial for lead ${leadId} failed on Telnyx's side; one retry in ${DIAL_RETRY_MS / 60_000} min: ${message}`);
+        await job.updateData({ ...job.data, dialRetried: true });
+        return this.delay(job, Date.now() + DIAL_RETRY_MS, token);
+      }
+      const invalid = isInvalidNumberError(message);
+      await this.activity.recordCallFailed(orgId, leadId, message, invalid ? CallDisposition.invalid_number : CallDisposition.failed);
+      if (invalid) await this.activity.markInvalid(leadId, 'Invalid number (Telnyx D50: the number does not exist)');
       return;
     }
 
     if (call.call_control_id) await this.slots.rename(orgId, slotId, call.call_control_id);
     else await this.slots.release(orgId, slotId);
-    await this.activity.startCall(orgId, leadId, call.call_control_id);
+    await this.activity.startCall(orgId, leadId, call.call_control_id, intent);
   }
 
   private async delay(job: Job<CallJobData>, until: number, token?: string): Promise<never> {

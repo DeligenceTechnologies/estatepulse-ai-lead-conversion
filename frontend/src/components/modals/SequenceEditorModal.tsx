@@ -28,6 +28,8 @@ import {
   ENROLL_TRIGGERS,
   type EnrollTrigger,
 } from '../../utils/sequencesApi';
+import { SEQUENCE_PRESETS, fitSteps } from '../../utils/journey';
+import { AlwaysOnRules, StepRules } from '../journey/StepRules';
 
 /**
  * Author a nurture sequence.
@@ -58,6 +60,8 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
 }
+
+const fit = (steps: StepDraft[]) => fitSteps(steps, (s) => s.actionType);
 
 const blankStep = (): StepDraft => ({
   actionType: 'sms',
@@ -93,15 +97,21 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
   const [description, setDescription] = useState(sequence?.description ?? '');
   const [status, setStatus] = useState<SequenceStatus>(sequence?.status ?? 'active');
   const [triggers, setTriggers] = useState<EnrollTrigger[]>(sequence?.enrollTriggers ?? []);
-  const [steps, setSteps] = useState<StepDraft[]>(
-    sequence?.steps.map((s) => ({
-      actionType: s.actionType,
-      delayMinutes: s.delayMinutes,
-      messageTemplate: s.messageTemplate ?? '',
-      voicePrompt: s.voicePrompt ?? '',
-      maxAttempts: s.maxAttempts,
-    })) ?? [blankStep()],
+  const [steps, setStepsRaw] = useState<StepDraft[]>(() =>
+    fit(
+      sequence?.steps.map((s) => ({
+        actionType: s.actionType,
+        delayMinutes: s.delayMinutes,
+        messageTemplate: s.messageTemplate ?? '',
+        voicePrompt: s.voicePrompt ?? '',
+        maxAttempts: s.maxAttempts,
+        onlyIf: s.onlyIf,
+        voicemail: s.voicemail,
+      })) ?? [blankStep()],
+    ),
   );
+  /** A step's condition depends on the step before it, so every change refits them all. */
+  const setSteps = (next: (prev: StepDraft[]) => StepDraft[]) => setStepsRaw((prev) => fit(next(prev)));
   const [saving, setSaving] = useState(false);
 
   /**
@@ -166,7 +176,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
   const save = async () => {
     setSaving(true);
     try {
-      const payloadSteps: StepDraft[] = steps.map((s) => ({
+      const payloadSteps: StepDraft[] = steps.map((s, i) => ({
         actionType: s.actionType,
         delayMinutes: s.delayMinutes,
         maxAttempts: s.maxAttempts ?? 1,
@@ -175,7 +185,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
         // validation rejects an empty message.
         ...(s.actionType === 'sms'
           ? { messageTemplate: s.messageTemplate ?? '' }
-          : { voicePrompt: s.voicePrompt ?? '' }),
+          : { voicePrompt: s.voicePrompt ?? '', ...(s.voicemail && s.voicemail !== 'default' ? { voicemail: s.voicemail } : {}) }),
+        ...(i > 0 && (s.onlyIf?.lastCallMissed || s.onlyIf?.noReply) ? { onlyIf: s.onlyIf } : {}),
       }));
 
       if (isNew) {
@@ -573,6 +584,24 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   {steps.length} step{steps.length === 1 ? '' : 's'} over {daysLabel}.
                 </p>
               </div>
+              <select
+                value=""
+                onChange={(e) => {
+                  const preset = SEQUENCE_PRESETS.find((p) => p.key === e.target.value);
+                  if (!preset) return;
+                  if (!window.confirm(`Replace the ${steps.length} step(s) with the "${preset.name}" template? Nothing changes until you save.`)) return;
+                  setSteps(() => preset.steps());
+                }}
+                className="ml-auto mr-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 text-xs focus:outline-none focus:border-emerald-500"
+                aria-label="Start from a template"
+              >
+                <option value="">Start from a template…</option>
+                {SEQUENCE_PRESETS.map((p) => (
+                  <option key={p.key} value={p.key} title={p.description}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={() => setSteps((p) => [...p, blankStep()])}
                 className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center gap-1 cursor-pointer"
@@ -581,6 +610,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                 Add step
               </button>
             </div>
+
+            <AlwaysOnRules className="mb-3" />
 
             <div className="space-y-2">
               {steps.map((step, i) => (
@@ -644,6 +675,14 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                     </button>
                   </div>
 
+                  <StepRules
+                    channel={step.actionType}
+                    onlyIf={step.onlyIf}
+                    voicemail={step.voicemail}
+                    previous={steps[i - 1]?.actionType}
+                    onChange={(patch) => patchStep(i, patch)}
+                  />
+
                   {step.actionType === 'sms' ? (
                     <div>
                       <textarea
@@ -664,11 +703,11 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                         className={`${input} h-16 resize-none`}
                         value={step.voicePrompt ?? ''}
                         onChange={(e) => patchStep(i, { voicePrompt: e.target.value })}
-                        placeholder="What should the AI try to find out on this call?"
+                        placeholder="Why is the AI calling this time? e.g. second try, check if their timeline moved"
                       />
                       <p className="text-2xs text-slate-500 mt-1 flex items-center gap-1">
                         <PhoneCall className="w-3 h-3" />
-                        Guidance for the assistant on this callback.
+                        Given to the AI as its reason for this call. The next step waits until the call has ended.
                       </p>
                     </div>
                   )}
