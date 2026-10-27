@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import {
+  CLOSE_OUT_HOURS,
   createSequence,
   formatDelay,
   replaceSteps,
@@ -97,6 +98,9 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
   const [description, setDescription] = useState(sequence?.description ?? '');
   const [status, setStatus] = useState<SequenceStatus>(sequence?.status ?? 'active');
   const [triggers, setTriggers] = useState<EnrollTrigger[]>(sequence?.enrollTriggers ?? []);
+  const [closeOutHours, setCloseOutHours] = useState<number>(sequence?.closeOutHours ?? CLOSE_OUT_HOURS.default);
+  const [closeOutUnresponsive, setCloseOutUnresponsive] = useState<boolean>(sequence?.closeOutUnresponsive ?? true);
+  const closeOutValid = Number.isInteger(closeOutHours) && closeOutHours >= CLOSE_OUT_HOURS.min && closeOutHours <= CLOSE_OUT_HOURS.max;
   const [steps, setStepsRaw] = useState<StepDraft[]>(() =>
     fit(
       sequence?.steps.map((s) => ({
@@ -131,15 +135,15 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
    * boolean flipped on every keystroke, so that typing a character and deleting
    * it again correctly leaves the sequence unchanged.
    */
+  const snapshot = () =>
+    JSON.stringify({ n: name, d: description, s: status, t: [...triggers].sort(), st: steps, co: closeOutHours, cu: closeOutUnresponsive });
   const initial = useMemo(
-    () => JSON.stringify({ n: name, d: description, s: status, t: [...triggers].sort(), st: steps }),
+    snapshot,
     // Deliberately empty: this is the snapshot at open, not a live value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-  const dirty =
-    JSON.stringify({ n: name, d: description, s: status, t: [...triggers].sort(), st: steps }) !==
-    initial;
+  const dirty = snapshot() !== initial;
 
   const patchStep = (i: number, patch: Partial<StepDraft>) =>
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
@@ -196,6 +200,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
           description: description || undefined,
           status,
           enrollTriggers: triggers,
+          closeOutHours,
+          closeOutUnresponsive,
           steps: payloadSteps,
         });
       } else {
@@ -204,6 +210,8 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
           description: description || null,
           status,
           enrollTriggers: triggers,
+          closeOutHours,
+          closeOutUnresponsive,
         });
         await replaceSteps(sequence.id, payloadSteps);
       }
@@ -497,20 +505,26 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       <div className="space-y-2">
                         {items.map((t) => {
                           const on = triggers.includes(t.value);
+                          // A hot lead goes straight to an agent, so this trigger never sends; one already set can be removed.
+                          const hot = t.value === 'qualified_hot';
+                          const locked = hot && !on;
                           return (
                             <label
                               key={t.value}
-                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
-                                on
-                                  ? 'bg-emerald-950/25 border-emerald-700/60'
-                                  : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                              className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                                locked
+                                  ? 'bg-slate-950/40 border-slate-800/60 opacity-60 cursor-not-allowed'
+                                  : on
+                                    ? 'bg-emerald-950/25 border-emerald-700/60 cursor-pointer'
+                                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 cursor-pointer'
                               }`}
                             >
                               <input
                                 type="checkbox"
                                 checked={on}
+                                disabled={locked}
                                 onChange={() => toggle(t.value)}
-                                className="mt-0.5 w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer"
+                                className="mt-0.5 w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer disabled:cursor-not-allowed"
                               />
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-2 flex-wrap">
@@ -530,7 +544,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                                   )}
                                 </span>
                                 <span className="block text-xs text-slate-500 mt-0.5 leading-normal">
-                                  {t.hint}
+                                  {hot ? 'Hot leads go straight to an agent, so a sequence here never sends anything.' : t.hint}
                                 </span>
                               </span>
                             </label>
@@ -714,6 +728,40 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                 </div>
               ))}
             </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+              <h5 className="text-xs font-semibold text-slate-200">When the sequence ends</h5>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <span>After the last step, give the lead</span>
+                <input
+                  id="sequence-close-out-hours"
+                  type="number"
+                  min={CLOSE_OUT_HOURS.min}
+                  max={CLOSE_OUT_HOURS.max}
+                  className={`${input} w-20`}
+                  value={closeOutHours}
+                  onChange={(e) => setCloseOutHours(Number(e.target.value))}
+                  aria-label="Hours the lead has to reply after the last step"
+                />
+                <span>hours ({formatDelay(Math.max(0, closeOutHours) * 60)}) to reply, then</span>
+                <select
+                  id="sequence-close-out-action"
+                  className={`${input} w-auto`}
+                  value={closeOutUnresponsive ? 'unresponsive' : 'keep'}
+                  onChange={(e) => setCloseOutUnresponsive(e.target.value === 'unresponsive')}
+                >
+                  <option value="unresponsive">mark them Unresponsive</option>
+                  <option value="keep">leave them in Follow-up</option>
+                </select>
+              </div>
+              {!closeOutValid && (
+                <p className="text-2xs text-rose-300">Use {CLOSE_OUT_HOURS.min} to {CLOSE_OUT_HOURS.max} hours (30 days).</p>
+              )}
+              <p className="text-2xs text-slate-500">
+                A lead who replied or talked on a call during the sequence is never marked Unresponsive. Default: 48 hours, then
+                Unresponsive.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -746,7 +794,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
             </button>
             <button
               onClick={() => void save()}
-              disabled={saving || !name.trim() || (isNew && !code.trim())}
+              disabled={saving || !name.trim() || (isNew && !code.trim()) || !closeOutValid}
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
             >
               {saving ? 'Saving…' : isNew ? 'Create sequence' : 'Save changes'}

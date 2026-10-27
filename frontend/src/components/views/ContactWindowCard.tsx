@@ -60,13 +60,17 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
     whole(limits.callsPerDay, 20) &&
     whole(limits.smsPerDay, 20) &&
     whole(limits.minGapMinutes, 1440) &&
+    whole(limits.redialGapMinutes, 1440) &&
+    whole(limits.chatQuietMinutes, 1440) &&
     skipDays.length < 7;
   const setLimit = (key: keyof ContactLimits, value: string) => setLimits((l) => ({ ...l, [key]: value === '' ? 0 : Number(value) }));
   const toggleDay = (d: number) => setSkipDays((days) => (days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort()));
 
   const save = async () => {
     if (!valid) {
-      setError('Times must be 24-hour HH:MM (e.g. 21:00), limits whole numbers (calls and texts up to 20 a day, a gap up to 1440 min), and at least one day open.');
+      setError(
+        'Times must be 24-hour HH:MM (e.g. 21:00), limits whole numbers (calls and texts up to 20 a day, the gaps and waits up to 1440 min), and at least one day open.',
+      );
       return;
     }
     setSaving(true);
@@ -225,6 +229,54 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
               <p className="text-2xs text-slate-500 mt-1">
                 A step due on a day off goes at the start of the next open day. A callback the lead asked for still
                 happens.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label htmlFor="redial-gap" className="block text-slate-300 font-semibold mb-1">
+                After a busy or declined call <span className="text-slate-500 font-normal">— 0 is no wait</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">wait</span>
+                <input
+                  id="redial-gap"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  value={limits.redialGapMinutes}
+                  onChange={(e) => setLimit('redialGapMinutes', e.target.value)}
+                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
+                />
+                <span className="text-slate-400">min before calling again</span>
+              </div>
+              <p className="text-2xs text-slate-500 mt-1">
+                Someone who just declined is not rung straight back. A callback the lead asked for is not held back.
+                Default 30 min.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="chat-quiet" className="block text-slate-300 font-semibold mb-1">
+                While a lead is texting <span className="text-slate-500 font-normal">— follow-up sequences, 0 is no wait</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">wait</span>
+                <input
+                  id="chat-quiet"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  value={limits.chatQuietMinutes}
+                  onChange={(e) => setLimit('chatQuietMinutes', e.target.value)}
+                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
+                />
+                <span className="text-slate-400">min after their last text</span>
+              </div>
+              <p className="text-2xs text-slate-500 mt-1">
+                A sequence step never lands in the middle of a chat. The outreach strategy keeps its own rule: a call waits
+                until the chat has been quiet for that step&apos;s wait. Default 30 min.
               </p>
             </div>
           </div>

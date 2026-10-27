@@ -11,7 +11,20 @@ export interface CallToolsSettings {
   confirmSms: boolean;
   /** {{firstName}}, {{callbackTime}} and the other lead variables are filled in. */
   confirmMessage: string;
+  /** A callback the lead does not answer is called again this many minutes later… */
+  retryMinutes: number;
+  /** …this many times (0: not at all), before the lead goes to the no-answer follow-up. */
+  retryAttempts: number;
 }
+
+export const DEFAULT_RETRY_MINUTES = 15;
+export const RETRY_MINUTES_MIN = 5;
+export const RETRY_MINUTES_MAX = 240;
+export const DEFAULT_RETRY_ATTEMPTS = 1;
+export const RETRY_ATTEMPTS_MAX = 3;
+
+const whole = (value: unknown, min: number, max: number, fallback: number): number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
 
 /** What was created on Telnyx for them; only the token's hash is kept here. */
 export interface CallToolsTelnyx {
@@ -46,6 +59,8 @@ export function callToolsSettings(raw: unknown): CallToolsSettings & { telnyx: C
     enabled: typeof v.enabled === 'boolean' ? v.enabled : true,
     confirmSms: typeof v.confirmSms === 'boolean' ? v.confirmSms : true,
     confirmMessage: typeof v.confirmMessage === 'string' && v.confirmMessage.trim() ? v.confirmMessage.trim() : DEFAULT_CONFIRM_MESSAGE,
+    retryMinutes: whole(v.retryMinutes, RETRY_MINUTES_MIN, RETRY_MINUTES_MAX, DEFAULT_RETRY_MINUTES),
+    retryAttempts: whole(v.retryAttempts, 0, RETRY_ATTEMPTS_MAX, DEFAULT_RETRY_ATTEMPTS),
     telnyx: v.telnyx?.tokenHash ? v.telnyx : null,
   };
 }

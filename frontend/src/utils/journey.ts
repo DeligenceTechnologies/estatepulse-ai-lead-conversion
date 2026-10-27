@@ -43,9 +43,13 @@ export interface ContactLimits {
   smsPerDay: number;
   /** Between two of our calls, or two of our texts. A text may follow a call sooner. */
   minGapMinutes: number;
+  /** After a call the lead declined or was busy for, the next call waits this long (a callback they asked for does not). */
+  redialGapMinutes: number;
+  /** A follow-up step waits this long after the lead's last text, so it never lands in a chat. */
+  chatQuietMinutes: number;
 }
 
-export const DEFAULT_LIMITS: ContactLimits = { callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10 };
+export const DEFAULT_LIMITS: ContactLimits = { callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10, redialGapMinutes: 30, chatQuietMinutes: 30 };
 
 export const CALL_CONTEXT_MAX_CHARS = 500;
 
@@ -53,12 +57,12 @@ export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** The rules every step is held to, in the strategy and in every sequence. They are not settings. */
 export const ALWAYS_ON_RULES = [
-  'A booking, a do-not-contact request, "not interested" or a wrong number ends all outreach at once.',
+  'A booking (any meeting with the lead on the calendar), a do-not-contact request, "not interested" or a wrong number ends all outreach at once.',
   'Nothing canned is sent while the lead is texting with the AI; a call waits until the chat goes quiet.',
   'Nothing is sent over a call that is still ringing or live.',
   'After a real conversation, the rest of the steps stop and the call scoring decides what happens next.',
   'A callback the lead asked for comes first: nothing else reaches them before it.',
-  'A lead who declined or was busy is not called again for 30 minutes.',
+  'A lead who declined or was busy is not called again until the wait set in the contact window has passed.',
   'Quiet hours, days off and the daily limits below apply to every step. A step that cannot go now waits; it is never dropped.',
   'A step’s condition is about the step right before it. If that step was skipped, the step is skipped too.',
 ];

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CallbackService, LATER_MS, RETRY_AFTER_MS, resolveCallback } from './callback.service';
+import { CallbackService, LATER_MS, resolveCallback } from './callback.service';
+import { DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_MINUTES } from './call-tools';
 
 const TZ = 'Asia/Kolkata';
 const QUIET = { start: '21:00', end: '08:00' };
@@ -61,7 +62,20 @@ describe('resolveCallback', () => {
   });
 });
 
-function setup(opts: { status?: string; dnc?: boolean; moved?: boolean; callbackAt?: Date | null; disposition?: string; setHere?: boolean; missed?: number; confirmSms?: boolean } = {}) {
+function setup(
+  opts: {
+    status?: string;
+    dnc?: boolean;
+    moved?: boolean;
+    callbackAt?: Date | null;
+    disposition?: string;
+    setHere?: boolean;
+    missed?: number;
+    confirmSms?: boolean;
+    retryMinutes?: number;
+    retryAttempts?: number;
+  } = {},
+) {
   const prisma = {
     lead: {
       findFirst: vi.fn(async () => ({ status: opts.status ?? 'contacting', dncStatus: opts.dnc ?? false })),
@@ -86,7 +100,14 @@ function setup(opts: { status?: string; dnc?: boolean; moved?: boolean; callback
   const sms = { sendSms: vi.fn(async () => ({ id: 'msg-1' })) };
   const activity = { leadVariables: vi.fn(async () => ({ firstName: 'Ana' })), recordSms: vi.fn(async () => undefined) };
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
-  const tools = { settings: vi.fn(async () => ({ confirmSms: opts.confirmSms ?? true, confirmMessage: "Thanks {{firstName}}! I'll call you on {{callbackTime}}." })) };
+  const tools = {
+    settings: vi.fn(async () => ({
+      confirmSms: opts.confirmSms ?? true,
+      confirmMessage: "Thanks {{firstName}}! I'll call you on {{callbackTime}}.",
+      retryMinutes: opts.retryMinutes ?? DEFAULT_RETRY_MINUTES,
+      retryAttempts: opts.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS,
+    })),
+  };
   const service = new CallbackService(
     prisma as any,
     state as any,
@@ -195,7 +216,7 @@ describe('CallbackService.onCallEnded', () => {
   it('missed once: tried again in 15 minutes', async () => {
     const s = setup({ callbackAt: DUE, disposition: 'voicemail', missed: 0 });
     await s.service.onCallEnded('cc-1', NOW);
-    const retry = new Date(NOW.getTime() + RETRY_AFTER_MS);
+    const retry = new Date(NOW.getTime() + 15 * 60_000);
     expect(s.prisma.lead.update).toHaveBeenCalledWith({ where: { id: 'lead-1' }, data: { callbackAt: retry } });
     expect(s.calls.schedule).toHaveBeenCalledWith(expect.objectContaining({ source: 'callback', callbackAt: retry.toISOString() }), retry, expect.any(String));
     expect(s.followup.enroll).not.toHaveBeenCalled();
@@ -208,6 +229,18 @@ describe('CallbackService.onCallEnded', () => {
     expect(s.state.move).toHaveBeenCalledWith('lead-1', 'follow_up', expect.objectContaining({ onlyFrom: ['follow_up'], data: { followUpReason: 'no_answer' } }));
     expect(s.followup.enroll).toHaveBeenCalledWith('org-1', 'lead-1', 'no-answer-seq');
     expect(s.calls.schedule).not.toHaveBeenCalled();
+  });
+
+  it("the organization's own retry: how long after a miss, and how many times", async () => {
+    const later = setup({ callbackAt: DUE, disposition: 'no_answer', missed: 1, retryMinutes: 60, retryAttempts: 2 });
+    await later.service.onCallEnded('cc-1', NOW);
+    const retry = new Date(NOW.getTime() + 60 * 60_000);
+    expect(later.calls.schedule).toHaveBeenCalledWith(expect.objectContaining({ callbackAt: retry.toISOString() }), retry, expect.any(String));
+
+    const none = setup({ callbackAt: DUE, disposition: 'no_answer', missed: 0, retryAttempts: 0 });
+    await none.service.onCallEnded('cc-1', NOW);
+    expect(none.calls.schedule).not.toHaveBeenCalled();
+    expect(none.followup.enroll).toHaveBeenCalledWith('org-1', 'lead-1', 'no-answer-seq');
   });
 
   it('missed twice by a hot lead: it stays with its agent, no sequence', async () => {

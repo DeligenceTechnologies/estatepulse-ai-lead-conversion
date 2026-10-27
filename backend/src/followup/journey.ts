@@ -73,9 +73,13 @@ export interface ContactLimits {
   smsPerDay: number;
   /** Between two calls, or two texts, from us. A text may follow a call sooner, as speed to lead needs. */
   minGapMinutes: number;
+  /** After a call the lead declined or was busy for, the next call waits this long (a callback they asked for does not). */
+  redialGapMinutes: number;
+  /** A follow-up sequence step waits this long after the lead's last text, so it never lands in a chat. */
+  chatQuietMinutes: number;
 }
 
-export const DEFAULT_LIMITS: ContactLimits = { callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10 };
+export const DEFAULT_LIMITS: ContactLimits = { callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10, redialGapMinutes: 30, chatQuietMinutes: 30 };
 
 const whole = (value: unknown, max: number, fallback: number): number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : fallback;
@@ -87,8 +91,13 @@ export function limitsOf(raw: unknown): ContactLimits {
     callsPerDay: whole(v.callsPerDay, 20, DEFAULT_LIMITS.callsPerDay),
     smsPerDay: whole(v.smsPerDay, 20, DEFAULT_LIMITS.smsPerDay),
     minGapMinutes: whole(v.minGapMinutes, 1440, DEFAULT_LIMITS.minGapMinutes),
+    redialGapMinutes: whole(v.redialGapMinutes, 1440, DEFAULT_LIMITS.redialGapMinutes),
+    chatQuietMinutes: whole(v.chatQuietMinutes, 1440, DEFAULT_LIMITS.chatQuietMinutes),
   };
 }
+
+/** How long a sequence gives a lead after its last step before closing out: an hour to 30 days, 48 hours unless set. */
+export const CLOSE_OUT_HOURS = { min: 1, max: 720, default: 48 } as const;
 
 /** Days of the week (0 = Sunday) nobody is contacted, in the organization's time zone. */
 export function skipDaysOf(raw: unknown): number[] {

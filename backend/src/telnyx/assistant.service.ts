@@ -18,7 +18,6 @@ function shape(a: any) {
   const tr = a.transcription ?? {};
   const trs = tr.settings ?? {};
   const ms = a.messaging_settings ?? {};
-  const vm = ts.voicemail_detection ?? {};
   return {
     id: a.id,
     name: a.name,
@@ -53,8 +52,6 @@ function shape(a: any) {
 
     fallback_destination: ts.fallback_destination ?? '',
 
-    voicemail_detection: !!ts.voicemail_detection,
-    voicemail_action: vm.action ?? 'hangup',
     post_call_processing: !!a.post_conversation_settings?.enabled,
 
     enabled_features: a.enabled_features ?? ['telephony'],
@@ -272,8 +269,6 @@ export class AssistantService {
       'disable_dtmf',
       'noise_suppression',
       'fallback_destination',
-      'voicemail_detection',
-      'voicemail_action',
     ];
     if (telephonyKeys.some((k) => patch[k] != null)) {
       const ts: any = { ...(cur.telephony_settings ?? {}) };
@@ -284,13 +279,6 @@ export class AssistantService {
       if (patch.noise_suppression != null) ts.noise_suppression = patch.noise_suppression;
       if (patch.fallback_destination != null) ts.fallback_destination = patch.fallback_destination || null;
       if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: false };
-      if (patch.voicemail_detection != null) {
-        ts.voicemail_detection = patch.voicemail_detection
-          ? { ...(ts.voicemail_detection ?? {}), action: patch.voicemail_action ?? ts.voicemail_detection?.action ?? 'hangup' }
-          : null;
-      } else if (patch.voicemail_action != null && ts.voicemail_detection) {
-        ts.voicemail_detection = { ...ts.voicemail_detection, action: patch.voicemail_action };
-      }
       body.telephony_settings = ts;
     }
 
@@ -331,7 +319,11 @@ export class AssistantService {
     return shape(await this.fetchRaw(orgId));
   }
 
-  /** Once per assistant: the hangup tool is attached, and the assistant does not record on top of the call's own recording. */
+  /**
+   * Once per assistant: the hangup tool is attached, the assistant does not
+   * record on top of the call's own recording, and it does not act on voicemail
+   * by itself: the organization's Voicemail setting decides that for every call.
+   */
   async ensureCallSetup(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
@@ -349,14 +341,20 @@ export class AssistantService {
         this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
       }
       const ts = cur.telephony_settings ?? {};
-      if (ts.recording_settings?.enabled) {
+      if (ts.recording_settings?.enabled || ts.voicemail_detection) {
         const res = await fetch(`${BASE}/${c.assistantId}`, {
           method: 'PATCH',
           headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telephony_settings: { ...ts, recording_settings: { ...ts.recording_settings, enabled: false } } }),
+          body: JSON.stringify({
+            telephony_settings: {
+              ...ts,
+              ...(ts.recording_settings?.enabled ? { recording_settings: { ...ts.recording_settings, enabled: false } } : {}),
+              ...(ts.voicemail_detection ? { voicemail_detection: null } : {}),
+            },
+          }),
         });
-        if (!res.ok) throw new Error(`turning off the assistant's own recording failed ${res.status}: ${await res.text()}`);
-        this.logger.log(`assistant ${c.assistantId} no longer records on its own; the call's recording covers it`);
+        if (!res.ok) throw new Error(`turning off the assistant's own recording or voicemail handling failed ${res.status}: ${await res.text()}`);
+        this.logger.log(`assistant ${c.assistantId} no longer records or handles voicemail on its own; the call's settings cover both`);
       }
       this.hangupReady.add(key);
     })()

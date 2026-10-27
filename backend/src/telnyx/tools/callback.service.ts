@@ -16,8 +16,6 @@ import { CallToolsService } from './call-tools.service';
 
 /** "Call me later", with no time named. */
 export const LATER_MS = 3 * 60 * 60_000;
-/** A missed callback is tried once more after this. */
-export const RETRY_AFTER_MS = 15 * 60_000;
 /** The furthest ahead a callback may be set. */
 export const MAX_AHEAD_MS = 14 * 24 * 60 * 60_000;
 /** A time this close to now, or past, is not a callback. */
@@ -73,8 +71,9 @@ const SAY: Record<string, string> = {
  * callback_requested, or a hot lead keeps its status), stops the strategy and
  * every sequence, and queues the call for that exact time: nothing else
  * contacts the lead before it. After the call that set it, the lead gets the
- * time by SMS (an org setting). A missed callback is tried once more after
- * RETRY_AFTER_MS; a second miss hands the lead to the no-answer follow-up.
+ * time by SMS (an org setting). A missed callback is tried again as the
+ * organization set it (by default once, 15 minutes later); the miss after the
+ * last try hands the lead to the no-answer follow-up.
  */
 @Injectable()
 export class CallbackService {
@@ -196,8 +195,10 @@ export class CallbackService {
       where: { leadId: call.leadId, type: 'callback_missed', ...(lastSet ? { createdAt: { gte: lastSet.createdAt } } : {}) },
     });
     this.state.quietly({ ...base, type: 'callback_missed', reason: call.disposition ?? null, payload: { attempt: missed + 1 } });
-    if (missed === 0) {
-      const at = new Date(now.getTime() + RETRY_AFTER_MS);
+    // The organization's retry: how many more tries, and how long after a miss.
+    const { retryAttempts, retryMinutes } = await this.tools.settings(call.orgId);
+    if (missed < retryAttempts) {
+      const at = new Date(now.getTime() + retryMinutes * 60_000);
       await this.prisma.lead.update({ where: { id: call.leadId }, data: { callbackAt: at } });
       await this.calls.schedule({ orgId: call.orgId, leadId: call.leadId, source: 'callback', callbackAt: at.toISOString() }, at, `callback:${call.leadId}:${at.getTime()}`);
       return;
@@ -206,7 +207,7 @@ export class CallbackService {
     // A hot lead stays with its agent; a parked one goes on to the no-answer follow-up.
     const { moved } = await this.state.move(call.leadId, LeadStatus.follow_up, {
       source: 'callback',
-      reason: 'Missed the callback twice',
+      reason: missed === 0 ? 'Missed the callback' : `Missed the callback ${missed + 1} times`,
       callId: call.id,
       onlyFrom: [LeadStatus.follow_up],
       data: { followUpReason: FollowUpReason.no_answer },

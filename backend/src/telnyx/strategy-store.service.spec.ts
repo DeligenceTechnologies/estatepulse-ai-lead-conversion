@@ -91,7 +91,7 @@ describe('stepOffsets', () => {
     const { service, prisma } = store(defaultStrategy());
     await service.saveStrategy('org-1', { guardrails: { limits: { callsPerDay: 99, smsPerDay: 4, minGapMinutes: 15 }, skipDays: [0, 0, 8] } } as any);
     const saved = (prisma.organizationSetting.upsert.mock.calls[0] as any)[0].update.outreachStrategy;
-    expect(saved.guardrails.limits).toEqual({ callsPerDay: 2, smsPerDay: 4, minGapMinutes: 15 });
+    expect(saved.guardrails.limits).toEqual({ callsPerDay: 2, smsPerDay: 4, minGapMinutes: 15, redialGapMinutes: 30, chatQuietMinutes: 30 });
     expect(saved.guardrails.skipDays).toEqual([0]);
     expect(saved.guardrails.quietHours).toEqual({ start: '21:00', end: '08:00' });
   });
@@ -105,7 +105,7 @@ describe('stepOffsets', () => {
 
   it('a new organization gets the daily limits and a tried-calling text that needs a missed call', () => {
     const d = defaultStrategy();
-    expect(d.guardrails.limits).toEqual({ callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10 });
+    expect(d.guardrails.limits).toEqual({ callsPerDay: 2, smsPerDay: 3, minGapMinutes: 10, redialGapMinutes: 30, chatQuietMinutes: 30 });
     expect(d.steps.find((st) => st.id === 's3')?.onlyIf).toEqual({ lastCallMissed: true });
   });
 });

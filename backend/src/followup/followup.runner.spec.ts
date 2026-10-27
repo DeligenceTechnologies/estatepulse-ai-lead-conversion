@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { CHAT_QUIET_MS, CLOSE_OUT_AFTER_MS, FollowupRunner } from './followup.runner';
+import { FollowupRunner } from './followup.runner';
+import { DEFAULT_LIMITS } from './journey';
+
+const CLOSE_OUT_AFTER_MS = 48 * 3_600_000;
+const CHAT_QUIET_MS = 30 * 60_000;
 
 const NOW = new Date('2026-10-26T10:00:00Z');
 const smsStep = (text: string) => ({ actionType: 'sms', delayMinutes: 60, messageTemplate: text, voicePrompt: null, maxAttempts: 1 });
@@ -17,13 +21,14 @@ function setup(steps: unknown[], currentStep: number) {
     leadEvent: { create: vi.fn(async () => ({})), findFirst: vi.fn(async () => null as { createdAt: Date } | null) },
     message: { findFirst: vi.fn(async (_args?: any): Promise<any> => null) },
     call: { findFirst: vi.fn(async () => null as Record<string, unknown> | null) },
-    sequence: { findUnique: vi.fn(async () => ({ steps })) },
+    sequence: { findUnique: vi.fn(async () => ({ steps, closeOutHours: 48, closeOutUnresponsive: true })) },
     organization: { findUnique: vi.fn(async () => ({ name: 'Acme Realty' })) },
+    calendarMeeting: { count: vi.fn(async () => 0) },
     sequenceEnrollment: { update: vi.fn(async () => ({})) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const followup = {
-    guardrailsFor: vi.fn(async () => ({ timeZone: 'UTC', quiet: undefined, skipDays: [] as number[] })),
+    guardrailsFor: vi.fn(async () => ({ timeZone: 'UTC', quiet: undefined, skipDays: [] as number[], limits: { ...DEFAULT_LIMITS } })),
     dueAt: vi.fn(async () => NOW),
     contactSlot: vi.fn(async () => ({ at: new Date(Date.now()), reason: null as string | null })),
   };
@@ -87,6 +92,40 @@ describe('FollowupRunner last step', () => {
     });
   });
 
+  it("keeps to the sequence's own close-out: how long to wait, and whether to mark the lead unresponsive", async () => {
+    const wait = setup([smsStep('one'), smsStep('two')], 2);
+    wait.prisma.sequence.findUnique.mockResolvedValue({ steps: [smsStep('one'), smsStep('two')], closeOutHours: 120, closeOutUnresponsive: true } as any);
+    await wait.execute();
+    expect(wait.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({
+      where: { id: 'enr-1' },
+      data: expect.objectContaining({ currentStep: 3, nextActionAt: new Date(NOW.getTime() + 120 * 3_600_000) }),
+    });
+
+    const keep = setup([smsStep('one'), smsStep('two')], 3);
+    keep.prisma.sequence.findUnique.mockResolvedValue({ steps: [smsStep('one'), smsStep('two')], closeOutHours: 48, closeOutUnresponsive: false } as any);
+    await keep.execute();
+    expect(keep.tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(keep.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'completed' }) }));
+  });
+
+  it("waits after the lead's last text as long as the organization set, and not at all at 0", async () => {
+    const lastText = new Date(NOW.getTime() - 5 * 60_000);
+    const longer = setup([smsStep('one'), smsStep('two')], 2);
+    longer.followup.guardrailsFor.mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits: { ...DEFAULT_LIMITS, chatQuietMinutes: 60 } } as any);
+    longer.prisma.message.findFirst.mockResolvedValue({ createdAt: lastText });
+    await longer.execute();
+    expect(longer.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({
+      where: { id: 'enr-1' },
+      data: { nextActionAt: new Date(lastText.getTime() + 60 * 60_000), lockedBy: null, lockedAt: null },
+    });
+
+    const off = setup([smsStep('one'), smsStep('two')], 2);
+    off.followup.guardrailsFor.mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits: { ...DEFAULT_LIMITS, chatQuietMinutes: 0 } } as any);
+    off.prisma.message.findFirst.mockResolvedValue({ createdAt: lastText });
+    await off.execute();
+    expect(off.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'two');
+  });
+
   it('does not close out a lead who replied during the wait', async () => {
     const s = setup([smsStep('one')], 2);
     s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+1', status: 'contacting', dncStatus: false, automationPaused: true });
@@ -142,9 +181,38 @@ describe('FollowupRunner journey rules', () => {
     expect(s.sms.sendSms).not.toHaveBeenCalled();
   });
 
+  it('after a pick-up the next step waits for the call analysis instead of stopping on a guess', async () => {
+    const s = setup([voiceStep(), smsStep('two')], 2);
+    s.prisma.call.findFirst.mockResolvedValue({ status: 'completed', disposition: 'connected', endedAt: new Date(NOW.getTime() - 60_000), createdAt: NOW });
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(deferredTo(s)).toEqual([new Date(NOW.getTime() + 30_000)]);
+    expect(loggedEvent(s, 'sequence_stopped')).toBe(false);
+  });
+
+  it('a meeting on the calendar stops the sequence and marks the lead booked', async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 2);
+    s.prisma.calendarMeeting.count.mockResolvedValue(1);
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(s.tx.lead.updateMany).toHaveBeenCalledWith({ where: { id: 'lead-1', status: 'follow_up' }, data: { status: 'appointment_booked' } });
+    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'stopped', stoppedReason: 'appointment_booked' }) }),
+    );
+  });
+
+  it('looks at the lead once more right before sending: a pause that came in meanwhile holds the step', async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 2);
+    const lead = { firstName: 'Ana', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false };
+    s.prisma.lead.findUnique.mockResolvedValueOnce(lead).mockResolvedValueOnce({ ...lead, automationPaused: true });
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'paused' }) }));
+  });
+
   it('after a conversation the sequence stops: the call scoring decides what comes next', async () => {
     const s = setup([voiceStep(), smsStep('two')], 2);
-    s.prisma.call.findFirst.mockResolvedValue({ status: 'completed', disposition: 'connected', endedAt: NOW, createdAt: NOW });
+    s.prisma.call.findFirst.mockResolvedValue({ status: 'completed', disposition: 'connected', endedAt: NOW, createdAt: NOW, extractedIntel: { qualification: {} } });
     await s.execute();
     expect(s.sms.sendSms).not.toHaveBeenCalled();
     expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(

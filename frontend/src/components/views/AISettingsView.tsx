@@ -42,7 +42,6 @@ import {
   LEAD_VARIABLES,
   AssistantTool,
   NoiseSuppression,
-  VoicemailAction,
   toolLabel,
   setTools as saveTools,
   detachTool,
@@ -129,8 +128,6 @@ export const AISettingsView: React.FC = () => {
   const [userIdleReplySecs, setUserIdleReplySecs] = useState(10);
   const [noiseSuppression, setNoiseSuppression] = useState<NoiseSuppression>('disabled');
   const [fallbackDestination, setFallbackDestination] = useState('');
-  const [voicemailDetection, setVoicemailDetection] = useState(false);
-  const [voicemailAction, setVoicemailAction] = useState<VoicemailAction>('hangup');
   const [disableDtmf, setDisableDtmf] = useState(false);
   const [disableGreetingInterruption, setDisableGreetingInterruption] = useState(false);
   const [interruptThreshold, setInterruptThreshold] = useState<number | null>(null);
@@ -181,8 +178,6 @@ export const AISettingsView: React.FC = () => {
         setUserIdleReplySecs(a.user_idle_reply_secs);
         setNoiseSuppression(a.noise_suppression);
         setFallbackDestination(a.fallback_destination);
-        setVoicemailDetection(a.voicemail_detection);
-        setVoicemailAction(a.voicemail_action);
         setDisableDtmf(a.disable_dtmf);
         setDisableGreetingInterruption(a.disable_greeting_interruption);
         setInterruptThreshold(a.interrupt_prediction_threshold);
@@ -261,8 +256,6 @@ export const AISettingsView: React.FC = () => {
         post_call_processing: postCall,
         noise_suppression: noiseSuppression,
         fallback_destination: fallbackDestination,
-        voicemail_detection: voicemailDetection,
-        voicemail_action: voicemailAction,
         disable_dtmf: disableDtmf,
         disable_greeting_interruption: disableGreetingInterruption,
         interrupt_prediction_threshold: interruptThreshold,
@@ -855,13 +848,6 @@ export const AISettingsView: React.FC = () => {
             <div className="md:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-3 pt-1">
               {[
                 {
-                  label: 'Detect voicemail',
-                  icon: <Voicemail className="w-3.5 h-3.5" />,
-                  on: voicemailDetection,
-                  set: setVoicemailDetection,
-                  hint: 'Stops the agent pitching an answering machine.',
-                },
-                {
                   label: 'Let callers interrupt the greeting',
                   on: !disableGreetingInterruption,
                   set: (v: boolean) => setDisableGreetingInterruption(!v),
@@ -873,7 +859,7 @@ export const AISettingsView: React.FC = () => {
                   set: setDisableDtmf,
                   hint: '',
                 },
-              ].map(({ label, icon, on, set, hint }) => (
+              ].map(({ label, on, set, hint }) => (
                 <button
                   key={label}
                   type="button"
@@ -884,24 +870,15 @@ export const AISettingsView: React.FC = () => {
                   <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
-                  <span className="font-semibold flex items-center gap-1.5">{icon}{label}</span>
+                  <span className="font-semibold">{label}</span>
                 </button>
               ))}
             </div>
 
-            {voicemailDetection && (
-              <div className="md:col-span-2">
-                <label className="block text-slate-300 font-semibold mb-1">When it reaches voicemail</label>
-                <select
-                  value={voicemailAction}
-                  onChange={(e) => setVoicemailAction(e.target.value as VoicemailAction)}
-                  className="w-full md:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="hangup">Hang up without leaving a message</option>
-                  <option value="leave_message">Leave a message</option>
-                </select>
-              </div>
-            )}
+            <p className="md:col-span-2 text-xs text-slate-500 flex items-center gap-1.5">
+              <Voicemail className="w-3.5 h-3.5" />
+              Answering machines and voicemail are set in the Voicemail card further down this page.
+            </p>
           </div>
         </div>
 

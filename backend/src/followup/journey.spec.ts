@@ -46,8 +46,15 @@ describe('step conditions', () => {
 describe('contact limits', () => {
   it('stored values are checked; anything missing or out of range is the default', () => {
     expect(limitsOf(undefined)).toEqual(DEFAULT_LIMITS);
-    expect(limitsOf({ callsPerDay: 0, smsPerDay: 5, minGapMinutes: 15 })).toEqual({ callsPerDay: 0, smsPerDay: 5, minGapMinutes: 15 });
-    expect(limitsOf({ callsPerDay: -1, smsPerDay: 2.5, minGapMinutes: 99999 })).toEqual(DEFAULT_LIMITS);
+    expect(DEFAULT_LIMITS).toMatchObject({ redialGapMinutes: 30, chatQuietMinutes: 30 });
+    expect(limitsOf({ callsPerDay: 0, smsPerDay: 5, minGapMinutes: 15, redialGapMinutes: 0, chatQuietMinutes: 90 })).toEqual({
+      callsPerDay: 0,
+      smsPerDay: 5,
+      minGapMinutes: 15,
+      redialGapMinutes: 0,
+      chatQuietMinutes: 90,
+    });
+    expect(limitsOf({ callsPerDay: -1, smsPerDay: 2.5, minGapMinutes: 99999, redialGapMinutes: -5, chatQuietMinutes: 5000 })).toEqual(DEFAULT_LIMITS);
     expect(skipDaysOf([0, 6, 6, 9, 'x'])).toEqual([0, 6]);
     expect(skipDaysOf(null)).toEqual([]);
   });
@@ -72,6 +79,6 @@ describe('contact limits', () => {
   });
 
   it('a limit of 0 is off', () => {
-    expect(slot({ limits: { callsPerDay: 0, smsPerDay: 0, minGapMinutes: 0 }, sentToday: 50, lastAt: NOW })).toEqual({ at: NOW, reason: null });
+    expect(slot({ limits: { ...DEFAULT_LIMITS, callsPerDay: 0, smsPerDay: 0, minGapMinutes: 0 }, sentToday: 50, lastAt: NOW })).toEqual({ at: NOW, reason: null });
   });
 });

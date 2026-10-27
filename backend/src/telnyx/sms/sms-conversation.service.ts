@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
@@ -38,7 +38,7 @@ export interface SmsConversationStatus {
  * this server, plus the text-chat section of its prompt. Off undoes them.
  */
 @Injectable()
-export class SmsConversationService {
+export class SmsConversationService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SmsConversationService.name);
   private readonly publicApiUrl: string;
   private readonly enabledCache = new Map<string, { value: boolean; until: number }>();
@@ -53,6 +53,37 @@ export class SmsConversationService {
 
   get variablesUrl(): string {
     return `${this.publicApiUrl}${ASSISTANT_VARIABLES_PATH}`;
+  }
+
+  /** The server's address can change (a new deploy domain, a dev tunnel): text chats keep reaching it. */
+  onApplicationBootstrap(): void {
+    if (this.publicApiUrl) void this.refreshVariablesUrls();
+  }
+
+  /**
+   * Points each chatting assistant's variables webhook at this server again
+   * when it still names our path on an older address. An address the
+   * organization typed in itself is left alone.
+   */
+  async refreshVariablesUrls(): Promise<void> {
+    const rows = await this.prisma.organizationSetting
+      .findMany({ where: { smsConversation: { path: ['enabled'], equals: true } }, select: { orgId: true } })
+      .catch((error) => {
+        this.logger.warn(`variables webhook check: ${(error as Error).message}`);
+        return [];
+      });
+    for (const { orgId } of rows) {
+      try {
+        const c = await this.creds.getCreds(orgId);
+        if (!c?.apiKey || !c.assistantId) continue;
+        const current = String((await this.assistant(c.apiKey, c.assistantId)).dynamic_variables_webhook_url ?? '');
+        if (!current.endsWith(ASSISTANT_VARIABLES_PATH) || current === this.variablesUrl) continue;
+        await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}`, { method: 'PATCH', body: JSON.stringify({ dynamic_variables_webhook_url: this.variablesUrl }) });
+        this.logger.log(`assistant ${c.assistantId}: variables webhook moved from ${current} to ${this.variablesUrl}`);
+      } catch (error) {
+        this.logger.warn(`variables webhook for org ${orgId}: ${(error as Error).message}`);
+      }
+    }
   }
 
   async status(orgId: string): Promise<SmsConversationStatus> {

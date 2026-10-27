@@ -12,6 +12,7 @@ import { PERMISSIONS } from '@/role/permissions';
 import { AssistantService } from './assistant.service';
 import { SetToolsDto, StrategyDto, TestToolDto, ThresholdsDto } from './dto/telnyx.dto';
 import { EngineService } from './engine.service';
+import { flowFromLog } from './lead-flow';
 import { LeadScoringService } from './lead-scoring.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
@@ -211,19 +212,29 @@ export class PortalLeadsController {
     return { ok: true };
   }
 
-  /** Where the lead is in the outreach strategy, step by step, as far as the calls and texts on record show. */
+  /**
+   * Where the lead is in the outreach strategy, step by step: from the step log
+   * (sent, skipped with why, failed, waiting), or for a lead from before it,
+   * as far as the calls and texts on record show.
+   */
   @Get(':id/flow')
   async flow(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) leadId: string) {
     const orgId = auth.organizationId;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) } });
     if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-    const [strategy, calls, messages] = await Promise.all([
+    const since = lead.firstContactAt ?? new Date(0);
+    const [strategy, calls, messages, log] = await Promise.all([
       this.strategies.getStrategy(orgId),
-      this.prisma.call.findMany({ where: { orgId, leadId }, orderBy: { createdAt: 'asc' }, select: { status: true } }),
+      this.prisma.call.findMany({ where: { orgId, leadId }, orderBy: { createdAt: 'asc' }, select: { status: true, disposition: true, createdAt: true } }),
       this.prisma.message.findMany({
         where: { orgId, leadId, direction: 'outbound', channel: 'sms' },
         orderBy: { createdAt: 'asc' },
         select: { deliveryStatus: true },
+      }),
+      this.prisma.leadEvent.findMany({
+        where: { leadId, source: 'strategy', type: { in: ['step_sent', 'step_skipped', 'step_failed', 'step_held'] }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'asc' },
+        select: { type: true, reason: true, payload: true, createdAt: true },
       }),
     ]);
 
@@ -238,22 +249,32 @@ export class PortalLeadsController {
             : { state: 'current', label: 'Ringing' };
     const smsOutcome = (s: string) => (s === 'failed' ? { state: 'failed', label: 'SMS failed' } : { state: 'done', label: 'SMS sent' });
 
+    const logged = flowFromLog(
+      steps,
+      log,
+      calls.filter((c) => c.createdAt >= since),
+    );
     let ci = 0;
     let mi = 0;
-    const stepsOut = steps.map((s, index) => {
-      let outcome: string | null = null;
-      let state = 'pending';
-      const o = s.channel === 'voice' ? (ci < calls.length ? callOutcome(calls[ci++].status) : null) : mi < messages.length ? smsOutcome(messages[mi++].deliveryStatus) : null;
-      if (o) ({ state, label: outcome } = o);
-      return { index, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome };
-    });
-    const nextIndex = stepsOut.findIndex((s) => s.outcome === null);
-    if (nextIndex >= 0) stepsOut[nextIndex].state = 'current';
+    const stepsOut =
+      logged ??
+      steps.map((s, index) => {
+        let outcome: string | null = null;
+        let state = 'pending';
+        const o = s.channel === 'voice' ? (ci < calls.length ? callOutcome(calls[ci++].status) : null) : mi < messages.length ? smsOutcome(messages[mi++].deliveryStatus) : null;
+        if (o) ({ state, label: outcome } = o);
+        return { index, channel: s.channel, action: s.action ?? s.channel, after: s.after, state, outcome, detail: null };
+      });
+    if (!logged) {
+      const pending = stepsOut.findIndex((s) => s.outcome === null);
+      if (pending >= 0) stepsOut[pending].state = 'current';
+    }
+    const nextIndex = stepsOut.findIndex((s) => s.state === 'current');
 
-    const fired = calls.length + messages.length;
+    const fired = logged ? logged.filter((s) => s.state !== 'pending' && s.outcome !== 'Waiting').length : calls.length + messages.length;
     const status = lead.status;
     const phase = OUTCOME_STATUSES.includes(status) ? 'done' : status === LeadStatus.follow_up ? 'exited' : lead.firstContactAt ? 'strategy' : 'not_started';
-    const answered = calls.some((c) => c.status === 'completed' || c.status === 'in_progress');
+    const answered = calls.some((c) => (c.disposition ? c.disposition === 'connected' : c.status === 'completed' || c.status === 'in_progress'));
     const outcome =
       OUTCOME_LABELS[status] ??
       (answered

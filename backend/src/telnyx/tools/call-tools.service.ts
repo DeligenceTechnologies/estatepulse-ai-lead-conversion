@@ -81,9 +81,13 @@ export class CallToolsService {
       enabled: patch.enabled ?? current.enabled,
       confirmSms: patch.confirmSms ?? current.confirmSms,
       ...(confirmMessage === DEFAULT_CONFIRM_MESSAGE ? {} : { confirmMessage }),
+      retryMinutes: patch.retryMinutes ?? current.retryMinutes,
+      retryAttempts: patch.retryAttempts ?? current.retryAttempts,
     };
     await this.serial(orgId, async () => {
       await this.save(orgId, { ...next, telnyx: (await this.settings(orgId)).telnyx });
+      // Only switching the tools on or off touches Telnyx; the texts and the retry live here.
+      if (patch.enabled === undefined) return;
       this.ready.delete(orgId);
       if (next.enabled) await this.provision(orgId, true);
       else await this.teardown(orgId);

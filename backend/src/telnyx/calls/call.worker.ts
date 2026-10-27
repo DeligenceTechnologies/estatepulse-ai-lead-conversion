@@ -1,13 +1,14 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CallDisposition, CallStatus, LeadStatus } from '@prisma/client';
+import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus } from '@prisma/client';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
-import { OUTCOME_STATUSES } from '@/lead/lead-status';
+import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
+import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
 import { VoiceService } from '../voice.service';
@@ -21,8 +22,6 @@ const SLOT_WAIT_JITTER_MS = 5_000;
 const LIVE_CALL_WAIT_MS = 30_000;
 /** A call row older than this still marked live is a lost hangup, not a call in progress. */
 const LIVE_CALL_MAX_AGE_MS = 30 * 60_000;
-/** A lead who declined or was busy is not dialled again this soon, except for a callback they asked for. */
-export const REDIAL_GAP_MS = 30 * 60_000;
 /** Telnyx or the network failing the dial (not the lead, not the number) is tried once more after this. */
 export const DIAL_RETRY_MS = 10 * 60_000;
 
@@ -90,22 +89,33 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       this.logger.log(`Callback for lead ${leadId} at ${callbackAt} dropped: it was moved or cleared since`);
       return;
     }
+    // Queued by a strategy or sequence the lead has since left (it ended, was stopped or swapped).
+    if (!(await this.stillEnrolled(job.data, lead.status))) {
+      this.logger.log(`Call for lead ${leadId} dropped: the lead has left the ${job.data.source ?? 'journey'} that queued it`);
+      return;
+    }
+    if (await hasUpcomingMeeting(this.prisma, orgId, leadId)) {
+      this.logger.log(`Call for lead ${leadId} dropped: a meeting with the lead is on the calendar`);
+      return;
+    }
+    const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(orgId);
     if (callback) {
       const live = await this.prisma.call.count({
         where: { leadId, status: { in: [CallStatus.ringing, CallStatus.in_progress] }, createdAt: { gte: new Date(Date.now() - LIVE_CALL_MAX_AGE_MS) } },
       });
       if (live > 0) return this.delay(job, Date.now() + LIVE_CALL_WAIT_MS, token);
-    } else {
+    } else if (limits.redialGapMinutes > 0) {
+      // The organization's wait after a decline or a busy line.
+      const gapMs = limits.redialGapMinutes * 60_000;
       const last = await this.prisma.call.findFirst({ where: { leadId }, orderBy: { createdAt: 'desc' }, select: { disposition: true, endedAt: true } });
       const declined = last?.disposition === CallDisposition.busy || last?.disposition === CallDisposition.rejected;
-      if (declined && last.endedAt && last.endedAt.getTime() + REDIAL_GAP_MS > Date.now()) {
+      if (declined && last.endedAt && last.endedAt.getTime() + gapMs > Date.now()) {
         this.logger.log(`Call for lead ${leadId} waits: they declined or were busy at ${last.endedAt.toISOString()}`);
-        return this.delay(job, last.endedAt.getTime() + REDIAL_GAP_MS, token);
+        return this.delay(job, last.endedAt.getTime() + gapMs, token);
       }
     }
 
     // A callback the lead asked for keeps to quiet hours only; everything else also skips the organization's days off.
-    const { timeZone, quiet, skipDays } = await this.followup.guardrailsFor(orgId);
     const allowed = callback ? nextAllowedAt(timeZone, quiet, new Date()) : nextContactAt(timeZone, quiet, skipDays, new Date());
     if (allowed.getTime() > Date.now()) return this.delay(job, allowed.getTime(), token);
 
@@ -138,6 +148,17 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     if (call.call_control_id) await this.slots.rename(orgId, slotId, call.call_control_id);
     else await this.slots.release(orgId, slotId);
     await this.activity.startCall(orgId, leadId, call.call_control_id, intent);
+  }
+
+  /** A strategy call needs the lead still in the strategy; a sequence call, its enrolment still active. A callback has its own check. */
+  private async stillEnrolled(data: CallJobData, status: LeadStatus): Promise<boolean> {
+    if (data.source === 'strategy') return IN_STRATEGY_STATUSES.includes(status);
+    if (data.source !== 'followup' || !data.sequenceId) return true;
+    const enrolment = await this.prisma.sequenceEnrollment.findFirst({
+      where: { leadId: data.leadId, sequenceId: data.sequenceId, status: EnrollmentStatus.active },
+      select: { id: true },
+    });
+    return enrolment !== null;
   }
 
   private async delay(job: Job<CallJobData>, until: number, token?: string): Promise<never> {

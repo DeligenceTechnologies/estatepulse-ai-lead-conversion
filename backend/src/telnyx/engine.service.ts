@@ -7,6 +7,7 @@ import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending } from '@/lead/lead-status';
+import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
 import { SmsService } from './sms.service';
 import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from './strategy-store.service';
@@ -24,6 +25,15 @@ const SCORING_WAIT_MS = 10 * 60_000;
 
 /** However short a call step's wait, a text chat must have been quiet this long before the call. */
 const MIN_CHAT_QUIET_MS = 2 * 60_000;
+
+/** The longest wait one timer can hold (~24.8 days); a longer one is taken in pieces. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** A step that throws is tried again after this, doubling each time up to the cap; past the last try the lead is parked. */
+export const STEP_RETRY_BASE_MS = 10_000;
+export const STEP_RETRY_MAX_MS = 5 * 60_000;
+export const MAX_STEP_FAILURES = 5;
+/** The review flag on a lead whose strategy was parked because a step kept failing. */
+export const STEP_FAILED_REVIEW = 'Outreach stopped: a strategy step kept failing';
 
 const OPEN_CALL: CallStatus[] = [CallStatus.queued, CallStatus.ringing, CallStatus.in_progress];
 
@@ -69,6 +79,8 @@ export interface CallState {
   scored: boolean;
   /** How the latest call that has ended went; null before any has. */
   lastCall: CallDisposition | null;
+  /** When the latest call ended; null while none has. */
+  endedAt: number | null;
 }
 
 interface Guardrails {
@@ -93,6 +105,10 @@ interface Enrollment {
   held: Set<string>;
   /** The step run last was skipped, so a condition on the next one has nothing to check. */
   previousSkipped: boolean;
+  /** Steps whose text or call has gone out (or was being sent): a retry after an error never sends one twice. */
+  sent: Set<string>;
+  /** Errors in a row; reset once a run gets through. */
+  failures: number;
 }
 
 /**
@@ -108,6 +124,8 @@ interface Enrollment {
 export class EngineService implements OnModuleDestroy {
   private readonly logger = new Logger('Engine');
   private readonly active = new Map<string, Enrollment>();
+  /** Claimed or being resumed, strategy not loaded yet: counted as running, so nothing starts it twice. */
+  private readonly starting = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -126,41 +144,61 @@ export class EngineService implements OnModuleDestroy {
   }
 
   async enroll(orgId: string, leadId: string): Promise<void> {
-    if (this.active.has(leadId)) return;
+    if (this.isRunning(leadId)) return;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId } });
     if (!lead || lead.dncStatus || lead.automationPaused) return;
     const claimedAt = new Date();
-    // The claim and the status move commit together, so a failed status update never leaves a claimed lead stuck in `new`.
-    const claimed = await this.prisma.$transaction(async (tx) => {
-      const claim = await tx.lead.updateMany({ where: { id: leadId, firstContactAt: null }, data: { firstContactAt: claimedAt } });
-      if (claim.count === 0) return false;
-      await this.state.move(leadId, LeadStatus.contacting, { source: 'strategy', reason: 'Outreach strategy started' }, tx);
-      return true;
-    });
-    if (!claimed) return;
+    this.starting.add(leadId);
+    try {
+      // The claim and the status move commit together, so a failed status update never leaves a claimed lead stuck in `new`.
+      const claimed = await this.prisma.$transaction(async (tx) => {
+        const claim = await tx.lead.updateMany({ where: { id: leadId, firstContactAt: null }, data: { firstContactAt: claimedAt } });
+        if (claim.count === 0) return false;
+        await this.state.move(leadId, LeadStatus.contacting, { source: 'strategy', reason: 'Outreach strategy started' }, tx);
+        return true;
+      });
+      if (!claimed) return;
 
-    const [strategy, office] = await Promise.all([this.strategies.getStrategy(orgId), this.office(orgId)]);
-    const enrollment: Enrollment = {
-      orgId,
-      leadId,
-      startedAt: claimedAt.getTime(),
-      voiceAttempts: 0,
-      timers: [],
-      stopped: false,
-      total: strategy.steps.length,
-      queue: [...strategy.steps],
-      held: new Set(),
-      previousSkipped: false,
-    };
-    this.active.set(leadId, enrollment);
-    this.logger.log(`enrolled lead ${leadId} into "${strategy.name}" — ${strategy.steps.length} steps`);
-    const first = enrollment.queue[0];
-    this.next(enrollment, first ? claimedAt.getTime() + offsetMs(first.after) : Date.now(), office, strategy.guardrails as Guardrails);
+      // Should this fail, the lead stays claimed and not running: the watcher resumes it.
+      const [strategy, office] = await Promise.all([this.strategies.getStrategy(orgId), this.office(orgId)]);
+      const enrollment: Enrollment = {
+        orgId,
+        leadId,
+        startedAt: claimedAt.getTime(),
+        voiceAttempts: 0,
+        timers: [],
+        stopped: false,
+        total: strategy.steps.length,
+        queue: [...strategy.steps],
+        held: new Set(),
+        previousSkipped: false,
+        sent: new Set(),
+        failures: 0,
+      };
+      this.active.set(leadId, enrollment);
+      this.logger.log(`enrolled lead ${leadId} into "${strategy.name}" — ${strategy.steps.length} steps`);
+      const first = enrollment.queue[0];
+      this.next(enrollment, first ? claimedAt.getTime() + offsetMs(first.after) : Date.now(), office, strategy.guardrails as Guardrails);
+    } finally {
+      this.starting.delete(leadId);
+    }
   }
 
-  /** Picks a lead back up after a restart, skipping the steps already taken. */
+  /**
+   * Picks up a lead whose strategy is not running here (after a restart, or a
+   * claim whose start failed), skipping the steps already taken.
+   */
   async resume(orgId: string, leadId: string): Promise<boolean> {
-    if (this.active.has(leadId)) return false;
+    if (this.isRunning(leadId)) return false;
+    this.starting.add(leadId);
+    try {
+      return await this.resumeClaimed(orgId, leadId);
+    } finally {
+      this.starting.delete(leadId);
+    }
+  }
+
+  private async resumeClaimed(orgId: string, leadId: string): Promise<boolean> {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, orgId },
       select: { firstContactAt: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true },
@@ -169,6 +207,13 @@ export class EngineService implements OnModuleDestroy {
     if (callbackPending(lead)) return false;
 
     const since = lead.firstContactAt;
+    // A lead that left the strategy (stopped, or moved to follow-up or an outcome) and is back in an
+    // in-strategy status, as a reply from follow-up makes it engaged, is not in the strategy again.
+    const left = await this.prisma.leadEvent.findFirst({
+      where: { leadId, createdAt: { gte: since }, OR: [{ type: 'strategy_stopped' }, { type: 'status_changed', toStatus: { notIn: IN_STRATEGY_STATUSES } }] },
+      select: { id: true },
+    });
+    if (left) return false;
     const [calls, texts, logged, strategy, office] = await Promise.all([
       this.prisma.call.count({ where: { orgId, leadId, createdAt: { gte: since } } }),
       // The fallback for leads from before the step log; it cannot tell the AI's chat replies from our steps.
@@ -194,6 +239,8 @@ export class EngineService implements OnModuleDestroy {
       queue: remaining,
       held: new Set(),
       previousSkipped: logged.at(-1)?.type === 'step_skipped',
+      sent: new Set(),
+      failures: 0,
     };
     this.active.set(leadId, enrollment);
     this.logger.log(`resumed lead ${leadId} — ${remaining.length} of ${enrollment.total} step(s) left`);
@@ -203,7 +250,7 @@ export class EngineService implements OnModuleDestroy {
 
   /** A lead whose strategy was interrupted for longer than it could resume is parked for follow-up. */
   async finalizeAbandoned(orgId: string, leadId: string): Promise<boolean> {
-    if (this.active.has(leadId)) return false;
+    if (this.isRunning(leadId)) return false;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { status: true, dncStatus: true, aiSummary: true } });
     if (!lead || OUTCOME_STATUSES.includes(lead.status) || lead.dncStatus) return false;
     await this.activity.exitStrategy(leadId, `Strategy interrupted — ${lead.aiSummary || 'recovered after a restart'}`.slice(0, 2000));
@@ -311,7 +358,7 @@ export class EngineService implements OnModuleDestroy {
   }
 
   isRunning(leadId: string): boolean {
-    return this.active.has(leadId);
+    return this.active.has(leadId) || this.starting.has(leadId);
   }
 
   /** Something else now decides the lead's next contact (a callback, an outcome they stated): the strategy stops here. */
@@ -330,11 +377,19 @@ export class EngineService implements OnModuleDestroy {
 
   private async fireStep(e: Enrollment, step: StrategyStep, office: Office, guardrails: Guardrails, heldSince?: number): Promise<void> {
     if (e.stopped) return;
+    // Tried again after an error once its text or call had gone out: move on, never send it twice.
+    if (e.sent.has(step.id)) return this.next(e, Date.now() + (e.queue[0] ? offsetMs(e.queue[0].after) : 0), office, guardrails);
     const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
     if (!lead || lead.dncStatus || lead.automationPaused || OUTCOME_STATUSES.includes(lead.status)) return this.stop(e);
     if (callbackPending(lead)) {
       this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: 'A callback the lead asked for is due' });
       return this.stop(e);
+    }
+    // A meeting on the calendar ends the strategy whatever the status says, and the status follows it.
+    if (await hasUpcomingMeeting(this.prisma, e.orgId, e.leadId)) {
+      this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'calendar', reason: 'A meeting with the lead is on the calendar' });
+      this.stop(e);
+      return this.appointmentBooked(e.orgId, e.leadId, 'calendar');
     }
 
     const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
@@ -383,10 +438,19 @@ export class EngineService implements OnModuleDestroy {
       }
       this.logger.warn(`lead ${e.leadId}: step ${step.id} goes ahead after ${CALL_HOLD_MAX_MS / 60_000} min waiting for an open call`);
     }
+    // A pick-up is a conversation once the call analysis says a person was there (a voicemail the
+    // detection missed is not one). It comes a minute or two after the hang-up.
+    if (call.talked && !call.scored && call.endedAt && Date.now() - call.endedAt < SCORING_WAIT_MS) {
+      hold('Waiting for the call analysis');
+      this.later(e, () => this.fireStep(e, step, office, guardrails), CALL_HOLD_RECHECK_MS);
+      return;
+    }
 
     const unmet = call.talked ? null : unmetCondition(step.onlyIf, { lastCall: call.lastCall, replied: chat.replied, previousSkipped: e.previousSkipped });
     const capped = !call.talked && !unmet && step.channel === 'voice' && (guardrails?.maxVoiceAttempts ?? 99) <= e.voiceAttempts;
-    if (!call.talked && !unmet && !capped) {
+    const sending = !call.talked && !unmet && !capped;
+    let phone = lead.phone;
+    if (sending) {
       // The day's limit or the gap since our last touch on this channel: the step waits, it is not dropped.
       const slot = await this.followup.contactSlot(e.orgId, e.leadId, step.channel);
       if (slot.at.getTime() > Date.now()) {
@@ -394,6 +458,14 @@ export class EngineService implements OnModuleDestroy {
         this.later(e, () => this.fireStep(e, step, office, guardrails), slot.at.getTime() - Date.now());
         return;
       }
+      // Looked at once more right before anything goes out: a reply, an opt-out, a booking or a
+      // pause may have come in while the step was being decided.
+      const fresh = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
+      if (e.stopped) return;
+      if (!fresh || fresh.dncStatus || fresh.automationPaused || OUTCOME_STATUSES.includes(fresh.status) || callbackPending(fresh)) return this.stop(e);
+      if (step.channel === 'sms' && (await this.chatState(e)).replied) return this.fireStep(e, step, office, guardrails, heldSince);
+      phone = fresh.phone;
+      e.sent.add(step.id);
     }
 
     if (call.talked) {
@@ -405,11 +477,11 @@ export class EngineService implements OnModuleDestroy {
       const variables = await this.activity.leadVariables(e.orgId, e.leadId);
       const text = fillTemplate(step.message ?? '', { ...variables, brokerage: office.brokerage });
       try {
-        const sent = await this.sms.sendSms(e.orgId, lead.phone ?? '', text);
+        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text);
         await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
         this.state.quietly({ ...event, type: 'step_sent' });
         this.conversations
-          .appendOurMessage(e.orgId, lead.phone, text)
+          .appendOurMessage(e.orgId, phone, text)
           .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
         await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
@@ -473,7 +545,7 @@ export class EngineService implements OnModuleDestroy {
       : latest?.status === CallStatus.completed && (latest.durationSeconds ?? 0) >= CONVERSATION_MIN_SECS;
     const scored = Boolean((latest?.extractedIntel as { qualification?: unknown } | null)?.qualification);
     const lastCall = latest?.endedAt ? (latest.disposition ?? null) : null;
-    return { open, talked, scored, lastCall };
+    return { open, talked, scored, lastCall, endedAt: latest?.endedAt?.getTime() ?? null };
   }
 
   private scheduleFinalize(e: Enrollment): void {
@@ -512,12 +584,56 @@ export class EngineService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Runs `run` after `delayMs`, in pieces when that is longer than one timer
+   * holds. A run that throws is tried again with backoff; a fired timer is let go.
+   */
   private later(e: Enrollment, run: () => Promise<void>, delayMs: number): void {
+    const delay = Math.max(0, delayMs);
     const timer = setTimeout(() => {
-      run().catch((error) => this.logger.error(`lead ${e.leadId}: ${(error as Error).message}`));
-    }, Math.max(0, delayMs));
+      e.timers = e.timers.filter((t) => t !== timer);
+      if (delay > MAX_TIMER_MS) return this.later(e, run, delay - MAX_TIMER_MS);
+      run().then(
+        () => {
+          e.failures = 0;
+        },
+        (error: Error) => this.retry(e, run, error),
+      );
+    }, Math.min(delay, MAX_TIMER_MS));
     timer.unref();
     e.timers.push(timer);
+  }
+
+  /** A database or Redis blip should not leave the lead hanging: try again, waiting longer each time, then park it. */
+  private retry(e: Enrollment, run: () => Promise<void>, error: Error): void {
+    if (e.stopped) return;
+    e.failures += 1;
+    if (e.failures > MAX_STEP_FAILURES) return void this.giveUp(e, error);
+    const wait = Math.min(STEP_RETRY_BASE_MS * 2 ** (e.failures - 1), STEP_RETRY_MAX_MS);
+    this.logger.warn(`lead ${e.leadId}: ${error.message} — try ${e.failures + 1} of ${MAX_STEP_FAILURES + 1} in ${Math.round(wait / 1000)}s`);
+    this.later(e, run, wait);
+  }
+
+  /**
+   * Parks a lead whose step kept failing: flagged for review, out to follow-up
+   * and its sequence. It counts as running until then, so the watcher cannot
+   * resume it halfway; if even parking fails, the watcher picks it up later.
+   */
+  private async giveUp(e: Enrollment, error: Error): Promise<void> {
+    this.logger.error(`lead ${e.leadId}: giving up after ${MAX_STEP_FAILURES + 1} failed tries: ${error.message}`);
+    try {
+      const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId }, select: { reviewReasons: true } });
+      if (lead && !lead.reviewReasons.includes(STEP_FAILED_REVIEW)) {
+        await this.prisma.lead.update({ where: { id: e.leadId }, data: { needsReview: true, reviewReasons: { push: STEP_FAILED_REVIEW } } });
+      }
+      await this.state.record({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: `A step kept failing: ${error.message}`.slice(0, 500) });
+      await this.activity.exitStrategy(e.leadId, `Strategy step kept failing — ${error.message}`.slice(0, 2000));
+      await this.enrolOnFollowUp(e.orgId, e.leadId);
+    } catch (err) {
+      this.logger.error(`lead ${e.leadId}: could not park it either: ${(err as Error).message}`);
+    } finally {
+      this.stop(e);
+    }
   }
 
   private stopFor(leadId: string): void {

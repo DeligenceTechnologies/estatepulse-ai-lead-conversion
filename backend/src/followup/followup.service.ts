@@ -59,6 +59,16 @@ export interface EnrollSkip {
 const MAX_ENROLL_PER_CALL = 500;
 const LIVE: EnrollmentStatus[] = [EnrollmentStatus.active, EnrollmentStatus.paused];
 
+/** A hot lead goes straight to an agent (interested ends automation), so a sequence on this trigger never sends. */
+export const HOT_TRIGGER_NOTE = 'Hot leads go straight to an agent, so a sequence for "Qualified as hot" never sends anything.';
+
+/** Refuses the hot trigger when it is newly added; a sequence that already carries it may keep it. */
+function assertNoNewHotTrigger(triggers: SequenceTrigger[], had: SequenceTrigger[] = []): void {
+  if (triggers.includes(SequenceTrigger.qualified_hot) && !had.includes(SequenceTrigger.qualified_hot)) {
+    throw new AppError('VALIDATION_ERROR', HOT_TRIGGER_NOTE, [{ path: 'enrollTriggers', message: HOT_TRIGGER_NOTE }]);
+  }
+}
+
 export const stepsOf = (sequence: Pick<Sequence, 'steps'>): SequenceStep[] =>
   Array.isArray(sequence.steps) ? (sequence.steps as unknown as SequenceStep[]) : [];
 
@@ -180,6 +190,7 @@ export class FollowupService {
   async createSequence(orgId: string, input: CreateSequenceDto) {
     const status = input.status ?? SequenceStatus.active;
     const triggers = input.enrollTriggers ?? [];
+    assertNoNewHotTrigger(triggers);
     const created = await this.prisma.$transaction(async (tx) => {
       await lockOrganization(tx, orgId);
       const existing = await tx.sequence.findFirst({ where: { orgId, code: input.code }, select: { name: true, status: true } });
@@ -201,6 +212,8 @@ export class FollowupService {
           status,
           triggers,
           steps: toSteps(input.steps) as unknown as Prisma.InputJsonArray,
+          ...(input.closeOutHours !== undefined ? { closeOutHours: input.closeOutHours } : {}),
+          ...(input.closeOutUnresponsive !== undefined ? { closeOutUnresponsive: input.closeOutUnresponsive } : {}),
         },
         select: { id: true },
       });
@@ -214,6 +227,7 @@ export class FollowupService {
       const current = await this.owned(orgId, id, tx);
       const status = input.status ?? current.status;
       const triggers = input.enrollTriggers ?? current.triggers;
+      assertNoNewHotTrigger(triggers, current.triggers);
       if (status === SequenceStatus.active) await this.assertTriggersFree(tx, orgId, triggers, id);
       await tx.sequence.update({
         where: { id },
@@ -222,6 +236,8 @@ export class FollowupService {
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
           ...(input.enrollTriggers !== undefined ? { triggers: input.enrollTriggers } : {}),
+          ...(input.closeOutHours !== undefined ? { closeOutHours: input.closeOutHours } : {}),
+          ...(input.closeOutUnresponsive !== undefined ? { closeOutUnresponsive: input.closeOutUnresponsive } : {}),
         },
       });
     });
@@ -383,6 +399,8 @@ export class FollowupService {
       description: s.description,
       status: s.status,
       enrollTriggers: [...s.triggers].sort(),
+      closeOutHours: s.closeOutHours,
+      closeOutUnresponsive: s.closeOutUnresponsive,
       activeCount: countOf(s.id, EnrollmentStatus.active),
       pausedCount: countOf(s.id, EnrollmentStatus.paused),
       completedCount: countOf(s.id, EnrollmentStatus.completed),

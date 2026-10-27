@@ -28,6 +28,8 @@ export interface CallJobData {
 export interface CallIntent {
   voicemail?: StepVoicemail;
   context?: string;
+  /** False when the call was dialed without answering-machine detection: no verdict will come. */
+  amd?: boolean;
 }
 
 /** The intent in a webhook's client_state; anything unreadable is none. */
@@ -37,7 +39,7 @@ export function callIntent(clientState: unknown): CallIntent {
     const raw = JSON.parse(Buffer.from(clientState, 'base64').toString('utf8')) as Record<string, unknown>;
     const voicemail = STEP_VOICEMAILS.find((v) => v === raw.voicemail);
     const context = typeof raw.context === 'string' && raw.context.trim() ? raw.context.trim().slice(0, CALL_CONTEXT_MAX_CHARS) : undefined;
-    return { ...(voicemail ? { voicemail } : {}), ...(context ? { context } : {}) };
+    return { ...(voicemail ? { voicemail } : {}), ...(context ? { context } : {}), ...(raw.amd === false ? { amd: false } : {}) };
   } catch {
     return {};
   }

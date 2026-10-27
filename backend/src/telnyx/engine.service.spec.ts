@@ -53,6 +53,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
       }),
     },
     organization: { findUnique: vi.fn(async () => ({ name: 'Acme Realty', settings: { timezone: 'UTC' } })) },
+    calendarMeeting: { count: vi.fn(async () => 0) },
     $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)),
   };
   const strategy: Strategy = { name: 'Test', guardrails: { respectQuietHours: false, ...guardrails }, steps };
@@ -160,12 +161,30 @@ describe('EngineService strategy', () => {
     await vi.advanceTimersByTimeAsync(5 * MIN);
     expect(s.texts()).toEqual(['text s1']);
 
-    await vi.advanceTimersByTimeAsync(5 * MIN);
+    await vi.advanceTimersByTimeAsync(4 * MIN);
     expect(s.activity.exitStrategy).not.toHaveBeenCalled();
 
+    // The analysis says a person was there: the rest is skipped, and the strategy closes.
     call.extractedIntel = { qualification: { temperature: 'warm' } };
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(2 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
     expect(s.activity.exitStrategy).toHaveBeenCalledOnce();
+  });
+
+  it('waits for the call analysis after a pick-up: one that reached no one gets the tried-calling text', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    const call = s.dial('completed', 40, 'connected');
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
+    expect((s.prisma.leadEvent.create.mock.calls as any[]).some((c) => c[0].data.type === 'step_held' && /call analysis/.test(c[0].data.reason))).toBe(true);
+
+    // A voicemail the detection missed: the analysis turns the pick-up into a not-answered call.
+    call.disposition = 'voicemail';
+    call.extractedIntel = { qualification: { temperature: 'cold' } };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(s.texts()).toEqual(['text s1', 'just tried you with a call']);
   });
 
   it('does not close the strategy while its last call is live', async () => {
@@ -295,6 +314,95 @@ describe('EngineService journey rules', () => {
       expect.objectContaining({ source: 'strategy', voicemail: 'leave', context: 'They asked about 3-bed homes in Austin' }),
       expect.anything(),
     );
+  });
+});
+
+describe('EngineService safety and recovery', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const eventOf = (s: ReturnType<typeof setup>, type: string) =>
+    (s.prisma.leadEvent.create.mock.calls as any[]).map((c) => c[0].data).find((d) => d.type === type);
+
+  it('a meeting on the calendar ends the strategy before the next step, and the lead is marked booked', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
+    s.prisma.calendarMeeting.count.mockResolvedValue(1);
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.lead.status).toBe('appointment_booked');
+    expect(s.followup.stopForLead).toHaveBeenCalledWith(ORG, LEAD, 'appointment_booked');
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+  });
+
+  it('looks at the lead once more right before sending: a pause that came in meanwhile stops the text', async () => {
+    const s = setup([sms('s1', 0)]);
+    s.prisma.lead.findUnique.mockResolvedValueOnce({ ...s.lead }).mockResolvedValueOnce({ ...s.lead, automationPaused: true });
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual([]);
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+  });
+
+  it('a step that throws is tried again with backoff, and sends once it gets through', async () => {
+    const s = setup([sms('s1', 0)]);
+    s.followup.contactSlot.mockRejectedValueOnce(new Error('connection reset')).mockRejectedValueOnce(new Error('connection reset'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s.texts()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(s.texts()).toEqual(['text s1']);
+  });
+
+  it('never sends a text twice when the error came after it went out', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 1)]);
+    s.activity.recordSms.mockRejectedValueOnce(new Error('db down')).mockRejectedValueOnce(new Error('db down'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000 + MIN);
+    expect(s.texts()).toEqual(['text s1', 'text s2']);
+  });
+
+  it('after the last try the lead is parked for follow-up and flagged for review, not left hanging', async () => {
+    const s = setup([sms('s1', 0)]);
+    s.followup.contactSlot.mockRejectedValue(new Error('connection refused'));
+    s.prisma.lead.findUnique.mockImplementation((async (args: any) => (args?.select?.reviewReasons ? { reviewReasons: [] } : { ...s.lead })) as any);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(30 * MIN);
+    expect(s.texts()).toEqual([]);
+    expect(s.activity.exitStrategy).toHaveBeenCalledWith(LEAD, expect.stringContaining('kept failing'));
+    expect(s.prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: LEAD },
+      data: { needsReview: true, reviewReasons: { push: 'Outreach stopped: a strategy step kept failing' } },
+    });
+    expect(eventOf(s, 'strategy_stopped')?.reason).toMatch(/kept failing/);
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+  });
+
+  it('a wait longer than one timer can hold fires when it is due, not at once', async () => {
+    const s = setup([sms('s1', 0), { ...sms('s2', 0, 'a month on'), after: { value: 30, unit: 'days' } }]);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(MIN);
+    expect(s.texts()).toEqual(['text s1']);
+    await vi.advanceTimersByTimeAsync(29 * 24 * 60 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
+    await vi.advanceTimersByTimeAsync(24 * 60 * MIN);
+    expect(s.texts()).toEqual(['text s1', 'a month on']);
+  });
+
+  it('does not resume a lead that left the strategy and came back to an in-strategy status', async () => {
+    const s = setup();
+    s.prisma.lead.findFirst.mockResolvedValue({ ...s.lead, status: 'engaged', firstContactAt: new Date(Date.now() - 60 * MIN), callbackAt: null } as any);
+    (s.prisma.leadEvent as any).findFirst = vi.fn(async () => ({ id: 'ev-1' }));
+    expect(await s.engine.resume(ORG, LEAD)).toBe(false);
+    expect(s.engine.isRunning(LEAD)).toBe(false);
   });
 });
 

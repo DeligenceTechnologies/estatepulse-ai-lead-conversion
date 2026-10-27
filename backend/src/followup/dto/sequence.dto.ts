@@ -22,7 +22,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { STEP_VOICEMAILS, type StepVoicemail } from '../journey';
+import { CLOSE_OUT_HOURS, STEP_VOICEMAILS, type StepVoicemail } from '../journey';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const unique = ({ value }: { value: unknown }) => (Array.isArray(value) ? [...new Set(value)] : value);
@@ -116,6 +116,18 @@ export class CreateSequenceDto extends ReplaceStepsDto {
   @Transform(unique)
   @IsEnum(SequenceTrigger, { each: true })
   enrollTriggers?: SequenceTrigger[];
+
+  /** Hours a lead has to answer after the last step before the sequence closes out. */
+  @IsOptional()
+  @IsInt()
+  @Min(CLOSE_OUT_HOURS.min)
+  @Max(CLOSE_OUT_HOURS.max)
+  closeOutHours?: number;
+
+  /** At close-out, a lead who stayed silent is marked unresponsive; false leaves it in follow-up. */
+  @IsOptional()
+  @IsBoolean()
+  closeOutUnresponsive?: boolean;
 }
 
 export class UpdateSequenceDto {
@@ -142,6 +154,16 @@ export class UpdateSequenceDto {
   @Transform(unique)
   @IsEnum(SequenceTrigger, { each: true })
   enrollTriggers?: SequenceTrigger[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(CLOSE_OUT_HOURS.min)
+  @Max(CLOSE_OUT_HOURS.max)
+  closeOutHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  closeOutUnresponsive?: boolean;
 }
 
 export class LeadFilterDto {

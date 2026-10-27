@@ -3,6 +3,7 @@ import { CallDisposition, LeadStatus, type Call, type LeadTemperature, type Pris
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { verifyTelnyxSignature } from '@/common/utils/crypto';
+import { LeadStateService } from '@/lead/lead-state.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
@@ -16,6 +17,7 @@ import {
   type ThresholdsInput,
 } from './lead-scoring';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
+import { OutcomeService } from './tools/outcome.service';
 
 export interface Qualification {
   source: 'telnyx_insights' | 'transcript';
@@ -50,6 +52,8 @@ export class LeadScoringService {
     private readonly creds: TelnyxCredentialsService,
     private readonly insights: LeadInsightsService,
     private readonly engine: EngineService,
+    private readonly state: LeadStateService,
+    private readonly outcomes: OutcomeService,
   ) {}
 
   /** The Insight's result for a call. Signed by Telnyx; refused when the signature does not verify. */
@@ -121,20 +125,35 @@ export class LeadScoringService {
       call.extractedIntel && typeof call.extractedIntel === 'object' && !Array.isArray(call.extractedIntel)
         ? (call.extractedIntel as Record<string, unknown>)
         : {};
+    // Voicemail the detection missed, a phone menu, the assistant talking alone: nobody was reached,
+    // so the call is not answered, written with the score so no step reads one without the other.
+    const reachedNoOne = extraction.reached_person === false;
     await this.prisma.call.update({
       where: { id: call.id },
       data: {
         extractedIntel: { ...intel, qualification } as unknown as Prisma.InputJsonObject,
         aiSummary: extraction.summary || null,
         handoffRequested: call.handoffRequested || extraction.human_requested,
+        ...(reachedNoOne && call.disposition === CallDisposition.connected ? { disposition: CallDisposition.voicemail } : {}),
       },
     });
-
-    const latest = await this.prisma.call.findFirst({ where: { leadId: call.leadId, orgId }, orderBy: { createdAt: 'desc' }, select: { id: true } });
-    if (latest && latest.id !== call.id) return qualification;
+    if (reachedNoOne) {
+      await this.undoConversation(call);
+      this.logger.log(`call ${call.id} reached no one (${source}) — counted as not answered, the lead left as it was`);
+      return qualification;
+    }
 
     const lead = await this.prisma.lead.findFirst({ where: { id: call.leadId, orgId }, select: { status: true, dncStatus: true } });
     if (!lead) return qualification;
+    // Asked not to be contacted: honoured from any call and whatever the lead's status, like a STOP
+    // text, in case the AI did not record it during the call.
+    if (extraction.do_not_contact && !lead.dncStatus) {
+      await this.outcomes.record({ orgId, leadId: call.leadId, callId: call.id }, { outcome: 'do_not_contact', note: 'Found in the call analysis' });
+      return qualification;
+    }
+
+    const latest = await this.prisma.call.findFirst({ where: { leadId: call.leadId, orgId }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+    if (latest && latest.id !== call.id) return qualification;
     await this.prisma.lead.update({ where: { id: call.leadId }, data: { score: result.score, ...leadDetailsFrom(extraction) } });
     const ended = endingOutcome(extraction);
     if (SETTLED_STATUSES.includes(lead.status) || lead.dncStatus) {
@@ -150,6 +169,37 @@ export class LeadScoringService {
     }
     this.logger.log(`lead ${call.leadId} scored ${result.score} → ${result.temperature} (${source})`);
     return qualification;
+  }
+
+  /**
+   * What the hang-up did for a conversation, undone for a call that reached
+   * no one: the lead goes back to the status it had before the call made it
+   * engaged, and its first response is its first text, if any.
+   */
+  private async undoConversation(call: Call): Promise<void> {
+    const engaged = await this.prisma.leadEvent.findFirst({
+      where: { leadId: call.leadId, callId: call.id, type: 'status_changed', toStatus: LeadStatus.engaged },
+      select: { fromStatus: true },
+    });
+    if (engaged?.fromStatus) {
+      await this.state.move(call.leadId, engaged.fromStatus, {
+        source: 'scoring',
+        reason: 'The call reached no one (voicemail or a phone menu)',
+        callId: call.id,
+        channel: 'voice',
+        onlyFrom: [LeadStatus.engaged],
+        alsoFrom: [LeadStatus.engaged],
+      });
+    }
+    const firstText = await this.prisma.message.findFirst({
+      where: { leadId: call.leadId, channel: 'sms', direction: 'inbound' },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true },
+    });
+    await this.prisma.lead.updateMany({
+      where: { id: call.leadId, firstResponseAt: { gte: call.createdAt } },
+      data: { firstResponseAt: firstText?.createdAt ?? null },
+    });
   }
 }
 

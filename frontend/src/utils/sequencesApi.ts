@@ -104,6 +104,10 @@ export interface Sequence {
   status: SequenceStatus;
   /** Which temperature auto-enrols here. Null means manual only. */
   enrollTriggers: EnrollTrigger[];
+  /** Hours a lead has to answer after the last step before the sequence closes out. */
+  closeOutHours: number;
+  /** At close-out, a lead who stayed silent is marked unresponsive; false leaves it in follow-up. */
+  closeOutUnresponsive: boolean;
   activeCount: number;
   pausedCount: number;
   completedCount: number;
@@ -206,6 +210,9 @@ export const formatDelay = (minutes: number): string => {
 
 // ------------------------------------------------------------------- authoring
 
+/** How long a sequence may give a lead after its last step, in hours; the server holds the same range. */
+export const CLOSE_OUT_HOURS = { min: 1, max: 720, default: 48 } as const;
+
 /** Condition -> its wording, derived so the two can never disagree. */
 export const TRIGGER_LABELS: Record<string, string> = Object.fromEntries(
   ENROLL_TRIGGERS.map((t) => [t.value, t.label]),
@@ -217,6 +224,8 @@ export const createSequence = (body: {
   description?: string;
   status?: SequenceStatus;
   enrollTriggers?: EnrollTrigger[];
+  closeOutHours?: number;
+  closeOutUnresponsive?: boolean;
   steps: StepDraft[];
 }): Promise<Sequence> =>
   apiFetch<Sequence>('/v1/sequences', { method: 'POST', body, auth: true });
@@ -228,6 +237,8 @@ export const updateSequence = (
     description?: string | null;
     status?: SequenceStatus;
     enrollTriggers?: EnrollTrigger[];
+    closeOutHours?: number;
+    closeOutUnresponsive?: boolean;
   },
 ): Promise<Sequence> =>
   apiFetch<Sequence>(`/v1/sequences/${id}`, { method: 'PATCH', body, auth: true });

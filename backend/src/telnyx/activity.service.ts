@@ -40,6 +40,9 @@ const BUSY_SIP = new Set(['486', '600']);
 const DECLINED_SIP = new Set(['603']);
 /** Telnyx's answering-machine verdicts that mean a person, or may: the assistant starts for these. */
 const PERSON_VERDICTS = new Set(['human_residence', 'human_business', 'not_sure', 'silence']);
+
+/** A call not over yet: the only rows a hang-up may close. */
+const OPEN_CALL_STATUSES: CallStatus[] = [CallStatus.queued, CallStatus.ringing, CallStatus.in_progress];
 /** A lost "greeting ended" webhook must not keep a voicemail call open: it is hung up after this. */
 const BEEP_WAIT_MAX_MS = 35_000;
 /** The longest a voicemail message may play before the call is hung up regardless. */
@@ -188,27 +191,30 @@ export class ActivityService {
   }
 
   async onCallAnswered(ccid: string, intent: CallIntent = {}): Promise<void> {
-    const bookkeeping = (async () => {
-      const call = await this.callByProvider(ccid);
-      if (!call) return null;
+    const plan = this.prepared.get(ccid);
+    const call = await (async () => {
+      const row = await this.callByProvider(ccid);
+      if (!row) return null;
+      // Only a call still dialing goes live. The hang-up may have been handled first (its webhook
+      // overtook this one), or this is the same event again: then nothing more happens on it.
       // From here startedAt is when the lead picked up, so an answered call's duration is talk time, not ringing.
-      await this.prisma.call.update({ where: { id: call.id }, data: { status: CallStatus.in_progress, startedAt: new Date() } });
-      await this.slots.extend(call.orgId, ccid).catch(() => undefined);
-      await this.markContacted(call.leadId);
-      return call;
+      const { count } = await this.prisma.call.updateMany({
+        where: { id: row.id, status: { in: [CallStatus.queued, CallStatus.ringing] } },
+        data: { status: CallStatus.in_progress, startedAt: new Date() },
+      });
+      return count > 0 ? row : null;
     })().catch((error) => {
       this.logger.error(`onCallAnswered ${ccid}: ${(error as Error).message}`);
       return null;
     });
+    if (!call) return;
 
-    let plan = this.prepared.get(ccid);
-    if (!plan) {
-      const call = await bookkeeping;
-      if (!call) return;
-      plan = this.prepareAttach(ccid, call.orgId, call.leadId, intent);
-    }
-    const p = await plan;
-    if (p) await this.attach(ccid, p);
+    // The slot and the lead's note are kept while the assistant attaches, not before it: the caller hears no gap.
+    const bookkeeping = Promise.all([this.slots.extend(call.orgId, ccid).catch(() => undefined), this.markContacted(call.leadId)]).catch((error) =>
+      this.logger.error(`onCallAnswered ${ccid}: ${(error as Error).message}`),
+    );
+    const p = await (plan ?? this.prepareAttach(ccid, call.orgId, call.leadId, intent));
+    if (p) await this.attach(ccid, p, intent.amd !== false);
     await bookkeeping;
   }
 
@@ -218,16 +224,28 @@ export class ActivityService {
     const call = await this.callByProvider(ccid);
     if (!call) return;
     await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
-    const answered = call.status === CallStatus.in_progress;
     const cause = String(payload.hangup_cause ?? '');
-    const durationSeconds = call.startedAt ? Math.round((Date.now() - call.startedAt.getTime()) / 1000) : null;
-    const machine = call.disposition === CallDisposition.voicemail || verdict === 'machine';
     const sipCause = String(payload.sip_hangup_cause ?? '');
-    const disposition = dispositionOf({ answered, machine, durationSeconds, hangupCause: cause, sipCause });
-    await this.prisma.call.update({
-      where: { id: call.id },
-      data: { status: answered ? CallStatus.completed : CallStatus.no_answer, disposition, endedAt: new Date(), durationSeconds },
+    // Decided on the row as it is, locked, so an answered event racing this one can never leave the
+    // call live, and the end, the disposition and the length land together. A call already over (the
+    // same hang-up again) is left as it was.
+    const result = await this.prisma.$transaction(async (tx) => {
+      const [row] = await tx.$queryRaw<{ status: CallStatus; started_at: Date | null; disposition: CallDisposition | null }[]>`
+        SELECT status, started_at, disposition FROM calls WHERE id = ${call.id}::uuid FOR UPDATE`;
+      if (!row || !OPEN_CALL_STATUSES.includes(row.status)) return null;
+      const answered = row.status === CallStatus.in_progress;
+      const endedAt = new Date();
+      const durationSeconds = row.started_at ? Math.round((endedAt.getTime() - new Date(row.started_at).getTime()) / 1000) : null;
+      const machine = row.disposition === CallDisposition.voicemail || verdict === 'machine';
+      const disposition = dispositionOf({ answered, machine, durationSeconds, hangupCause: cause, sipCause });
+      await tx.call.update({
+        where: { id: call.id },
+        data: { status: answered ? CallStatus.completed : CallStatus.no_answer, disposition, endedAt, durationSeconds },
+      });
+      return { disposition, durationSeconds };
     });
+    if (!result) return;
+    const { disposition, durationSeconds } = result;
     this.state.quietly({
       orgId: call.orgId,
       leadId: call.leadId,
@@ -351,13 +369,16 @@ export class ActivityService {
     return plan;
   }
 
-  private async attach(ccid: string, p: AttachPlan): Promise<void> {
+  /** `detection`: the call was dialed with answering-machine detection, so a verdict is coming. */
+  private async attach(ccid: string, p: AttachPlan, detection = true): Promise<void> {
     if (p.record) await this.action(ccid, p.apiKey, 'record_start', { format: 'mp3', channels: 'dual', transcription: true });
     if (!p.assistantId) return;
     const verdict = this.verdicts.get(ccid);
     if (verdict && !PERSON_VERDICTS.has(verdict)) return;
     const waitMs = this.config.get('AI_OPENING_WAIT_MS', { infer: true });
-    if (verdict || !waitMs) return this.startAssistant(ccid, p);
+    // Without detection there is nothing to wait for: the assistant starts on the pick-up, and the
+    // call analysis tells a voicemail from a conversation afterwards.
+    if (verdict || !waitMs || !detection) return this.startAssistant(ccid, p);
     // The assistant, and with it the greeting, starts once Telnyx says a person
     // picked up (by then they have said "Hello?"), or when waitMs runs out
     // without a verdict. A machine never hears it.

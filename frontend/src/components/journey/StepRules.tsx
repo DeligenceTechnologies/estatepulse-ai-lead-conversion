@@ -1,6 +1,7 @@
 import React from 'react';
 import { Filter, ShieldCheck, Voicemail } from 'lucide-react';
 import { ALWAYS_ON_RULES, allowedConditions, type StepChannel, type StepConditions, type StepVoicemail } from '../../utils/journey';
+import { useVoicemailDetection } from '../../utils/voicemailApi';
 
 interface Props {
   channel: StepChannel;
@@ -27,6 +28,7 @@ const chip = (on: boolean, enabled: boolean) =>
  */
 export const StepRules: React.FC<Props> = ({ channel, onlyIf, voicemail, previous, onChange }) => {
   const allowed = allowedConditions(previous);
+  const detection = useVoicemailDetection();
   const set = (key: keyof StepConditions, value: boolean) => {
     const next = { ...(onlyIf ?? {}), [key]: value || undefined };
     onChange({ onlyIf: next.lastCallMissed || next.noReply ? next : undefined });
@@ -72,18 +74,23 @@ export const StepRules: React.FC<Props> = ({ channel, onlyIf, voicemail, previou
       )}
 
       {channel === 'voice' && (
-        <span className="flex items-center gap-1.5 ml-auto">
+        <span
+          className="flex items-center gap-1.5 ml-auto"
+          title={detection === false ? 'Answering-machine detection is off in AI Settings, so calls cannot tell a voicemail apart.' : undefined}
+        >
           <Voicemail className="w-3 h-3 text-slate-500" />
           <span className="text-slate-500">On voicemail</span>
           <select
             value={voicemail ?? 'default'}
+            disabled={detection === false}
             onChange={(e) => onChange({ voicemail: e.target.value as StepVoicemail })}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white text-2xs focus:outline-none focus:border-emerald-500"
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white text-2xs focus:outline-none focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <option value="default">AI Settings default</option>
             <option value="leave">Leave the message</option>
             <option value="skip">Hang up, no message</option>
           </select>
+          {detection === false && <span className="text-slate-600">— detection off</span>}
         </span>
       )}
     </div>

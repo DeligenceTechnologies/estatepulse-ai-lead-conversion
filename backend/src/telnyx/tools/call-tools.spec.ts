@@ -11,9 +11,21 @@ import {
 } from './call-tools';
 
 describe('call tools', () => {
-  it('are on by default, with the confirmation SMS and its default text', () => {
-    expect(callToolsSettings(null)).toEqual({ enabled: true, confirmSms: true, confirmMessage: DEFAULT_CONFIRM_MESSAGE, telnyx: null });
+  it('are on by default, with the confirmation SMS, its default text and one retry 15 minutes after a miss', () => {
+    expect(callToolsSettings(null)).toEqual({
+      enabled: true,
+      confirmSms: true,
+      confirmMessage: DEFAULT_CONFIRM_MESSAGE,
+      retryMinutes: 15,
+      retryAttempts: 1,
+      telnyx: null,
+    });
     expect(callToolsSettings({ enabled: false, confirmSms: false, confirmMessage: '  Hi  ' })).toMatchObject({ enabled: false, confirmSms: false, confirmMessage: 'Hi' });
+  });
+
+  it("keep the organization's retry when it is in range, else the default", () => {
+    expect(callToolsSettings({ retryMinutes: 60, retryAttempts: 0 })).toMatchObject({ retryMinutes: 60, retryAttempts: 0 });
+    expect(callToolsSettings({ retryMinutes: 1, retryAttempts: 9 })).toMatchObject({ retryMinutes: 15, retryAttempts: 1 });
   });
 
   it('add their prompt section once, and remove only it', () => {

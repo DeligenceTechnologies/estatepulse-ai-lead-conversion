@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, PhoneForwarded } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
-import { getCallTools, updateCallTools, type CallToolsStatus } from '../../utils/callToolsApi';
+import { RETRY_ATTEMPTS_MAX, RETRY_MINUTES_RANGE, getCallTools, updateCallTools, type CallToolsStatus } from '../../utils/callToolsApi';
 
 /** Matches the server's limit: two SMS segments at most. */
 const MAX_CHARS = 320;
@@ -15,12 +15,16 @@ const MAX_CHARS = 320;
 export const CallToolsCard: React.FC = () => {
   const [status, setStatus] = useState<CallToolsStatus | null>(null);
   const [draft, setDraft] = useState('');
+  const [retryMinutes, setRetryMinutes] = useState(15);
+  const [retryAttempts, setRetryAttempts] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const apply = (s: CallToolsStatus) => {
     setStatus(s);
     setDraft(s.confirmMessage);
+    setRetryMinutes(s.retryMinutes);
+    setRetryAttempts(s.retryAttempts);
   };
 
   useEffect(() => {
@@ -29,7 +33,10 @@ export const CallToolsCard: React.FC = () => {
       .catch((e) => setError(messageFor(e)));
   }, []);
 
-  const save = async (patch: { enabled?: boolean; confirmSms?: boolean; confirmMessage?: string }, done: string) => {
+  const save = async (
+    patch: { enabled?: boolean; confirmSms?: boolean; confirmMessage?: string; retryMinutes?: number; retryAttempts?: number },
+    done: string,
+  ) => {
     setBusy(true);
     try {
       apply(await updateCallTools(patch));
@@ -43,6 +50,15 @@ export const CallToolsCard: React.FC = () => {
 
   const changed = !!status && draft.trim() !== status.confirmMessage;
   const editable = !!status?.enabled && status.confirmSms && !busy;
+  const retryValid =
+    Number.isInteger(retryMinutes) && retryMinutes >= RETRY_MINUTES_RANGE.min && retryMinutes <= RETRY_MINUTES_RANGE.max &&
+    Number.isInteger(retryAttempts) && retryAttempts >= 0 && retryAttempts <= RETRY_ATTEMPTS_MAX;
+  const retryChanged = !!status && (retryMinutes !== status.retryMinutes || retryAttempts !== status.retryAttempts);
+  const retryText = !status
+    ? ''
+    : status.retryAttempts === 0
+      ? 'A missed callback is not tried again: the lead goes straight to your no-answer follow-up.'
+      : `A missed callback is tried again ${status.retryMinutes} minutes later${status.retryAttempts > 1 ? `, up to ${status.retryAttempts} times` : ''}, then the lead goes to your no-answer follow-up.`;
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
@@ -53,8 +69,7 @@ export const CallToolsCard: React.FC = () => {
         </h3>
         <p className="text-[11px] text-slate-400 mt-1">
           When a lead says &ldquo;call me tomorrow at 5&rdquo;, the AI books the callback for that exact time, in your
-          calling hours, and nothing else is sent to them before it. A missed callback is tried once more 15 minutes
-          later, then the lead goes to your no-answer follow-up. When a lead clearly says they are not interested,
+          calling hours, and nothing else is sent to them before it. {retryText} When a lead clearly says they are not interested,
           asks not to be contacted, or it is the wrong number, the AI records it straight away and all outreach to them
           stops; &ldquo;don&apos;t contact me&rdquo; also sets do-not-contact.
         </p>
@@ -116,6 +131,51 @@ export const CallToolsCard: React.FC = () => {
             />
             Text the lead the callback time after the call
           </label>
+
+          <div className="text-xs space-y-1.5">
+            <span className="block text-slate-300 font-semibold">If the lead misses the callback</span>
+            <div className="flex flex-wrap items-center gap-2 text-slate-400">
+              <span>Try again</span>
+              <input
+                id="callback-retry-attempts"
+                type="number"
+                min={0}
+                max={RETRY_ATTEMPTS_MAX}
+                value={retryAttempts}
+                disabled={busy || !status.enabled}
+                onChange={(e) => setRetryAttempts(Number(e.target.value))}
+                aria-label="How many more times to try a missed callback"
+                className="w-14 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-emerald-600 disabled:opacity-50"
+              />
+              <span>{retryAttempts === 1 ? 'time,' : 'times,'}</span>
+              <input
+                id="callback-retry-minutes"
+                type="number"
+                min={RETRY_MINUTES_RANGE.min}
+                max={RETRY_MINUTES_RANGE.max}
+                value={retryMinutes}
+                disabled={busy || !status.enabled || retryAttempts === 0}
+                onChange={(e) => setRetryMinutes(Number(e.target.value))}
+                aria-label="Minutes after a missed callback before trying again"
+                className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-emerald-600 disabled:opacity-50"
+              />
+              <span>minutes after each miss, then the no-answer follow-up.</span>
+              <button
+                type="button"
+                onClick={() => void save({ retryMinutes, retryAttempts }, 'Callback retry saved.')}
+                disabled={busy || !status.enabled || !retryChanged || !retryValid}
+                className="ml-auto px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
+            {!retryValid && (
+              <p className="text-[11px] text-rose-300">
+                Use 0–{RETRY_ATTEMPTS_MAX} tries and {RETRY_MINUTES_RANGE.min}–{RETRY_MINUTES_RANGE.max} minutes.
+              </p>
+            )}
+            <p className="text-[11px] text-slate-500">0 tries sends a missed callback straight to the no-answer follow-up. Default: once, 15 minutes later.</p>
+          </div>
 
           <div className="text-xs space-y-1">
             <label className="block text-slate-300 font-semibold">

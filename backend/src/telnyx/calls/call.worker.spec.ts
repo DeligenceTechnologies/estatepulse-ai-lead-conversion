@@ -1,12 +1,25 @@
 import { DelayedError } from 'bullmq';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { callIntent } from './call.types';
-import { CallWorker, REDIAL_GAP_MS, isCapacityError, isInvalidNumberError, isTransientDialError } from './call.worker';
+import { DEFAULT_LIMITS } from '@/followup/journey';
+import { CallWorker, isCapacityError, isInvalidNumberError, isTransientDialError } from './call.worker';
 
 const ORG = 'org-1';
 const LEAD = 'lead-1';
 
-function setup(overrides: { lead?: Record<string, unknown> | null; slot?: boolean; quietUntil?: Date; placeCall?: () => Promise<unknown>; liveCalls?: number; lastCall?: Record<string, unknown> } = {}) {
+function setup(
+  overrides: {
+    lead?: Record<string, unknown> | null;
+    slot?: boolean;
+    quietUntil?: Date;
+    placeCall?: () => Promise<unknown>;
+    liveCalls?: number;
+    lastCall?: Record<string, unknown>;
+    meetings?: number;
+    enrolment?: Record<string, unknown> | null;
+    redialGapMinutes?: number;
+  } = {},
+) {
   const lead = overrides.lead === undefined ? { phone: '+12895550100', status: 'contacting', dncStatus: false, automationPaused: false } : overrides.lead;
   const prisma = {
     lead: { findUnique: vi.fn().mockResolvedValue(lead) },
@@ -14,10 +27,13 @@ function setup(overrides: { lead?: Record<string, unknown> | null; slot?: boolea
       count: vi.fn().mockResolvedValue(overrides.liveCalls ?? 0),
       findFirst: vi.fn().mockResolvedValue(overrides.lastCall ?? null),
     },
+    calendarMeeting: { count: vi.fn().mockResolvedValue(overrides.meetings ?? 0) },
+    sequenceEnrollment: { findFirst: vi.fn().mockResolvedValue(overrides.enrolment === undefined ? { id: 'enr-1' } : overrides.enrolment) },
     organizationSetting: { findUnique: vi.fn().mockResolvedValue({ maxConcurrentCalls: 2 }) },
   };
   const config = { get: vi.fn() };
-  const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined }) };
+  const limits = { ...DEFAULT_LIMITS, ...(overrides.redialGapMinutes === undefined ? {} : { redialGapMinutes: overrides.redialGapMinutes }) };
+  const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits }) };
   const voice = { placeCall: vi.fn(overrides.placeCall ?? (() => Promise.resolve({ call_control_id: 'ccid-1' }))) };
   const activity = { startCall: vi.fn(), recordCallFailed: vi.fn(), markInvalid: vi.fn() };
   const slots = {
@@ -108,9 +124,20 @@ describe('CallWorker', () => {
         const endedAt = new Date(Date.now() - 5 * 60_000);
         const { worker, job, voice } = setup({ lastCall: { disposition, endedAt } });
         await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
-        expect(job.moveToDelayed).toHaveBeenCalledWith(endedAt.getTime() + REDIAL_GAP_MS, 'tok');
+        expect(job.moveToDelayed).toHaveBeenCalledWith(endedAt.getTime() + 30 * 60_000, 'tok');
         expect(voice.placeCall).not.toHaveBeenCalled();
       }
+    });
+
+    it("keeps to the organization's own wait, and to none when it is 0", async () => {
+      const endedAt = new Date(Date.now() - 45 * 60_000);
+      const longer = setup({ lastCall: { disposition: 'busy', endedAt }, redialGapMinutes: 60 });
+      await expect(longer.worker.process(longer.job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+      expect(longer.job.moveToDelayed).toHaveBeenCalledWith(endedAt.getTime() + 60 * 60_000, 'tok');
+
+      const off = setup({ lastCall: { disposition: 'rejected', endedAt: new Date() }, redialGapMinutes: 0 });
+      await off.worker.process(off.job as any, 'tok');
+      expect(off.voice.placeCall).toHaveBeenCalled();
     });
 
     it('dials once the gap has passed, or after a call that was simply not answered', async () => {
@@ -139,6 +166,34 @@ describe('CallWorker', () => {
       expect(isTransientDialError('Telnyx POST /calls failed 403: Account is disabled D17')).toBe(false);
       expect(isTransientDialError('Telnyx POST /calls failed 422: invalid number')).toBe(false);
       expect(isTransientDialError('Telnyx unreachable: The operation was aborted due to timeout')).toBe(true);
+    });
+  });
+
+  describe('the journey that queued it', () => {
+    it('drops a strategy call once the lead has left the strategy', async () => {
+      const { worker, job, voice } = setup({ lead: { phone: '+1', status: 'follow_up', dncStatus: false, automationPaused: false } });
+      await worker.process(job as any, 'tok');
+      expect(voice.placeCall).not.toHaveBeenCalled();
+    });
+
+    it('drops a sequence call once its enrolment is no longer active, and dials while it is', async () => {
+      const followup = (job: any) => ({ ...job, data: { ...job.data, source: 'followup', sequenceId: 'seq-1' } });
+      const stopped = setup({ lead: { phone: '+1', status: 'follow_up', dncStatus: false, automationPaused: false }, enrolment: null });
+      await stopped.worker.process(followup(stopped.job), 'tok');
+      expect(stopped.voice.placeCall).not.toHaveBeenCalled();
+      expect(stopped.prisma.sequenceEnrollment.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { leadId: LEAD, sequenceId: 'seq-1', status: 'active' } }),
+      );
+
+      const live = setup({ lead: { phone: '+1', status: 'follow_up', dncStatus: false, automationPaused: false } });
+      await live.worker.process(followup(live.job), 'tok');
+      expect(live.voice.placeCall).toHaveBeenCalled();
+    });
+
+    it('drops any call while a meeting with the lead is on the calendar, whatever the status says', async () => {
+      const { worker, job, voice } = setup({ meetings: 1 });
+      await worker.process(job as any, 'tok');
+      expect(voice.placeCall).not.toHaveBeenCalled();
     });
   });
 
