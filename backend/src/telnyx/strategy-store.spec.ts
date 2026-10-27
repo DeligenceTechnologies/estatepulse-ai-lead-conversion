@@ -159,4 +159,22 @@ describe('StrategyStoreService with conditional outreach off (the behaviour befo
     expect(saved.timing).toBeUndefined();
     expect(prisma.organizationSetting.upsert).toHaveBeenCalledOnce();
   });
+
+  it('a guardrails-only save on an office that never saved steps stores no steps: it gets the new default once conditional outreach is on', async () => {
+    const { svc, prisma } = off(undefined);
+    const voicemail = { detect: true, action: 'hangup', message: 'x' };
+    const saved = await svc.saveStrategy('org-1', { guardrails: { ...(await svc.getStrategy('org-1')).guardrails, voicemail } });
+    // Meanwhile it runs the older default, with the setting.
+    expect(saved.steps.map((x) => x.channel)).toEqual(['sms', 'voice', 'sms']);
+    expect(saved.guardrails.voicemail).toEqual(voicemail);
+    const row = prisma.organizationSetting.upsert.mock.calls[0][0].update.outreachStrategy;
+    expect(row).not.toHaveProperty('steps');
+    expect(row).not.toHaveProperty('timing');
+    expect(row.guardrails.voicemail).toEqual(voicemail);
+    // The flag goes on: the new two-step default, the saved setting kept.
+    const s = await store(row).svc.getStrategy('org-1');
+    expect(s.timing).toBe('after_previous');
+    expect(s.steps.map((x) => x.channel)).toEqual(['voice', 'sms']);
+    expect(s.guardrails.voicemail).toEqual(voicemail);
+  });
 });

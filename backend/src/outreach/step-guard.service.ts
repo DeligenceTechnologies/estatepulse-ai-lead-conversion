@@ -112,10 +112,11 @@ export function callResult(call: CallRow, now = Date.now()): CallResult {
     case CallStatus.no_answer:
       return 'not_answered';
     case CallStatus.completed: {
+      // Answering machine detection heard a machine: voicemail, final, decided now rather than after
+      // the analysis (which may take the greeting for a person). "Not sure" is a person: the rest decides.
+      if (call.answeredBy === 'machine') return 'not_answered';
       const verdict = analysisVerdict(call);
       if (verdict !== null) return verdict ? 'answered' : 'not_answered';
-      // Answering machine detection heard a machine: voicemail, decided now rather than after the analysis.
-      if (call.answeredBy === 'machine') return 'not_answered';
       // Only a call someone picked up (answered_at) waits for its analysis; a row from before the column is judged by its time.
       if (!isScored(call) && pickedUp(call) && now - (call.endedAt ?? call.createdAt).getTime() < SCORE_WAIT_MS) return 'awaiting_analysis';
       return talkedLongEnough(call) ? 'answered' : 'not_answered';
@@ -271,7 +272,7 @@ export class StepGuard {
     });
   }
 
-  /** Bookkeeping only: a lost record never stops or repeats a step. */
+  /** Bookkeeping only: a lost record never stops a step, and never repeats one either (a resume reads the calls and texts on record too). */
   async record(run: StepRun): Promise<void> {
     await this.prisma.outreachStepRun
       .createMany({

@@ -71,12 +71,39 @@ describe('ActivityService call bookkeeping', () => {
     expect(prisma.lead.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { lastContactAt: NOW, firstResponseAt: NOW } });
   });
 
+  it('the assistant attaches as soon as the row is answered; the slot and the lead note are not waited for', async () => {
+    const actions = stubActions();
+    const { activity, prisma, slots } = setup({ id: 'call-1', orgId: ORG, leadId: LEAD, status: 'ringing' }, { creds: { apiKey: 'KEY', assistantId: null } });
+    prisma.organizationSetting.findUnique.mockResolvedValue({ callRecordingEnabled: true });
+    let releaseSlot!: () => void;
+    slots.extend.mockReturnValue(new Promise<void>((resolve) => (releaseSlot = resolve)));
+    const answered = activity.onCallAnswered('ccid-1');
+    // Only promises stand between the answer and the attach (no timers): let them settle while the slot is still held.
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    expect(actions.map((a) => a.name)).toEqual(['record_start']);
+    releaseSlot();
+    await answered;
+    expect(slots.extend).toHaveBeenCalledWith(ORG, 'ccid-1');
+    expect(prisma.lead.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { lastContactAt: NOW, firstResponseAt: NOW } });
+  });
+
   it('a hang-up after an answer completes the call', async () => {
     const { activity, prisma, slots } = setup({ id: 'call-1', orgId: ORG, leadId: LEAD, status: 'in_progress' }, { ended: 'completed' });
     await activity.onCallHangup('ccid-1', { hangup_cause: 'normal_clearing' });
     expect(slots.release).toHaveBeenCalledWith(ORG, 'ccid-1');
     expect(prisma.$queryRaw).toHaveBeenCalledOnce();
     expect(prisma.lead.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("the hang-up stamps the end with the app's clock and times the call from when it was placed, never with the database's clock", async () => {
+    const { activity, prisma } = setup(
+      { id: 'call-1', orgId: ORG, leadId: LEAD, status: 'in_progress', startedAt: new Date(NOW.getTime() - 95_000) },
+      { ended: 'completed' },
+    );
+    await activity.onCallHangup('ccid-1', { hangup_cause: 'normal_clearing' });
+    const [sql, ...values] = prisma.$queryRaw.mock.calls[0];
+    expect(sql.join('?')).not.toMatch(/now\(\)/);
+    expect(values).toEqual(expect.arrayContaining([NOW, 95, 'normal_clearing']));
   });
 
   it('a hang-up before any answer is no answer, busy included', async () => {

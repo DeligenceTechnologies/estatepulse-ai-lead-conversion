@@ -36,6 +36,8 @@ describe('callResult', () => {
     ['a pick-up that ended 2 minutes ago, analysis not in yet', pickedUp(2, 45), 'awaiting_analysis'],
     ['a voicemail over 30s the analysis says reached no one', pickedUp(2, 90, { reached_person: false }), 'not_answered'],
     ['a 10s pick-up the analysis says reached a person', pickedUp(2, 10, { reached_person: true }), 'answered'],
+    ['a machine heard by detection, whatever the analysis then says', { ...pickedUp(2, 40, { reached_person: true }), answeredBy: 'machine' }, 'not_answered'],
+    ['detection not sure (a person): the analysis decides', { ...pickedUp(2, 10, { reached_person: true }), answeredBy: 'human' }, 'answered'],
     ['an older analysis without the field that heard a real exchange', pickedUp(2, 10, { not_interested: true }), 'answered'],
     ['an older analysis that cannot tell: the talk time decides', pickedUp(2, 45, {}), 'answered'],
     ['no analysis 15 minutes on, 45s of talk', pickedUp(20, 45), 'answered'],
@@ -253,9 +255,9 @@ describe('the analysis wait is for connected calls only', () => {
 });
 
 describe('answering machine detection in the call result', () => {
-  it('a call a machine picked up is voicemail at once, however long it ran, unless its analysis says a person spoke', () => {
+  it('a call a machine picked up is voicemail at once, however long it ran and whatever its analysis then says; a person waits for the analysis', () => {
     expect(callResult({ ...pickedUp(1, 90), answeredBy: 'machine' } as any, NOW)).toBe('not_answered');
-    expect(callResult({ ...pickedUp(1, 90, { reached_person: true }), answeredBy: 'machine' } as any, NOW)).toBe('answered');
+    expect(callResult({ ...pickedUp(1, 90, { reached_person: true }), answeredBy: 'machine' } as any, NOW)).toBe('not_answered');
     expect(callResult({ ...pickedUp(1, 90), answeredBy: 'human' } as any, NOW)).toBe('awaiting_analysis');
   });
 });

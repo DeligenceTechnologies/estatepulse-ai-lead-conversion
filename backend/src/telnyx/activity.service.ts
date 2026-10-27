@@ -140,28 +140,32 @@ export class ActivityService {
   }
 
   async onCallAnswered(ccid: string): Promise<void> {
-    const bookkeeping = (async () => {
+    const prepared = this.prepared.get(ccid);
+    const call = await this.answeredRow(ccid);
+    if (!call) return;
+    // The slot and the lead's note are kept while the assistant attaches, not before it: the caller hears no gap.
+    const bookkeeping = Promise.all([this.slots.extend(call.orgId, ccid).catch(() => undefined), this.markContacted(call.leadId, true)]).catch(
+      (error) => this.logger.error(`onCallAnswered ${ccid}: ${(error as Error).message}`),
+    );
+    const p = await (prepared ?? this.prepareAttach(ccid, call.orgId, call.leadId));
+    if (p) await this.attach(ccid, p);
+    await bookkeeping;
+  }
+
+  /** The call's row moved to in progress; null when it was not still ringing (a hang-up got there first, or the same event again) or could not be read. */
+  private async answeredRow(ccid: string) {
+    try {
       const call = await this.callByProvider(ccid);
       if (!call) return null;
-      // Only a call still ringing is answered: a hang-up that got here first, or the same event again, changes nothing.
       const { count } = await this.prisma.call.updateMany({
         where: { id: call.id, status: { in: [CallStatus.queued, CallStatus.ringing] } },
         data: { status: CallStatus.in_progress, answeredAt: new Date() },
       });
-      if (count === 0) return null;
-      await this.slots.extend(call.orgId, ccid).catch(() => undefined);
-      await this.markContacted(call.leadId, true);
-      return call;
-    })().catch((error) => {
+      return count === 0 ? null : call;
+    } catch (error) {
       this.logger.error(`onCallAnswered ${ccid}: ${(error as Error).message}`);
       return null;
-    });
-
-    const prepared = this.prepared.get(ccid);
-    const call = await bookkeeping;
-    if (!call) return;
-    const p = await (prepared ?? this.prepareAttach(ccid, call.orgId, call.leadId));
-    if (p) await this.attach(ccid, p);
+    }
   }
 
   async onCallHangup(ccid: string, payload: { hangup_cause?: string; sip_hangup_cause?: string } = {}): Promise<void> {
@@ -178,12 +182,16 @@ export class ActivityService {
     await this.slots.release(call.orgId, ccid).catch((error) => this.logger.warn(`release slot ${ccid}: ${(error as Error).message}`));
     const endReason = endReasonOf(payload.hangup_cause, payload.sip_hangup_cause);
     // One move, decided on the row as it is at that moment: answered → completed, never answered →
-    // no answer. A call already over (the same hang-up twice) is left as it is.
+    // no answer. A call already over (the same hang-up twice) is left as it is. Stamped with this
+    // process's clock, like answered_at and started_at (the database's can be hundreds of ms off),
+    // and the end never precedes the pick-up, whichever event took its timestamp first.
+    const now = new Date();
+    const durationSeconds = call.startedAt ? Math.round((now.getTime() - call.startedAt.getTime()) / 1000) : null;
     const [ended] = await this.prisma.$queryRaw<{ status: CallStatus }[]>`
       UPDATE calls
          SET status = CASE WHEN status = 'in_progress'::call_status THEN 'completed'::call_status ELSE 'no_answer'::call_status END,
-             ended_at = now(),
-             duration_seconds = CASE WHEN started_at IS NULL THEN NULL ELSE round(extract(epoch FROM now() - started_at))::int END,
+             ended_at = GREATEST(answered_at, ${now}::timestamptz),
+             duration_seconds = ${durationSeconds}::int,
              end_reason = ${endReason}
        WHERE id = ${call.id}::uuid AND status IN ('queued'::call_status, 'ringing'::call_status, 'in_progress'::call_status)
        RETURNING status`;

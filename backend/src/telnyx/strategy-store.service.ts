@@ -217,6 +217,18 @@ export function validateTwoStep(steps: StrategyStep[]): void {
   });
 }
 
+/**
+ * A saved row with what the defaults fill in. A row may carry only the name and guardrails (the
+ * contact window or the voicemail setting, saved before any steps were): the steps, and their
+ * timing, are then the default's, so an office that never saved steps gets a new default when it
+ * changes.
+ */
+function withDefaults(saved: Partial<Strategy> | null | undefined, conditional: boolean): Strategy {
+  const base = defaultStrategy(conditional);
+  if (!saved) return base;
+  return { ...base, ...saved, steps: saved.steps ?? base.steps, timing: saved.steps ? saved.timing : base.timing };
+}
+
 /** The organization's outreach cadence for new leads: what is sent, through which channel, and when. */
 @Injectable()
 export class StrategyStoreService {
@@ -231,16 +243,23 @@ export class StrategyStoreService {
   }
 
   async getStrategy(orgId: string): Promise<Strategy> {
+    return withDefaults(await this.savedStrategy(orgId), this.conditional);
+  }
+
+  /** The row as saved: without steps when only the name or guardrails were ever saved. */
+  private async savedStrategy(orgId: string): Promise<Partial<Strategy> | null> {
     const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { outreachStrategy: true } });
-    return (settings?.outreachStrategy as unknown as Strategy | null) ?? defaultStrategy(this.conditional);
+    return (settings?.outreachStrategy as unknown as Partial<Strategy> | null) ?? null;
   }
 
   /**
    * With conditional outreach on, saving steps saves the two-step form; a save of only the name or
    * guardrails leaves the steps as they are. Off, the strategy is stored as sent, as it always was.
+   * Only what was saved is written: an office that never saved steps keeps running the default,
+   * and gets a new one when it changes.
    */
   async saveStrategy(orgId: string, patch: Partial<Strategy>): Promise<Strategy> {
-    const next: Strategy = { ...(await this.getStrategy(orgId)), ...patch };
+    const next: Partial<Strategy> = { ...(await this.savedStrategy(orgId)), ...patch };
     if (patch.steps && this.conditional) {
       validateTwoStep(patch.steps);
       next.steps = asEditable(patch.steps);
@@ -252,6 +271,6 @@ export class StrategyStoreService {
       create: { orgId, outreachStrategy },
       update: { outreachStrategy },
     });
-    return next;
+    return withDefaults(next, this.conditional);
   }
 }

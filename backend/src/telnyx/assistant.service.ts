@@ -112,7 +112,12 @@ export class AssistantService {
     const saved = voicemailSettingOf(await this.strategies.getStrategy(orgId).catch(() => null));
     if (saved) return saved;
     const vm = raw?.telephony_settings?.voicemail_detection;
-    return { detect: !!vm, action: vm?.action === 'leave_message' ? 'leave_message' : 'hangup', message: DEFAULT_VOICEMAIL_MESSAGE };
+    // Telnyx's shape (on_voicemail_detected: action, voicemail_message), or the bare action this app wrote before it.
+    const on = vm?.on_voicemail_detected ?? vm;
+    const leaves = on?.action === 'leave_message_and_stop_assistant' || on?.action === 'leave_message';
+    // Only a fixed text can be shown; a prompted message has none.
+    const text = on?.voicemail_message?.type === 'message' ? String(on.voicemail_message.message ?? '').trim().slice(0, VOICEMAIL_MESSAGE_MAX) : '';
+    return { detect: !!vm, action: leaves ? 'leave_message' : 'hangup', message: text || DEFAULT_VOICEMAIL_MESSAGE };
   }
 
   private static voicemailFields(vm: VoicemailConfig) {
@@ -285,15 +290,16 @@ export class AssistantService {
       body.telephony_settings = ts;
     }
 
+    // The setting is saved first: if that fails, nothing is sent and the assistant keeps its own detection.
+    if (voicemailChanged) {
+      const strategy = await this.strategies.getStrategy(orgId);
+      await this.strategies.saveStrategy(orgId, { guardrails: { ...strategy.guardrails, voicemail: wanted } });
+    }
     const res = await fetch(`${BASE}/${c.assistantId}`, { method: 'PATCH', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) throw new AppError('UPSTREAM_ERROR', `AI agent update failed ${res.status}: ${await res.text()}`);
     const j = (await res.json()) as any;
     if (patch.record_calls != null) {
       await this.prisma.organizationSetting.updateMany({ where: { orgId }, data: { callRecordingEnabled: !!patch.record_calls } });
-    }
-    if (voicemailChanged) {
-      const strategy = await this.strategies.getStrategy(orgId);
-      await this.strategies.saveStrategy(orgId, { guardrails: { ...strategy.guardrails, voicemail: wanted } });
     }
     return { ...shape(j.data ?? j), record_calls: await this.recordsCalls(orgId), ...AssistantService.voicemailFields(wanted) };
   }

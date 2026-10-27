@@ -80,10 +80,16 @@ describe('EngineService: a step that throws', () => {
   it('past the limit the lead is flagged, parked for follow-up and no longer run here', async () => {
     const { engine, prisma, guard, activity, calls } = setup();
     prisma.lead.findUnique.mockRejectedValue(new Error('database unreachable'));
+    let runningWhileParked: boolean | null = null;
+    guard.flagReview.mockImplementation(async () => {
+      runningWhileParked = engine.isRunning(LEAD);
+    });
     await engine.enroll(ORG, LEAD);
     await vi.advanceTimersByTimeAsync(2 * DAY);
     expect(calls.enqueue).not.toHaveBeenCalled();
     expect(guard.flagReview).toHaveBeenCalledWith(ORG, LEAD, STEP_FAILED_REVIEW);
+    // Parked while still counted as running: a watcher poll in between leaves the lead alone.
+    expect(runningWhileParked).toBe(true);
     expect(activity.exitStrategy).toHaveBeenCalledWith(LEAD, expect.stringContaining('kept failing'));
     expect(engine.isRunning(LEAD)).toBe(false);
     expect(prisma.lead.findUnique.mock.calls.length).toBe(MAX_STEP_FAILURES + 1);
@@ -163,7 +169,6 @@ describe('EngineService: resume reads the step record (a queued call has no row 
     expect(sms.sendSms).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(sms.sendSms).toHaveBeenCalledOnce();
-    expect(prisma.call.count).not.toHaveBeenCalled();
   });
 
   it('a call that failed to queue is not retried by a resume either, and the call key is stable across it', async () => {
@@ -173,6 +178,48 @@ describe('EngineService: resume reads the step record (a queued call has no row 
     expect(await engine.resume(ORG, LEAD)).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.enqueue).toHaveBeenCalledWith(expect.anything(), { dedupeKey: `strategy:${LEAD}:${contacted.getTime()}:1` });
+  });
+});
+
+describe('EngineService: a resume also trusts the calls and texts on record (a step record can be lost)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const smsThenCall: StrategyStep[] = [
+    { id: 'a', after: { value: 0, unit: 'minutes' }, channel: 'sms', message: 'Hi' },
+    { id: 'b', after: { value: 5, unit: 'minutes' }, channel: 'voice' },
+  ];
+
+  it('the text went but its record was lost: after a restart the text on record counts, and it is not sent again', async () => {
+    const { engine, prisma, sms, calls, guard } = setup({ steps: smsThenCall });
+    await engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sms.sendSms).toHaveBeenCalledOnce();
+    // The record's write failed (bookkeeping, it never throws), the process went down, the lead is resumed.
+    engine.onModuleDestroy();
+    prisma.lead.findFirst.mockResolvedValue({ firstContactAt: NOW, status: 'contacting', dncStatus: false, automationPaused: false });
+    prisma.message.count.mockResolvedValue(1);
+    guard.stepRuns.mockResolvedValue([]);
+    expect(await engine.resume(ORG, LEAD)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(sms.sendSms).toHaveBeenCalledOnce();
+    expect(calls.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('a lead that ran with the flag off and is resumed with it on (no record at all): its call and text on record count, nothing repeats', async () => {
+    const { engine, prisma, sms, calls, guard, activity } = setup();
+    prisma.lead.findFirst.mockResolvedValue({ firstContactAt: new Date(NOW.getTime() - 2 * MIN), status: 'contacting', dncStatus: false, automationPaused: false });
+    prisma.call.count.mockResolvedValue(1);
+    prisma.message.count.mockResolvedValue(1);
+    guard.stepRuns.mockResolvedValue([]);
+    expect(await engine.resume(ORG, LEAD)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(calls.enqueue).not.toHaveBeenCalled();
+    expect(sms.sendSms).not.toHaveBeenCalled();
+    expect(activity.exitStrategy).toHaveBeenCalledWith(LEAD, expect.stringContaining('Strategy complete'));
   });
 });
 

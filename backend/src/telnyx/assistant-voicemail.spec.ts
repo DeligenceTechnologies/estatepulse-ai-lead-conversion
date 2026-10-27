@@ -96,4 +96,31 @@ describe('AssistantService "Detect voicemail"', () => {
       guardrails: { maxVoiceAttempts: 3, voicemail: { detect: true, action: 'leave_message', message: 'Hi {{firstName}}' } },
     });
   });
+
+  it('when the setting cannot be saved, nothing is sent to Telnyx: the assistant keeps its own detection', async () => {
+    const { service, patches, strategies } = setup({ assistantVoicemail: { action: 'hangup' } });
+    strategies.saveStrategy.mockRejectedValue(new Error('database unreachable'));
+    await expect(
+      service.updateAssistant(ORG, { voicemail_detection: false, voicemail_action: 'hangup', voicemail_message: DEFAULT_VOICEMAIL_MESSAGE }),
+    ).rejects.toThrow(/database unreachable/);
+    expect(patches).toEqual([]);
+  });
+
+  it("an assistant's own detection as Telnyx stores it (on_voicemail_detected): the action and the message it leaves are shown as they are", async () => {
+    const leaves = {
+      on_voicemail_detected: { action: 'leave_message_and_stop_assistant', voicemail_message: { type: 'message', message: 'Hi, Acme here. Call us back.' } },
+    };
+    expect(await setup({ assistantVoicemail: leaves }).service.getAssistant(ORG)).toEqual(
+      expect.objectContaining({ voicemail_detection: true, voicemail_action: 'leave_message', voicemail_message: 'Hi, Acme here. Call us back.' }),
+    );
+    const stops = { on_voicemail_detected: { action: 'stop_assistant' } };
+    expect(await setup({ assistantVoicemail: stops }).service.getAssistant(ORG)).toEqual(
+      expect.objectContaining({ voicemail_detection: true, voicemail_action: 'hangup', voicemail_message: DEFAULT_VOICEMAIL_MESSAGE }),
+    );
+    // A prompted message has no fixed text to show.
+    const prompted = { on_voicemail_detected: { action: 'leave_message_and_stop_assistant', voicemail_message: { type: 'prompt', prompt: 'Be brief' } } };
+    expect(await setup({ assistantVoicemail: prompted }).service.getAssistant(ORG)).toEqual(
+      expect.objectContaining({ voicemail_action: 'leave_message', voicemail_message: DEFAULT_VOICEMAIL_MESSAGE }),
+    );
+  });
 });

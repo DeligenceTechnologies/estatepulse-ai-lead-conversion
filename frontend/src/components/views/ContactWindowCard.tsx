@@ -58,11 +58,11 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
     setSaving(true);
     setError(null);
     try {
-      // Read-modify-write: guardrails holds keys this card does not show
-      // (stopOn, and anything added later), and a blind PUT would drop them.
+      // Read-modify-write of the guardrails alone: they hold keys this card does not show (stopOn,
+      // voicemail, anything added later), and a blind PUT would drop them. The steps are not sent
+      // back: the server may have shown a default, and this card must not turn it into a saved one.
       const current = await getStrategy();
       await saveStrategy({
-        ...current,
         guardrails: {
           ...(current.guardrails ?? {}),
           respectQuietHours: respect,

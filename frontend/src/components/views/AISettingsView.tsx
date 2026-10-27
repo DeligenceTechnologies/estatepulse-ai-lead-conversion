@@ -875,7 +875,7 @@ export const AISettingsView: React.FC = () => {
             </div>
 
             <p className="md:col-span-2 text-xs text-slate-500 -mt-1">
-              Detect voicemail: detects voicemail so the call ends quickly and the follow-up SMS goes right away. This adds a per-call charge on your
+              Detect voicemail: detects voicemail so the call ends quickly and the follow-up SMS goes at its scheduled time. This adds a per-call charge on your
               Telnyx account.
             </p>
 

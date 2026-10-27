@@ -27,9 +27,8 @@ export const STEP_FAILED_REVIEW =
 
 /**
  * Which steps are still to run after a restart, matched against the calls and
- * texts already on record, and the anchor that keeps their spacing. Only an
- * older (enrolment-timed) strategy is resumed this way; a two-step one reads
- * its step record.
+ * texts already on record, and the anchor that keeps their spacing. A two-step
+ * strategy reads its step record as well (resume).
  */
 export function remainingSteps(
   steps: StrategyStep[],
@@ -191,28 +190,28 @@ export class EngineService implements OnModuleDestroy {
     });
     if (!lead?.firstContactAt || lead.dncStatus || lead.automationPaused || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
 
-    const [strategy, office] = await Promise.all([this.strategies.getStrategy(orgId), this.office(orgId)]);
+    const [strategy, office, calls, texts] = await Promise.all([
+      this.strategies.getStrategy(orgId),
+      this.office(orgId),
+      this.prisma.call.count({ where: { orgId, leadId } }),
+      this.prisma.message.count({ where: { orgId, leadId, direction: 'outbound', channel: 'sms' } }),
+    ]);
     const afterPrevious = this.conditional && isTwoStep(strategy);
     const enrolledAt = lead.firstContactAt.getTime();
-    let remaining: StrategyStep[];
-    let anchor = enrolledAt;
-    let voiceAttempts: number;
+    // The calls and texts on record say what went; an older strategy is resumed from them alone.
+    let { remaining, anchor } = remainingSteps(strategy.steps, calls, texts, enrolledAt, Date.now());
+    let voiceAttempts = calls;
     let lastRanAt = enrolledAt;
     if (afterPrevious) {
-      // The step record says what went, was queued or was skipped. The calls on record would not
-      // do: a call still waiting in the queue has no row yet, and would be queued a second time.
+      // A two-step strategy reads its step record as well: a call still waiting in the queue has no
+      // row yet and would be queued a second time. A step is done when either says so, so a record
+      // that was never written (the write is best effort) cannot repeat a step either.
       const runs = await this.guard.stepRuns(leadId, `strategy:${enrolledAt}:`);
       const done = new Set(runs.map((r) => r.stepNumber));
-      remaining = strategy.steps.filter((_, i) => !done.has(i + 1));
-      voiceAttempts = runs.filter((r) => r.channel === 'voice' && r.outcome === 'queued').length;
+      remaining = remaining.filter((step) => !done.has(strategy.steps.indexOf(step) + 1));
+      voiceAttempts = Math.max(calls, runs.filter((r) => r.channel === 'voice' && r.outcome === 'queued').length);
       lastRanAt = runs.at(-1)?.createdAt.getTime() ?? enrolledAt;
-    } else {
-      const [calls, texts] = await Promise.all([
-        this.prisma.call.count({ where: { orgId, leadId } }),
-        this.prisma.message.count({ where: { orgId, leadId, direction: 'outbound', channel: 'sms' } }),
-      ]);
-      ({ remaining, anchor } = remainingSteps(strategy.steps, calls, texts, enrolledAt, Date.now()));
-      voiceAttempts = calls;
+      anchor = enrolledAt;
     }
     const enrollment: Enrollment = {
       orgId,
@@ -602,14 +601,16 @@ export class EngineService implements OnModuleDestroy {
 
   private async giveUp(e: Enrollment, error: Error): Promise<void> {
     this.logger.error(`lead ${e.leadId}: giving up after ${MAX_STEP_FAILURES} failed tries: ${error.message}`);
-    // Out of `active` first: if parking fails too, the watcher's next poll picks the lead up again.
-    this.stop(e);
+    // Parked while still counted as running, so a watcher poll cannot resume it in between; out of
+    // `active` after, parked or not: if parking failed too, the watcher's next poll picks the lead up.
     try {
       await this.guard.flagReview(e.orgId, e.leadId, STEP_FAILED_REVIEW);
       await this.activity.exitStrategy(e.leadId, `Strategy step kept failing — ${error.message}`.slice(0, 2000));
       await this.enrolOnFollowUp(e.orgId, e.leadId);
     } catch (err) {
       this.logger.error(`lead ${e.leadId}: could not park it either: ${(err as Error).message}`);
+    } finally {
+      this.stop(e);
     }
   }
 
