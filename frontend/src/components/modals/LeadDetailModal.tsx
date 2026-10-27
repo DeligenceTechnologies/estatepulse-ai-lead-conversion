@@ -32,10 +32,16 @@ import {
 } from '../../utils/historyApi';
 import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
-import { formatDateTime } from '../../lib/datetime';
+import { formatDateTime, formatTime } from '../../lib/datetime';
 
 /** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** One line of a reason; an ellipsis says the rest is in the tooltip. */
+const clip = (text: string, max: number): string => {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+};
 
 interface LeadActivity {
   calls: CallRow[];
@@ -425,15 +431,20 @@ export const LeadDetailModal: React.FC = () => {
                 ) : (
                   <span className="text-slate-400">All {flow.stepsTotal} steps sent — awaiting outcome</span>
                 )}
+                {flow.heldUntil && (
+                  <span className="text-amber-300 font-medium" title="Nothing sends inside the contact window's quiet hours; the step goes out when they end.">
+                    · Quiet hours — waits until {formatTime(flow.heldUntil)}
+                  </span>
+                )}
                 {flow.reason && (
-                  <span className="text-slate-500 break-words" title={flow.reason}>· last attempt: {flow.reason.replace(/\s+/g, ' ').slice(0, 45)}</span>
+                  <span className="text-slate-500 break-words" title={flow.reason}>· last attempt: {clip(flow.reason, 45)}</span>
                 )}
               </>
             )}
 
             {flow.phase === 'exited' && (
               <span className="text-rose-300 break-words" title={flow.reason ?? undefined}>
-                Left the strategy{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
+                Left the strategy{flow.reason ? `: ${clip(flow.reason, 80)}` : ''}
               </span>
             )}
             {/* After the strategy, its skipped steps still say why they did not go. */}

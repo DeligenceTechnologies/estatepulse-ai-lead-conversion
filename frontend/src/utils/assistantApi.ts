@@ -419,6 +419,7 @@ export interface LeadFlow {
   stepsTotal: number;
   completed: number;
   currentStep: LeadFlowStep | null;
+  heldUntil: string | null; // ISO: the current step waits for quiet hours to end
   steps: LeadFlowStep[];
   reason: string | null;
   automationPaused: boolean;

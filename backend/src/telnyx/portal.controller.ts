@@ -17,6 +17,7 @@ import { SAFETY_RULES } from '@/outreach/safety-rules';
 import { StrategyStoreService, toTwoStep, type Strategy } from './strategy-store.service';
 import { callResult } from '@/outreach/step-guard.service';
 import { strategyFlowSteps } from '@/outreach/strategy-flow';
+import { nextAllowedAt, type QuietHours } from '@/common/utils/quiet-hours';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',
@@ -234,8 +235,9 @@ export class PortalLeadsController {
     const orgId = auth.organizationId;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) } });
     if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
-    const [strategy, calls, messages, runs] = await Promise.all([
+    const [strategy, settings, calls, messages, runs] = await Promise.all([
       this.strategies.getStrategy(orgId),
+      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } }),
       this.prisma.call.findMany({
         where: { orgId, leadId },
         orderBy: { createdAt: 'asc' },
@@ -297,6 +299,12 @@ export class PortalLeadsController {
               ? 'Not started'
               : 'In strategy');
 
+    const currentStep = phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null;
+    // The engine holds a step that comes due inside the contact window's quiet hours (fireStep); this says so on the lead.
+    const guard = (strategy.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours };
+    const now = new Date();
+    const opensAt = currentStep ? nextAllowedAt(settings?.timezone ?? 'UTC', guard.respectQuietHours === false ? undefined : guard.quietHours, now) : now;
+
     return {
       phase,
       leadStatus: status,
@@ -304,7 +312,8 @@ export class PortalLeadsController {
       strategyName: strategy.name,
       stepsTotal: steps.length,
       completed: Math.min(runs.length || fired, steps.length),
-      currentStep: phase === 'strategy' && nextIndex >= 0 ? stepsOut[nextIndex] : null,
+      currentStep,
+      heldUntil: opensAt > now ? opensAt.toISOString() : null,
       steps: stepsOut,
       reason: lead.aiSummary ?? null,
       // For the quick actions: read here, fresh, rather than from a copy of the lead the page may hold.
