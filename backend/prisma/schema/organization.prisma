@@ -23,6 +23,7 @@ model Organization {
   auditLogs           AuditLog[]
   outreachBatches     OutreachBatch[]
   leadEvents          LeadEvent[]
+  dailySummaryRuns    DailySummaryRun[]
 
   @@map("organizations")
 }
@@ -50,6 +51,10 @@ model OrganizationSetting {
   callTools             Json?   @map("call_tools")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
+  /// The owners' end-of-day summary email.
+  dailySummaryEnabled   Boolean @default(true) @map("daily_summary_enabled")
+  /// HH:MM in `timezone`. Before noon the email covers the previous day; from noon, the day so far.
+  dailySummaryTime      String  @default("23:55") @map("daily_summary_time") @db.VarChar(5)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -57,4 +62,22 @@ model OrganizationSetting {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@map("org_settings")
+}
+
+/// One row per organization per local day the summary email was claimed for:
+/// the unique key is what keeps several instances from sending it twice.
+model DailySummaryRun {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  orgId       String    @map("organization_id") @db.Uuid
+  summaryDate DateTime  @map("summary_date") @db.Date
+  /// claimed | sent | skipped_empty | no_recipients
+  status      String    @db.VarChar(20)
+  recipients  Int       @default(0)
+  claimedAt   DateTime  @default(now()) @map("claimed_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, summaryDate])
+  @@map("daily_summary_runs")
 }

@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Check, User, Users } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor, type OrganizationType } from '../../lib/api';
+import type { CheckEmailState } from './CheckEmailPage';
 import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton } from './AuthLayout';
 
 const ACCOUNT_TYPES: {
@@ -68,7 +69,7 @@ export const SignupPage: React.FC = () => {
     setError(null);
     setBusy(true);
     try {
-      await signup({
+      const { verificationRequired } = await signup({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         organizationName: organizationName.trim(),
@@ -77,7 +78,11 @@ export const SignupPage: React.FC = () => {
         phone: phone.trim(),
         password,
       });
-      navigate('/', { replace: true });
+      if (verificationRequired) {
+        navigate('/check-email', { replace: true, state: { email: email.trim(), from: 'signup' } satisfies CheckEmailState });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (err) {
       toast.error(messageFor(err));
     } finally {

@@ -25,7 +25,12 @@ describe('answering-machine detection as an organization setting', () => {
 
   const dial = async (detect: boolean) => {
     vi.mocked(telnyx).mockClear();
-    const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', fromNumber: '+17427245092' })), ensureConnectionId: vi.fn(async () => 'conn-1') };
+    const creds = {
+      getCreds: vi.fn(async () => ({ apiKey: 'KEY', fromNumber: '+17427245092' })),
+      ensureConnectionId: vi.fn(async () => 'conn-1'),
+      keyAccepted: vi.fn(async () => undefined),
+      keyRejected: vi.fn(async () => undefined),
+    };
     const voicemail = { settings: vi.fn(async () => ({ detect, enabled: true, message: 'hi' })) };
     const voice = new VoiceService(creds as any, { get: vi.fn(() => '') } as any, voicemail as any);
     await voice.placeCall('org-1', '+12895550100', { leadId: 'lead-1', orgId: 'org-1' });

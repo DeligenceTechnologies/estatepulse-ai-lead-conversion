@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { IntegrationProvider, IntegrationStatus, type Integration } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '@/audit/audit.service';
@@ -60,6 +61,7 @@ export class GoogleConnectionsService {
     private readonly secrets: SecretBoxService,
     private readonly google: GoogleClient,
     private readonly audit: AuditService,
+    private readonly connectionAlerts: ConnectionAlertService,
   ) {}
 
   publicConfig() {
@@ -286,11 +288,25 @@ export class GoogleConnectionsService {
     return tokens.accessToken;
   }
 
+  /** active -> invalid; the owners are emailed once, on the transition. */
   private async markInvalid(id: string, code: string): Promise<void> {
     this.accessTokens.delete(id);
-    await this.prisma.integration.update({
-      where: { id },
-      data: { status: IntegrationStatus.invalid, lastErrorAt: new Date(), lastErrorCode: code },
+    const brokenAt = new Date();
+    const changed = await this.prisma.integration.updateMany({
+      where: { id, status: IntegrationStatus.active },
+      data: { status: IntegrationStatus.invalid, lastErrorAt: brokenAt, lastErrorCode: code },
+    });
+    if (changed.count === 0) return;
+    const row = await this.prisma.integration.findUnique({ where: { id }, select: { orgId: true, accountEmail: true } });
+    if (!row) return;
+    this.connectionAlerts.connectionBroken({
+      orgId: row.orgId,
+      connectionId: id,
+      providerLabel: 'Google Sheets',
+      account: row.accountEmail,
+      impact: 'New leads from your Google Sheets are not being imported.',
+      reconnectPath: '/integrations',
+      brokenAt,
     });
   }
 

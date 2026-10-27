@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
-import { telnyx } from './telnyx-api';
+import { isTelnyxKeyRejected, telnyx } from './telnyx-api';
 import { VoicemailService } from './voicemail/voicemail.service';
 
 /**
@@ -32,18 +32,25 @@ export class VoiceService {
     // Tells a person from an answering machine, so the assistant never talks to a voicemail greeting.
     // A per-call charge, so only where the organization keeps it on; the webhooks learn which from client_state.
     const { detect } = await this.voicemail.settings(orgId);
-    const res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
-      method: 'POST',
-      body: JSON.stringify({
-        connection_id: connectionId,
-        to,
-        from: c.fromNumber,
-        timeout_secs: DIAL_TIMEOUT_SECS,
-        ...(detect ? { answering_machine_detection: 'premium' } : {}),
-        client_state: Buffer.from(JSON.stringify({ ...clientState, amd: detect })).toString('base64'),
-        ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
-      }),
-    });
+    let res: { data?: { call_control_id?: string } };
+    try {
+      res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
+        method: 'POST',
+        body: JSON.stringify({
+          connection_id: connectionId,
+          to,
+          from: c.fromNumber,
+          timeout_secs: DIAL_TIMEOUT_SECS,
+          ...(detect ? { answering_machine_detection: 'premium' } : {}),
+          client_state: Buffer.from(JSON.stringify({ ...clientState, amd: detect })).toString('base64'),
+          ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
+        }),
+      });
+    } catch (error) {
+      if (isTelnyxKeyRejected(error)) await this.creds.keyRejected(orgId).catch(() => undefined);
+      throw error;
+    }
+    await this.creds.keyAccepted(orgId, c).catch(() => undefined);
     return res.data ?? {};
   }
 }

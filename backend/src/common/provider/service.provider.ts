@@ -2,6 +2,8 @@ import { Global, Module, Provider, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 
 import { AuditService } from '@/audit/audit.service';
+import { AccountEmailService } from '@/auth/account-email.service';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { MailService } from '@/common/service/mail.service';
 import { RedisService } from '@/common/service/redis.service';
@@ -18,6 +20,8 @@ const SERVICES: Provider[] = [
   UserService,
   AuditService,
   LeadStateService,
+  AccountEmailService,
+  ConnectionAlertService,
 ];
 
 const TENANT_PRISMA_PROVIDER: Provider = {

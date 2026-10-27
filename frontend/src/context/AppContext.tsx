@@ -214,6 +214,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (view !== activeView) navigate(pathForView(view));
   };
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+
+  // `/leads?lead=<id>`, the link in the "lead assigned" email: open that lead,
+  // then drop the parameter so closing the dossier does not reopen it.
+  useEffect(() => {
+    const leadId = new URLSearchParams(location.search).get('lead');
+    if (!leadId) return;
+    setSelectedLeadId(leadId);
+    navigate({ pathname: location.pathname }, { replace: true });
+  }, [location.search]);
   const [focusLeadSourceId, setFocusLeadSourceId] = useState<string | null>(null);
   const [preCallLeadId, setPreCallLeadId] = useState<string | null>(null);
   const [isSimulatingCall, setIsSimulatingCall] = useState(false);

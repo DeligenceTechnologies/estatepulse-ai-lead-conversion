@@ -77,6 +77,17 @@ export function wallClockNow(timeZone: string, now = new Date()): string {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
 }
 
+/** The earliest start worth offering in `timeZone`: at least 5 minutes out, on a 5-minute mark. */
+export function earliestStart(timeZone: string, now = new Date()): { date: string; time: string } {
+  const step = 5 * 60_000;
+  const [date, time] = wallClockNow(timeZone, new Date(Math.ceil((now.getTime() + step) / step) * step)).split(' ');
+  return { date, time };
+}
+
+/** `when` as it is while still ahead in its zone, else moved up to the earliest start. */
+export const upcoming = <T extends { date: string; time: string; timeZone: string }>(when: T): T =>
+  `${when.date} ${when.time}` > wallClockNow(when.timeZone) ? when : { ...when, ...earliestStart(when.timeZone) };
+
 /** When a batch launches, in its own zone, e.g. "Tue, Oct 21, 6:00 PM IST". */
 export function startLabel(startAt: string, timeZone: string): string {
   return new Date(startAt).toLocaleString('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });

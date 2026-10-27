@@ -5,7 +5,9 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { hashPassword, verifyPassword } from '@/common/utils/password';
 import { AuthErrorCode, authError } from './auth.constants';
+import { AccountEmailService } from './account-email.service';
 import { AuthTokenService } from './auth-token.service';
+import { EmailVerificationService } from './email-verification.service';
 import type { AuthContext, IssuedTokens, SessionMeta } from './auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -21,10 +23,17 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokens: AuthTokenService,
+    private readonly emails: AccountEmailService,
+    private readonly verification: EmailVerificationService,
   ) {}
 
+  /**
+   * With verification required the owner is not signed in: the emailed link
+   * does that. Otherwise the address is taken as verified and a session starts.
+   */
   async register(dto: RegisterDto, meta: SessionMeta) {
     const { organizationName, organizationType, password, ...owner } = dto;
+    const verificationRequired = this.verification.required;
     const passwordHash = await hashPassword(password);
 
     let user: User;
@@ -48,6 +57,7 @@ export class AuthService {
             orgId: organization.id,
             password: passwordHash,
             source: 'web',
+            emailVerifiedAt: verificationRequired ? null : new Date(),
             roles: { create: roleIds.map((roleId) => ({ roleId })) },
           },
         });
@@ -56,6 +66,16 @@ export class AuthService {
       rethrowPrismaError(error, 'User');
     }
 
+    if (verificationRequired) {
+      await this.verification.sendAfterSignup(user, organizationName, meta);
+      return { verificationRequired: true as const, email: user.email };
+    }
+    return this.startSession(user, false, meta);
+  }
+
+  /** Opening the emailed link verifies the address and signs the owner in. */
+  async verifyEmail(token: string, meta: SessionMeta) {
+    const user = await this.verification.verify(token, meta);
     return this.startSession(user, false, meta);
   }
 
@@ -71,6 +91,14 @@ export class AuthService {
     }
     if (user.status !== 'active' || user.organization.status !== 'active') {
       throw authError(HttpStatus.FORBIDDEN, 'This account is inactive.', AuthErrorCode.ACCOUNT_INACTIVE);
+    }
+    // Checked after the password, so it says nothing about an address to someone who does not know it.
+    if (this.verification.required && !user.emailVerifiedAt) {
+      throw authError(
+        HttpStatus.FORBIDDEN,
+        'Confirm your email to sign in. We sent a link when you signed up.',
+        AuthErrorCode.EMAIL_NOT_VERIFIED,
+      );
     }
 
     return this.startSession(user, keepSignIn, meta);
@@ -182,10 +210,17 @@ export class AuthService {
     return { ...user, roles, permissions: effectivePermissions(roles) };
   }
 
-  async changePassword(dto: ChangePasswordDto, auth: AuthContext) {
+  async changePassword(dto: ChangePasswordDto, auth: AuthContext, meta: SessionMeta) {
     const user = await this.prisma.user.findUnique({
       where: { id: auth.userId },
-      select: { id: true, password: true },
+      select: {
+        id: true,
+        password: true,
+        email: true,
+        firstName: true,
+        timezone: true,
+        organization: { select: { name: true } },
+      },
     });
     if (!user) throw new NotFoundException('User not found');
 
@@ -211,6 +246,17 @@ export class AuthService {
         data: { revokedAt: now },
       }),
     ]);
+
+    await this.emails.sendPasswordChanged({
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      timezone: user.timezone,
+      organizationName: user.organization.name,
+      kind: 'self',
+      changedAt: now,
+      ipAddress: meta.ipAddress,
+    });
     return true;
   }
 

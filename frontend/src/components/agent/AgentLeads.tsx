@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Inbox, Loader2, Mail, Phone, RefreshCw, X } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { LeadAppointments } from '../leads/LeadBooking';
@@ -181,7 +182,13 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
 export const AgentLeads: React.FC = () => {
   const [leads, setLeads] = useState<AgentLead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openLeadId, setOpenLeadId] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  // `/leads?lead=<id>`, the link in the "lead assigned" email, opens that lead.
+  const [openLeadId, setOpenLeadId] = useState<string | null>(() => params.get('lead'));
+  useEffect(() => {
+    if (params.has('lead')) navigate('/leads', { replace: true });
+  }, [params, navigate]);
 
   const load = useCallback(async () => {
     try {

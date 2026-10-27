@@ -65,6 +65,8 @@ export const AISettingsView: React.FC = () => {
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
   const [systemPrompt, setSystemPrompt] = useState(orgSettings.aiSystemPrompt);
+  // Saved on Call Capacity, read by Call Pacing: each card loads it once, so a save has to reach the other.
+  const [callLimit, setCallLimit] = useState<number>();
 
   // Provider connection (Bring-Your-Own-Telnyx).
   const [status, setStatus] = useState<TelnyxStatus | null>(null);
@@ -1150,11 +1152,11 @@ export const AISettingsView: React.FC = () => {
         </div>
 
         <div id="call-capacity" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallCapacityCard />
+          <CallCapacityCard onSaved={setCallLimit} />
         </div>
 
         <div id="call-pacing" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallPacingCard />
+          <CallPacingCard limit={callLimit} />
         </div>
 
         <LeadTemperatureCard />
