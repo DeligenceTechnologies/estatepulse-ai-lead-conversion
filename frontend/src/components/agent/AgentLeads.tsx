@@ -5,11 +5,14 @@ import { messageFor } from '../../lib/api';
 import { LeadAppointments } from '../leads/LeadBooking';
 import {
   getMyLead,
+  getMyLeadMessages,
   getMyLeads,
   leadName,
   type AgentLead,
   type AgentLeadDetail,
+  type MessageRow,
 } from '../../utils/agentMeApi';
+import { MessageThread } from '../conversations/MessageThread';
 import { statusLabel, statusTone } from '../../lib/leadStatus';
 import { formatDate as formatDay } from '../../lib/datetime';
 
@@ -46,6 +49,7 @@ const Field: React.FC<{ label: string; value: React.ReactNode }> = ({ label, val
  */
 const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ leadId, onClose }) => {
   const [lead, setLead] = useState<AgentLeadDetail | null>(null);
+  const [messages, setMessages] = useState<MessageRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,6 +60,14 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
       })
       .catch((e) => {
         if (!cancelled) setError(messageFor(e));
+      });
+    // The chat is its own request: a lead with no texts, or one that fails to load, still shows its details.
+    getMyLeadMessages(leadId)
+      .then((m) => {
+        if (!cancelled) setMessages(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
       });
     return () => {
       cancelled = true;
@@ -144,6 +156,11 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
               <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1">
                 <span className="text-slate-400 block text-2xs">Latest AI note</span>
                 <p className="text-slate-100 leading-relaxed">{lead.aiSummary ?? DASH}</p>
+              </div>
+
+              <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-2">
+                <span className="text-slate-400 block text-2xs">Text conversation</span>
+                <MessageThread messages={messages} className="max-h-80 overflow-y-auto custom-scrollbar pr-1" />
               </div>
 
               <LeadAppointments leadId={lead.id} agentKey={null} />

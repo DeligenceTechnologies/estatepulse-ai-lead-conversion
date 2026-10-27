@@ -51,6 +51,7 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'RATE_LIMITED'
+  | 'UPSTREAM_ERROR'
   | 'PASSWORD_RESET_INVALID'
   | 'PASSWORD_RESET_UNAVAILABLE'
   | 'EMAIL_NOT_VERIFIED'
@@ -185,6 +186,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: 'That page or resource does not exist.',
   CONFLICT: 'That conflicts with something that already exists.',
   RATE_LIMITED: 'Too many attempts. Please wait a minute and try again.',
+  UPSTREAM_ERROR: 'A connected service (Telnyx, Calendly or your CRM) did not respond in time. Please try again in a moment.',
   PASSWORD_RESET_INVALID: 'This password reset link is invalid or has expired. Request a new one.',
   PASSWORD_RESET_UNAVAILABLE: 'Password reset by email is not available. Ask your administrator to reset your password.',
   EMAIL_NOT_VERIFIED: 'Confirm your email to sign in. We sent a link when you signed up.',

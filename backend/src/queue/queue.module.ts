@@ -5,7 +5,7 @@ import { redisOptions } from '@/common/config/redis.config';
 import type { QueueEnv } from '@/common/utils/interface';
 import { EmailQueue } from './email/email.queue';
 import { EmailWorker } from './email/email.worker';
-import { CALL_QUEUE, EMAIL_QUEUE, QUEUE_PREFIX } from './queue.constants';
+import { CALL_QUEUE, EMAIL_QUEUE } from './queue.constants';
 
 const DAY_SECONDS = 24 * 60 * 60;
 
@@ -35,7 +35,7 @@ const WORKERS = [EmailWorker];
       inject: [ConfigService],
       useFactory: (config: ConfigService<QueueEnv, true>) => ({
         connection: { ...redisOptions(config.getOrThrow('REDIS_URL', { infer: true })), connectionName: 'estatepulse-queue' },
-        prefix: QUEUE_PREFIX,
+        prefix: config.get('QUEUE_PREFIX', { infer: true }),
         defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 1_000 }, ...RETENTION },
       }),
     }),

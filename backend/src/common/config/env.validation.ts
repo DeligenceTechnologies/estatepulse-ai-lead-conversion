@@ -6,6 +6,8 @@ export const envValidationSchema = Joi.object({
     DATABASE_URL: Joi.string().pattern(POSTGRES_URL).required(),
     DIRECT_URL: Joi.string().pattern(POSTGRES_URL).required(),
     REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
+    // Each environment sharing one Redis needs its own, or their workers take each other's jobs.
+    QUEUE_PREFIX: Joi.string().pattern(/^[A-Za-z0-9_-]+$/).default('estatepulse'),
     EMAIL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
     EMAIL_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(5),
     CALL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
@@ -113,7 +115,7 @@ export const envValidationSchema = Joi.object({
     // Calls and texts real people: off unless explicitly switched on.
     STRATEGY_ENGINE: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     ENGINE_POLL_MS: Joi.number().integer().positive().default(15_000),
-    // On an AI call the lead speaks first: the assistant starts on their first words, or after this much silence. 0 starts it at once.
+    // On an AI call the assistant waits for answering-machine detection to say a person picked up, at most this long. 0 starts it at once.
     AI_OPENING_WAIT_MS: Joi.number().integer().min(0).default(5_000),
     STRATEGY_STALE_MS: Joi.number().integer().positive().default(86_400_000),
     FOLLOWUP_POLL_MS: Joi.number().integer().positive().default(60_000),

@@ -16,11 +16,15 @@ enum BaseStatus {
 enum LeadStatus {
   new
   contacting
+  /// Replied by SMS or talked on a call; no outcome yet.
+  engaged
   follow_up
   interested
   appointment_requested
   appointment_booked
   not_interested
+  /// Every follow-up step ran and the lead never answered.
+  unresponsive
   closed
   invalid
 
@@ -33,6 +37,8 @@ enum FollowUpReason {
   callback_requested
   needs_time
   other
+  appointment_canceled
+  no_show
 
   @@map("follow_up_reason")
 }
@@ -102,6 +108,25 @@ enum CallStatus {
   failed
 
   @@map("call_status")
+}
+
+/// How a call ended, from the lead's side: what the next step depends on.
+enum CallDisposition {
+  /// Rang out, or was not picked up.
+  no_answer
+  busy
+  /// Declined by the lead.
+  rejected
+  voicemail
+  /// Picked up and hung up before a conversation (shorter than CONVERSATION_MIN_SECS).
+  short
+  /// A conversation.
+  connected
+  failed
+  /// The number does not exist.
+  invalid_number
+
+  @@map("call_disposition")
 }
 
 enum IntegrationProvider {

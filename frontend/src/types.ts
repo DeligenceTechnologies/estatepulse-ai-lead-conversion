@@ -6,16 +6,25 @@ export type LeadTemperature = 'hot' | 'warm' | 'cold';
 export type LeadStatus =
   | 'new'
   | 'contacting'
+  | 'engaged'
   | 'follow_up'
   | 'interested'
   | 'appointment_requested'
   | 'appointment_booked'
   | 'not_interested'
+  | 'unresponsive'
   | 'closed'
   | 'invalid';
 
 /** Why a follow_up lead is parked (leads.follow_up_reason). Only set for follow_up. */
-export type FollowUpReason = 'no_answer' | 'not_ready' | 'callback_requested' | 'needs_time' | 'other';
+export type FollowUpReason =
+  | 'no_answer'
+  | 'not_ready'
+  | 'callback_requested'
+  | 'needs_time'
+  | 'other'
+  | 'appointment_canceled'
+  | 'no_show';
 
 export type LeadSource = 
   | 'website'

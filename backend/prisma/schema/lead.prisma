@@ -15,7 +15,9 @@ model Lead {
 
   status          LeadStatus       @default(new)
   followUpReason  FollowUpReason?  @map("follow_up_reason")
-  temperature     LeadTemperature? @default(cold)
+  /// When the lead asked to be called back; nothing else contacts them before it. Cleared once the callback is done.
+  callbackAt      DateTime?        @map("callback_at") @db.Timestamptz(6)
+  temperature    LeadTemperature? @default(cold)
   score           Decimal?         @db.Decimal(5, 2)
   aiSummary       String?          @map("ai_summary")
   lostReason      String?          @map("lost_reason") @db.VarChar(255)
@@ -64,6 +66,7 @@ model Lead {
   sheetImportRows SheetImportRow[]
   meetings        CalendarMeeting[]
   outreachItems   OutreachBatchLead[]
+  events          LeadEvent[]
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])
@@ -118,16 +121,47 @@ model Call {
   extractedIntel   Json?      @map("extracted_intel")
   handoffRequested Boolean    @default(false) @map("handoff_requested")
   dncDetected      Boolean    @default(false) @map("dnc_detected")
+  /// How the call ended for the lead; set at hangup (or when the dial fails).
+  disposition      CallDisposition?
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  events       LeadEvent[]
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([leadId, createdAt(sort: Desc)])
   @@index([providerCallId])
   @@map("calls")
+}
+
+/// What the outreach decided about a lead, one row per decision and in order:
+/// status moves, steps sent, held or skipped, calls ended, replies received.
+model LeadEvent {
+  id         String      @id @default(uuid(7)) @db.Uuid
+  orgId      String      @map("organization_id") @db.Uuid
+  leadId     String      @map("lead_id") @db.Uuid
+  type       String      @db.VarChar(50)
+  fromStatus LeadStatus? @map("from_status")
+  toStatus   LeadStatus? @map("to_status")
+  reason     String?
+  channel    String?     @db.VarChar(10)
+  /// What decided it: strategy, followup, call, scoring, sms_reply, calendar, agent, …
+  source     String      @db.VarChar(30)
+  actorType  ActorType   @map("actor_type")
+  actorId    String?     @map("actor_id") @db.Uuid
+  callId     String?     @map("call_id") @db.Uuid
+  payload    Json?
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  call         Call?        @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt(sort: Desc)])
+  @@index([orgId, type, createdAt(sort: Desc)])
+  @@map("lead_events")
 }
 
 model AuditLog {

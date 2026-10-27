@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Ban, CheckCircle2, Clock, RotateCw, Search, XCircle } from 'lucide-react';
+import { AlertTriangle, Ban, RotateCw, Search } from 'lucide-react';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import {
   listConversations,
@@ -8,6 +8,7 @@ import {
   type MessageRow,
 } from '../../utils/historyApi';
 import { formatDateTime } from '../../lib/datetime';
+import { MessageThread } from '../conversations/MessageThread';
 
 /**
  * SMS history for the office.
@@ -27,32 +28,6 @@ const TEMP_STYLES: Record<string, string> = {
   hot: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
   warm: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
   cold: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
-};
-
-const DeliveryMark: React.FC<{ m: MessageRow }> = ({ m }) => {
-  if (m.direction === 'inbound') return null;
-  if (m.failedAt || m.deliveryStatus === 'failed') {
-    return (
-      <span className="flex items-center gap-1 text-rose-400">
-        <XCircle className="w-3 h-3" />
-        failed
-      </span>
-    );
-  }
-  if (m.deliveredAt) {
-    return (
-      <span className="flex items-center gap-1 text-emerald-400">
-        <CheckCircle2 className="w-3 h-3" />
-        delivered
-      </span>
-    );
-  }
-  return (
-    <span className="flex items-center gap-1 text-slate-500">
-      <Clock className="w-3 h-3" />
-      {m.deliveryStatus}
-    </span>
-  );
 };
 
 export const ConversationsView: React.FC = () => {
@@ -78,7 +53,6 @@ export const ConversationsView: React.FC = () => {
     [selectedId],
   );
   const messagesQuery = useLiveQuery<MessageRow[]>(fetchMessages, { refreshKey: selectedId });
-  const messages = messagesQuery.data ?? [];
 
   useEffect(() => {
     if (threads.length === 0) {
@@ -230,44 +204,10 @@ export const ConversationsView: React.FC = () => {
               </div>
             )}
 
-            <div className="p-5 space-y-3 max-h-[520px] overflow-y-auto custom-scrollbar">
-              {messages.length === 0 && (
-                <p className="text-xs text-slate-500 text-center py-8">
-                  {messagesQuery.data === null ? 'Loading…' : 'No messages in this thread.'}
-                </p>
-              )}
-
-              {messages.map((m) => {
-                const inbound = m.direction === 'inbound';
-                return (
-                  <div key={m.id} className={`flex ${inbound ? 'justify-start' : 'justify-end'}`}>
-                    <div
-                      className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 space-y-1 border ${
-                        inbound
-                          ? 'bg-slate-950 border-slate-800'
-                          : 'bg-emerald-950/50 border-emerald-800/40'
-                      }`}
-                    >
-                      <p className="text-xs text-slate-100 leading-relaxed whitespace-pre-wrap">
-                        {m.body}
-                      </p>
-                      <div className="flex items-center gap-2 text-2xs text-slate-500">
-                        <span className="uppercase font-semibold">{m.senderType}</span>
-                        <span>
-                          {formatDateTime(m.sentAt ?? m.createdAt, {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                        <DeliveryMark m={m} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <MessageThread
+              messages={messagesQuery.data}
+              className="p-5 max-h-[520px] overflow-y-auto custom-scrollbar"
+            />
           </div>
         ) : (
           <div className="lg:col-span-8 flex items-center justify-center p-12 text-xs text-slate-500">

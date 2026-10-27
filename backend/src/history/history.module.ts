@@ -7,5 +7,6 @@ import { HistoryService } from './history.service';
   imports: [TelnyxModule],
   controllers: [HistoryController],
   providers: [HistoryService],
+  exports: [HistoryService],
 })
 export class HistoryModule {}

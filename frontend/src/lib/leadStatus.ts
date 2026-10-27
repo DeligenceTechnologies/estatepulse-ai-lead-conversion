@@ -1,18 +1,20 @@
 import type { FollowUpReason, LeadStatus } from '../types';
 
 /**
- * The 9 lead statuses in lifecycle order — the backend's LeadStatus
- * (backend/src/common/domain.ts) and leads_status_check. One list, so the
- * dashboard bars, the table badges and every filter agree.
+ * The 11 lead statuses in lifecycle order — the backend's LeadStatus enum
+ * (backend/prisma/schema/enums.prisma). One list, so the dashboard bars, the
+ * table badges and every filter agree.
  */
 export const LEAD_STATUSES: readonly LeadStatus[] = [
   'new',
   'contacting',
+  'engaged',
   'follow_up',
   'interested',
   'appointment_requested',
   'appointment_booked',
   'not_interested',
+  'unresponsive',
   'closed',
   'invalid',
 ];
@@ -20,11 +22,13 @@ export const LEAD_STATUSES: readonly LeadStatus[] = [
 export const STATUS_LABELS: Record<LeadStatus, string> = {
   new: 'New',
   contacting: 'Contacting',
+  engaged: 'Engaged',
   follow_up: 'Follow-up',
   interested: 'Interested',
   appointment_requested: 'Appointment requested',
   appointment_booked: 'Appointment booked',
   not_interested: 'Not interested',
+  unresponsive: 'Unresponsive',
   closed: 'Closed',
   invalid: 'Invalid',
 };
@@ -33,11 +37,13 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
 export const STATUS_TONES: Record<LeadStatus, string> = {
   new: 'bg-slate-800 text-slate-300 border border-slate-700',
   contacting: 'bg-sky-950 text-sky-300 border border-sky-800/40',
+  engaged: 'bg-cyan-950 text-cyan-300 border border-cyan-800/40',
   follow_up: 'bg-orange-950 text-orange-300 border border-orange-800/40',
   interested: 'bg-emerald-950 text-emerald-300 border border-emerald-800/40',
   appointment_requested: 'bg-violet-950 text-violet-300 border border-violet-800/40',
   appointment_booked: 'bg-purple-950 text-purple-300 border border-purple-800/40',
   not_interested: 'bg-rose-950 text-rose-300 border border-rose-800/40',
+  unresponsive: 'bg-stone-900 text-stone-400 border border-stone-700',
   closed: 'bg-slate-900 text-slate-400 border border-slate-700',
   invalid: 'bg-zinc-900 text-zinc-400 border border-zinc-700',
 };
@@ -49,6 +55,8 @@ export const FOLLOW_UP_REASON_LABELS: Record<FollowUpReason, string> = {
   callback_requested: 'Callback requested',
   needs_time: 'Needs time',
   other: 'Other',
+  appointment_canceled: 'Appointment canceled',
+  no_show: 'No-show',
 };
 
 /** Retired spellings, read the way the backend's normalizeLeadStatus reads them. */
@@ -57,13 +65,12 @@ const LEGACY: Record<string, LeadStatus> = {
   lost: 'not_interested',
   dnc: 'not_interested',
   contacted: 'contacting',
-  engaged: 'contacting',
   qualified: 'interested',
   nurture: 'follow_up',
 };
 
 /**
- * Any status string as one of the 9. The API already normalizes, so this only
+ * Any status string as one of the 11. The API already normalizes, so this only
  * matters for a stale cached row.
  */
 export function normalizeStatus(status: string | null | undefined): LeadStatus {
