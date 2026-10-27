@@ -6,7 +6,7 @@ import { getCallCapacity, saveCallCapacity, type CallCapacity } from '../../util
 
 const MAX = 500;
 
-export const CallCapacityCard: React.FC = () => {
+export const CallCapacityCard: React.FC<{ onSaved?: (limit: number) => void }> = ({ onSaved }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +32,7 @@ export const CallCapacityCard: React.FC = () => {
       const s = await saveCallCapacity(limit);
       setStatus(s);
       setLimit(s.appLimit);
+      onSaved?.(s.appLimit);
       toast.success('Call limit saved and synced with Telnyx.');
     } catch (e) {
       setError(messageFor(e));
