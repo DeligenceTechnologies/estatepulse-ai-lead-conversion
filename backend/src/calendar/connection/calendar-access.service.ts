@@ -9,6 +9,7 @@ import {
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { PROVIDER_LABEL, type CalCredentials, type CalendlyCredentials } from '../calendar.types';
 import { CalendlyClient, type CalendlyGrant } from '../providers/calendly.client';
 import { ProviderHttpError } from '../providers/provider-http';
@@ -61,6 +62,7 @@ export class CalendarAccessService {
     private readonly secrets: SecretBoxService,
     private readonly calendly: CalendlyClient,
     private readonly provider: SchedulingProvider,
+    private readonly connectionAlerts: ConnectionAlertService,
   ) {}
 
   /**
@@ -160,6 +162,17 @@ export class CalendarAccessService {
         data: connection.status === 'active' ? { status: 'error', lastError: message } : { lastError: message },
       });
       if (parked.count === 0) throw new CredentialsChanged(message);
+      // Only the connection in use breaking pauses anything; a saved one just records it.
+      if (connection.status === 'active') {
+        this.connectionAlerts.connectionBroken({
+          orgId,
+          connectionId: connection.id,
+          providerLabel: label,
+          impact: 'Leads cannot book meetings, and availability and meetings are not syncing.',
+          reconnectPath: '/settings?tab=calendar',
+          brokenAt: new Date(),
+        });
+      }
       throw new ConflictException(message);
     }
   }

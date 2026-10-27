@@ -2,6 +2,10 @@ import { AppError } from '@/common/errors/app-error';
 
 export const TELNYX_API = 'https://api.telnyx.com/v2';
 
+/** Telnyx refused the API key itself (revoked or deleted). A 403 is left out: it also means "not allowed to text that number". */
+export const isTelnyxKeyRejected = (error: unknown): boolean =>
+  error instanceof Error && /^Telnyx \S+ \S+ failed 401:/.test(error.message);
+
 /** A Telnyx call that throws an UPSTREAM_ERROR with the provider's own message on failure. */
 export async function telnyx<T = any>(apiKey: string, path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
