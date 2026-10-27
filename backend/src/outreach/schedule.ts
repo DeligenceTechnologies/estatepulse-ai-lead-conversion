@@ -1,7 +1,7 @@
 import { httpError } from '@/common/errors/app-error';
 import { minutesOfDay } from '@/common/utils/quiet-hours';
 import { isTimeZone, minutesOf, zonedToInstant } from '@/common/utils/zoned-time';
-import { offsetMs, type StrategyStep } from '@/telnyx/strategy-store.service';
+import { stepOffsets, type StrategyStep } from '@/telnyx/strategy-store.service';
 
 export type OutreachMode = 'now' | 'scheduled';
 
@@ -66,6 +66,7 @@ export function releaseCapacity(p: { maxConcurrent: number; reserved: number; ac
  */
 // ponytail: only the first voice attempt is counted; later attempts (maxVoiceAttempts) wait in the call queue, whose worker enforces the limit. Count per-step if release pacing must account for them.
 export function awaitingWindowMs(steps: StrategyStep[]): number {
-  const voice = steps.filter((s) => s.channel === 'voice').map((s) => offsetMs(s.after));
-  return voice.length ? Math.min(...voice) + 5 * 60_000 : 0;
+  const offsets = stepOffsets(steps);
+  const first = steps.findIndex((s) => s.channel === 'voice');
+  return first < 0 ? 0 : offsets[first] + 5 * 60_000;
 }

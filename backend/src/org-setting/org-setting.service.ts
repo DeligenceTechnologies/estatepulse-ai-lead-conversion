@@ -7,7 +7,15 @@ import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { UpdateOrgSettingDto } from './dto/update-org-setting.dto';
 
-const PUBLIC_FIELDS = { id: true, timezone: true, workingHours: true, reservedCallSlots: true, updatedAt: true } as const;
+const PUBLIC_FIELDS = {
+  id: true,
+  timezone: true,
+  workingHours: true,
+  reservedCallSlots: true,
+  dailySummaryEnabled: true,
+  dailySummaryTime: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class OrgSettingService {

@@ -420,7 +420,7 @@ export const FollowUpsView: React.FC = () => {
                     <td className="px-3 py-2.5 text-slate-300 font-mono text-xs">
                       {e.sequenceCode}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-400">{e.currentStep}</td>
+                    <td className="px-3 py-2.5 text-slate-400">{e.awaitingReply ? 'Waiting for reply' : e.currentStep}</td>
                     <td className="px-3 py-2.5">
                       <span
                         className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${

@@ -4,6 +4,7 @@ import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
+import { LeadAssignmentNotifier } from './lead-assignment-notifier.service';
 import { INACTIVE_STATUSES } from './lead-status';
 import { AGENT_ROLE_WHERE, fullName } from './lead-scope';
 
@@ -42,6 +43,7 @@ export class LeadAssignmentService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly events: EventsBus,
+    private readonly notifier: LeadAssignmentNotifier,
   ) {}
 
   async assign(orgId: string, leadId: string, userId: string, by: AssignedBy): Promise<LeadAssignmentDTO> {
@@ -72,6 +74,7 @@ export class LeadAssignmentService {
         if (current.assignedToId === userId) {
           return {
             leadSourceId: lead.lead_source_id,
+            previousAgentId: current.assignedToId,
             dto: {
               leadId,
               agent: { id: userId, name },
@@ -115,6 +118,7 @@ export class LeadAssignmentService {
         );
         return {
           leadSourceId: lead.lead_source_id,
+          previousAgentId: current.assignedToId,
           dto: { leadId, agent: { id: userId, name }, assignmentType: by.assignmentType, assignedAt, changed: true },
         };
       }, TX_OPTIONS),
@@ -122,6 +126,14 @@ export class LeadAssignmentService {
 
     if (result.dto.changed) {
       this.events.publish({ organizationId: orgId, type: 'lead.assigned', leadSourceId: result.leadSourceId });
+      this.notifier.leadAssigned({
+        orgId,
+        leadId,
+        agentId: userId,
+        actorId: by.actorType === 'user' ? by.actorId : null,
+        previousAgentId: result.previousAgentId,
+        assignedAt: result.dto.assignedAt,
+      });
     }
     return result.dto;
   }

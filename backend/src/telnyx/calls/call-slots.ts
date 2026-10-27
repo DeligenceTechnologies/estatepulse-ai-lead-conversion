@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '@/common/service/redis.service';
 import type { QueueEnv } from '@/common/utils/interface';
-import { QUEUE_PREFIX } from '@/queue/queue.constants';
 
 const ACQUIRE = `
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
@@ -23,16 +22,18 @@ return 1
 @Injectable()
 export class CallSlots {
   private readonly ttlMs: number;
+  private readonly prefix: string;
 
   constructor(
     private readonly redis: RedisService,
     config: ConfigService<QueueEnv, true>,
   ) {
     this.ttlMs = config.get('CALL_SLOT_TTL_MS', { infer: true });
+    this.prefix = config.get('QUEUE_PREFIX', { infer: true });
   }
 
   private key(orgId: string): string {
-    return `${QUEUE_PREFIX}:calls:active:${orgId}`;
+    return `${this.prefix}:calls:active:${orgId}`;
   }
 
   async acquire(orgId: string, slotId: string, limit: number): Promise<boolean> {

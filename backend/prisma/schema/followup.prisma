@@ -9,6 +9,10 @@ model Sequence {
   status      SequenceStatus    @default(active)
   steps       Json              @default("[]")
   triggers    SequenceTrigger[] @default([])
+  /// Hours a lead has to answer after the last step before the sequence closes out.
+  closeOutHours        Int     @default(48) @map("close_out_hours")
+  /// At close-out, a lead who stayed silent is marked unresponsive; off, it stays in follow-up.
+  closeOutUnresponsive Boolean @default(true) @map("close_out_unresponsive")
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 

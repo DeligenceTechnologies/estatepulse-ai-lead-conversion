@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
-import { consumeSessionEndReason, messageFor, type SessionEndReason } from '../../lib/api';
+import { ApiError, consumeSessionEndReason, messageFor, type SessionEndReason } from '../../lib/api';
+import type { CheckEmailState } from './CheckEmailPage';
 import { AuthLayout, Checkbox, Field, FormNotice, PasswordField, SubmitButton } from './AuthLayout';
 
 interface FromState {
-  from?: { pathname?: string };
+  from?: { pathname?: string; search?: string };
 }
 
 const END_REASON_NOTICES: Record<SessionEndReason, string> = {
@@ -32,7 +33,9 @@ export const LoginPage: React.FC = () => {
   });
 
   // Land back on whatever the guard interrupted.
-  const target = (location.state as FromState | null)?.from?.pathname ?? '/';
+  const from = (location.state as FromState | null)?.from;
+  // The query string too: an emailed link such as /leads?lead=<id> must survive signing in.
+  const target = from?.pathname ? `${from.pathname}${from.search ?? ''}` : '/';
 
   if (status === 'authed') return <Navigate to={target} replace />;
 
@@ -43,6 +46,10 @@ export const LoginPage: React.FC = () => {
       await login(email.trim(), password, keepSignIn);
       navigate(target, { replace: true });
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
+        navigate('/check-email', { state: { email: email.trim(), from: 'login' } satisfies CheckEmailState });
+        return;
+      }
       toast.error(messageFor(err));
     } finally {
       setBusy(false);
@@ -91,6 +98,11 @@ export const LoginPage: React.FC = () => {
           disabled={busy}
           required
         />
+        <div className="-mt-2 text-right">
+          <Link to="/forgot-password" className="text-xs text-emerald-400 hover:text-emerald-300 font-medium">
+            Forgot password?
+          </Link>
+        </div>
         <Checkbox
           label="Keep me signed in"
           hint="Stay signed in on this device for 30 days. Don't use on a shared computer."

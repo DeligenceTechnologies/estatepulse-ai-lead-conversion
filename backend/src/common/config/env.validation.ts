@@ -6,6 +6,8 @@ export const envValidationSchema = Joi.object({
     DATABASE_URL: Joi.string().pattern(POSTGRES_URL).required(),
     DIRECT_URL: Joi.string().pattern(POSTGRES_URL).required(),
     REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
+    // Each environment sharing one Redis needs its own, or their workers take each other's jobs.
+    QUEUE_PREFIX: Joi.string().pattern(/^[A-Za-z0-9_-]+$/).default('estatepulse'),
     EMAIL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
     EMAIL_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(5),
     CALL_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
@@ -34,8 +36,17 @@ export const envValidationSchema = Joi.object({
         .falsy('false')
         .empty('')
         .default(Joi.ref('NODE_ENV', { adjust: (env) => env === 'production' })),
+    // New sign-ups must click the emailed link before they can sign in. Needs
+    // MAIL_PROVIDER and APP_URL: the server refuses to boot with it on without them.
+    EMAIL_VERIFICATION_REQUIRED: Joi.boolean()
+        .truthy('true')
+        .truthy('1')
+        .falsy('false')
+        .falsy('0')
+        .empty('')
+        .default(Joi.ref('NODE_ENV', { adjust: (env) => env === 'production' })),
 
-    MAIL_PROVIDER: Joi.string().valid('smtp', 'resend').empty('').optional(),
+    MAIL_PROVIDER: Joi.string().valid('smtp', 'resend', 'ses').empty('').optional(),
 
     MAIL_FROM: Joi.string().empty('').when('MAIL_PROVIDER', {
         is: Joi.exist(),
@@ -59,6 +70,17 @@ export const envValidationSchema = Joi.object({
         is: 'resend',
         then: Joi.required(),
     }),
+
+    AWS_SES_REGION: Joi.string().pattern(/^[a-z]{2}(-[a-z]+)+-\d$/).empty('').when('MAIL_PROVIDER', {
+        is: 'ses',
+        then: Joi.required(),
+    }),
+    // Both or neither. Unset = the AWS default credential chain (IAM role on
+    // EC2/ECS/EKS/Lambda, AWS_PROFILE, AWS_ACCESS_KEY_ID...), preferred in production.
+    AWS_SES_ACCESS_KEY_ID: Joi.string().empty('').optional(),
+    AWS_SES_SECRET_ACCESS_KEY: Joi.string().empty('').optional(),
+    // Routes bounce/complaint/delivery events to the configuration set's event destinations.
+    AWS_SES_CONFIGURATION_SET: Joi.string().empty('').optional(),
 
     INTEGRATION_ENCRYPTION_KEY: Joi.string().base64().empty('').optional(),
 
@@ -93,7 +115,7 @@ export const envValidationSchema = Joi.object({
     // Calls and texts real people: off unless explicitly switched on.
     STRATEGY_ENGINE: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     ENGINE_POLL_MS: Joi.number().integer().positive().default(15_000),
-    // On an AI call the lead speaks first: the assistant starts on their first words, or after this much silence. 0 starts it at once.
+    // On an AI call the assistant waits for answering-machine detection to say a person picked up, at most this long. 0 starts it at once.
     AI_OPENING_WAIT_MS: Joi.number().integer().min(0).default(5_000),
     STRATEGY_STALE_MS: Joi.number().integer().positive().default(86_400_000),
     FOLLOWUP_POLL_MS: Joi.number().integer().positive().default(60_000),
@@ -103,6 +125,13 @@ export const envValidationSchema = Joi.object({
     // Off: approving releases leads at once, exactly as before.
     OUTREACH_SCHEDULING_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     OUTREACH_POLL_MS: Joi.number().integer().positive().default(15_000),
+
+    // The owners' daily summary email: leads, calls, texts and meetings. Each
+    // organization picks its send time in Settings; one the server missed (it
+    // was down) still goes out for DAILY_SUMMARY_CATCH_UP_HOURS after it.
+    DAILY_SUMMARY_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
+    DAILY_SUMMARY_CATCH_UP_HOURS: Joi.number().integer().min(1).max(12).default(6),
+    DAILY_SUMMARY_POLL_MS: Joi.number().integer().min(10_000).default(60_000),
 
     GOOGLE_SHEETS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     GOOGLE_CLIENT_ID: Joi.string().empty('').optional(),
@@ -147,4 +176,4 @@ export const envValidationSchema = Joi.object({
     // connection is reconciled against the CRM's modified dates to catch a lost webhook.
     CRM_POLL_MS: Joi.number().integer().min(0).default(30_000),
     CRM_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
-});
+}).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

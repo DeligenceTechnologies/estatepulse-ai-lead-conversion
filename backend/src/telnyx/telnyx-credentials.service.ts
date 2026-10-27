@@ -3,6 +3,7 @@ import { IntegrationProvider, IntegrationStatus, Prisma, type Integration } from
 import { randomUUID } from 'node:crypto';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad } from '@/common/utils/crypto';
 
@@ -17,6 +18,8 @@ export interface TelnyxCreds {
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
+  /** Telnyx refused this key on a live call or text, and the owners were told. */
+  keyRejected?: boolean;
 }
 
 interface TelnyxConfig {
@@ -57,6 +60,8 @@ export interface TelnyxAccount {
 }
 
 const PROVIDER = IntegrationProvider.telnyx;
+/** integrations.last_error_code while Telnyx is refusing the active key; latches the owners' alert. */
+const KEY_REJECTED = 'TELNYX_KEY_REJECTED';
 const mask = (key: string): string => (key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '');
 
 /**
@@ -70,11 +75,46 @@ export class TelnyxCredentialsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly secrets: SecretBoxService,
+    private readonly connectionAlerts: ConnectionAlertService,
   ) {}
 
   async getCreds(orgId: string): Promise<TelnyxCreds | null> {
     const row = await this.activeRow(orgId);
     return row ? this.fromRow(row) : null;
+  }
+
+  /**
+   * Telnyx refused the active key on a live call or text. Flags the account and
+   * emails the owners once; later refusals of the same key stay quiet until it
+   * works again (keyAccepted) or a key is saved.
+   */
+  async keyRejected(orgId: string): Promise<void> {
+    const row = await this.activeRow(orgId);
+    if (!row) return;
+    const brokenAt = new Date();
+    const flagged = await this.prisma.integration.updateMany({
+      where: { id: row.id, orgId, status: IntegrationStatus.active, OR: [{ lastErrorCode: null }, { lastErrorCode: { not: KEY_REJECTED } }] },
+      data: { lastErrorCode: KEY_REJECTED, lastErrorAt: brokenAt },
+    });
+    if (flagged.count === 0) return;
+    this.connectionAlerts.connectionBroken({
+      orgId,
+      connectionId: row.id,
+      providerLabel: 'Telnyx',
+      account: row.label || row.phoneNumber,
+      impact: 'AI calls and text messages to leads are failing.',
+      reconnectPath: '/settings?tab=telnyx',
+      brokenAt,
+    });
+  }
+
+  /** A call or text went through with a key flagged as refused: clear the flag so a later refusal alerts again. */
+  async keyAccepted(orgId: string, creds: TelnyxCreds): Promise<void> {
+    if (!creds.keyRejected) return;
+    await this.prisma.integration.updateMany({
+      where: { orgId, provider: PROVIDER, status: IntegrationStatus.active, lastErrorCode: KEY_REJECTED },
+      data: { lastErrorCode: null, lastErrorAt: null },
+    });
   }
 
   async isConnected(orgId: string): Promise<boolean> {
@@ -269,6 +309,9 @@ export class TelnyxCredentialsService {
       label: c.label || null,
       credentials: this.secrets.seal(c.apiKey, aad.integration(orgId, id)),
       credentialPreview: mask(c.apiKey),
+      // A saved key starts clean; if it is refused too, the owners hear about it again.
+      lastErrorCode: null,
+      lastErrorAt: null,
       phoneNumber: c.fromNumber || null,
       externalAccountId: c.assistantId || null,
       config: config as Prisma.InputJsonObject,
@@ -292,6 +335,7 @@ export class TelnyxCredentialsService {
       fromNumber: row.phoneNumber ?? '',
       assistantId: config.assistantId ?? '',
       connectedAt: row.createdAt.toISOString(),
+      keyRejected: row.lastErrorCode === KEY_REJECTED,
     };
   }
 }

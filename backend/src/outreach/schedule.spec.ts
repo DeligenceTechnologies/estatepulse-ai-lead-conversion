@@ -67,4 +67,13 @@ describe('awaitingWindowMs', () => {
     expect(awaitingWindowMs(defaultStrategy().steps)).toBe(6 * 60_000);
     expect(awaitingWindowMs(defaultStrategy().steps.filter((s) => s.channel === 'sms'))).toBe(0);
   });
+
+  it('counts the waits of every step before the first call, since each wait follows the step before', () => {
+    const steps = [
+      { id: 'a', channel: 'sms' as const, after: { value: 2, unit: 'minutes' as const } },
+      { id: 'b', channel: 'sms' as const, after: { value: 3, unit: 'minutes' as const } },
+      { id: 'c', channel: 'voice' as const, after: { value: 4, unit: 'minutes' as const } },
+    ];
+    expect(awaitingWindowMs(steps)).toBe((9 + 5) * 60_000);
+  });
 });

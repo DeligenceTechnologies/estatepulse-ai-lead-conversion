@@ -14,10 +14,14 @@ export interface OrgSettings {
   workingHours: WorkingDay[];
   /** Of the concurrent call limit, kept free by outreach batches for new form leads and follow-ups (server default 1). */
   reservedCallSlots: number;
+  /** The owners' end-of-day summary email (server default on). */
+  dailySummaryEnabled: boolean;
+  /** HH:MM, 24-hour, in `timezone` (server default 23:55). Before noon it summarises the previous day. */
+  dailySummaryTime: string;
   updatedAt: string;
 }
 
-export type OrgSettingsUpdate = Partial<Pick<OrgSettings, 'timezone' | 'workingHours' | 'reservedCallSlots'>>;
+export type OrgSettingsUpdate = Partial<Pick<OrgSettings, 'timezone' | 'workingHours' | 'reservedCallSlots' | 'dailySummaryEnabled' | 'dailySummaryTime'>>;
 
 export const getOrgSettings = (): Promise<OrgSettings> => apiFetch<OrgSettings>('/org-settings', { auth: true });
 

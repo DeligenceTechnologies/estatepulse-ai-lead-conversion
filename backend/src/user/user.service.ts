@@ -4,6 +4,8 @@ import { BaseStatus, Prisma, UserSource } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { rethrowPrismaError } from '@/common/prisma/prisma-errors';
 import { generatePassword, hashPassword } from '@/common/utils/password';
+import { AuditService } from '@/audit/audit.service';
+import { AccountEmailService } from '@/auth/account-email.service';
 import { MailService } from '@/common/service/mail.service';
 import { EmailQueue } from '@/queue/email/email.queue';
 import type { AppEnv } from '@/common/utils/interface';
@@ -47,6 +49,8 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly emailQueue: EmailQueue,
+    private readonly accountEmails: AccountEmailService,
+    private readonly audit: AuditService,
     config: ConfigService<AppEnv, true>,
   ) {
     const appUrl = config.get('APP_URL', { infer: true });
@@ -74,6 +78,8 @@ export class UserService {
             ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
             password: await hashPassword(password),
             source,
+            // The admin vouches for the address, and the password reaches them only through it.
+            emailVerifiedAt: new Date(),
             roles: { create: roleIds.map((roleId) => ({ roleId })) },
           },
           omit: OMIT_PASSWORD,
@@ -135,10 +141,20 @@ export class UserService {
     return flattenRoles(user);
   }
 
-  async update(id: string, orgId: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto) {
+  /**
+   * A new password here is an administrator's reset: it signs the member out
+   * everywhere and emails them a notice (never the password). Changing your own
+   * password this way keeps the session you are using.
+   */
+  async update(id: string, orgId: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto, actor?: AuthContext) {
     const current = await this.prisma.user.findFirst({
       where: { id, orgId },
-      select: { orgId: true, status: true, roles: { select: { role: { select: { isSystem: true } } } } },
+      select: {
+        orgId: true,
+        status: true,
+        roles: { select: { role: { select: { isSystem: true } } } },
+        organization: { select: { name: true } },
+      },
     });
     if (!current) throw new NotFoundException('User not found');
 
@@ -149,24 +165,60 @@ export class UserService {
       await this.assertAnotherOwner(id, current.orgId);
     }
 
+    const passwordChangedAt = password !== undefined ? new Date() : undefined;
+    const passwordHash = password !== undefined ? await hashPassword(password) : undefined;
+    const bySelf = actor?.userId === id;
+
+    let updated;
     try {
-      return flattenRoles(
-        await this.prisma.user.update({
+      updated = await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.update({
           where: { id },
           data: {
             ...dto,
             ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
-            ...(password !== undefined ? { password: await hashPassword(password) } : {}),
+            ...(passwordHash ? { password: passwordHash, passwordChangedAt } : {}),
             // The given list replaces the user's roles entirely.
             ...(roleIds ? { roles: { deleteMany: {}, create: roleIds.map((roleId) => ({ roleId })) } } : {}),
           },
           omit: OMIT_PASSWORD,
           include: WITH_ROLES,
-        }),
-      );
+        });
+        if (passwordChangedAt) {
+          await tx.userSession.updateMany({
+            where: { userId: id, revokedAt: null, ...(bySelf ? { id: { not: actor!.sessionId } } : {}) },
+            data: { revokedAt: passwordChangedAt },
+          });
+          await this.audit.record(
+            {
+              orgId: current.orgId,
+              actorType: 'user',
+              actorId: actor?.userId ?? null,
+              action: 'user.password_set_by_admin',
+              entityType: 'user',
+              entityId: id,
+            },
+            tx,
+          );
+        }
+        return user;
+      });
     } catch (error) {
       rethrowPrismaError(error, 'User');
     }
+
+    if (passwordChangedAt) {
+      await this.accountEmails.sendPasswordChanged({
+        userId: id,
+        email: updated.email,
+        firstName: updated.firstName,
+        timezone: updated.timezone,
+        organizationName: current.organization.name,
+        kind: bySelf ? 'self' : 'admin',
+        changedAt: passwordChangedAt,
+      });
+    }
+    return flattenRoles(updated);
   }
 
   async remove(id: string, orgId: string) {

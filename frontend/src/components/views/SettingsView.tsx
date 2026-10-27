@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   LocateFixed,
+  Mail,
   PhoneCall,
   RotateCcw,
   Save,
@@ -147,6 +148,148 @@ const LeadAssignmentCard: React.FC = () => {
             {busy && <Loader2 className="w-3 h-3 text-slate-500 animate-spin" />}
           </span>
         </button>
+      </div>
+    </Card>
+  );
+};
+
+/** "21:00" → "9:00 PM". */
+const clock12 = (time: string): string => {
+  const [h, m] = time.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+
+/** Mirrors the server: a send time before noon covers the whole previous day. */
+const coverageOf = (time: string): string =>
+  Number(time.split(':')[0]) < 12 ? 'the whole previous day' : `today, from midnight to ${clock12(time)}`;
+
+/**
+ * The owners' daily summary email: on/off and the time it goes out. Saves on
+ * its own, apart from the timezone/hours draft below it, so using it never
+ * saves or discards those edits.
+ */
+const DailySummaryCard: React.FC<{
+  enabled: boolean;
+  time: string;
+  timezone: string;
+  canEdit: boolean;
+  onSaved: (settings: OrgSettings) => void;
+}> = ({ enabled, time, timezone, canEdit, onSaved }) => {
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState(time);
+
+  // A save, or another tab's, replaces the draft with what the server holds.
+  useEffect(() => setDraft(time), [time]);
+
+  const valid = /^([01]\d|2[0-3]):[0-5]\d$/.test(draft);
+  const timeChanged = valid && draft !== time;
+  const zone = timezone.replace(/_/g, ' ');
+
+  const save = async (update: OrgSettingsUpdate, message: string): Promise<void> => {
+    if (busy || !canEdit) return;
+    setBusy(true);
+    try {
+      onSaved(await updateOrgSettings(update));
+      toast.success(message);
+    } catch (e) {
+      toast.error(messageFor(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card
+      icon={<Mail className="w-4 h-4" />}
+      title="Daily summary email"
+      description={`Every owner gets the day's leads, AI calls, texts and meetings by email, in ${zone} time.`}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-slate-200">Send the daily summary</div>
+            <p className="text-2xs text-slate-500 mt-0.5">
+              {enabled
+                ? `On: sent every day at ${clock12(time)}. Days with no activity are skipped.`
+                : 'Off: no summary emails are sent to this organization.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label="Send the daily summary"
+            aria-busy={busy || undefined}
+            onClick={() =>
+              void save(
+                { dailySummaryEnabled: !enabled },
+                enabled ? 'Daily summary email turned off.' : 'Daily summary email turned on.',
+              )
+            }
+            disabled={busy || !canEdit}
+            className={`relative w-10 h-[22px] rounded-full shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
+              enabled ? 'bg-emerald-600' : 'bg-slate-700'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+                enabled ? 'translate-x-[18px]' : ''
+              }`}
+            >
+              {busy && <Loader2 className="w-3 h-3 text-slate-500 animate-spin" />}
+            </span>
+          </button>
+        </div>
+
+        {enabled && (
+          <form
+            className="border-t border-slate-800 pt-4 flex flex-wrap items-end gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (timeChanged) void save({ dailySummaryTime: draft }, `Daily summary will be sent at ${clock12(draft)}.`);
+            }}
+          >
+            <label className="min-w-0">
+              <span className="block text-xs font-semibold text-slate-300 mb-1.5">Send at</span>
+              <div className="relative">
+                <Clock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="time"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  disabled={busy || !canEdit}
+                  required
+                  className="h-11 w-40 bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 text-xs text-white tabular-nums focus:outline-none focus:border-emerald-500 hover:border-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+              </div>
+            </label>
+            {timeChanged && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="h-11 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-on-accent cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
+                >
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Save time
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft(time)}
+                  disabled={busy}
+                  className="h-11 px-3 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 cursor-pointer disabled:opacity-60 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            <p className="basis-full text-2xs text-slate-500">
+              {valid
+                ? `At ${clock12(draft)} ${zone} time, covering ${coverageOf(draft)}. Pick a time before noon to get the previous day's full summary in the morning.`
+                : 'Enter a time.'}
+            </p>
+          </form>
+        )}
       </div>
     </Card>
   );
@@ -338,6 +481,18 @@ const GeneralSettings: React.FC = () => {
           <WorkingHoursEditor value={hours} onChange={setHours} disabled={!canEdit || saving} />
         </div>
       </Card>
+
+      <DailySummaryCard
+        enabled={saved.dailySummaryEnabled}
+        time={saved.dailySummaryTime}
+        timezone={saved.timezone}
+        canEdit={canEdit}
+        onSaved={(next) =>
+          setSaved((prev) =>
+            prev ? { ...prev, dailySummaryEnabled: next.dailySummaryEnabled, dailySummaryTime: next.dailySummaryTime } : prev,
+          )
+        }
+      />
 
       {/* Save bar: appears with unsaved changes */}
       {dirty && (
