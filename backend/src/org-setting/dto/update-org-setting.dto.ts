@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsTimeZone, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsTimeZone, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { IsWeeklySchedule, type WorkingDayDto } from '@/common/utils/working-hours';
 
@@ -19,4 +19,14 @@ export class UpdateOrgSettingDto {
   @Min(0)
   @Max(499)
   reservedCallSlots?: number;
+
+  /** The owners' end-of-day summary email. */
+  @IsOptional()
+  @IsBoolean()
+  dailySummaryEnabled?: boolean;
+
+  /** HH:MM, 24-hour, in the organization's timezone. */
+  @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'dailySummaryTime must be a time like 21:00' })
+  dailySummaryTime?: string;
 }

@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { SmsConversationService } from './sms/sms-conversation.service';
+import { withSmsSection } from './sms/sms-prompt';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
+import { callToolsSettings, withCallToolsSection } from './tools/call-tools';
 
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
 
@@ -15,7 +18,6 @@ function shape(a: any) {
   const tr = a.transcription ?? {};
   const trs = tr.settings ?? {};
   const ms = a.messaging_settings ?? {};
-  const vm = ts.voicemail_detection ?? {};
   return {
     id: a.id,
     name: a.name,
@@ -50,8 +52,6 @@ function shape(a: any) {
 
     fallback_destination: ts.fallback_destination ?? '',
 
-    voicemail_detection: !!ts.voicemail_detection,
-    voicemail_action: vm.action ?? 'hangup',
     post_call_processing: !!a.post_conversation_settings?.enabled,
 
     enabled_features: a.enabled_features ?? ['telephony'],
@@ -81,6 +81,7 @@ const HANGUP_TOOL = {
 };
 
 export const RECORDING_NOTICE = 'Just so you know, this call is recorded for quality and training.';
+const VOICE_CACHE_MS = 10 * 60 * 1000;
 
 const ASSISTANT_MODELS = [
   'meta-llama/Llama-3.3-70B-Instruct',
@@ -95,13 +96,16 @@ export class AssistantService {
 
   private readonly hangupReady = new Set<string>();
   private readonly hangupInflight = new Map<string, Promise<void>>();
+  private readonly voices = new Map<string, { voice: string | null; until: number }>();
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
     private readonly prisma: PrismaService,
+    private readonly conversations: SmsConversationService,
   ) {}
 
-  private async greetingFor(orgId: string, base: string): Promise<string> {
+  /** The greeting with the recording notice in front of it, when the organization announces recording. */
+  async greetingFor(orgId: string, base: string): Promise<string> {
     const settings = await this.prisma.organizationSetting
       .findUnique({ where: { orgId }, select: { callRecordingEnabled: true, callRecordingAnnounce: true } })
       .catch(() => null);
@@ -115,6 +119,17 @@ export class AssistantService {
     return c;
   }
 
+  /** The assistant's own voice, so a voicemail sounds like the AI that would have talked. Null when it cannot be read. */
+  async voiceFor(orgId: string): Promise<string | null> {
+    const hit = this.voices.get(orgId);
+    if (hit && hit.until > Date.now()) return hit.voice;
+    const voice = await this.fetchRaw(orgId)
+      .then((a) => (typeof a?.voice_settings?.voice === 'string' && a.voice_settings.voice) || null)
+      .catch(() => null);
+    this.voices.set(orgId, { voice, until: Date.now() + VOICE_CACHE_MS });
+    return voice;
+  }
+
   private async fetchRaw(orgId: string): Promise<any> {
     const c = await this.requireCreds(orgId);
     if (!c.assistantId) throw new AppError('CONFLICT', 'No AI assistant yet — create one or paste an existing assistant id.');
@@ -122,6 +137,13 @@ export class AssistantService {
     if (!res.ok) throw new AppError('UPSTREAM_ERROR', `AI agent fetch failed ${res.status}: ${await res.text()}`);
     const j = (await res.json()) as any;
     return j.data ?? j;
+  }
+
+  /** While the call-outcome tools are on the assistant, a form save keeps their prompt section. */
+  private async keepCallToolsSection(orgId: string, instructions: string): Promise<string> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
+    const tools = callToolsSettings(row?.callTools);
+    return tools.enabled && tools.telnyx ? withCallToolsSection(instructions) : instructions;
   }
 
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
@@ -151,18 +173,27 @@ export class AssistantService {
   }
 
   async updateAssistant(orgId: string, patch: any) {
+    this.voices.delete(orgId);
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
+    // While the AI answers texts, the pieces that switch it on are managed by SmsConversationService; a form save keeps them.
+    const texting = await this.conversations.isEnabled(orgId);
     const body: any = {};
-    if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
+    if (patch.instructions != null) {
+      const withBooking = await this.keepBookingSection(orgId, patch.instructions);
+      const withTexting = texting ? withSmsSection(withBooking) : withBooking;
+      body.instructions = await this.keepCallToolsSection(orgId, withTexting);
+    }
     if (patch.greeting != null) body.greeting = patch.greeting;
     if (patch.model != null) body.model = patch.model;
     if (patch.description != null) body.description = patch.description;
     if (patch.dynamic_variables != null) body.dynamic_variables = patch.dynamic_variables;
-    if (patch.dynamic_variables_webhook_url != null) {
+    if (patch.dynamic_variables_webhook_url != null && !texting) {
       body.dynamic_variables_webhook_url = patch.dynamic_variables_webhook_url || null;
     }
-    if (patch.enabled_features != null) body.enabled_features = patch.enabled_features;
+    if (patch.enabled_features != null) {
+      body.enabled_features = texting ? [...new Set<string>([...patch.enabled_features, 'messaging'])] : patch.enabled_features;
+    }
     if (patch.data_retention != null) {
       body.privacy_settings = { ...(cur.privacy_settings ?? {}), data_retention: !!patch.data_retention };
     }
@@ -201,7 +232,13 @@ export class AssistantService {
       if (patch.stt_model != null) tr.model = patch.stt_model;
       if (patch.stt_language != null) tr.language = patch.stt_language;
       tr.settings = { ...(tr.settings ?? {}) };
-      if (patch.eot_threshold != null) tr.settings.eot_threshold = Number(patch.eot_threshold);
+      if (patch.eot_threshold != null) {
+        tr.settings.eot_threshold = Number(patch.eot_threshold);
+        // Telnyx rejects an eager end-of-turn threshold above the main one (400).
+        if (tr.settings.eager_eot_threshold != null && tr.settings.eager_eot_threshold > tr.settings.eot_threshold) {
+          tr.settings.eager_eot_threshold = tr.settings.eot_threshold;
+        }
+      }
       if (patch.eot_timeout_ms != null) tr.settings.eot_timeout_ms = Number(patch.eot_timeout_ms);
       body.transcription = tr;
     }
@@ -232,8 +269,6 @@ export class AssistantService {
       'disable_dtmf',
       'noise_suppression',
       'fallback_destination',
-      'voicemail_detection',
-      'voicemail_action',
     ];
     if (telephonyKeys.some((k) => patch[k] != null)) {
       const ts: any = { ...(cur.telephony_settings ?? {}) };
@@ -244,13 +279,6 @@ export class AssistantService {
       if (patch.noise_suppression != null) ts.noise_suppression = patch.noise_suppression;
       if (patch.fallback_destination != null) ts.fallback_destination = patch.fallback_destination || null;
       if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: false };
-      if (patch.voicemail_detection != null) {
-        ts.voicemail_detection = patch.voicemail_detection
-          ? { ...(ts.voicemail_detection ?? {}), action: patch.voicemail_action ?? ts.voicemail_detection?.action ?? 'hangup' }
-          : null;
-      } else if (patch.voicemail_action != null && ts.voicemail_detection) {
-        ts.voicemail_detection = { ...ts.voicemail_detection, action: patch.voicemail_action };
-      }
       body.telephony_settings = ts;
     }
 
@@ -291,7 +319,11 @@ export class AssistantService {
     return shape(await this.fetchRaw(orgId));
   }
 
-  /** Once per assistant: the hangup tool is attached, and the assistant does not record on top of the call's own recording. */
+  /**
+   * Once per assistant: the hangup tool is attached, the assistant does not
+   * record on top of the call's own recording, and it does not act on voicemail
+   * by itself: the organization's Voicemail setting decides that for every call.
+   */
   async ensureCallSetup(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
@@ -309,14 +341,20 @@ export class AssistantService {
         this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
       }
       const ts = cur.telephony_settings ?? {};
-      if (ts.recording_settings?.enabled) {
+      if (ts.recording_settings?.enabled || ts.voicemail_detection) {
         const res = await fetch(`${BASE}/${c.assistantId}`, {
           method: 'PATCH',
           headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telephony_settings: { ...ts, recording_settings: { ...ts.recording_settings, enabled: false } } }),
+          body: JSON.stringify({
+            telephony_settings: {
+              ...ts,
+              ...(ts.recording_settings?.enabled ? { recording_settings: { ...ts.recording_settings, enabled: false } } : {}),
+              ...(ts.voicemail_detection ? { voicemail_detection: null } : {}),
+            },
+          }),
         });
-        if (!res.ok) throw new Error(`turning off the assistant's own recording failed ${res.status}: ${await res.text()}`);
-        this.logger.log(`assistant ${c.assistantId} no longer records on its own; the call's recording covers it`);
+        if (!res.ok) throw new Error(`turning off the assistant's own recording or voicemail handling failed ${res.status}: ${await res.text()}`);
+        this.logger.log(`assistant ${c.assistantId} no longer records or handles voicemail on its own; the call's settings cover both`);
       }
       this.hangupReady.add(key);
     })()

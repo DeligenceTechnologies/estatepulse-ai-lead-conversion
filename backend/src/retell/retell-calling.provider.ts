@@ -32,7 +32,7 @@ export class RetellCallingProvider implements CallingProvider {
         from_number: c.fromNumber,
         to_number: to,
         override_agent_id: c.agentId,
-        retell_llm_dynamic_variables: await this.activity.callVariables(orgId, ctx.leadId),
+        retell_llm_dynamic_variables: await this.activity.leadVariables(orgId, ctx.leadId),
         metadata: { ...ctx },
         honor_internal_dnc: true,
       }),

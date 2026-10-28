@@ -345,7 +345,19 @@ export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export type CalendlyPopupResult = { outcome: 'ok' | 'failed' | 'closed'; message: string | null };
 
-export function openCalendlyPopup(authorizeUrl: string): Promise<CalendlyPopupResult> {
+/** The backend callback page's postMessage source, and the channel /settings?calendar=… reports on. */
+export const CALENDLY_CHANNEL = 'estatepulse:calendly';
+const CALENDLY_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Tell the tab that opened the Calendly popup how it ended. Called from inside that popup. */
+export function announceCalendlyResult(ok: boolean): void {
+  if (!('BroadcastChannel' in window)) return;
+  const channel = new BroadcastChannel(CALENDLY_CHANNEL);
+  channel.postMessage({ source: CALENDLY_CHANNEL, ok, message: null });
+  channel.close();
+}
+
+export function openCalendlyPopup(authorizeUrl: string, signal?: AbortSignal): Promise<CalendlyPopupResult> {
   return new Promise((resolve) => {
     const width = 600;
     const height = 760;
@@ -358,23 +370,37 @@ export function openCalendlyPopup(authorizeUrl: string): Promise<CalendlyPopupRe
     }
     popup.focus();
 
+    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CALENDLY_CHANNEL) : null;
+    let settled = false;
+
     const finish = (result: CalendlyPopupResult) => {
+      if (settled) return;
+      settled = true;
       window.removeEventListener('message', onMessage);
-      clearInterval(poll);
+      channel?.close();
+      clearTimeout(timer);
       resolve(result);
     };
 
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== popup) return;
-      const data = event.data as { source?: unknown; ok?: unknown; message?: unknown } | null;
-      if (data?.source !== 'estatepulse:calendly') return;
+    const accept = (raw: unknown) => {
+      const data = raw as { source?: unknown; ok?: unknown; message?: unknown } | null;
+      if (data?.source !== CALENDLY_CHANNEL) return;
       finish({ outcome: data.ok === true ? 'ok' : 'failed', message: typeof data.message === 'string' ? data.message : null });
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.source === popup) accept(event.data);
     };
 
     window.addEventListener('message', onMessage);
-    const poll = window.setInterval(() => {
-      if (popup.closed) finish({ outcome: 'closed', message: null });
-    }, 500);
+    if (channel) channel.onmessage = (e) => accept(e.data);
+
+    // ponytail: no popup.closed polling. Calendly's login page sends
+    // Cross-Origin-Opener-Policy: same-origin, which severs the opener, after
+    // which `closed` reads true while the owner is still signing in. The
+    // callback then lands the popup on /settings?calendar=…, which reports on
+    // CALENDLY_CHANNEL. Cancel and this timeout end an abandoned attempt.
+    const timer = setTimeout(() => finish({ outcome: 'closed', message: null }), CALENDLY_TIMEOUT_MS);
+    signal?.addEventListener('abort', () => finish({ outcome: 'closed', message: null }));
   });
 }
 

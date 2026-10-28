@@ -42,11 +42,11 @@ import {
   LEAD_VARIABLES,
   AssistantTool,
   NoiseSuppression,
-  VoicemailAction,
   toolLabel,
   setTools as saveTools,
   detachTool,
 } from '../../utils/assistantApi';
+import { disableSmsConversation, enableSmsConversation, getSmsConversation } from '../../utils/smsConversationApi';
 import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
 import { CallPacingCard } from './CallPacingCard';
@@ -54,6 +54,8 @@ import { ContactWindowCard } from './ContactWindowCard';
 import { CallCapacityCard } from './CallCapacityCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { InCallBookingCard } from './InCallBookingCard';
+import { VoicemailCard } from './VoicemailCard';
+import { CallToolsCard } from './CallToolsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
 import { useCallingProvider } from '../../utils/callingProviderApi';
@@ -82,6 +84,8 @@ const TelnyxAISettingsView: React.FC = () => {
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
   const [systemPrompt, setSystemPrompt] = useState(orgSettings.aiSystemPrompt);
+  // Saved on Call Capacity, read by Call Pacing: each card loads it once, so a save has to reach the other.
+  const [callLimit, setCallLimit] = useState<number>();
 
   // Provider connection (Bring-Your-Own-Telnyx).
   const [status, setStatus] = useState<TelnyxStatus | null>(null);
@@ -145,13 +149,12 @@ const TelnyxAISettingsView: React.FC = () => {
   const [userIdleReplySecs, setUserIdleReplySecs] = useState(10);
   const [noiseSuppression, setNoiseSuppression] = useState<NoiseSuppression>('disabled');
   const [fallbackDestination, setFallbackDestination] = useState('');
-  const [voicemailDetection, setVoicemailDetection] = useState(false);
-  const [voicemailAction, setVoicemailAction] = useState<VoicemailAction>('hangup');
   const [disableDtmf, setDisableDtmf] = useState(false);
   const [disableGreetingInterruption, setDisableGreetingInterruption] = useState(false);
   const [interruptThreshold, setInterruptThreshold] = useState<number | null>(null);
   const [dynamicVarsWebhook, setDynamicVarsWebhook] = useState('');
   const [smsEnabled, setSmsEnabled] = useState(false);
+  const [smsBusy, setSmsBusy] = useState(false);
   const [dataRetention, setDataRetention] = useState(true);
 
   // Tools / Workflows
@@ -196,19 +199,33 @@ const TelnyxAISettingsView: React.FC = () => {
         setUserIdleReplySecs(a.user_idle_reply_secs);
         setNoiseSuppression(a.noise_suppression);
         setFallbackDestination(a.fallback_destination);
-        setVoicemailDetection(a.voicemail_detection);
-        setVoicemailAction(a.voicemail_action);
         setDisableDtmf(a.disable_dtmf);
         setDisableGreetingInterruption(a.disable_greeting_interruption);
         setInterruptThreshold(a.interrupt_prediction_threshold);
         setDynamicVarsWebhook(a.dynamic_variables_webhook_url);
-        setSmsEnabled((a.enabled_features || []).includes('messaging'));
         setDataRetention(a.data_retention);
         setTools(a.tools || []);
       })
       .catch((e) => setAgentError(e.message))
       .finally(() => setAgentLoading(false));
     listModels().then(setModels);
+    getSmsConversation()
+      .then((s) => setSmsEnabled(s.enabled))
+      .catch(() => undefined);
+  };
+
+  // Saved at once, like the tools: turning it on links the number and the agent on Telnyx.
+  const toggleSms = async (next: boolean) => {
+    setSmsBusy(true);
+    try {
+      const s = next ? await enableSmsConversation() : await disableSmsConversation();
+      setSmsEnabled(s.enabled);
+      toast.success(s.enabled ? 'The agent now answers texts from leads.' : 'Texts from leads now go to a person.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not change who answers texts.');
+    } finally {
+      setSmsBusy(false);
+    }
   };
 
   const setVar = (i: number, patch: Partial<{ key: string; value: string }>) =>
@@ -260,14 +277,12 @@ const TelnyxAISettingsView: React.FC = () => {
         post_call_processing: postCall,
         noise_suppression: noiseSuppression,
         fallback_destination: fallbackDestination,
-        voicemail_detection: voicemailDetection,
-        voicemail_action: voicemailAction,
         disable_dtmf: disableDtmf,
         disable_greeting_interruption: disableGreetingInterruption,
         interrupt_prediction_threshold: interruptThreshold,
         dynamic_variables,
-        dynamic_variables_webhook_url: dynamicVarsWebhook,
-        enabled_features: smsEnabled ? ['telephony', 'messaging'] : ['telephony'],
+        // While the agent answers texts, the lead-details URL and the SMS feature belong to EstatePulse.
+        ...(smsEnabled ? {} : { dynamic_variables_webhook_url: dynamicVarsWebhook }),
         data_retention: dataRetention,
         // `tools` is deliberately absent. Tools are saved the moment they are
         // edited, through their own endpoint, so that saving this form can
@@ -854,13 +869,6 @@ const TelnyxAISettingsView: React.FC = () => {
             <div className="md:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-3 pt-1">
               {[
                 {
-                  label: 'Detect voicemail',
-                  icon: <Voicemail className="w-3.5 h-3.5" />,
-                  on: voicemailDetection,
-                  set: setVoicemailDetection,
-                  hint: 'Stops the agent pitching an answering machine.',
-                },
-                {
                   label: 'Let callers interrupt the greeting',
                   on: !disableGreetingInterruption,
                   set: (v: boolean) => setDisableGreetingInterruption(!v),
@@ -872,7 +880,7 @@ const TelnyxAISettingsView: React.FC = () => {
                   set: setDisableDtmf,
                   hint: '',
                 },
-              ].map(({ label, icon, on, set, hint }) => (
+              ].map(({ label, on, set, hint }) => (
                 <button
                   key={label}
                   type="button"
@@ -883,24 +891,15 @@ const TelnyxAISettingsView: React.FC = () => {
                   <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
                   </span>
-                  <span className="font-semibold flex items-center gap-1.5">{icon}{label}</span>
+                  <span className="font-semibold">{label}</span>
                 </button>
               ))}
             </div>
 
-            {voicemailDetection && (
-              <div className="md:col-span-2">
-                <label className="block text-slate-300 font-semibold mb-1">When it reaches voicemail</label>
-                <select
-                  value={voicemailAction}
-                  onChange={(e) => setVoicemailAction(e.target.value as VoicemailAction)}
-                  className="w-full md:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="hangup">Hang up without leaving a message</option>
-                  <option value="leave_message">Leave a message</option>
-                </select>
-              </div>
-            )}
+            <p className="md:col-span-2 text-xs text-slate-500 flex items-center gap-1.5">
+              <Voicemail className="w-3.5 h-3.5" />
+              Answering machines and voicemail are set in the Voicemail card further down this page.
+            </p>
           </div>
         </div>
 
@@ -915,21 +914,24 @@ const TelnyxAISettingsView: React.FC = () => {
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
               {[
                 {
-                  label: 'Let this agent handle SMS too',
+                  label: smsBusy ? 'Updating…' : 'Let this agent answer texts from leads',
                   on: smsEnabled,
-                  set: setSmsEnabled,
+                  set: (next: boolean) => void toggleSms(next),
+                  disabled: smsBusy,
                 },
                 {
                   label: 'Keep conversation history at the provider',
                   on: dataRetention,
                   set: setDataRetention,
+                  disabled: false,
                 },
-              ].map(({ label, on, set }) => (
+              ].map(({ label, on, set, disabled }) => (
                 <button
                   key={label}
                   type="button"
                   onClick={() => set(!on)}
-                  className="flex items-center gap-2 text-slate-300 cursor-pointer"
+                  disabled={disabled}
+                  className="flex items-center gap-2 text-slate-300 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
                 >
                   <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
@@ -948,12 +950,14 @@ const TelnyxAISettingsView: React.FC = () => {
                 type="url"
                 value={dynamicVarsWebhook}
                 onChange={(e) => setDynamicVarsWebhook(e.target.value)}
+                disabled={smsEnabled}
                 placeholder="https://your-portal.com/api/assistant/context"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-60"
               />
               <span className="text-xs text-slate-500 mt-1 block">
-                Called as each conversation starts, to pull the newest details rather than whatever was true when
-                the call was scheduled. The lead's own fields are already sent without this.
+                {smsEnabled
+                  ? 'EstatePulse uses this while the agent answers texts: it gives the agent the lead’s details and the text they are replying to.'
+                  : 'Called as each conversation starts, to pull the newest details rather than whatever was true when the call was scheduled. The lead’s own fields are already sent without this.'}
               </span>
             </div>
           </div>
@@ -1167,16 +1171,20 @@ const TelnyxAISettingsView: React.FC = () => {
         </div>
 
         <div id="call-capacity" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallCapacityCard />
+          <CallCapacityCard onSaved={setCallLimit} />
         </div>
 
         <div id="call-pacing" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallPacingCard />
+          <CallPacingCard limit={callLimit} />
         </div>
 
         <LeadTemperatureCard />
 
         <InCallBookingCard />
+
+        <VoicemailCard />
+
+        <CallToolsCard />
 
         {/* Statements of behaviour, not settings — nothing here is editable. */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">

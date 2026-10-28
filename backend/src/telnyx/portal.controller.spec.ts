@@ -13,8 +13,10 @@ const steps = [
 function setup(sms: boolean, messages: { deliveryStatus: string }[]) {
   const prisma = {
     lead: { findFirst: vi.fn().mockResolvedValue({ id: 'lead-1', status: 'contacting', firstContactAt: new Date(), aiSummary: null }) },
-    call: { findMany: vi.fn().mockResolvedValue([{ status: 'no_answer' }]) },
+    call: { findMany: vi.fn().mockResolvedValue([{ status: 'no_answer', disposition: null, createdAt: new Date() }]) },
     message: { findMany: vi.fn().mockResolvedValue(messages) },
+    // A lead from before the step log: the flow is matched against the calls and texts on record.
+    leadEvent: { findMany: vi.fn().mockResolvedValue([]) },
   };
   const strategies = { getStrategy: vi.fn().mockResolvedValue({ name: 'Default', steps }) };
   const providers = { for: vi.fn().mockResolvedValue({ name: sms ? 'telnyx' : 'retell', capabilities: { sms } }) };

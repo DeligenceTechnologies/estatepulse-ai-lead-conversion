@@ -29,7 +29,9 @@ describe('verifyRetellSignature', () => {
 describe('POST_CALL_ANALYSIS_DATA', () => {
   it('asks Retell for every qualification field, with the same choices the scorer accepts', () => {
     const byName = Object.fromEntries(POST_CALL_ANALYSIS_DATA.map((f) => [f.name, f]));
-    expect(POST_CALL_ANALYSIS_DATA).toHaveLength(17);
+    expect(POST_CALL_ANALYSIS_DATA).toHaveLength(19);
+    expect(byName.reached_person.type).toBe('boolean');
+    expect(byName.do_not_contact.type).toBe('boolean');
     expect(byName.timeline).toMatchObject({ type: 'enum', choices: ['within_30_days', '1_3_months', '3_6_months', 'over_6_months', 'unknown'] });
     expect(byName.financing).toMatchObject({ type: 'enum', choices: ['pre_approved', 'cash', 'needs_financing', 'unknown'] });
     expect(byName.pre_approved.type).toBe('boolean');
@@ -41,6 +43,13 @@ describe('POST_CALL_ANALYSIS_DATA', () => {
 });
 
 describe('extractionFromRetell', () => {
+  it('carries the newer verdicts (a person reached, do not contact) only when Retell answered them', () => {
+    expect(extractionFromRetell({ custom_analysis_data: { summary: 'x', reached_person: true, do_not_contact: 'false' } })).toMatchObject({ reached_person: true, do_not_contact: false });
+    const older = extractionFromRetell({ custom_analysis_data: { summary: 'x' } });
+    expect(older?.reached_person).toBeUndefined();
+    expect(older?.do_not_contact).toBeUndefined();
+  });
+
   it('reads Retell’s custom analysis as our extraction, filling what was not said', () => {
     const x = extractionFromRetell({
       call_summary: 'Retell summary',
@@ -86,7 +95,7 @@ const sent = (i = 0) => {
 describe('RetellCallingProvider', () => {
   const active = { active: true, apiKey: 'key_api', agentId: 'agent_1', fromNumber: '+12025550100' };
   const setup = (c: Record<string, unknown> | null = active) => {
-    const activity = { callVariables: vi.fn().mockResolvedValue({ firstName: 'Asha', leadId: 'lead-1' }) };
+    const activity = { leadVariables: vi.fn().mockResolvedValue({ firstName: 'Asha', leadId: 'lead-1' }) };
     return new RetellCallingProvider({ getCreds: vi.fn().mockResolvedValue(c) } as any, activity as any);
   };
 
@@ -176,7 +185,7 @@ describe('RetellAccountService', () => {
       data_storage_setting: 'basic_attributes_only',
       max_call_duration_ms: 1_800_000,
     });
-    expect(agent.body.post_call_analysis_data).toHaveLength(17);
+    expect(agent.body.post_call_analysis_data).toHaveLength(19);
     expect(c.save).toHaveBeenCalledWith(ORG, { agentId: 'agent_1', llmId: 'llm_1' });
   });
 

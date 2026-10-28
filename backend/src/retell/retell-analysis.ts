@@ -60,5 +60,8 @@ export function extractionFromRetell(analysis: unknown): Extraction | null {
     bedrooms: bedrooms == null ? null : Math.round(bedrooms),
     financing: oneOf('financing', FINANCING),
     motivation: text(d.motivation, 1000),
+    // Asked since the journey work; an agent created before then never answers them, and the disposition decides instead.
+    ...('reached_person' in d ? { reached_person: bool('reached_person') } : {}),
+    ...('do_not_contact' in d ? { do_not_contact: bool('do_not_contact') } : {}),
   });
 }

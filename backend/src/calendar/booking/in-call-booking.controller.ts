@@ -6,19 +6,11 @@ import { Public } from '@/auth/decorators/public.decorator';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { RetellEnabledGuard } from '@/retell/retell-enabled.guard';
+import { toolRequest } from '@/telnyx/tools/assistant-tool-auth.service';
 import { EnableInCallBookingDto } from './dto/in-call-booking.dto';
 import { InCallBookingSettingsService } from './in-call-booking-settings.service';
 import { InCallBookingService } from './in-call-booking.service';
-import { ToolAuthService, type RetellToolRequest, type ToolRequest } from './tool-auth.service';
-
-const toolRequest = (req: RawBodyRequest<Request>, body: any): ToolRequest => ({
-  authorization: req.header('authorization'),
-  signature: req.header('telnyx-signature-ed25519'),
-  timestamp: req.header('telnyx-timestamp'),
-  rawBody: req.rawBody,
-  callControlId: body?.call_control_id,
-  leadId: body?.lead_id,
-});
+import { ToolAuthService, type RetellToolRequest } from './tool-auth.service';
 
 const str = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : undefined);
 

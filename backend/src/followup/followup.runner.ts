@@ -1,15 +1,20 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
+import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { CallingProviders } from '@/calling/calling-providers';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
-import { nextAllowedAt } from '@/common/utils/quiet-hours';
+import { nextContactAt } from '@/common/utils/quiet-hours';
+import { LeadStateService } from '@/lead/lead-state.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
+import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from '@/telnyx/activity.service';
+import { CallingProviders, SMS_UNAVAILABLE } from '@/calling/calling-providers';
 import { CallQueue } from '@/telnyx/calls/call.queue';
+import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
+import { fillTemplate } from '@/telnyx/template';
 import { FollowupService, stepsOf, type SequenceStep } from './followup.service';
+import { unmetCondition, type JourneyFacts } from './journey';
 
 interface ClaimedEnrollment {
   id: string;
@@ -18,9 +23,16 @@ interface ClaimedEnrollment {
   sequence_id: string;
   current_step: number;
   attempts: number;
+  enrolled_at: Date;
 }
 
 const MAX_ATTEMPTS = 6;
+/** A step after a call that is still queued, ringing or live looks again this soon. */
+export const CALL_HOLD_RECHECK_MS = 30_000;
+/** A call still not over after this is a lost hangup or a stuck queue: the next step goes ahead. */
+export const CALL_HOLD_MAX_MS = 30 * 60_000;
+/** How long a step after a pick-up waits for the call analysis before taking the pick-up as a conversation. */
+export const ANALYSIS_WAIT_MS = 10 * 60_000;
 
 /**
  * Sends the sequence step each due enrolment is on. Claims with FOR UPDATE
@@ -43,6 +55,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly providers: CallingProviders,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
+    private readonly state: LeadStateService,
+    private readonly conversations: SmsConversationService,
   ) {}
 
   onModuleInit(): void {
@@ -93,7 +107,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
          SET locked_by = ${this.instanceId}, locked_at = now(), attempts = e.attempts + 1
         FROM claimed
        WHERE e.id = claimed.id
-      RETURNING e.id, e.organization_id, e.lead_id, e.sequence_id, e.current_step, e.attempts`;
+      RETURNING e.id, e.organization_id, e.lead_id, e.sequence_id, e.current_step, e.attempts, e.enrolled_at`;
   }
 
   private async requeueStuck(): Promise<void> {
@@ -105,75 +119,218 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
 
   private async execute(row: ClaimedEnrollment): Promise<void> {
     try {
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: row.lead_id },
-        select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
-      });
-      if (!lead) return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted'));
-      if (lead.dncStatus) return void (await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out'));
-      if (lead.automationPaused) return void (await this.pause(row.id));
-      if (OUTCOME_STATUSES.includes(lead.status)) return void (await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`));
+      const lead = await this.liveLead(row);
+      if (!lead) return;
 
-      const sequence = await this.prisma.sequence.findUnique({ where: { id: row.sequence_id }, select: { steps: true } });
+      const sequence = await this.prisma.sequence.findUnique({
+        where: { id: row.sequence_id },
+        select: { steps: true, closeOutHours: true, closeOutUnresponsive: true },
+      });
       const steps = sequence ? stepsOf(sequence) : [];
       const step = steps[row.current_step - 1];
-      if (!step) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
+      if (sequence && !step && steps.length > 0 && row.current_step > steps.length) return void (await this.closeOut(row, sequence.closeOutUnresponsive));
+      if (!sequence || !step) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
+      const closeOutMs = sequence.closeOutHours * 3_600_000;
 
-      const { timeZone, quiet } = await this.followup.guardrailsFor(row.organization_id);
+      const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
+      const chatQuietMs = limits.chatQuietMinutes * 60_000;
+      if (await this.chatBusy(row, chatQuietMs)) return;
+
       const now = new Date();
-      const allowed = nextAllowedAt(timeZone, quiet, now);
-      if (allowed > now) {
-        await this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: allowed, lockedBy: null, lockedAt: null } });
-        return;
+      const allowed = nextContactAt(timeZone, quiet, skipDays, now);
+      if (allowed > now) return void (await this.deferTo(row, allowed));
+
+      // As in the strategy: nothing over a call that is not over, and nothing canned after a conversation.
+      const journey = await this.journeyState(row);
+      if (journey.callOpen) return void (await this.deferTo(row, new Date(Date.now() + CALL_HOLD_RECHECK_MS)));
+      // A pick-up is a conversation once the call analysis says a person was there; it comes a minute or two after.
+      if (journey.lastCall === CallDisposition.connected && !journey.lastCallScored && journey.lastCallEndedAt && Date.now() - journey.lastCallEndedAt.getTime() < ANALYSIS_WAIT_MS) {
+        return void (await this.deferTo(row, new Date(Date.now() + CALL_HOLD_RECHECK_MS)));
       }
-      await this.fire(row, step, lead);
-      await this.advance(row, steps);
+      const event = { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', channel: step.actionType, payload: { sequenceId: row.sequence_id, step: row.current_step } };
+      if (journey.lastCall === CallDisposition.connected) {
+        this.state.quietly({ ...event, type: 'sequence_stopped', reason: 'The lead talked on a call; the call scoring decides what comes next' });
+        return void (await this.finish(row.id, EnrollmentStatus.stopped, 'lead_talked'));
+      }
+      const unmet = unmetCondition(step.onlyIf, journey);
+      if (unmet) {
+        this.state.quietly({ ...event, type: 'step_skipped', reason: unmet });
+        return void (await this.advance(row, steps, closeOutMs));
+      }
+      // The day's limit or the gap since our last touch on this channel: the step waits, it is not dropped.
+      const slot = await this.followup.contactSlot(row.organization_id, row.lead_id, step.actionType);
+      if (slot.at > now) {
+        this.state.quietly({ ...event, type: 'step_held', reason: slot.reason });
+        return void (await this.deferTo(row, slot.at));
+      }
+      // Looked at once more right before anything goes out: a reply, an opt-out, a booking or a
+      // pause may have come in while the step was being decided.
+      const fresh = await this.liveLead(row);
+      if (!fresh || (await this.chatBusy(row, chatQuietMs))) return;
+      await this.fire(row, step, fresh);
+      await this.advance(row, steps, closeOutMs);
     } catch (error) {
       await this.onFailure(row, (error as Error).message);
     }
   }
 
+  /** The lead when a step may go to it; otherwise the enrolment is stopped or paused, and null. */
+  private async liveLead(row: ClaimedEnrollment): Promise<{ firstName: string | null; phone: string | null } | null> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: row.lead_id },
+      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
+    });
+    if (!lead) await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
+    else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
+    else if (lead.automationPaused) await this.pause(row.id);
+    else if (OUTCOME_STATUSES.includes(lead.status)) await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`);
+    // A meeting on the calendar ends the sequence whatever the status says, and the status follows it.
+    else if (await hasUpcomingMeeting(this.prisma, row.organization_id, row.lead_id)) {
+      await this.state.move(row.lead_id, LeadStatus.appointment_booked, { source: 'calendar', reason: 'A meeting with the lead is on the calendar' });
+      await this.finish(row.id, EnrollmentStatus.stopped, 'appointment_booked');
+    } else return lead;
+    return null;
+  }
+
+  /** A lead texting with the AI is not sent the next step until the chat has been quiet as long as the organization set: deferred to then. */
+  private async chatBusy(row: ClaimedEnrollment, quietMs: number): Promise<boolean> {
+    if (quietMs <= 0) return false;
+    const lastReply = await this.prisma.message.findFirst({
+      where: { leadId: row.lead_id, channel: 'sms', direction: 'inbound' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    const chatQuietAt = lastReply ? lastReply.createdAt.getTime() + quietMs : 0;
+    if (chatQuietAt <= Date.now()) return false;
+    await this.deferTo(row, new Date(chatQuietAt));
+    return true;
+  }
+
+  private deferTo(row: ClaimedEnrollment, at: Date) {
+    return this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: at, lockedBy: null, lockedAt: null } });
+  }
+
+  /**
+   * The calls and texts since this enrolment began: whether a call it placed
+   * is still queued, ringing or live (up to CALL_HOLD_MAX_MS), how the last
+   * call ended, whether the lead has texted back, and whether the step before
+   * this one was skipped.
+   */
+  private async journeyState(
+    row: ClaimedEnrollment,
+  ): Promise<JourneyFacts & { callOpen: boolean; lastCallScored: boolean; lastCallEndedAt: Date | null }> {
+    const since = new Date(row.enrolled_at);
+    const holdFrom = new Date(Date.now() - CALL_HOLD_MAX_MS);
+    const [latest, queued, reply, lastStep] = await Promise.all([
+      this.prisma.call.findFirst({
+        where: { leadId: row.lead_id, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, disposition: true, endedAt: true, createdAt: true, extractedIntel: true },
+      }),
+      this.prisma.leadEvent.findFirst({
+        where: { leadId: row.lead_id, source: 'followup', type: 'step_sent', channel: 'voice', createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+      this.prisma.message.findFirst({ where: { leadId: row.lead_id, channel: 'sms', direction: 'inbound', createdAt: { gte: since } }, select: { id: true } }),
+      this.prisma.leadEvent.findFirst({
+        where: { leadId: row.lead_id, source: 'followup', type: { in: ['step_sent', 'step_skipped', 'step_failed'] }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        select: { type: true, payload: true },
+      }),
+    ]);
+    const live = !!latest && (latest.status === CallStatus.ringing || latest.status === CallStatus.in_progress) && latest.createdAt >= holdFrom;
+    // A call we queued that has not been placed yet (waiting for a slot, quiet hours or the redial gap).
+    const notPlaced = !!queued && queued.createdAt >= holdFrom && (!latest || latest.createdAt < queued.createdAt);
+    const logged = lastStep?.payload as { sequenceId?: string; step?: number } | null | undefined;
+    const previousSkipped = lastStep?.type === 'step_skipped' && logged?.sequenceId === row.sequence_id && logged?.step === row.current_step - 1;
+    return {
+      callOpen: live || notPlaced,
+      lastCall: latest?.endedAt ? (latest.disposition ?? null) : null,
+      lastCallScored: Boolean((latest?.extractedIntel as { qualification?: unknown } | null)?.qualification),
+      lastCallEndedAt: latest?.endedAt ?? null,
+      replied: !!reply,
+      previousSkipped,
+    };
+  }
+
   private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<void> {
+    const event = {
+      orgId: row.organization_id,
+      leadId: row.lead_id,
+      source: 'followup',
+      channel: step.actionType,
+      payload: { sequenceId: row.sequence_id, step: row.current_step },
+    };
     if (step.actionType === 'sms') {
-      const org = await this.prisma.organization.findUnique({ where: { id: row.organization_id }, select: { name: true } });
-      const text = String(step.messageTemplate ?? '')
-        .replace(/\{\{firstName\}\}/g, lead.firstName?.trim() || 'there')
-        .replace(/\{\{brokerage\}\}/g, org?.name ?? 'our team');
+      const [org, variables] = await Promise.all([
+        this.prisma.organization.findUnique({ where: { id: row.organization_id }, select: { name: true } }),
+        this.activity.leadVariables(row.organization_id, row.lead_id),
+      ]);
+      const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
       if (!text) return;
       try {
         const provider = await this.providers.for(row.organization_id);
-        if (provider.capabilities.sms) {
+        if (!provider.capabilities.sms) {
+          // Retell sends no SMS: the step is logged as skipped, never as failed, and the sequence goes on.
+          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name} sends no SMS`);
+          this.state.quietly({ ...event, type: 'step_skipped', reason: SMS_UNAVAILABLE });
+        } else {
           const sent = await provider.sendSms(row.organization_id, lead.phone ?? '', text);
           await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
-        } else {
-          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name} sends no SMS`);
+          this.state.quietly({ ...event, type: 'step_sent' });
+          this.conversations
+            .appendOurMessage(row.organization_id, lead.phone, text)
+            .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
         }
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
+        this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
       }
       return;
     }
     try {
       await this.calls.enqueue(
-        { orgId: row.organization_id, leadId: row.lead_id, source: 'followup', sequenceId: row.sequence_id },
+        {
+          orgId: row.organization_id,
+          leadId: row.lead_id,
+          source: 'followup',
+          sequenceId: row.sequence_id,
+          ...(step.voicemail && step.voicemail !== 'default' ? { voicemail: step.voicemail } : {}),
+          ...(step.voicePrompt?.trim() ? { context: step.voicePrompt.trim() } : {}),
+        },
         { dedupeKey: `followup:${row.id}:${row.current_step}` },
       );
+      this.state.quietly({ ...event, type: 'step_sent', reason: 'Call queued' });
     } catch (error) {
-      const provider = await this.providers.nameFor(row.organization_id).catch(() => undefined);
-      await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message, provider);
+      await this.activity.recordCallFailed(
+        row.organization_id,
+        row.lead_id,
+        (error as Error).message,
+        undefined,
+        await this.providers.nameFor(row.organization_id).catch(() => undefined),
+      );
+      this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
     }
   }
 
-  /** After the last step a lead that never responded is closed out as not interested. */
-  private async advance(row: ClaimedEnrollment, steps: SequenceStep[]): Promise<void> {
+  /**
+   * Moves to the next step. After the last one the enrolment stays live, one
+   * past the end, for the sequence's close-out wait: the lead can still answer,
+   * book or be called on that last step before closeOut runs.
+   */
+  private async advance(row: ClaimedEnrollment, steps: SequenceStep[], closeOutMs: number): Promise<void> {
     const next = steps[row.current_step];
     if (!next) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
-        await tx.lead.updateMany({
-          where: { id: row.lead_id, status: LeadStatus.follow_up },
-          data: { status: LeadStatus.not_interested, lostReason: 'Follow-up sequence exhausted with no response' },
-        });
+      await this.prisma.sequenceEnrollment.update({
+        where: { id: row.id },
+        data: {
+          currentStep: row.current_step + 1,
+          nextActionAt: new Date(Date.now() + closeOutMs),
+          lockedBy: null,
+          lockedAt: null,
+          lastError: null,
+        },
       });
       return;
     }
@@ -186,6 +343,25 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         lockedAt: null,
         lastError: null,
       },
+    });
+  }
+
+  /**
+   * Every step ran and the lead stayed silent through the wait after the last
+   * one: closed out as unresponsive, or, where the sequence says so, left in
+   * follow-up. A lead who replied or talked on a call since the enrolment
+   * began did respond, so the sequence just completes.
+   */
+  private async closeOut(row: ClaimedEnrollment, markUnresponsive: boolean): Promise<void> {
+    const journey = await this.journeyState(row);
+    if (journey.replied || journey.lastCall === CallDisposition.connected) {
+      return void (await this.finish(row.id, EnrollmentStatus.completed, 'lead_responded'));
+    }
+    if (!markUnresponsive) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
+    const reason = 'Follow-up sequence exhausted with no response';
+    await this.prisma.$transaction(async (tx) => {
+      await this.finish(row.id, EnrollmentStatus.completed, 'exhausted', tx);
+      await this.state.move(row.lead_id, LeadStatus.unresponsive, { source: 'followup', reason, data: { lostReason: reason } }, tx);
     });
   }
 

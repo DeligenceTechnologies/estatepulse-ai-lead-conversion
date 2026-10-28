@@ -51,6 +51,11 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'RATE_LIMITED'
+  | 'UPSTREAM_ERROR'
+  | 'PASSWORD_RESET_INVALID'
+  | 'PASSWORD_RESET_UNAVAILABLE'
+  | 'EMAIL_NOT_VERIFIED'
+  | 'EMAIL_VERIFICATION_INVALID'
   | 'INTERNAL'
   | 'NETWORK';
 
@@ -111,6 +116,12 @@ export interface AuthSessionResponse extends AuthTokens {
   user: AuthUser;
 }
 
+/** Sign-up when the server requires email verification: no session until the link is opened. */
+export interface VerificationPendingResponse {
+  verificationRequired: true;
+  email: string;
+}
+
 export interface RegisterInput {
   organizationName: string;
   /** individual: the owner also gets the Agent role; team: Owner only. */
@@ -124,6 +135,12 @@ export interface RegisterInput {
 
 export interface ChangePasswordInput {
   oldPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface ResetPasswordInput {
+  token: string;
   newPassword: string;
   confirmPassword: string;
 }
@@ -169,6 +186,11 @@ const MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: 'That page or resource does not exist.',
   CONFLICT: 'That conflicts with something that already exists.',
   RATE_LIMITED: 'Too many attempts. Please wait a minute and try again.',
+  UPSTREAM_ERROR: 'A connected service (Telnyx, Calendly or your CRM) did not respond in time. Please try again in a moment.',
+  PASSWORD_RESET_INVALID: 'This password reset link is invalid or has expired. Request a new one.',
+  PASSWORD_RESET_UNAVAILABLE: 'Password reset by email is not available. Ask your administrator to reset your password.',
+  EMAIL_NOT_VERIFIED: 'Confirm your email to sign in. We sent a link when you signed up.',
+  EMAIL_VERIFICATION_INVALID: 'This verification link is invalid or has expired. Request a new one.',
   INTERNAL: 'Something went wrong on our end. Please try again.',
   NETWORK: 'Cannot reach the server. Check that the API is running.',
 };
@@ -591,7 +613,15 @@ export function apiUpload<T>(path: string, body: FormData, onProgress?: (fractio
 export const api = {
   /** Creates the organization (with Owner and Agent roles) and signs its owner in. */
   register: (body: RegisterInput) =>
-    apiFetch<AuthSessionResponse>('/auth/register', { method: 'POST', body }),
+    apiFetch<AuthSessionResponse | VerificationPendingResponse>('/auth/register', { method: 'POST', body }),
+
+  /** Verifies the address and signs the owner in. */
+  verifyEmail: (token: string) =>
+    apiFetch<AuthSessionResponse>('/auth/verify-email', { method: 'POST', body: { token } }),
+
+  /** Answers the same whether or not the email has an account waiting. */
+  resendVerification: (email: string) =>
+    apiFetch<{ success: true; message: string }>('/auth/resend-verification', { method: 'POST', body: { email } }),
 
   login: (body: { email: string; password: string; keepSignIn: boolean }) =>
     apiFetch<AuthSessionResponse>('/auth/login', { method: 'POST', body }),
@@ -608,4 +638,15 @@ export const api = {
   /** Succeeds by signing the user out everywhere, this browser included. */
   changePassword: (body: ChangePasswordInput) =>
     apiFetch<{ success: true }>('/auth/change-password', { method: 'POST', auth: true, body }),
+
+  /** Answers the same whether or not the email has an account. */
+  forgotPassword: (email: string) =>
+    apiFetch<{ success: true; message: string }>('/auth/forgot-password', { method: 'POST', body: { email } }),
+
+  validateResetToken: (token: string) =>
+    apiFetch<{ valid: true; expiresAt: string }>('/auth/reset-password/validate', { method: 'POST', body: { token } }),
+
+  /** Succeeds by signing the user out everywhere, this browser included. */
+  resetPassword: (body: ResetPasswordInput) =>
+    apiFetch<{ success: true }>('/auth/reset-password', { method: 'POST', body }),
 };

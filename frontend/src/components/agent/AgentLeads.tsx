@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Inbox, Loader2, Mail, Phone, RefreshCw, X } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { LeadAppointments } from '../leads/LeadBooking';
 import {
   getMyLead,
+  getMyLeadMessages,
   getMyLeads,
   leadName,
   type AgentLead,
   type AgentLeadDetail,
+  type MessageRow,
 } from '../../utils/agentMeApi';
+import { MessageThread } from '../conversations/MessageThread';
 import { statusLabel, statusTone } from '../../lib/leadStatus';
 import { formatDate as formatDay } from '../../lib/datetime';
 
@@ -45,6 +49,7 @@ const Field: React.FC<{ label: string; value: React.ReactNode }> = ({ label, val
  */
 const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ leadId, onClose }) => {
   const [lead, setLead] = useState<AgentLeadDetail | null>(null);
+  const [messages, setMessages] = useState<MessageRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,6 +60,14 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
       })
       .catch((e) => {
         if (!cancelled) setError(messageFor(e));
+      });
+    // The chat is its own request: a lead with no texts, or one that fails to load, still shows its details.
+    getMyLeadMessages(leadId)
+      .then((m) => {
+        if (!cancelled) setMessages(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
       });
     return () => {
       cancelled = true;
@@ -145,6 +158,11 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
                 <p className="text-slate-100 leading-relaxed">{lead.aiSummary ?? DASH}</p>
               </div>
 
+              <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-2">
+                <span className="text-slate-400 block text-2xs">Text conversation</span>
+                <MessageThread messages={messages} className="max-h-80 overflow-y-auto custom-scrollbar pr-1" />
+              </div>
+
               <LeadAppointments leadId={lead.id} agentKey={null} />
             </>
           )}
@@ -164,7 +182,13 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
 export const AgentLeads: React.FC = () => {
   const [leads, setLeads] = useState<AgentLead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openLeadId, setOpenLeadId] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  // `/leads?lead=<id>`, the link in the "lead assigned" email, opens that lead.
+  const [openLeadId, setOpenLeadId] = useState<string | null>(() => params.get('lead'));
+  useEffect(() => {
+    if (params.has('lead')) navigate('/leads', { replace: true });
+  }, [params, navigate]);
 
   const load = useCallback(async () => {
     try {

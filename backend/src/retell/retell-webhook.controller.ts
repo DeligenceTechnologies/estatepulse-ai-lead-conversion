@@ -21,6 +21,19 @@ interface RetellCall {
 }
 
 /**
+ * Retell's disconnection reason in the words the activity service reads
+ * (Telnyx's hangup causes), with Retell's own voicemail verdict: a call its
+ * voicemail detection ended was picked up by a machine, not by the lead.
+ */
+export function hangupOf(reason: string): { hangup_cause: string; sip_hangup_cause?: string; machine?: boolean } {
+  if (reason === 'voicemail_reached' || reason === 'machine_detected') return { hangup_cause: reason, machine: true };
+  if (reason === 'invalid_destination') return { hangup_cause: 'not_found' };
+  if (reason === 'dial_busy') return { hangup_cause: 'user_busy' };
+  if (reason === 'dial_failed' || reason === 'telephony_provider_unavailable' || reason.startsWith('error')) return { hangup_cause: 'unspecified', sip_hangup_cause: '503' };
+  return { hangup_cause: reason };
+}
+
+/**
  * Call events from the organization's Retell agent. Every delivery must carry
  * a valid signature from the workspace's webhook key; one for a call we did
  * not place yet answers 404 so Retell retries it (it retries up to three
@@ -68,7 +81,7 @@ export class RetellWebhookController {
   private async ended(call: Call, payload: RetellCall): Promise<void> {
     if (call.endedAt) return;
     const reason = String(payload.disconnection_reason ?? '');
-    await this.activity.onCallHangup(call.providerCallId!, { hangup_cause: reason });
+    await this.activity.onCallHangup(call.providerCallId!, hangupOf(reason));
     if (reason === 'user_requested_dnc') {
       await this.engine
         .setStatus(call.orgId, call.leadId, LeadStatus.not_interested, 'Asked on the call not to be contacted again', { optOut: true })

@@ -30,7 +30,8 @@ function setup(publicKey = '') {
   const inbound = { onMessageReceived: vi.fn() };
   const scoring = { onTranscriptSaved: vi.fn(), onInsightsGenerated: vi.fn() };
   const creds = { getCreds: vi.fn().mockResolvedValue({ publicKey }), orgForNumber: vi.fn().mockResolvedValue(ORG) };
-  const controller = new TelnyxWebhookController(activity as any, inbound as any, scoring as any, creds as any);
+  const callbacks = { onCallEnded: vi.fn() };
+  const controller = new TelnyxWebhookController(activity as any, inbound as any, scoring as any, creds as any, {} as any, callbacks as any);
   return { controller, activity, inbound, scoring, creds };
 }
 
@@ -46,7 +47,7 @@ describe('TelnyxWebhookController voice', () => {
       expect(controller.voice(voiceEvent(type, { hangup_cause: 'normal_clearing' }), request({}))).toEqual({ received: true });
     }
     await settle();
-    expect(activity.onCallAnswered).toHaveBeenCalledWith(CCID);
+    expect(activity.onCallAnswered).toHaveBeenCalledWith(CCID, {});
     expect(activity.onCallHangup).toHaveBeenCalledWith(CCID, expect.objectContaining({ hangup_cause: 'normal_clearing' }));
     expect(activity.onRecordingSaved).toHaveBeenCalledWith(CCID, expect.objectContaining({ call_control_id: CCID }));
     expect(activity.onTranscriptionSaved).toHaveBeenCalledWith(CCID, expect.objectContaining({ call_control_id: CCID }));
@@ -79,7 +80,7 @@ describe('TelnyxWebhookController voice', () => {
     await settle();
     expect(bad.activity.onCallAnswered).not.toHaveBeenCalled();
     expect(unsigned.activity.onCallAnswered).not.toHaveBeenCalled();
-    expect(good.activity.onCallAnswered).toHaveBeenCalledWith(CCID);
+    expect(good.activity.onCallAnswered).toHaveBeenCalledWith(CCID, {});
   });
 
   it('without a public key, accepts unsigned deliveries', async () => {

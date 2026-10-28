@@ -344,11 +344,14 @@ export const LeadDetailModal: React.FC = () => {
                       s.state === 'done' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
                       : s.state === 'failed' ? 'bg-rose-900/40 text-rose-300 border-rose-800/50'
                       : s.state === 'current' ? 'bg-emerald-500 text-on-accent border-emerald-400 shadow shadow-emerald-950'
-                      : s.state === 'skipped' ? 'bg-amber-950/30 text-amber-300/80 border-amber-800/40'
+                      : s.state === 'skipped' ? 'bg-slate-900 text-slate-400 border-dashed border-slate-600'
                       : 'bg-slate-800 text-slate-500 border-slate-700';
-                    const why = s.state === 'skipped' ? ' (SMS follow-ups are not available with Retell)' : '';
                     return (
-                      <span key={s.index} title={`Step ${s.index + 1}: ${s.action}${s.outcome ? ` — ${s.outcome}` : ''}${why}`} className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}>
+                      <span
+                        key={s.index}
+                        title={`Step ${s.index + 1}: ${name}${s.outcome ? ` — ${s.outcome}` : ''}${s.detail ? `\n${s.detail}` : ''}`}
+                        className={`px-2 py-0.5 rounded-md border text-2xs font-semibold ${cls}`}
+                      >
                         {s.index + 1}·{s.outcome ?? name}
                       </span>
                     );
@@ -359,7 +362,7 @@ export const LeadDetailModal: React.FC = () => {
                     Current: Step {flow.currentStep.index + 1} of {flow.stepsTotal} — {flow.currentStep.channel === 'voice' ? 'AI Call' : 'SMS'}
                   </span>
                 ) : (
-                  <span className="text-slate-400">All {flow.stepsTotal} steps sent — awaiting outcome</span>
+                  <span className="text-slate-400">All {flow.stepsTotal} steps run — awaiting outcome</span>
                 )}
                 {flow.reason && (
                   <span className="text-slate-500 break-words" title={flow.reason}>· last attempt: {flow.reason.replace(/\s+/g, ' ').slice(0, 45)}</span>
@@ -369,7 +372,7 @@ export const LeadDetailModal: React.FC = () => {
 
             {flow.phase === 'exited' && (
               <span className="text-rose-300 break-words" title={flow.reason ?? undefined}>
-                Left the strategy — not reached{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
+                Left the strategy{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
               </span>
             )}
             {flow.phase === 'not_started' && <span className="text-slate-500">Waiting to enter the strategy</span>}

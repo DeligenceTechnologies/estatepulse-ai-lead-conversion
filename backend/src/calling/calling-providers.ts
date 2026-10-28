@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, IntegrationStatus } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import type { CallIntent } from '@/telnyx/calls/call.types';
 import { RetellCallingProvider } from '@/retell/retell-calling.provider';
 import { retellEnabled } from '@/retell/retell-enabled.guard';
 import { CallCapacityService } from '@/telnyx/calls/call-capacity.service';
@@ -11,7 +12,11 @@ import { VoiceService } from '@/telnyx/voice.service';
 
 export type CallingProviderName = 'telnyx' | 'retell';
 
-export interface CallContext {
+/** Why an SMS step is skipped for an organization on Retell; shown wherever that step appears. */
+export const SMS_UNAVAILABLE = 'SMS follow-ups are not available with Retell.';
+
+/** What the step that placed the call wants from it travels with the call, on either provider. */
+export interface CallContext extends CallIntent {
   orgId: string;
   leadId: string;
   sequenceId?: string;

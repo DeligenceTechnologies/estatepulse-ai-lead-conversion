@@ -1,21 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, MessageSquare, Phone, Save, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Loader2, AlertTriangle, MessageSquare, Phone, Save, Trash2, ArrowUp, ArrowDown, LayoutTemplate } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { CALL_CONTEXT_MAX_CHARS, STRATEGY_PRESETS, fitSteps } from '../../utils/journey';
 import { Strategy, StrategyStep, getStrategy, saveStrategy, emptyStep } from '../../utils/strategiesApi';
+import { AlwaysOnRules, StepRules } from '../journey/StepRules';
+
+/** A step's condition depends on the step before it, so every change refits them all. */
+const fit = (steps: StrategyStep[]) => fitSteps(steps, (s) => s.channel);
 
 // Single editable strategy: the voice + SMS sequence for new leads.
 // smsDisabledReason: the calling provider sends no SMS (Retell) — SMS steps stay
 // visible, marked as not sent with the reason, and no new ones can be added.
 export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDisabledReason }) => {
-  const [steps, setSteps] = useState<StrategyStep[]>([]);
+  const [steps, setStepsRaw] = useState<StrategyStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const setSteps = (next: (ss: StrategyStep[]) => StrategyStep[]) => setStepsRaw((ss) => fit(next(ss)));
 
   useEffect(() => {
     getStrategy()
-      .then((s: Strategy) => setSteps(s.steps || []))
+      .then((s: Strategy) => setStepsRaw(fit(s.steps || [])))
       .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   }, []);
@@ -35,6 +41,13 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
     setSteps((ss) => [...ss, { ...emptyStep(), channel, action: channel === 'voice' ? 'ai_call' : 'send_sms' }]);
   };
   const removeStep = (i: number) => setSteps((ss) => ss.filter((_, k) => k !== i));
+  const applyPreset = (key: string) => {
+    const preset = STRATEGY_PRESETS.find((p) => p.key === key);
+    if (!preset) return;
+    if (steps.length > 0 && !window.confirm(`Replace your ${steps.length} step(s) with the "${preset.name}" template? Nothing changes until you save.`)) return;
+    setError(null);
+    setSteps(() => preset.steps());
+  };
 
   const save = async () => {
     // Require at least one step.
@@ -51,7 +64,7 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
     setError(null);
     try {
       const s = await saveStrategy({ steps });
-      setSteps(s.steps || []);
+      setStepsRaw(fit(s.steps || []));
       toast.success('Strategy saved.');
     } catch (e: any) {
       toast.error(e.message);
@@ -82,6 +95,23 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
           <AlertTriangle className="w-3.5 h-3.5" /> {error}
         </div>
       )}
+      <div className="flex items-center gap-2 text-xs">
+        <LayoutTemplate className="w-3.5 h-3.5 text-slate-500" />
+        <select
+          value=""
+          onChange={(e) => applyPreset(e.target.value)}
+          className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 text-xs focus:outline-none focus:border-emerald-500"
+        >
+          <option value="">Start from a template…</option>
+          {STRATEGY_PRESETS.map((p) => (
+            <option key={p.key} value={p.key} title={p.description}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <span className="text-2xs text-slate-500 truncate">Templates fill the steps below; edit anything before saving.</span>
+      </div>
+
       {steps.length === 0 && <p className="text-xs text-slate-500">No steps yet — add at least one call or SMS below.</p>}
 
       {smsDisabledReason && steps.some((s) => s.channel === 'sms') && (
@@ -127,6 +157,7 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
               <option value="hours">hr</option>
               <option value="days">days</option>
             </select>
+            <span className="text-slate-500 text-xs">{i === 0 ? 'after the lead comes in' : 'after the step before'}</span>
 
             <div className="ml-auto flex items-center gap-1">
               <button type="button" onClick={() => move(i, -1)} className="text-slate-500 hover:text-slate-200 p-1"><ArrowUp className="w-3.5 h-3.5" /></button>
@@ -135,6 +166,14 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
             </div>
           </div>
 
+          <StepRules
+            channel={step.channel}
+            onlyIf={step.onlyIf}
+            voicemail={step.voicemail}
+            previous={steps[i - 1]?.channel}
+            onChange={(patch) => setStep(i, patch)}
+          />
+
           {step.channel === 'sms' ? (
             <textarea
               value={step.message || ''}
@@ -142,16 +181,27 @@ export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDi
               rows={2}
               readOnly={!!smsDisabledReason}
               title={smsDisabledReason}
-              placeholder="Message text… use {{firstName}} and {{brokerage}}"
+              placeholder="Message text… use {{firstName}}, {{brokerage}}, {{location}}"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
             />
           ) : (
-            <p className="text-xs text-slate-500 flex items-center gap-1.5 pl-7">
-              <Phone className="w-3 h-3" /> AI voice agent calls the lead and qualifies them.
-            </p>
+            <div className="space-y-1">
+              <textarea
+                value={step.context || ''}
+                onChange={(e) => setStep(i, { context: e.target.value.slice(0, CALL_CONTEXT_MAX_CHARS) })}
+                rows={1}
+                placeholder="Optional: why the AI is calling this time (e.g. second try, ask about financing)"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
+              />
+              <p className="text-2xs text-slate-500 flex items-center gap-1.5">
+                <Phone className="w-3 h-3" /> The AI calls and qualifies the lead, with this as its reason for calling. The next step waits until the call has ended.
+              </p>
+            </div>
           )}
         </div>
       ))}
+
+      <AlwaysOnRules />
 
       <div className="flex items-center gap-2 pt-1">
         <button

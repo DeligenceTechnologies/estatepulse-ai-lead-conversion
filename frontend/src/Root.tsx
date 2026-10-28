@@ -2,9 +2,13 @@ import React from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import App from './App';
 import { AgentApp } from './components/agent/AgentApp';
+import { CheckEmailPage } from './components/auth/CheckEmailPage';
+import { ForgotPasswordPage } from './components/auth/ForgotPasswordPage';
 import { LoginPage } from './components/auth/LoginPage';
+import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { SignupPage } from './components/auth/SignupPage';
+import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
 import { LandingPage } from './components/public/LandingPage';
 import { useAuth } from './context/AuthContext';
 
@@ -61,6 +65,10 @@ export const Root: React.FC = () => (
     <Route path="/" element={<Home />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/signup" element={<SignupPage />} />
+    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
+    <Route path="/check-email" element={<CheckEmailPage />} />
+    <Route path="/verify-email" element={<VerifyEmailPage />} />
     <Route
       path="*"
       element={

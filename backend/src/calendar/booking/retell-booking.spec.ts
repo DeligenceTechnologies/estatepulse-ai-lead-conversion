@@ -29,7 +29,7 @@ function authSetup(opts: { call?: Record<string, unknown> | null; config?: unkno
   const prisma = { call: { findFirst: vi.fn().mockResolvedValue(call) } };
   const settings = { activeConfig: vi.fn().mockResolvedValue(opts.config === undefined ? config : opts.config) };
   const retellCreds = { getCreds: vi.fn().mockResolvedValue(keys) };
-  const auth = new ToolAuthService(prisma as any, settings as any, {} as any, { get: () => 'test' } as any, retellCreds as any);
+  const auth = new ToolAuthService({} as any, settings as any, prisma as any, retellCreds as any, { get: () => 'test' } as any);
   return { auth, prisma };
 }
 

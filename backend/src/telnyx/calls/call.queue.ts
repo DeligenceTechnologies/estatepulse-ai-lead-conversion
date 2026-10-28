@@ -12,7 +12,16 @@ export class CallQueue {
   constructor(@InjectQueue(CALL_QUEUE) private readonly queue: Queue<CallJobData>) {}
 
   async enqueue(data: CallJobData, options: EnqueueCallOptions): Promise<string> {
-    const add = this.queue.add(CallJob.Dial, data, { jobId: `call-${sha256Hex(options.dedupeKey).slice(0, 40)}` });
+    return this.add(data, options.dedupeKey, 0);
+  }
+
+  /** A call at a set time (a callback). Kept in Redis, so it survives a restart. */
+  async schedule(data: CallJobData, at: Date, dedupeKey: string): Promise<string> {
+    return this.add(data, dedupeKey, Math.max(0, at.getTime() - Date.now()));
+  }
+
+  private async add(data: CallJobData, dedupeKey: string, delay: number): Promise<string> {
+    const add = this.queue.add(CallJob.Dial, data, { jobId: `call-${sha256Hex(dedupeKey).slice(0, 40)}`, ...(delay ? { delay } : {}) });
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new ServiceUnavailableException('The call queue is unavailable')), ENQUEUE_TIMEOUT_MS);

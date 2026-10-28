@@ -23,6 +23,7 @@ import { FollowupModule } from './followup/followup.module';
 import { OutreachModule } from './outreach/outreach.module';
 import { HistoryModule } from './history/history.module';
 import { RetellModule } from './retell/retell.module';
+import { DailySummaryModule } from './daily-summary/daily-summary.module';
 import { HealthController } from './health.controller';
 import {QueueModule} from "@/queue/queue.module";
 
@@ -52,6 +53,7 @@ import {QueueModule} from "@/queue/queue.module";
     OutreachModule,
     HistoryModule,
     RetellModule,
+    DailySummaryModule,
     QueueModule,
   ],
   controllers: [HealthController],

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
-import { telnyx } from './telnyx-api';
+import { isTelnyxKeyRejected, telnyx } from './telnyx-api';
+import { VoicemailService } from './voicemail/voicemail.service';
 
 /**
  * How long a dial rings before Telnyx gives up. Its default of 30s is too short
@@ -17,6 +18,7 @@ export class VoiceService {
   constructor(
     private readonly creds: TelnyxCredentialsService,
     config: ConfigService<IntegrationEnv, true>,
+    private readonly voicemail: VoicemailService,
   ) {
     this.publicUrl = (config.get('PUBLIC_API_URL', { infer: true }) ?? '').replace(/\/+$/, '');
   }
@@ -27,17 +29,28 @@ export class VoiceService {
     if (!c.fromNumber) throw new Error('No from number configured');
     const connectionId = await this.creds.ensureConnectionId(orgId, c);
     if (!connectionId) throw new Error('No Call Control application found on the Telnyx account for outbound calls');
-    const res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
-      method: 'POST',
-      body: JSON.stringify({
-        connection_id: connectionId,
-        to,
-        from: c.fromNumber,
-        timeout_secs: DIAL_TIMEOUT_SECS,
-        client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
-        ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
-      }),
-    });
+    // Tells a person from an answering machine, so the assistant never talks to a voicemail greeting.
+    // A per-call charge, so only where the organization keeps it on; the webhooks learn which from client_state.
+    const { detect } = await this.voicemail.settings(orgId);
+    let res: { data?: { call_control_id?: string } };
+    try {
+      res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
+        method: 'POST',
+        body: JSON.stringify({
+          connection_id: connectionId,
+          to,
+          from: c.fromNumber,
+          timeout_secs: DIAL_TIMEOUT_SECS,
+          ...(detect ? { answering_machine_detection: 'premium' } : {}),
+          client_state: Buffer.from(JSON.stringify({ ...clientState, amd: detect })).toString('base64'),
+          ...(this.publicUrl ? { webhook_url: `${this.publicUrl}/webhooks/telnyx/voice` } : {}),
+        }),
+      });
+    } catch (error) {
+      if (isTelnyxKeyRejected(error)) await this.creds.keyRejected(orgId).catch(() => undefined);
+      throw error;
+    }
+    await this.creds.keyAccepted(orgId, c).catch(() => undefined);
     return res.data ?? {};
   }
 }

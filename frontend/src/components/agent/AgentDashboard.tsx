@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Building2, CalendarClock, Flame, Loader2, RefreshCw, Users } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, Building2, CalendarClock, Flame, Loader2, MessageSquare, RefreshCw, Users } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
-import { getAgentDashboard, type AgentDashboard as Stats } from '../../utils/agentMeApi';
+import { formatDateTime } from '../../lib/datetime';
+import { getAgentDashboard, getMyConversations, type AgentDashboard as Stats, type ConversationRow } from '../../utils/agentMeApi';
+
+const RECENT_THREADS = 5;
 
 /**
  * One count. The number is whatever the server answered — including zero, which
@@ -33,12 +37,16 @@ const Card: React.FC<{
  */
 export const AgentDashboard: React.FC = () => {
   const { user, organization } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
+  const [threads, setThreads] = useState<ConversationRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setStats(await getAgentDashboard());
+      const [s, t] = await Promise.all([getAgentDashboard(), getMyConversations(RECENT_THREADS)]);
+      setStats(s);
+      setThreads(t);
       setError(null);
     } catch (e) {
       setError(messageFor(e));
@@ -113,6 +121,53 @@ export const AgentDashboard: React.FC = () => {
           hint="Everything currently in your name."
           icon={<Users className="w-4 h-4" />}
         />
+      </div>
+
+      {/* The chats that brought leads to this agent, newest first: the AI's
+          qualification and the booking, before the agent takes it from there. */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-emerald-400" />
+            Recent conversations
+          </h3>
+          <button
+            onClick={() => navigate('/conversations')}
+            className="text-xs text-emerald-400 font-semibold hover:text-emerald-300 cursor-pointer"
+          >
+            View all
+          </button>
+        </div>
+        {threads === null ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
+          </div>
+        ) : threads.length === 0 ? (
+          <p className="text-xs text-slate-500">No text conversations with your leads yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-800/80">
+            {threads.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/conversations?lead=${t.id}`)}
+                  className="w-full text-left py-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/40 rounded-lg px-2 -mx-2 cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-white truncate">{t.leadName}</div>
+                    <p className="text-xs text-slate-400 truncate">
+                      {t.lastMessageDirection === 'inbound' && <span className="text-emerald-400 font-semibold">↩ </span>}
+                      {t.lastMessageBody ?? ''}
+                    </p>
+                  </div>
+                  <span className="text-2xs text-slate-500 shrink-0">
+                    {t.lastMessageAt ? formatDateTime(t.lastMessageAt, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Said plainly rather than left looking broken: the counts are real, and

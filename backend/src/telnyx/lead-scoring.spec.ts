@@ -86,7 +86,7 @@ describe('LeadScoringService.onInsightsGenerated', () => {
     };
     const creds = { getCreds: vi.fn().mockResolvedValue({ publicKey: opts.publicKey ?? '' }) };
     const engine = { qualified: vi.fn() };
-    const service = new LeadScoringService(prisma as any, creds as any, {} as any, engine as any);
+    const service = new LeadScoringService(prisma as any, creds as any, {} as any, engine as any, { move: vi.fn(), quietly: vi.fn() } as any, {} as any);
     return { service, prisma, engine };
   }
 

@@ -15,7 +15,7 @@ function setup(retellActive: number, failure: Error = unique()) {
     },
     $transaction: vi.fn().mockRejectedValue(failure),
   };
-  return { svc: new TelnyxCredentialsService(prisma as any, {} as any), prisma };
+  return { svc: new TelnyxCredentialsService(prisma as any, {} as any, {} as any), prisma };
 }
 
 describe('TelnyxCredentialsService and the one-calling-provider index', () => {

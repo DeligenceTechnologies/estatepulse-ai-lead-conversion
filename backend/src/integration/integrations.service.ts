@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { IntegrationProvider, IntegrationStatus, type Integration } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad, sha256Hex } from '@/common/utils/crypto';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -12,6 +13,7 @@ const FORM_PROVIDERS: Record<string, IntegrationProvider> = {
   TALLY: IntegrationProvider.tally,
   TYPEFORM: IntegrationProvider.typeform,
 };
+const FORM_PROVIDER_LABEL: Partial<Record<IntegrationProvider, string>> = { tally: 'Tally', typeform: 'Typeform' };
 const ADAPTER_CODE: Partial<Record<IntegrationProvider, string>> = { tally: 'TALLY', typeform: 'TYPEFORM' };
 
 export interface ProviderCredentialSummary {
@@ -37,6 +39,7 @@ export class IntegrationsService {
     private readonly prisma: PrismaService,
     private readonly secrets: SecretBoxService,
     private readonly registry: ProviderRegistry,
+    private readonly connectionAlerts: ConnectionAlertService,
   ) {}
 
   async connect(orgId: string, providerCode: string, apiKey: string, label?: string) {
@@ -175,11 +178,30 @@ export class IntegrationsService {
     return { apiKey: this.decrypt(row), provider: ADAPTER_CODE[row.provider]! };
   }
 
-  markInvalid(id: string, code: string) {
-    return this.prisma.integration.update({
-      where: { id },
-      data: { status: IntegrationStatus.invalid, lastErrorAt: new Date(), lastErrorCode: code },
+  /**
+   * active -> invalid. The owners are emailed once, on the transition: a dead
+   * key hit by every webhook repair or form listing does not alert again.
+   */
+  async markInvalid(id: string, code: string) {
+    const brokenAt = new Date();
+    const changed = await this.prisma.integration.updateMany({
+      where: { id, status: IntegrationStatus.active },
+      data: { status: IntegrationStatus.invalid, lastErrorAt: brokenAt, lastErrorCode: code },
     });
+    const row = await this.prisma.integration.findUniqueOrThrow({ where: { id } });
+    if (changed.count === 1) {
+      const label = FORM_PROVIDER_LABEL[row.provider] ?? row.provider;
+      this.connectionAlerts.connectionBroken({
+        orgId: row.orgId,
+        connectionId: row.id,
+        providerLabel: label,
+        account: row.accountEmail ?? row.accountName,
+        impact: `New ${label} form submissions are not reaching your lead sources.`,
+        reconnectPath: '/integrations',
+        brokenAt,
+      });
+    }
+    return row;
   }
 
   toHttp(error: unknown) {

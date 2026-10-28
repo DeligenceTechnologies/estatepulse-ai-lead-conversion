@@ -17,15 +17,36 @@ import { LeadWatcherService } from './lead-watcher.service';
 import { NumbersService } from './numbers.service';
 import { AssistantController, LeadScoringController, PortalLeadsController, StrategyController } from './portal.controller';
 import { SmsService } from './sms.service';
+import { SmsConversationController } from './sms/sms-conversation.controller';
+import { SmsConversationService } from './sms/sms-conversation.service';
+import { SmsIntentService } from './sms/sms-intent.service';
 import { StrategyStoreService } from './strategy-store.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TelnyxWebhookController } from './telnyx-webhook.controller';
 import { TelnyxController } from './telnyx.controller';
 import { VoiceService } from './voice.service';
+import { AssistantToolAuth } from './tools/assistant-tool-auth.service';
+import { CallOutcomeToolController, CallToolsSettingsController } from './tools/call-tools.controller';
+import { CallToolsService } from './tools/call-tools.service';
+import { CallbackService } from './tools/callback.service';
+import { OutcomeService } from './tools/outcome.service';
+import { VoicemailController } from './voicemail/voicemail.controller';
+import { VoicemailService } from './voicemail/voicemail.service';
 
 @Module({
   imports: [forwardRef(() => FollowupModule)],
-  controllers: [TelnyxController, AssistantController, StrategyController, LeadScoringController, PortalLeadsController, TelnyxWebhookController],
+  controllers: [
+    TelnyxController,
+    AssistantController,
+    StrategyController,
+    LeadScoringController,
+    PortalLeadsController,
+    TelnyxWebhookController,
+    SmsConversationController,
+    VoicemailController,
+    CallOutcomeToolController,
+    CallToolsSettingsController,
+  ],
   providers: [
     TelnyxCredentialsService,
     ActivityService,
@@ -44,12 +65,18 @@ import { VoiceService } from './voice.service';
     RetellCallingProvider,
     RetellCredentialsService,
     SmsService,
+    SmsConversationService,
+    SmsIntentService,
     StrategyStoreService,
     TelnyxCallingProvider,
     VoiceService,
+    VoicemailService,
+    AssistantToolAuth,
+    CallToolsService,
+    CallbackService,
+    OutcomeService,
   ],
   exports: [
-    CallingProviders,
     CallQueue,
     CallSlots,
     EngineService,
@@ -58,6 +85,9 @@ import { VoiceService } from './voice.service';
     ActivityService,
     StrategyStoreService,
     AssistantService,
+    AssistantToolAuth,
+    SmsConversationService,
+    CallingProviders,
     LeadScoringService,
     RetellCredentialsService,
   ],

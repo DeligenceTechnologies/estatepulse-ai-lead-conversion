@@ -1,4 +1,7 @@
 import { apiFetch } from '../lib/api';
+import type { ConversationRow, MessageRow } from './historyApi';
+
+export type { ConversationRow, MessageRow };
 
 /**
  * The signed-in agent's own view of their work.
@@ -53,6 +56,18 @@ export const getMyLeads = (): Promise<AgentLead[]> =>
 
 export const getMyLead = (leadId: string): Promise<AgentLeadDetail> =>
   apiFetch<AgentLeadDetail>(`/agents/me/leads/${leadId}`, { auth: true });
+
+/**
+ * SMS threads of the leads assigned to this agent, the AI's chat included,
+ * newest first. A lead appears once it is assigned to them and is gone the
+ * moment it is reassigned.
+ */
+export const getMyConversations = (limit?: number): Promise<ConversationRow[]> =>
+  apiFetch<ConversationRow[]>(`/agents/me/conversations${limit ? `?limit=${limit}` : ''}`, { auth: true });
+
+/** The full thread of one of this agent's leads; any other lead answers not found. */
+export const getMyLeadMessages = (leadId: string): Promise<MessageRow[]> =>
+  apiFetch<MessageRow[]>(`/agents/me/leads/${leadId}/messages`, { auth: true });
 
 /** "Ada Lovelace", or the email, or a dash — never a fabricated placeholder. */
 export const leadName = (l: AgentLead): string => {

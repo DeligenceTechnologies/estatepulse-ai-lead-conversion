@@ -57,7 +57,10 @@ interface AuthContextType {
    */
   explicitLogout: boolean;
   login: (email: string, password: string, keepSignIn: boolean) => Promise<void>;
-  signup: (input: RegisterInput) => Promise<void>;
+  /** Resolves to `verificationRequired` when the owner must confirm their email before a session starts. */
+  signup: (input: RegisterInput) => Promise<{ verificationRequired: boolean }>;
+  /** Opens the emailed verification link: verifies the address and signs in. */
+  verifyEmail: (token: string) => Promise<void>;
   /** Re-reads /auth/me, e.g. after the user's role or profile changed. */
   refreshSession: () => Promise<void>;
   logout: () => void;
@@ -170,8 +173,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signup: AuthContextType['signup'] = async (input) => {
-    await startSession(await api.register(input), false);
+    const result = await api.register(input);
+    if ('verificationRequired' in result) return { verificationRequired: true };
+    await startSession(result, false);
     toast.success('Workspace created. You are its owner.');
+    return { verificationRequired: false };
+  };
+
+  const verifyEmail: AuthContextType['verifyEmail'] = async (token) => {
+    const data = await startSession(await api.verifyEmail(token), false);
+    toast.success(`Email confirmed. Welcome, ${displayName(data)}.`);
   };
 
   const refreshSession: AuthContextType['refreshSession'] = async () => {
@@ -273,6 +284,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         logoutAll,
         changePassword,
+        verifyEmail,
         retryRestore,
       }}
     >

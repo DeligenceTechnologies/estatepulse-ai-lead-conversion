@@ -100,9 +100,6 @@ export interface AssistantConfig {
   disable_dtmf: boolean;
   noise_suppression: NoiseSuppression;
   fallback_destination: string;
-  /** Answering-machine detection: skip the pitch when a machine picks up. */
-  voicemail_detection: boolean;
-  voicemail_action: VoicemailAction;
   post_call_processing: boolean;
   enabled_features: string[];
   messaging_profile_id: string;
@@ -115,7 +112,6 @@ export interface AssistantConfig {
 }
 
 export type NoiseSuppression = 'disabled' | 'krisp' | 'aicoustics' | 'deepfilternet';
-export type VoicemailAction = 'hangup' | 'leave_message';
 
 export const NOISE_SUPPRESSION_OPTIONS: Array<{ value: NoiseSuppression; label: string }> = [
   { value: 'disabled', label: 'Off' },
@@ -403,9 +399,10 @@ export interface LeadFlowStep {
   channel: string;   // 'sms' | 'voice'
   action: string;    // 'send_sms' | 'ai_call' | ...
   after: { value: number; unit: string };
-  /** 'skipped': an SMS step for a provider that sends no SMS (Retell). */
   state: 'done' | 'failed' | 'current' | 'pending' | 'skipped';
-  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Call failed' | 'Not sent' | null
+  outcome: string | null; // 'SMS sent' | 'SMS failed' | 'Answered' | 'No answer' | 'Voicemail' | 'Skipped' | 'Waiting' | …
+  /** Why a step was skipped or is waiting, from the step log. */
+  detail?: string | null;
 }
 export interface LeadFlow {
   phase: 'not_started' | 'strategy' | 'exited' | 'done';
