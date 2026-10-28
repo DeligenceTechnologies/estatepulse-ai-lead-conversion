@@ -213,11 +213,8 @@ export class RetellAccountService {
     return { phoneNumber: n.phone_number };
   }
 
-  /** Brings a number from the organization's own SIP trunk. Telnyx trunks are refused: an organization uses Telnyx or Retell, not both. */
+  /** Brings a number from the organization's own SIP trunk, Telnyx included: under Retell, Telnyx is only the carrier. */
   async importNumber(orgId: string, input: { phoneNumber: string; terminationUri: string; username?: string; password?: string }) {
-    if (/telnyx/i.test(input.terminationUri)) {
-      throw new AppError('VALIDATION_ERROR', 'Telnyx numbers cannot be imported into Retell: an organization calls through Telnyx or Retell, not both.');
-    }
     const c = await this.requireAgent(orgId);
     const n = await retell<{ phone_number: string }>(c.apiKey, '/import-phone-number', {
       method: 'POST',

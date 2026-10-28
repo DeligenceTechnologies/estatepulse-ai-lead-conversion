@@ -199,12 +199,6 @@ describe('RetellAccountService', () => {
     expect(sent(2)).toMatchObject({ url: 'https://api.retellai.com/delete-retell-llm/llm_1', method: 'DELETE' });
   });
 
-  it('refuses to import a Telnyx number: an organization uses Telnyx or Retell, not both', async () => {
-    const svc = new RetellAccountService(prisma() as any, creds({ agentId: 'agent_1', llmId: 'llm_1' }) as any, config as any, slots as any);
-    await expect(svc.importNumber(ORG, { phoneNumber: '+12025550100', terminationUri: 'sip.telnyx.com' })).rejects.toThrow('Telnyx numbers cannot be imported');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('refuses keys from two different Retell workspaces', async () => {
     fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1' })).mockResolvedValueOnce(json({ org_id: 'ws_2' }));
     const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);

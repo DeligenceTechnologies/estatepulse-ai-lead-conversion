@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, Check, CheckCircle2, Loader2, Phone, PhoneCall, Plus, Unplug } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, CheckCircle2, KeyRound, Loader2, Phone, PhoneCall, Plus, Unplug } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { confirmToast } from '../../lib/toast';
 import { getTelnyxStatus } from '../../utils/assistantApi';
@@ -139,8 +139,8 @@ const SwitchBox: React.FC<{ to: CallingProviderName; onSwitched: () => void }> =
   );
 };
 
-/** API key + webhook key. Retell signs webhooks and tool calls only with the key marked as the webhook key. */
-const ConnectForm: React.FC<{ onConnected: () => void }> = ({ onConnected }) => {
+/** API key + webhook key. Retell signs webhooks and tool calls only with the key carrying its “Webhook” badge. With onCancel it edits a connected account's keys. */
+const ConnectForm: React.FC<{ onConnected: () => void; onCancel?: () => void }> = ({ onConnected, onCancel }) => {
   const [apiKey, setApiKey] = useState('');
   const [webhookKey, setWebhookKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -151,7 +151,7 @@ const ConnectForm: React.FC<{ onConnected: () => void }> = ({ onConnected }) => 
     setError(null);
     try {
       const s = await connectRetell(apiKey.trim(), webhookKey.trim());
-      toast.success(s.workspace ? `Retell connected (${s.workspace}).` : 'Retell connected.');
+      toast.success(onCancel ? 'Retell keys updated.' : s.workspace ? `Retell connected (${s.workspace}).` : 'Retell connected.');
       onConnected();
     } catch (e) {
       setError(retellMessage(e));
@@ -170,14 +170,19 @@ const ConnectForm: React.FC<{ onConnected: () => void }> = ({ onConnected }) => 
         <label className="block text-xs font-semibold text-slate-300 mb-1">Webhook key</label>
         <input type="password" autoComplete="off" className={input} value={webhookKey} onChange={(e) => setWebhookKey(e.target.value)} />
         <p className="text-2xs text-slate-500 mt-1 leading-relaxed">
-          In Retell → Settings → API Keys, choose “Set as webhook key” on one key and paste that key here. Retell signs its
-          webhooks and booking-tool calls with that key only. It may be the same key as above.
+          In Retell → Settings → API Keys, copy the key with the “Webhook” badge next to it and paste it here. Retell signs
+          its webhooks and booking-tool calls with that key only. It may be the same key as above.
         </p>
       </div>
       {error && <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">{error}</div>}
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <button type="button" className={secondary} onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+        )}
         <button type="button" className={primary} disabled={busy || !apiKey.trim() || !webhookKey.trim()} onClick={() => void connect()}>
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Connect Retell
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} {onCancel ? 'Save keys' : 'Connect Retell'}
         </button>
       </div>
     </div>
@@ -354,12 +359,12 @@ const NumbersSection: React.FC<{ status: RetellStatus; onChange: () => void }> =
       {showImport && (
         <div className="space-y-2 bg-slate-950/60 border border-slate-800 rounded-xl p-3">
           <p className="text-2xs text-slate-400 leading-relaxed">
-            Import a number from your own SIP trunk. Telnyx numbers cannot be imported: an organization calls through Telnyx or
-            Retell, not both.
+            Import a number from your own SIP trunk (Telnyx, Twilio or another carrier) with its termination URI and SIP
+            credentials.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input className={input} placeholder="+12025550123" value={sip.phoneNumber} onChange={(e) => setSip({ ...sip, phoneNumber: e.target.value })} />
-            <input className={input} placeholder="Termination URI, e.g. trunk.example.com" value={sip.terminationUri} onChange={(e) => setSip({ ...sip, terminationUri: e.target.value })} />
+            <input className={input} placeholder="Termination URI, e.g. sip.telnyx.com" value={sip.terminationUri} onChange={(e) => setSip({ ...sip, terminationUri: e.target.value })} />
             <input className={input} placeholder="SIP username (optional)" autoComplete="off" value={sip.username} onChange={(e) => setSip({ ...sip, username: e.target.value })} />
             <input className={input} type="password" placeholder="SIP password (optional)" autoComplete="off" value={sip.password} onChange={(e) => setSip({ ...sip, password: e.target.value })} />
           </div>
@@ -377,6 +382,7 @@ const NumbersSection: React.FC<{ status: RetellStatus; onChange: () => void }> =
 const RetellAccountCard: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
   const [status, setStatus] = useState<RetellStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingKeys, setEditingKeys] = useState(false);
 
   const load = useCallback(() => {
     getRetellStatus()
@@ -410,10 +416,17 @@ const RetellAccountCard: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
             <p className="text-xs text-slate-400">AI voice calls on your own Retell workspace (no SMS)</p>
           </div>
         </div>
-        {status?.connected && !status.active && (
-          <button type="button" className={secondary} onClick={() => void disconnect()}>
-            <Unplug className="w-3.5 h-3.5" /> Disconnect
-          </button>
+        {status?.connected && !editingKeys && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" className={secondary} onClick={() => setEditingKeys(true)}>
+              <KeyRound className="w-3.5 h-3.5" /> Update keys
+            </button>
+            {!status.active && (
+              <button type="button" className={secondary} onClick={() => void disconnect()}>
+                <Unplug className="w-3.5 h-3.5" /> Disconnect
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -432,11 +445,19 @@ const RetellAccountCard: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
         )
       ) : !status.connected ? (
         <ConnectForm onConnected={load} />
+      ) : editingKeys ? (
+        <ConnectForm
+          onConnected={() => {
+            setEditingKeys(false);
+            load();
+          }}
+          onCancel={() => setEditingKeys(false)}
+        />
       ) : (
         <div className="space-y-4">
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1">
             <Ok ok={status.active} yes="Your organization calls through Retell" no="Set up — not in use until you switch to Retell above" />
-            <Ok ok={status.hasWebhookKey} yes="Webhook key saved" no="No webhook key — reconnect with it" />
+            <Ok ok={status.hasWebhookKey} yes="Webhook key saved" no="No webhook key — add it with Update keys" />
             <Ok ok={!!status.agentId} yes="AI agent created" no="No agent yet — create one below" />
             <Ok ok={!!status.fromNumber} yes={`Calls come from ${status.fromNumber}`} no="No number chosen for calls yet" />
           </div>

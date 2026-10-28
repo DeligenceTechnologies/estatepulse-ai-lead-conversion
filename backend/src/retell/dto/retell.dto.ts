@@ -11,7 +11,7 @@ export class RetellCredentialsDto {
   @MaxLength(500)
   apiKey!: string;
 
-  /** The key marked "Set as webhook key" in Retell: the only one its signatures verify against. */
+  /** The key carrying the "Webhook" badge in Retell → Settings → API Keys: the only one its signatures verify against. */
   @Transform(trim)
   @IsString()
   @IsNotEmpty()
