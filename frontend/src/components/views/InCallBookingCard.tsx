@@ -57,7 +57,7 @@ export const InCallBookingCard: React.FC = () => {
         ? 'Calendly has not granted booking permission yet: add availability:read and scheduled_events:write to your Calendly OAuth app, set CALENDLY_BOOKING_SCOPES=1 in the backend .env, restart, then reconnect Calendly in Settings → Calendly.'
         : !voice.connected || !voice.hasAgent
           ? voice.provider === 'retell'
-            ? 'Connect Retell and create your AI agent first (Settings → Calling).'
+            ? 'Connect Retell and create your AI agent first (Settings → Calling → Retell → Manage connection).'
             : 'Connect Telnyx and create your AI assistant first.'
           : status.eventTypes.length === 0
             ? 'No round-robin or multi-pool event type found in Calendly. Create one (Calendly Teams plan) with your agents in a rotating host pool.'

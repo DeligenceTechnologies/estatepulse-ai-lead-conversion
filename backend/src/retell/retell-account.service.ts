@@ -10,11 +10,66 @@ import { CallSlots } from '@/telnyx/calls/call-slots';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { callToolsSettings, withCallToolsSection } from '@/telnyx/tools/call-tools';
 import { POST_CALL_ANALYSIS_DATA } from './retell-analysis';
-import { retell, storageFor } from './retell-api';
+import { editRetellLlm, retell, storageFor, type RetellLlmTool } from './retell-api';
 import { RetellCredentialsService, type RetellCreds } from './retell-credentials.service';
 import { retellEnabled } from './retell-enabled.guard';
 import { RetellSmsService, WEBHOOK_PATH } from './retell-sms.service';
+import { OUR_RETELL_TOOLS, isOurRetellTool } from './retell-tools';
 import { RetellToolsService } from './retell-tools.service';
+
+/** A JSON object of string values, anything else dropped. */
+function stringMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([k, v]) => k.trim() && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+      .map(([k, v]) => [k.trim(), String(v)]),
+  );
+}
+
+/** A tool as the settings page shows it: ours without their secrets (the bearer token in their headers), the organization's as they are. */
+function toolView(t: RetellLlmTool): RetellToolView {
+  const base = { type: String(t.type ?? ''), name: String(t.name ?? ''), ...(typeof t.description === 'string' ? { description: t.description } : {}) };
+  if (isOurRetellTool(t)) return { ...base, ...(typeof t.url === 'string' ? { url: t.url } : {}), managed: true };
+  return { ...t, ...base, managed: false } as RetellToolView;
+}
+
+const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** One of the organization's tools, checked field by field; anything else is refused with what is wrong. */
+function sanitizeTool(raw: unknown): RetellLlmTool & { name: string } {
+  const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const type = String(t.type ?? '');
+  const name = String(t.name ?? '').trim();
+  if (!TOOL_NAME.test(name)) throw new AppError('VALIDATION_ERROR', 'Each tool needs a name of letters, numbers, hyphens or underscores (up to 64).');
+  const description = typeof t.description === 'string' ? t.description.slice(0, 2000) : undefined;
+  const common = { type, name, ...(description ? { description } : {}) };
+  if (type === 'end_call' || type === 'press_digit') return common;
+  if (type === 'custom') {
+    const url = String(t.url ?? '').trim();
+    if (!/^https?:\/\/\S+$/.test(url)) throw new AppError('VALIDATION_ERROR', `Tool “${name}” needs an http(s) URL.`);
+    const method = String(t.method ?? 'POST').toUpperCase();
+    if (!METHODS.has(method)) throw new AppError('VALIDATION_ERROR', `Tool “${name}”: unknown method ${method}.`);
+    const parameters = t.parameters && typeof t.parameters === 'object' && !Array.isArray(t.parameters) ? t.parameters : undefined;
+    const timeout = typeof t.timeout_ms === 'number' && t.timeout_ms >= 1000 && t.timeout_ms <= 600_000 ? Math.round(t.timeout_ms) : undefined;
+    return { ...common, url, method, headers: stringMap(t.headers), ...(parameters ? { parameters } : {}), ...(timeout ? { timeout_ms: timeout } : {}) };
+  }
+  if (type === 'transfer_call') {
+    const d = (t.transfer_destination ?? {}) as Record<string, unknown>;
+    const destination =
+      d.type === 'inferred' && typeof d.prompt === 'string' && d.prompt.trim()
+        ? { type: 'inferred', prompt: d.prompt.trim().slice(0, 2000) }
+        : typeof d.number === 'string' && /^\+[1-9][0-9]{6,14}$/.test(d.number.trim())
+          ? { type: 'predefined', number: d.number.trim() }
+          : null;
+    if (!destination) throw new AppError('VALIDATION_ERROR', `Tool “${name}” needs a number to transfer to, in E.164 format (e.g. +12025550123).`);
+    const o = (t.transfer_option ?? {}) as Record<string, unknown>;
+    const option = o.type === 'warm_transfer' ? { type: 'warm_transfer' } : { type: 'cold_transfer' };
+    return { ...common, transfer_destination: destination, transfer_option: option };
+  }
+  throw new AppError('VALIDATION_ERROR', `Tool “${name}”: “${type}” is not a kind this page can add. Build it in the Retell dashboard.`);
+}
 
 /** Telnyx's default call length (1800 s), so an organization that switches keeps the same ceiling. */
 const DEFAULT_MAX_CALL_MS = 1_800_000;
@@ -25,9 +80,25 @@ const END_CALL_TOOL = {
   description: 'End the call. Use it right after saying goodbye: once the conversation is complete, the caller is not interested, or the caller asks to end the call.',
 };
 
+/** A tool on the agent's Retell LLM. One of ours (booking, callbacks, outcomes) is shown without its secrets and cannot be edited here. */
+export interface RetellToolView {
+  type: string;
+  name: string;
+  description?: string;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  parameters?: unknown;
+  transfer_destination?: unknown;
+  transfer_option?: unknown;
+  timeout_ms?: number;
+  managed: boolean;
+}
+
 export interface RetellAgentView {
   agentId: string;
   llmId: string;
+  name: string;
   prompt: string;
   greeting: string;
   voiceId: string;
@@ -35,10 +106,18 @@ export interface RetellAgentView {
   maxCallSeconds: number;
   voicemailHangup: boolean;
   recordCalls: boolean;
+  /** Retell analyses each finished call (summary, our qualification fields) and sends call_analyzed. */
+  postCallProcessing: boolean;
+  /** The LLM's default dynamic variables: {{key}} in the prompt when a call does not supply the key. */
+  dynamicVariables: Record<string, string>;
+  tools: RetellToolView[];
 }
 
 export interface RetellAgentPatch {
+  name?: string;
   prompt?: string;
+  postCallProcessing?: boolean;
+  dynamicVariables?: Record<string, string>;
   greeting?: string;
   voiceId?: string;
   language?: string;
@@ -111,8 +190,18 @@ export class RetellAccountService implements OnApplicationBootstrap {
     await this.sms.refreshUrls(c);
   }
 
-  /** Both keys must belong to one workspace: the API key places calls, the webhook key proves Retell's deliveries. */
-  async verifyKeys(apiKey: string, webhookKey: string): Promise<{ workspace: string }> {
+  /**
+   * Both keys must belong to one workspace: the API key places calls, the
+   * webhook key proves Retell's deliveries. On first connect both are given;
+   * later either one alone replaces just that key, checked against the one on
+   * file.
+   */
+  async verifyKeys(orgId: string, patch: { apiKey?: string; webhookKey?: string }): Promise<{ workspace: string }> {
+    const current = await this.creds.getCreds(orgId);
+    const apiKey = patch.apiKey || current?.apiKey || '';
+    const webhookKey = patch.webhookKey || current?.webhookKey || '';
+    if (!patch.apiKey && !patch.webhookKey) throw new AppError('VALIDATION_ERROR', 'Enter the API key, the webhook key, or both.');
+    if (!apiKey || !webhookKey) throw new AppError('VALIDATION_ERROR', 'Both the API key and the webhook key are needed to connect Retell.');
     const info = async (key: string, which: string) => {
       try {
         return await retell<{ org_id?: string; org_name?: string }>(key, '/get-api-key-info');
@@ -126,6 +215,48 @@ export class RetellAccountService implements OnApplicationBootstrap {
       throw new AppError('VALIDATION_ERROR', 'The API key and the webhook key belong to different Retell workspaces.');
     }
     return { workspace: api.org_name ?? '' };
+  }
+
+  /** The voice agents on the workspace; `current` marks the one the organization uses. */
+  async listAgents(orgId: string): Promise<{ agentId: string; name: string; current: boolean }[]> {
+    const c = await this.requireCreds(orgId);
+    type Item = { agent_id: string; agent_name?: string; channel?: string; is_suspended?: boolean };
+    const { items = [] } = await retell<{ items?: Item[] }>(c.apiKey, '/v2/list-agents?limit=200', { method: 'POST', body: JSON.stringify({}) });
+    return items
+      .filter((a) => a && typeof a.agent_id === 'string' && a.channel !== 'chat' && !a.is_suspended)
+      .map((a) => ({ agentId: a.agent_id, name: a.agent_name || a.agent_id, current: a.agent_id === c.agentId }));
+  }
+
+  /**
+   * An agent built in the Retell dashboard becomes the organization's: it must
+   * run on a Retell LLM (the app edits that LLM's prompt and puts its tools on
+   * it), and it is pointed at our webhook and asked for our analysis fields.
+   * Its prompt, voice and the rest are left as they are.
+   */
+  async useAgent(orgId: string, agentId: string): Promise<RetellAgentView> {
+    const c = await this.requireCreds(orgId);
+    if (!this.publicUrl) throw new AppError('CONFLICT', 'PUBLIC_API_URL is not configured on the server, so Retell could not reach us.');
+    const agent = await retell<{ agent_id?: string; response_engine?: { type?: string; llm_id?: string } }>(c.apiKey, `/get-agent/${encodeURIComponent(agentId)}`);
+    const engine = agent.response_engine;
+    if (engine?.type !== 'retell-llm' || !engine.llm_id) {
+      throw new AppError('VALIDATION_ERROR', 'That agent does not run on a Retell LLM (single prompt). EstatePulse can only use single-prompt agents, whose prompt it edits here.');
+    }
+    if (agentId === c.agentId) return (await this.getAgent(orgId))!;
+    await retell(c.apiKey, `/update-agent/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        webhook_url: `${this.publicUrl}${WEBHOOK_PATH}`,
+        webhook_events: ['call_started', 'call_ended', 'call_analyzed'],
+        post_call_analysis_data: POST_CALL_ANALYSIS_DATA,
+        enable_dnc_detection: true,
+        data_storage_setting: storageFor(await this.recordsCalls(orgId)),
+      }),
+    });
+    await this.creds.save(orgId, { agentId, llmId: engine.llm_id });
+    await this.tools.provisionNow(orgId).catch((error) => this.logger.warn(`Retell call tools for org ${orgId}: ${(error as Error).message}`));
+    if (c.fromNumber) await this.routeNumber(c.apiKey, c.fromNumber, agentId).catch((error) => this.logger.warn(`routing ${c.fromNumber} to agent ${agentId}: ${(error as Error).message}`));
+    this.logger.log(`org ${orgId} now uses Retell agent ${agentId} (LLM ${engine.llm_id})`);
+    return (await this.getAgent(orgId))!;
   }
 
   async listVoices(orgId: string) {
@@ -143,7 +274,7 @@ export class RetellAccountService implements OnApplicationBootstrap {
   }
 
   /** Creates the Retell LLM and the voice agent on it, and keeps their ids. Replaces nothing that exists. */
-  async createAgent(orgId: string, input: { voiceId?: string; language?: string }): Promise<RetellAgentView> {
+  async createAgent(orgId: string, input: { name?: string; voiceId?: string; language?: string }): Promise<RetellAgentView> {
     const c = await this.requireCreds(orgId);
     if (c.agentId) throw new AppError('CONFLICT', 'This Retell account already has an agent.');
     if (!this.publicUrl) throw new AppError('CONFLICT', 'PUBLIC_API_URL is not configured on the server, so Retell could not reach us.');
@@ -165,7 +296,7 @@ export class RetellAccountService implements OnApplicationBootstrap {
       agent = await retell<{ agent_id: string }>(c.apiKey, '/create-agent', {
         method: 'POST',
         body: JSON.stringify({
-          agent_name: DEFAULT_TEMPLATE.name,
+          agent_name: input.name?.trim() || DEFAULT_TEMPLATE.name,
           response_engine: { type: 'retell-llm', llm_id: llm.llm_id },
           voice_id: voiceId,
           language: input.language || 'en-US',
@@ -185,6 +316,7 @@ export class RetellAccountService implements OnApplicationBootstrap {
     await this.creds.save(orgId, { agentId: agent.agent_id, llmId: llm.llm_id });
     // The callback and outcome tools go on the new LLM now; a failure here is retried before the first call.
     await this.tools.provisionNow(orgId).catch((error) => this.logger.warn(`Retell call tools for org ${orgId}: ${(error as Error).message}`));
+    if (c.fromNumber) await this.routeNumber(c.apiKey, c.fromNumber, agent.agent_id).catch((error) => this.logger.warn(`routing ${c.fromNumber} to the new agent: ${(error as Error).message}`));
     return this.getAgent(orgId) as Promise<RetellAgentView>;
   }
 
@@ -196,9 +328,11 @@ export class RetellAccountService implements OnApplicationBootstrap {
       retell<any>(c.apiKey, `/get-retell-llm/${c.llmId}`),
       this.recordsCalls(orgId),
     ]);
+    const events: string[] = Array.isArray(agent.webhook_events) ? agent.webhook_events : [];
     return {
       agentId: c.agentId,
       llmId: c.llmId,
+      name: agent.agent_name ?? '',
       prompt: llm.general_prompt ?? '',
       greeting: llm.begin_message ?? '',
       voiceId: agent.voice_id ?? '',
@@ -206,7 +340,29 @@ export class RetellAccountService implements OnApplicationBootstrap {
       maxCallSeconds: Math.round((agent.max_call_duration_ms ?? DEFAULT_MAX_CALL_MS) / 1000),
       voicemailHangup: agent.voicemail_option?.action?.type === 'hangup',
       recordCalls: record,
+      postCallProcessing: events.includes('call_analyzed') && Array.isArray(agent.post_call_analysis_data) && agent.post_call_analysis_data.length > 0,
+      dynamicVariables: stringMap(llm.default_dynamic_variables),
+      tools: ((llm.general_tools ?? []) as RetellLlmTool[]).map(toolView),
     };
+  }
+
+  /**
+   * Replaces the agent's own tools on its LLM. Ours (booking, callbacks,
+   * outcomes) stay as they are and cannot be named by the organization's.
+   * Only the tool kinds the editor offers are accepted, each checked here so
+   * nothing malformed reaches Retell.
+   */
+  async setTools(orgId: string, tools: unknown[]): Promise<RetellAgentView> {
+    const c = await this.requireAgent(orgId);
+    const own = tools.map(sanitizeTool);
+    const names = new Set<string>();
+    for (const t of own) {
+      if (OUR_RETELL_TOOLS.has(t.name)) throw new AppError('VALIDATION_ERROR', `“${t.name}” is a tool EstatePulse manages; choose another name.`);
+      if (names.has(t.name)) throw new AppError('VALIDATION_ERROR', `Two tools are named “${t.name}”; names must be unique.`);
+      names.add(t.name);
+    }
+    await editRetellLlm(c.apiKey, c.llmId, (current) => ({ general_tools: [...current.filter(isOurRetellTool), ...own] }));
+    return (await this.getAgent(orgId))!;
   }
 
   async updateAgent(orgId: string, patch: RetellAgentPatch): Promise<RetellAgentView> {
@@ -214,9 +370,16 @@ export class RetellAccountService implements OnApplicationBootstrap {
     const llm: Record<string, unknown> = {};
     if (patch.prompt != null) llm.general_prompt = await this.withCallTools(orgId, c.llmId, await this.withBooking(orgId, patch.prompt));
     if (patch.greeting != null) llm.begin_message = patch.greeting;
+    if (patch.dynamicVariables != null) llm.default_dynamic_variables = stringMap(patch.dynamicVariables);
     if (Object.keys(llm).length) await retell(c.apiKey, `/update-retell-llm/${c.llmId}`, { method: 'PATCH', body: JSON.stringify(llm) });
 
     const agent: Record<string, unknown> = {};
+    if (patch.name != null && patch.name.trim()) agent.agent_name = patch.name.trim();
+    if (patch.postCallProcessing != null) {
+      // Off: Retell neither analyses the call nor sends call_analyzed, so nothing is scored; on: our fields and the event come back.
+      agent.webhook_events = patch.postCallProcessing ? ['call_started', 'call_ended', 'call_analyzed'] : ['call_started', 'call_ended'];
+      agent.post_call_analysis_data = patch.postCallProcessing ? POST_CALL_ANALYSIS_DATA : [];
+    }
     if (patch.voiceId != null) agent.voice_id = patch.voiceId;
     if (patch.language != null) agent.language = patch.language;
     if (patch.maxCallSeconds != null) agent.max_call_duration_ms = Math.round(patch.maxCallSeconds * 1000);
@@ -250,9 +413,9 @@ export class RetellAccountService implements OnApplicationBootstrap {
     }));
   }
 
-  /** Buys a Retell number (US or Canada) already routed to the organization's agent. */
+  /** Buys a Retell number (US or Canada), routed to the organization's agent once there is one. */
   async buyNumber(orgId: string, input: { areaCode?: number; countryCode?: 'US' | 'CA'; tollFree?: boolean }) {
-    const c = await this.requireAgent(orgId);
+    const c = await this.requireCreds(orgId);
     const n = await retell<{ phone_number: string }>(c.apiKey, '/create-phone-number', {
       method: 'POST',
       body: JSON.stringify({
@@ -260,7 +423,7 @@ export class RetellAccountService implements OnApplicationBootstrap {
         country_code: input.countryCode ?? 'US',
         ...(input.tollFree ? { toll_free: true } : {}),
         nickname: 'EstatePulse',
-        outbound_agents: [{ agent_id: c.agentId, weight: 1 }],
+        ...(c.agentId ? { outbound_agents: [{ agent_id: c.agentId, weight: 1 }] } : {}),
       }),
     });
     return { phoneNumber: n.phone_number };
@@ -268,7 +431,7 @@ export class RetellAccountService implements OnApplicationBootstrap {
 
   /** Brings a number from the organization's own SIP trunk, Telnyx included: under Retell, Telnyx is only the carrier. */
   async importNumber(orgId: string, input: { phoneNumber: string; terminationUri: string; username?: string; password?: string }) {
-    const c = await this.requireAgent(orgId);
+    const c = await this.requireCreds(orgId);
     const n = await retell<{ phone_number: string }>(c.apiKey, '/import-phone-number', {
       method: 'POST',
       body: JSON.stringify({
@@ -277,21 +440,29 @@ export class RetellAccountService implements OnApplicationBootstrap {
         ...(input.username ? { sip_trunk_auth_username: input.username } : {}),
         ...(input.password ? { sip_trunk_auth_password: input.password } : {}),
         nickname: 'EstatePulse',
-        outbound_agents: [{ agent_id: c.agentId, weight: 1 }],
+        ...(c.agentId ? { outbound_agents: [{ agent_id: c.agentId, weight: 1 }] } : {}),
       }),
     });
     return { phoneNumber: n.phone_number };
   }
 
-  /** Routes the number's outbound calls to the agent and makes it the number every call comes from. */
+  /**
+   * Makes the number the one every call comes from, routed to the agent once
+   * there is one: the number may be chosen before the agent is created, and
+   * the agent is routed to it when it appears.
+   */
   async assignNumber(orgId: string, phoneNumber: string) {
-    const c = await this.requireAgent(orgId);
-    await retell(c.apiKey, `/update-phone-number/${encodeURIComponent(phoneNumber)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ outbound_agents: [{ agent_id: c.agentId, weight: 1 }] }),
-    });
+    const c = await this.requireCreds(orgId);
+    if (c.agentId) await this.routeNumber(c.apiKey, phoneNumber, c.agentId);
     await this.creds.save(orgId, { fromNumber: phoneNumber });
     return { phoneNumber };
+  }
+
+  private async routeNumber(apiKey: string, phoneNumber: string, agentId: string): Promise<void> {
+    await retell(apiKey, `/update-phone-number/${encodeURIComponent(phoneNumber)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ outbound_agents: [{ agent_id: agentId, weight: 1 }] }),
+    });
   }
 
   async concurrency(orgId: string): Promise<{ inUse: number | null; limit: number | null }> {

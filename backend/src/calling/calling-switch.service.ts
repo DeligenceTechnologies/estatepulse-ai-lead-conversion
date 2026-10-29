@@ -62,7 +62,7 @@ export class CallingSwitchService {
       const c = await this.retellCreds.getCreds(orgId);
       const sms = await this.retellSms.capability(orgId, c ? { ...c, active: true } : c);
       if (!sms.available) {
-        warnings.push(`SMS will not be sent while you call through Retell: ${sms.reason ?? SMS_UNAVAILABLE}`);
+        warnings.push(`${sms.reason ?? SMS_UNAVAILABLE} Until then, SMS steps are not sent while you call through Retell.`);
         const smsSteps = (await this.strategies.getStrategy(orgId)).steps.filter((s) => s.channel === 'sms').length;
         if (smsSteps) warnings.push(`Your outreach strategy has ${smsSteps} SMS step(s); they will not be sent while you call through Retell.`);
         const enrolled = await this.enrolledInSmsSequences(orgId);

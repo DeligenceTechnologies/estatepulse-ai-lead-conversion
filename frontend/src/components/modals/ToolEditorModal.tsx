@@ -31,7 +31,10 @@ interface Props {
   /** Null builds a new tool; a tool edits that one. */
   tool: AssistantTool | null;
   onClose: () => void;
-  onSave: (tool: AssistantTool) => Promise<void>;
+  /** Resolving to false keeps the modal open: the caller has already said what went wrong. */
+  onSave: (tool: AssistantTool) => Promise<void | boolean>;
+  /** The kinds on offer for a new tool; all of them when absent. A provider that lacks a kind leaves it out. */
+  types?: ToolType[];
 }
 
 const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1';
@@ -66,9 +69,10 @@ const toSchema = (rows: ParamRow[]): ToolParamSchema | undefined => {
   };
 };
 
-export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
+export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave, types }) => {
   const isNew = tool === null;
-  const [type, setType] = useState<ToolType>((tool?.type as ToolType) ?? 'webhook');
+  const offered = types ?? (Object.keys(TOOL_TYPE_INFO) as ToolType[]);
+  const [type, setType] = useState<ToolType>((tool?.type as ToolType) ?? offered[0] ?? 'webhook');
 
   // Seeded once from the tool being edited. Switching type below swaps the
   // draft wholesale rather than trying to carry fields across, because a
@@ -145,7 +149,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
     setSaving(true);
     setError(null);
     try {
-      await onSave(built);
+      if ((await onSave(built)) === false) return;
       toast.success('Tool saved.');
       onClose();
     } catch (e: any) {
@@ -206,7 +210,7 @@ export const ToolEditorModal: React.FC<Props> = ({ tool, onClose, onSave }) => {
             <label className={label}>What should it do?</label>
             {isNew ? (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                {(Object.keys(TOOL_TYPE_INFO) as ToolType[]).map((t) => (
+                {offered.map((t) => (
                   <button
                     key={t}
                     onClick={() => changeType(t)}

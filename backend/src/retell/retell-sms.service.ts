@@ -105,7 +105,7 @@ export class RetellSmsService {
     if (!creds?.apiKey) return no('unavailable', 'Connect a Retell account first.');
     if (!creds.active) return no('unavailable', 'Retell is not this organization’s calling provider.');
     if (!creds.fromNumber) return no('no_number', 'Choose the Retell number calls come from before texting through Retell.');
-    if (!creds.smsAgentId) return no('not_configured', 'SMS is not set up on Retell yet: set up the SMS agent in Settings → Calling → Retell.');
+    if (!creds.smsAgentId) return no('not_configured', 'SMS is not set up on Retell yet: set up the SMS agent on AI Assistant settings (SMS card).');
     let n: NumberInfo;
     try {
       n = await this.numberInfo(creds);
@@ -115,7 +115,7 @@ export class RetellSmsService {
     const unsupported = this.unsupportedReason(creds.fromNumber, n);
     if (unsupported) return no('unsupported_number', unsupported);
     if (!n.inboundSmsAgents.includes(creds.smsAgentId) || !n.outboundSmsAgents.includes(creds.smsAgentId)) {
-      return no('not_configured', `The SMS agent is not bound to ${creds.fromNumber} on Retell. Run “Set up SMS” again in Settings → Calling → Retell.`);
+      return no('not_configured', `The SMS agent is not bound to ${creds.fromNumber} on Retell. Run “Check SMS setup” on AI Assistant settings (SMS card).`);
     }
     return { available: true, state: 'unverified', reason: REGISTRATION_NOTE, deliveryReports: false };
   }

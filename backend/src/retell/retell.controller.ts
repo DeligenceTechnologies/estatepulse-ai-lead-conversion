@@ -11,8 +11,10 @@ import {
   ImportRetellNumberDto,
   RetellCredentialsDto,
   RetellPhoneNumberDto,
+  SetRetellToolsDto,
   UpdateRetellAgentDto,
   UpdateRetellSmsAgentDto,
+  UseRetellAgentDto,
 } from './dto/retell.dto';
 import { RetellAccountService } from './retell-account.service';
 import { RetellCredentialsService } from './retell-credentials.service';
@@ -45,7 +47,7 @@ export class RetellController {
   @Put('credentials')
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async connect(@CurrentAuth() auth: AuthContext, @Body() body: RetellCredentialsDto) {
-    const { workspace } = await this.account.verifyKeys(body.apiKey, body.webhookKey);
+    const { workspace } = await this.account.verifyKeys(auth.organizationId, body);
     await this.creds.save(auth.organizationId, { apiKey: body.apiKey, webhookKey: body.webhookKey });
     return { ...(await this.creds.publicStatus(auth.organizationId)), workspace };
   }
@@ -81,6 +83,28 @@ export class RetellController {
     return { agent: await this.account.updateAgent(auth.organizationId, body) };
   }
 
+  /** Replaces the agent's own tools (ours stay); saved at once, like Telnyx's. */
+  @Put('agent/tools')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  async setTools(@CurrentAuth() auth: AuthContext, @Body() body: SetRetellToolsDto) {
+    return { agent: await this.account.setTools(auth.organizationId, body.tools) };
+  }
+
+  /** The voice agents already on the workspace, to pick one instead of creating ours. */
+  @Get('agents')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  async agents(@CurrentAuth() auth: AuthContext) {
+    return { agents: await this.account.listAgents(auth.organizationId) };
+  }
+
+  /** Makes an existing workspace agent the organization's: wired for our webhook and analysis, its prompt and voice left as they are. */
+  @Post('agent/use')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  async useAgent(@CurrentAuth() auth: AuthContext, @Body() body: UseRetellAgentDto) {
+    return { agent: await this.account.useAgent(auth.organizationId, body.agentId) };
+  }
+
   @Get('numbers')
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
   async numbers(@CurrentAuth() auth: AuthContext) {
@@ -104,6 +128,15 @@ export class RetellController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async assign(@CurrentAuth() auth: AuthContext, @Body() body: RetellPhoneNumberDto) {
     await this.account.assignNumber(auth.organizationId, body.phoneNumber);
+    return this.creds.publicStatus(auth.organizationId);
+  }
+
+  /** No number calls come from, until another is chosen; the number itself stays on the workspace. */
+  @Post('numbers/unassign')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
+  async unassign(@CurrentAuth() auth: AuthContext) {
+    await this.creds.save(auth.organizationId, { fromNumber: '' });
     return this.creds.publicStatus(auth.organizationId);
   }
 

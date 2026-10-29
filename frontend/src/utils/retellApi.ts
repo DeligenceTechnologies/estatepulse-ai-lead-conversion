@@ -22,9 +22,25 @@ export interface RetellStatus {
   connectedAt: string | null;
 }
 
+/** A tool on the agent's Retell LLM. `managed` ones are EstatePulse's (booking, callbacks, outcomes): shown, not editable. */
+export interface RetellTool {
+  type: string;
+  name: string;
+  description?: string;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  parameters?: { type: 'object'; properties: Record<string, { type: string; description?: string }>; required?: string[] };
+  transfer_destination?: { type: 'predefined'; number: string } | { type: 'inferred'; prompt: string };
+  transfer_option?: { type: string };
+  timeout_ms?: number;
+  managed: boolean;
+}
+
 export interface RetellAgent {
   agentId: string;
   llmId: string;
+  name: string;
   prompt: string;
   greeting: string;
   voiceId: string;
@@ -32,9 +48,18 @@ export interface RetellAgent {
   maxCallSeconds: number;
   voicemailHangup: boolean;
   recordCalls: boolean;
+  /** Retell analyses each finished call and sends it over; off, nothing is scored. */
+  postCallProcessing: boolean;
+  /** {{key}} defaults in the prompt; the lead's own details always win on a call. */
+  dynamicVariables: Record<string, string>;
+  tools: RetellTool[];
 }
 
-export type RetellAgentPatch = Partial<Omit<RetellAgent, 'agentId' | 'llmId'>>;
+export type RetellAgentPatch = Partial<Omit<RetellAgent, 'agentId' | 'llmId' | 'tools'>>;
+
+/** Replaces the agent's own tools (managed ones stay); saved at once. */
+export const setRetellAgentTools = (tools: Omit<RetellTool, 'managed'>[]) =>
+  apiFetch<{ agent: RetellAgent }>('/retell/agent/tools', { method: 'PUT', body: { tools }, auth: true }).then((d) => d.agent);
 
 export interface RetellVoice {
   id: string;
@@ -85,8 +110,8 @@ export interface RetellSmsAgent {
 
 export const getRetellStatus = () => apiFetch<RetellStatus>('/retell/status', { auth: true });
 
-export const connectRetell = (apiKey: string, webhookKey: string) =>
-  apiFetch<RetellStatus & { workspace: string }>('/retell/credentials', { method: 'PUT', body: { apiKey, webhookKey }, auth: true });
+export const connectRetell =(keys: { apiKey?: string; webhookKey?: string }) =>
+  apiFetch<RetellStatus & { workspace: string }>('/retell/credentials', { method: 'PUT', body: keys, auth: true });
 
 export const disconnectRetell = () => apiFetch<RetellStatus>('/retell/credentials', { method: 'DELETE', auth: true });
 
@@ -94,11 +119,24 @@ export const listRetellVoices = () => apiFetch<{ voices: RetellVoice[] }>('/rete
 
 export const getRetellAgent = () => apiFetch<{ agent: RetellAgent | null }>('/retell/agent', { auth: true }).then((d) => d.agent);
 
-export const createRetellAgent = (body: { voiceId?: string; language?: string }) =>
+export const createRetellAgent = (body: { name?: string; voiceId?: string; language?: string }) =>
   apiFetch<{ agent: RetellAgent }>('/retell/agent', { method: 'POST', body, auth: true }).then((d) => d.agent);
 
 export const updateRetellAgent = (patch: RetellAgentPatch) =>
   apiFetch<{ agent: RetellAgent }>('/retell/agent', { method: 'PATCH', body: patch, auth: true }).then((d) => d.agent);
+
+/** A voice agent on the Retell workspace; `current` is the one the organization uses. */
+export interface RetellAgentSummary {
+  agentId: string;
+  name: string;
+  current: boolean;
+}
+
+export const listRetellAgents = () => apiFetch<{ agents: RetellAgentSummary[] }>('/retell/agents', { auth: true }).then((d) => d.agents);
+
+/** Makes an agent built in the Retell dashboard the organization's (single-prompt agents only). */
+export const useRetellAgent = (agentId: string) =>
+  apiFetch<{ agent: RetellAgent }>('/retell/agent/use', { method: 'POST', body: { agentId }, auth: true }).then((d) => d.agent);
 
 export const listRetellNumbers = () => apiFetch<{ numbers: RetellNumber[] }>('/retell/numbers', { auth: true }).then((d) => d.numbers);
 
@@ -110,6 +148,9 @@ export const importRetellNumber = (body: { phoneNumber: string; terminationUri: 
 
 export const assignRetellNumber = (phoneNumber: string) =>
   apiFetch<RetellStatus>('/retell/numbers/assign', { method: 'POST', body: { phoneNumber }, auth: true });
+
+/** Clears the number calls come from, so another can be chosen; nothing changes on Retell. */
+export const unassignRetellNumber = () => apiFetch<RetellStatus>('/retell/numbers/unassign', { method: 'POST', auth: true });
 
 export const getRetellCallCapacity = () => apiFetch<RetellCallCapacity>('/retell/call-capacity', { auth: true });
 

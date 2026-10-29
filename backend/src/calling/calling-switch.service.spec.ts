@@ -41,7 +41,7 @@ describe('CallingSwitchService.preview', () => {
     const p = await setup().svc.preview(ORG, 'retell');
     expect(p).toMatchObject({ from: 'telnyx', to: 'retell', liveCalls: 0, blockers: [] });
     expect(p.warnings).toContain('Calls already queued will dial through the new provider, still inside the contact window.');
-    expect(p.warnings).toContain('SMS will not be sent while you call through Retell: SMS is not set up on Retell yet.');
+    expect(p.warnings).toContain('SMS is not set up on Retell yet. Until then, SMS steps are not sent while you call through Retell.');
   });
 
   it('blocks while a call is live', async () => {

@@ -169,8 +169,8 @@ describe('RetellCallingProvider', () => {
 });
 
 describe('RetellAccountService', () => {
-  const creds = (c: Record<string, unknown> = {}) => ({
-    getCreds: vi.fn().mockResolvedValue({ apiKey: 'key_api', webhookKey: 'key_hook', agentId: '', llmId: '', fromNumber: '', ...c }),
+  const creds = (c: Record<string, unknown> | null = {}) => ({
+    getCreds: vi.fn().mockResolvedValue(c && { apiKey: 'key_api', webhookKey: 'key_hook', agentId: '', llmId: '', fromNumber: '', ...c }),
     save: vi.fn().mockResolvedValue({}),
   });
   const prisma = (record = true) => ({
@@ -228,14 +228,149 @@ describe('RetellAccountService', () => {
 
   it('refuses keys from two different Retell workspaces', async () => {
     fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1' })).mockResolvedValueOnce(json({ org_id: 'ws_2' }));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
-    await expect(svc.verifyKeys('key_api', 'key_hook')).rejects.toThrow('different Retell workspaces');
+    const svc = new RetellAccountService(prisma() as any, creds(null) as any, config as any, slots as any, tools as any, smsSvc as any);
+    await expect(svc.verifyKeys(ORG, { apiKey: 'key_api', webhookKey: 'key_hook' })).rejects.toThrow('different Retell workspaces');
   });
 
   it('says which key Retell rejected', async () => {
     fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1' })).mockResolvedValueOnce(new Response('{"message":"invalid"}', { status: 401 }));
+    const svc = new RetellAccountService(prisma() as any, creds(null) as any, config as any, slots as any, tools as any, smsSvc as any);
+    await expect(svc.verifyKeys(ORG, { apiKey: 'key_api', webhookKey: 'bad' })).rejects.toThrow('Retell rejected the webhook key');
+  });
+
+  it('replaces one key at a time once connected, checking it against the key on file; both are needed to connect', async () => {
+    fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1', org_name: 'Acme' })).mockResolvedValueOnce(json({ org_id: 'ws_1' }));
     const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
-    await expect(svc.verifyKeys('key_api', 'bad')).rejects.toThrow('Retell rejected the webhook key');
+    await expect(svc.verifyKeys(ORG, { webhookKey: 'key_hook_new' })).resolves.toEqual({ workspace: 'Acme' });
+    expect(fetchMock.mock.calls.map((c) => (c[1] as RequestInit).headers)).toEqual([expect.objectContaining({ Authorization: 'Bearer key_api' }), expect.objectContaining({ Authorization: 'Bearer key_hook_new' })]);
+    const fresh = new RetellAccountService(prisma() as any, creds(null) as any, config as any, slots as any, tools as any, smsSvc as any);
+    await expect(fresh.verifyKeys(ORG, { apiKey: 'key_api' })).rejects.toThrow('Both the API key and the webhook key are needed');
+    await expect(fresh.verifyKeys(ORG, {})).rejects.toThrow('Enter the API key');
+  });
+
+  it('lists the workspace’s voice agents, marking the one in use and leaving chat agents out', async () => {
+    const agents = [{ agent_id: 'agent_1', agent_name: 'Ours', channel: 'voice' }, { agent_id: 'agent_2', agent_name: 'Theirs', channel: 'voice' }, { agent_id: 'chat_1', agent_name: 'Texter', channel: 'chat' }];
+    fetchMock.mockResolvedValueOnce(json({ items: agents, has_more: false }));
+    const svc = new RetellAccountService(prisma() as any, creds({ agentId: 'agent_1' }) as any, config as any, slots as any, tools as any, smsSvc as any);
+    expect(await svc.listAgents(ORG)).toEqual([
+      { agentId: 'agent_1', name: 'Ours', current: true },
+      { agentId: 'agent_2', name: 'Theirs', current: false },
+    ]);
+    expect(sent(0)).toMatchObject({ url: 'https://api.retellai.com/v2/list-agents?limit=200', method: 'POST' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the agent as the owner typed it, so several agents can be told apart in the Retell dashboard', async () => {
+    // No voice chosen: the first voice on the workspace is used, and changed later on AI settings.
+    fetchMock
+      .mockResolvedValueOnce(json([{ voice_id: 'voice_1', voice_name: 'Cleo', provider: 'elevenlabs' }]))
+      .mockResolvedValueOnce(json({ llm_id: 'llm_1' }))
+      .mockResolvedValueOnce(json({ agent_id: 'agent_1' }))
+      .mockResolvedValueOnce(json({ agent_name: 'Austin Home Advisors', voice_id: 'voice_1' }))
+      .mockResolvedValueOnce(json({ general_prompt: 'p', begin_message: 'g' }));
+    const c = creds();
+    // The ids saved during creation are what the read afterwards goes by.
+    c.save.mockImplementation(async (_org: string, patch: Record<string, string>) => {
+      c.getCreds.mockResolvedValue({ apiKey: 'key_api', webhookKey: 'key_hook', fromNumber: '', agentId: patch.agentId ?? '', llmId: patch.llmId ?? '' });
+      return {};
+    });
+    const svc = new RetellAccountService(prisma() as any, c as any, config as any, slots as any, tools as any, smsSvc as any);
+    const view = await svc.createAgent(ORG, { name: '  Austin Home Advisors ' });
+    expect(sent(2).body).toMatchObject({ agent_name: 'Austin Home Advisors', voice_id: 'voice_1' });
+    expect(view.name).toBe('Austin Home Advisors');
+  });
+
+  it('adopts an existing single-prompt agent: wired for our webhook and analysis, prompt and voice untouched, tools put on', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json({ agent_id: 'agent_2', response_engine: { type: 'retell-llm', llm_id: 'llm_2' } }))
+      .mockResolvedValueOnce(json({}))
+      .mockResolvedValueOnce(json({ voice_id: 'v', language: 'en-US' }))
+      .mockResolvedValueOnce(json({ general_prompt: 'Their prompt', begin_message: 'Hi' }));
+    const c = creds({ agentId: 'agent_1', llmId: 'llm_1' });
+    const svc = new RetellAccountService(prisma(false) as any, c as any, config as any, slots as any, tools as any, smsSvc as any);
+    await svc.useAgent(ORG, 'agent_2');
+    const patch = sent(1);
+    expect(patch).toMatchObject({ url: 'https://api.retellai.com/update-agent/agent_2', method: 'PATCH' });
+    expect(patch.body).toMatchObject({ webhook_url: 'https://api.example.com/webhooks/retell', webhook_events: ['call_started', 'call_ended', 'call_analyzed'], enable_dnc_detection: true, data_storage_setting: 'basic_attributes_only' });
+    expect(patch.body.post_call_analysis_data).toHaveLength(19);
+    expect(patch.body.general_prompt).toBeUndefined();
+    expect(patch.body.voice_id).toBeUndefined();
+    expect(c.save).toHaveBeenCalledWith(ORG, { agentId: 'agent_2', llmId: 'llm_2' });
+    expect(tools.provisionNow).toHaveBeenCalledWith(ORG);
+  });
+
+  it('reads the agent’s tools (ours without their secrets), its default variables and whether Retell analyses calls', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json({ agent_name: 'Ours', voice_id: 'v', webhook_events: ['call_started', 'call_ended', 'call_analyzed'], post_call_analysis_data: [{ type: 'string', name: 'summary' }] }))
+      .mockResolvedValueOnce(
+        json({
+          general_prompt: 'p',
+          default_dynamic_variables: { company_name: 'Acme', hours: '9-5', junk: { nested: true } },
+          general_tools: [
+            { type: 'end_call', name: 'end_call' },
+            { type: 'custom', name: 'record_outcome', url: 'https://api.example.com/tools/outcome/record', headers: { Authorization: 'Bearer secret' } },
+            { type: 'custom', name: 'crm_lookup', url: 'https://crm.example/lookup', method: 'GET', headers: { 'X-Key': 'k' }, parameters: { type: 'object', properties: {} } },
+          ],
+        }),
+      );
+    const svc = new RetellAccountService(prisma() as any, creds({ agentId: 'agent_1', llmId: 'llm_1' }) as any, config as any, slots as any, tools as any, smsSvc as any);
+    const view = (await svc.getAgent(ORG))!;
+    expect(view.postCallProcessing).toBe(true);
+    expect(view.dynamicVariables).toEqual({ company_name: 'Acme', hours: '9-5' });
+    expect(view.tools).toEqual([
+      { type: 'end_call', name: 'end_call', managed: false },
+      { type: 'custom', name: 'record_outcome', url: 'https://api.example.com/tools/outcome/record', managed: true },
+      { type: 'custom', name: 'crm_lookup', url: 'https://crm.example/lookup', method: 'GET', headers: { 'X-Key': 'k' }, parameters: { type: 'object', properties: {} }, managed: false },
+    ]);
+    expect(JSON.stringify(view)).not.toContain('Bearer secret');
+  });
+
+  it('replaces the organization’s own tools on the LLM, keeps ours, and refuses malformed or colliding ones', async () => {
+    const llm = { general_prompt: 'p', general_tools: [{ type: 'custom', name: 'record_outcome', url: 'u', headers: { Authorization: 'Bearer secret' } }, { type: 'custom', name: 'old', url: 'https://old' }] };
+    fetchMock.mockImplementation(async (url: string) => (String(url).includes('/get-retell-llm/') ? json(llm) : json({ agent_name: 'Ours', webhook_events: [], general_tools: [] })));
+    const svc = new RetellAccountService(prisma() as any, creds({ agentId: 'agent_1', llmId: 'llm_1' }) as any, config as any, slots as any, tools as any, smsSvc as any);
+    await svc.setTools(ORG, [
+      { type: 'end_call', name: 'end_call', description: 'Bye' },
+      { type: 'custom', name: 'crm_lookup', description: 'Look the caller up', url: 'https://crm.example/lookup', method: 'get', headers: { 'X-Key': 'k' }, parameters: { type: 'object', properties: {} }, timeout_ms: 5000 },
+      { type: 'transfer_call', name: 'to_agent', transfer_destination: { type: 'predefined', number: '+12025550123' }, transfer_option: { type: 'cold_transfer' } },
+    ]);
+    const patch = (fetchMock.mock.calls as [string, RequestInit][]).find(([u, i]) => String(u).includes('/update-retell-llm/') && i.method === 'PATCH')!;
+    const body = JSON.parse(String(patch[1].body));
+    expect(body.general_tools.map((t: any) => t.name)).toEqual(['record_outcome', 'end_call', 'crm_lookup', 'to_agent']);
+    expect(body.general_tools[0].headers.Authorization).toBe('Bearer secret');
+    expect(body.general_tools[2]).toEqual({ type: 'custom', name: 'crm_lookup', description: 'Look the caller up', url: 'https://crm.example/lookup', method: 'GET', headers: { 'X-Key': 'k' }, parameters: { type: 'object', properties: {} }, timeout_ms: 5000 });
+    expect(body.general_tools[3]).toEqual({ type: 'transfer_call', name: 'to_agent', transfer_destination: { type: 'predefined', number: '+12025550123' }, transfer_option: { type: 'cold_transfer' } });
+
+    await expect(svc.setTools(ORG, [{ type: 'custom', name: 'record_outcome', url: 'https://x' }])).rejects.toThrow('EstatePulse manages');
+    await expect(svc.setTools(ORG, [{ type: 'custom', name: 'bad name', url: 'https://x' }])).rejects.toThrow('needs a name');
+    await expect(svc.setTools(ORG, [{ type: 'custom', name: 'nourl' }])).rejects.toThrow('http(s) URL');
+    await expect(svc.setTools(ORG, [{ type: 'transfer_call', name: 'x', transfer_destination: { type: 'predefined', number: '555' } }])).rejects.toThrow('E.164');
+    await expect(svc.setTools(ORG, [{ type: 'mcp', name: 'x' }])).rejects.toThrow('not a kind this page can add');
+  });
+
+  it('switching post-call processing off stops Retell analysing and sending call_analyzed; on restores our fields; variables go to the LLM', async () => {
+    fetchMock.mockImplementation(async (url: string) => (String(url).includes('/get-retell-llm/') ? json({ general_prompt: 'p', general_tools: [] }) : json({ agent_name: 'Ours', webhook_events: ['call_started', 'call_ended'], general_tools: [] })));
+    const svc = new RetellAccountService(prisma() as any, creds({ agentId: 'agent_1', llmId: 'llm_1' }) as any, config as any, slots as any, tools as any, smsSvc as any);
+    const view = await svc.updateAgent(ORG, { postCallProcessing: false, dynamicVariables: { company_name: 'Acme', '': 'dropped' } });
+    const calls = fetchMock.mock.calls as [string, RequestInit][];
+    const agentPatch = JSON.parse(String(calls.find(([u, i]) => String(u).includes('/update-agent/') && i.method === 'PATCH')![1].body));
+    expect(agentPatch).toMatchObject({ webhook_events: ['call_started', 'call_ended'], post_call_analysis_data: [] });
+    const llmPatch = JSON.parse(String(calls.find(([u, i]) => String(u).includes('/update-retell-llm/') && i.method === 'PATCH')![1].body));
+    expect(llmPatch).toEqual({ default_dynamic_variables: { company_name: 'Acme' } });
+    expect(view.postCallProcessing).toBe(false);
+
+    fetchMock.mockClear();
+    await svc.updateAgent(ORG, { postCallProcessing: true });
+    const on = JSON.parse(String((fetchMock.mock.calls as [string, RequestInit][]).find(([u, i]) => String(u).includes('/update-agent/') && i.method === 'PATCH')![1].body));
+    expect(on.webhook_events).toEqual(['call_started', 'call_ended', 'call_analyzed']);
+    expect(on.post_call_analysis_data).toHaveLength(19);
+  });
+
+  it('refuses an agent that is not single-prompt (conversation flow, custom LLM), since its prompt cannot be edited here', async () => {
+    fetchMock.mockResolvedValueOnce(json({ agent_id: 'flow_1', response_engine: { type: 'conversation-flow', conversation_flow_id: 'cf_1' } }));
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
+    await expect(svc.useAgent(ORG, 'flow_1')).rejects.toThrow('does not run on a Retell LLM');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('keeps our call limit within the Retell workspace limit, which only Retell can raise', async () => {
