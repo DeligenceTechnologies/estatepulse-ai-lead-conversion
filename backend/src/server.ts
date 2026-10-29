@@ -43,6 +43,8 @@ const ROOT_ROUTES = [
   'tools/telnyx/outcome/record',
   'tools/booking/availability',
   'tools/booking/book',
+  'tools/outcome/callback',
+  'tools/outcome/record',
   'org-settings/calendar/calendly/callback',
 ];
 
