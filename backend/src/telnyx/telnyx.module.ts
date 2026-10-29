@@ -9,10 +9,12 @@ import { CallWorker } from './calls/call.worker';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
 import { LeadInsightsService } from './lead-insights.service';
+import { LeadMemoryService } from './lead-memory.service';
 import { LeadScoringService } from './lead-scoring.service';
 import { LeadWatcherService } from './lead-watcher.service';
 import { NumbersService } from './numbers.service';
-import { AssistantController, LeadScoringController, PortalLeadsController, StrategyController } from './portal.controller';
+import { AssistantController, LeadScoringController, PortalLeadsController, QualificationQuestionsController, StrategyController } from './portal.controller';
+import { QualificationQuestionsService } from './qualification-questions.service';
 import { SmsService } from './sms.service';
 import { SmsConversationController } from './sms/sms-conversation.controller';
 import { SmsConversationService } from './sms/sms-conversation.service';
@@ -37,6 +39,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantController,
     StrategyController,
     LeadScoringController,
+    QualificationQuestionsController,
     PortalLeadsController,
     TelnyxWebhookController,
     SmsConversationController,
@@ -55,9 +58,11 @@ import { VoicemailService } from './voicemail/voicemail.service';
     EngineService,
     InboundSmsService,
     LeadInsightsService,
+    LeadMemoryService,
     LeadScoringService,
     LeadWatcherService,
     NumbersService,
+    QualificationQuestionsService,
     SmsService,
     SmsConversationService,
     SmsIntentService,

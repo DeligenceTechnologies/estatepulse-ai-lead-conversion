@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
 import { FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -10,10 +10,12 @@ import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from '@/lead/lead-scope';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssistantService } from './assistant.service';
-import { SetToolsDto, StrategyDto, TestToolDto, ThresholdsDto } from './dto/telnyx.dto';
+import { QualificationAnswerDto, QualificationQuestionsDto, SetToolsDto, StrategyDto, TestToolDto, ThresholdsDto } from './dto/telnyx.dto';
 import { EngineService } from './engine.service';
 import { flowFromLog } from './lead-flow';
+import { LeadInsightsService } from './lead-insights.service';
 import { LeadScoringService } from './lead-scoring.service';
+import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
@@ -181,6 +183,38 @@ export class LeadScoringController {
   }
 }
 
+/** The questions the AI asks this org's leads, on calls and in texts. */
+@Controller('qualification-questions')
+export class QualificationQuestionsController {
+  private readonly logger = new Logger(QualificationQuestionsController.name);
+
+  constructor(
+    private readonly questions: QualificationQuestionsService,
+    private readonly insights: LeadInsightsService,
+    private readonly assistants: AssistantService,
+  ) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  async get(@CurrentAuth() auth: AuthContext) {
+    return { questions: await this.questions.get(auth.organizationId) };
+  }
+
+  /** Saves the list, then points the Insight and the assistant at it. */
+  @Put()
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  async save(@CurrentAuth() auth: AuthContext, @Body() body: QualificationQuestionsDto) {
+    const orgId = auth.organizationId;
+    const questions = await this.questions.set(orgId, body.questions);
+    let warning: string | null = null;
+    await Promise.all([this.insights.ensureProvisioned(orgId), this.assistants.syncQualification(orgId)]).catch((error) => {
+      this.logger.warn(`qualification sync for org ${orgId}: ${(error as Error).message}`);
+      warning = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+    });
+    return { questions, warning };
+  }
+}
+
 /** The lead list and outreach controls on the Leads page. */
 @Controller('leads')
 export class PortalLeadsController {
@@ -188,7 +222,34 @@ export class PortalLeadsController {
     private readonly prisma: PrismaService,
     private readonly engine: EngineService,
     private readonly strategies: StrategyStoreService,
+    private readonly questions: QualificationQuestionsService,
   ) {}
+
+  /** What the lead already told us on calls and in texts; unanswered questions are what the AI asks next. */
+  @Get(':id/memory')
+  @RequirePermissions(PERMISSIONS.LEAD_READ)
+  async memory(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    await this.requireVisible(auth, id);
+    return this.questions.forLead(auth.organizationId, id);
+  }
+
+  /** A person's correction of one custom answer; the AI never overrides it. A null value clears it. */
+  @Put(':id/memory/:key')
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  async setAnswer(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('key') key: string,
+    @Body() body: QualificationAnswerDto,
+  ) {
+    await this.requireVisible(auth, id);
+    return this.questions.setAnswer(auth.organizationId, id, key, body.value ?? null);
+  }
+
+  private async requireVisible(auth: AuthContext, id: string): Promise<void> {
+    const lead = await this.prisma.lead.findFirst({ where: { id, ...visibleLeads(auth) }, select: { id: true } });
+    if (!lead) throw new AppError('NOT_FOUND', 'Lead not found');
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.LEAD_READ)

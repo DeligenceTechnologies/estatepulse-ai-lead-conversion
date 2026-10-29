@@ -40,6 +40,7 @@ import {
   LANGUAGE_BOOST_OPTIONS,
   NOISE_SUPPRESSION_OPTIONS,
   LEAD_VARIABLES,
+  MANAGED_VARIABLES,
   AssistantTool,
   NoiseSuppression,
   toolLabel,
@@ -53,6 +54,7 @@ import { CallPacingCard } from './CallPacingCard';
 import { ContactWindowCard } from './ContactWindowCard';
 import { CallCapacityCard } from './CallCapacityCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
+import { QualificationQuestionsCard } from './QualificationQuestionsCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
@@ -165,7 +167,12 @@ export const AISettingsView: React.FC = () => {
         setAllowInterruptions(a.allow_interruptions);
         setRecordCalls(a.record_calls);
         setMaxCallMins(Math.round((a.max_call_secs || 1800) / 60));
-        setDynamicVars(Object.entries(a.dynamic_variables || {}).map(([key, value]) => ({ key, value: String(value) })));
+        // The memory variables are kept by the server (Qualification Questions) and filled per lead: not edited here.
+        setDynamicVars(
+          Object.entries(a.dynamic_variables || {})
+            .filter(([key]) => !MANAGED_VARIABLES.has(key))
+            .map(([key, value]) => ({ key, value: String(value) })),
+        );
         setSimilarityBoost(a.similarity_boost);
         setStyle(a.style);
         setUseSpeakerBoost(a.use_speaker_boost);
@@ -1116,13 +1123,18 @@ export const AISettingsView: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Building2 className="w-4 h-4 text-cyan-400" />
-              Dynamic Variables <span className="text-xs text-slate-500 font-normal">— injected into the prompt as {'{{key}}'}</span>
+              Dynamic Variables <span className="text-xs text-slate-500 font-normal">— fixed values for every call, use as {'{{key}}'} in the prompt</span>
             </h3>
             <button type="button" onClick={addVar} className="text-xs text-emerald-400 font-semibold hover:text-emerald-300">+ Add variable</button>
           </div>
 
           <div className="space-y-2 text-xs">
-            {dynamicVars.length === 0 && <p className="text-slate-500">No variables. Add company name, phone, hours…</p>}
+            {dynamicVars.length === 0 && (
+              <p className="text-slate-500">
+                No variables yet. For example <span className="font-mono text-slate-400">office_hours</span> = Mon–Sat 10am–7pm, then write{' '}
+                <span className="font-mono text-slate-400">{'{{office_hours}}'}</span> in the prompt.
+              </p>
+            )}
             {dynamicVars.map((v, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input
@@ -1138,9 +1150,21 @@ export const AISettingsView: React.FC = () => {
                   className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500"
                 />
                 <button type="button" onClick={() => removeVar(i)} className="text-rose-400 hover:text-rose-300 px-2">✕</button>
+                {LEAD_VARIABLES.some((l) => l.name === v.key.trim()) && (
+                  <span className="text-[11px] text-amber-300 shrink-0" title="The app sends this lead's own value on every call and chat">
+                    Replaced per lead on every call
+                  </span>
+                )}
               </div>
             ))}
           </div>
+
+          <p className="border-t border-slate-800 pt-3 text-xs text-slate-500">
+            The lead's own details and memory (<span className="font-mono text-slate-400">{'{{firstName}}'}</span>,{' '}
+            <span className="font-mono text-slate-400">{'{{knownInfo}}'}</span>,{' '}
+            <span className="font-mono text-slate-400">{'{{questionsToAsk}}'}</span>…) are filled for each lead on every call and
+            chat. Add them from "Insert lead details" under the prompt; they are not set here.
+          </p>
         </div>
 
         {/* The real org-wide guardrails, read by BOTH schedulers. The card
@@ -1157,6 +1181,10 @@ export const AISettingsView: React.FC = () => {
 
         <div id="call-pacing" className="scroll-mt-6 rounded-2xl transition-shadow">
           <CallPacingCard limit={callLimit} />
+        </div>
+
+        <div id="qualification-questions" className="scroll-mt-6 rounded-2xl transition-shadow">
+          <QualificationQuestionsCard />
         </div>
 
         <LeadTemperatureCard />

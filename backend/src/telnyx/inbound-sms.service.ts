@@ -4,6 +4,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { FollowupService } from '@/followup/followup.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { EngineService } from './engine.service';
+import { LeadMemoryService } from './lead-memory.service';
 import { normalizePhone } from './phone';
 import { SmsConversationService } from './sms/sms-conversation.service';
 import { SmsIntentService, type SmsIntentResult } from './sms/sms-intent.service';
@@ -36,6 +37,7 @@ export class InboundSmsService {
     private readonly engine: EngineService,
     private readonly conversations: SmsConversationService,
     private readonly intents: SmsIntentService,
+    private readonly memory: LeadMemoryService,
   ) {}
 
   async onMessageReceived(payload: any): Promise<void> {
@@ -84,6 +86,8 @@ export class InboundSmsService {
     const word = keyword(text);
     if (STOP_WORDS.has(word)) return this.onOptOut(orgId, lead.id);
     if (START_WORDS.has(word) && lead.dncStatus) return this.onOptIn(orgId, lead.id);
+    // Whoever answers, the AI or a person, what the lead says is remembered once the chat goes quiet.
+    this.memory.onLeadText(orgId, lead.id);
     if (await this.conversations.isEnabled(orgId)) return this.onChatReply(orgId, lead.id, text, !lead.firstResponseAt);
     return this.onHumanReply(orgId, lead.id, !lead.firstResponseAt);
   }
