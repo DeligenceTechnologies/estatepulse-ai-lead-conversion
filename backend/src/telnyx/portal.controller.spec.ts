@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SMS_READY } from '@/calling/calling-providers';
 import { PortalLeadsController } from './portal.controller';
 
 /** The lead's journey through the strategy, as the lead detail shows it. */
@@ -19,7 +20,13 @@ function setup(sms: boolean, messages: { deliveryStatus: string }[]) {
     leadEvent: { findMany: vi.fn().mockResolvedValue([]) },
   };
   const strategies = { getStrategy: vi.fn().mockResolvedValue({ name: 'Default', steps }) };
-  const providers = { for: vi.fn().mockResolvedValue({ name: sms ? 'telnyx' : 'retell', capabilities: { sms } }) };
+  const providers = {
+    for: vi.fn().mockResolvedValue({
+      name: sms ? 'telnyx' : 'retell',
+      capabilities: { sms: true },
+      smsCapability: async () => (sms ? SMS_READY : { available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet', deliveryReports: false }),
+    }),
+  };
   return new PortalLeadsController(prisma as any, {} as any, strategies as any, providers as any);
 }
 

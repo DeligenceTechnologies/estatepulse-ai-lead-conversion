@@ -23,6 +23,7 @@ model Organization {
   auditLogs           AuditLog[]
   outreachBatches     OutreachBatch[]
   leadEvents          LeadEvent[]
+  smsChats            SmsChat[]
   dailySummaryRuns    DailySummaryRun[]
 
   @@map("organizations")

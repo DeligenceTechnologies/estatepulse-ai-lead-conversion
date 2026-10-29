@@ -175,7 +175,7 @@ export const LeadDetailModal: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedLeadId, setSelectedLeadId]);
 
-  // Real outreach: enrols the lead into the office's strategy (call/SMS via Telnyx).
+  // Real outreach: enrols the lead into the office's strategy (call/SMS through the organization's calling provider).
   const [enrolling, setEnrolling] = useState(false);
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const startOutreach = async () => {

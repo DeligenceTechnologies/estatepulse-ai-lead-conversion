@@ -271,10 +271,12 @@ export class PortalLeadsController {
       const pending = stepsOut.findIndex((s) => s.outcome === null);
       if (pending >= 0) stepsOut[pending].state = 'current';
     }
-    // A provider without SMS (Retell) never sends these steps: shown as not sent, not left waiting forever.
-    if (!(await this.providers.for(orgId)).capabilities.sms) {
+    // A provider that cannot text for this organization (Retell without SMS set up) never sends these
+    // steps: shown as not sent, with the reason, not left waiting forever.
+    const sms = await (await this.providers.for(orgId)).smsCapability(orgId);
+    if (!sms.available) {
       for (const s of stepsOut) {
-        if (s.channel === 'sms' && (s.state === 'pending' || s.state === 'current')) Object.assign(s, { state: 'skipped', outcome: 'Not sent', detail: SMS_UNAVAILABLE });
+        if (s.channel === 'sms' && (s.state === 'pending' || s.state === 'current')) Object.assign(s, { state: 'skipped', outcome: 'Not sent', detail: sms.reason ?? SMS_UNAVAILABLE });
       }
       if (!logged && !stepsOut.some((s) => s.state === 'current')) {
         const pending = stepsOut.findIndex((s) => s.state === 'pending');

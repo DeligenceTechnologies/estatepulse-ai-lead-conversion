@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, Check, CheckCircle2, KeyRound, Loader2, Phone, PhoneCall, Plus, Unplug } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, CheckCircle2, KeyRound, Loader2, MessageSquare, Phone, PhoneCall, Plus, Unplug } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { confirmToast } from '../../lib/toast';
 import { getTelnyxStatus } from '../../utils/assistantApi';
 import { TelnyxCard } from './TelnyxCard';
 import {
   PROVIDER_LABEL,
-  SMS_UNAVAILABLE_ON_RETELL,
   getCallingProvider,
   getSwitchPreview,
+  refreshCallingProvider,
   switchCallingProvider,
   type CallingProviderName,
   type SwitchPreview,
@@ -19,12 +19,16 @@ import {
   buyRetellNumber,
   connectRetell,
   createRetellAgent,
+  disableRetellSms,
   disconnectRetell,
+  getRetellSms,
   getRetellStatus,
   importRetellNumber,
   listRetellNumbers,
   listRetellVoices,
+  setupRetellSms,
   type RetellNumber,
+  type RetellSmsStatus,
   type RetellStatus,
   type RetellVoice,
 } from '../../utils/retellApi';
@@ -32,7 +36,9 @@ import {
 /**
  * Settings → Calling, shown only when Retell is enabled on the server: which
  * provider the organization calls through (Telnyx or Retell), the switch, and
- * each provider's own setup. Retell is voice only: no SMS goes through it.
+ * each provider's own setup. Texts go through the same provider as calls:
+ * Telnyx's messaging, or Retell's SMS agent once it is set up on an eligible
+ * number. Never one provider's calls with the other's texts.
  */
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4';
@@ -57,7 +63,7 @@ const PROVIDER_CARDS: Record<CallingProviderName, { tagline: string; tone: strin
     selected: 'border-violet-500/60 bg-violet-500/[0.06]',
   },
   retell: {
-    tagline: 'AI voice calls on your own Retell workspace. No SMS.',
+    tagline: 'AI calls on your own Retell workspace; SMS too, from a Retell (Twilio) US number with the SMS add-on approved.',
     tone: 'bg-sky-600/20 text-sky-300 border-sky-500/30',
     selected: 'border-sky-500/60 bg-sky-500/[0.06]',
   },
@@ -240,7 +246,88 @@ const AgentSetup: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
   );
 };
 
-/** Numbers on the Retell workspace: buy one (US/CA), bring one from a SIP trunk (not Telnyx), pick the one calls come from. */
+/** Whether texts can go through Retell from the calling number, and the one-click setup of the SMS agent. */
+const RetellSmsSection: React.FC<{ status: RetellStatus; onChange: () => void }> = ({ status, onChange }) => {
+  const [sms, setSms] = useState<RetellSmsStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    getRetellSms()
+      .then((s) => {
+        setSms(s);
+        setError(null);
+      })
+      .catch((e) => setError(retellMessage(e)));
+  }, []);
+  useEffect(load, [load, status.fromNumber, status.smsAgentId]);
+
+  const run = async (action: () => Promise<RetellSmsStatus>, done: string) => {
+    setBusy(true);
+    try {
+      setSms(await action());
+      setError(null);
+      toast.success(done);
+      // Every screen's idea of what Retell can send comes from the server: ask it again.
+      void refreshCallingProvider();
+      onChange();
+    } catch (e) {
+      setError(retellMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cap = sms?.capability;
+  const numberType = sms?.number?.type === 'retell-twilio' ? 'Retell (Twilio) number' : sms?.number?.type === 'retell-telnyx' ? 'Retell (Telnyx) number' : sms?.number?.type === 'custom' ? 'number brought in over SIP' : null;
+  const canSetUp = !!status.fromNumber && !!status.agentId && cap?.state !== 'unsupported_number' && cap?.state !== 'unavailable';
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+        <MessageSquare className="w-3.5 h-3.5 text-cyan-400" /> SMS
+      </h4>
+      {error && <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">{error}</div>}
+      {!sms ? (
+        !error && (
+          <div className="text-xs text-slate-500 flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking whether {status.fromNumber || 'your number'} can text…
+          </div>
+        )
+      ) : (
+        <div className="space-y-2">
+          {cap && (
+            <Ok
+              ok={cap.available}
+              yes={cap.state === 'unverified' ? `SMS agent set up on ${sms.fromNumber} — registration not verifiable` : `Texts go through Retell from ${sms.fromNumber}`}
+              no={cap.reason ?? 'SMS is not available on Retell.'}
+            />
+          )}
+          {cap?.state === 'unverified' && <p className="text-2xs text-slate-400 leading-relaxed">{sms.registrationNote}</p>}
+          {numberType && <p className="text-2xs text-slate-500">{sms.fromNumber} is a {numberType}.</p>}
+          {sms.numberError && <p className="text-2xs text-amber-300">Could not read the number from Retell: {sms.numberError}</p>}
+          <p className="text-2xs text-slate-500 leading-relaxed">
+            Retell SMS needs a Retell (Twilio) US number, not toll-free, with the SMS add-on approved in the Retell dashboard (A2P 10DLC
+            registration, 2–3 weeks). A number brought in from Telnyx cannot text through Retell. Each of your SMS steps is sent as written;
+            the SMS agent answers replies, and Retell does not report delivery per message.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={primary} disabled={busy || !canSetUp} onClick={() => void run(setupRetellSms, cap?.available ? 'SMS setup checked.' : 'SMS set up on Retell.')}>
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} {status.smsAgentId ? 'Check SMS setup' : 'Set up SMS'}
+            </button>
+            {cap?.available && (
+              <button type="button" className={secondary} disabled={busy} onClick={() => void run(disableRetellSms, 'SMS turned off on Retell.')}>
+                Turn SMS off
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Numbers on the Retell workspace: buy one (US/CA), bring one from a SIP trunk, pick the one calls come from. */
 const NumbersSection: React.FC<{ status: RetellStatus; onChange: () => void }> = ({ status, onChange }) => {
   const [numbers, setNumbers] = useState<RetellNumber[] | null>(null);
   const [areaCode, setAreaCode] = useState('');
@@ -413,7 +500,7 @@ const RetellAccountCard: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
           </div>
           <div className="min-w-0">
             <h3 className="text-base font-bold text-white">Retell</h3>
-            <p className="text-xs text-slate-400">AI voice calls on your own Retell workspace (no SMS)</p>
+            <p className="text-xs text-slate-400">AI voice calls, and SMS, on your own Retell workspace</p>
           </div>
         </div>
         {status?.connected && !editingKeys && (
@@ -460,8 +547,10 @@ const RetellAccountCard: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
             <Ok ok={status.hasWebhookKey} yes="Webhook key saved" no="No webhook key — add it with Update keys" />
             <Ok ok={!!status.agentId} yes="AI agent created" no="No agent yet — create one below" />
             <Ok ok={!!status.fromNumber} yes={`Calls come from ${status.fromNumber}`} no="No number chosen for calls yet" />
+            <Ok ok={!!status.smsAgentId} yes="SMS agent created" no="No SMS agent yet — set SMS up below once a number is chosen" />
           </div>
           {!status.agentId ? <AgentSetup onCreated={load} /> : <NumbersSection status={status} onChange={load} />}
+          {status.agentId && status.fromNumber && <RetellSmsSection status={status} onChange={load} />}
         </div>
       )}
     </section>
@@ -577,8 +666,8 @@ export const CallingSettings: React.FC<{ initial?: CallingProviderName }> = ({ i
             {choice === 'retell' && (
               <div className="flex items-start gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                {SMS_UNAVAILABLE_ON_RETELL} SMS steps in your strategy and sequences will not be sent. Set up Retell below before you
-                switch.
+                Set up Retell below (agent, number and, for texts, the SMS agent) before you switch. The review before switching says
+                what will and will not be sent.
               </div>
             )}
             <SwitchBox to={choice} onSwitched={() => setReloadKey((k) => k + 1)} />

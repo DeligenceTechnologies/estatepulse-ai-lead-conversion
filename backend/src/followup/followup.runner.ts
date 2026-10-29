@@ -271,12 +271,14 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       if (!text) return;
       try {
         const provider = await this.providers.for(row.organization_id);
-        if (!provider.capabilities.sms) {
-          // Retell sends no SMS: the step is logged as skipped, never as failed, and the sequence goes on.
-          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name} sends no SMS`);
-          this.state.quietly({ ...event, type: 'step_skipped', reason: SMS_UNAVAILABLE });
+        const sms = await provider.smsCapability(row.organization_id);
+        if (!sms.available) {
+          // The provider cannot text for this organization (Retell without SMS set up): the step is logged
+          // as skipped with the reason, never as failed or sent, and the sequence goes on.
+          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name}: ${sms.reason ?? SMS_UNAVAILABLE}`);
+          this.state.quietly({ ...event, type: 'step_skipped', reason: sms.reason ?? SMS_UNAVAILABLE });
         } else {
-          const sent = await provider.sendSms(row.organization_id, lead.phone ?? '', text);
+          const sent = await provider.sendSms(row.organization_id, lead.phone ?? '', text, { leadId: row.lead_id });
           await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
           this.state.quietly({ ...event, type: 'step_sent' });
           this.conversations

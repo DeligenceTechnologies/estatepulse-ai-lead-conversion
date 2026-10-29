@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { IntegrationProvider, IntegrationStatus } from '@prisma/client';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
@@ -7,9 +8,13 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { DEFAULT_TEMPLATE, RECORDING_NOTICE } from '@/telnyx/assistant.service';
 import { CallSlots } from '@/telnyx/calls/call-slots';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
+import { callToolsSettings, withCallToolsSection } from '@/telnyx/tools/call-tools';
 import { POST_CALL_ANALYSIS_DATA } from './retell-analysis';
-import { retell } from './retell-api';
+import { retell, storageFor } from './retell-api';
 import { RetellCredentialsService, type RetellCreds } from './retell-credentials.service';
+import { retellEnabled } from './retell-enabled.guard';
+import { RetellSmsService, WEBHOOK_PATH } from './retell-sms.service';
+import { RetellToolsService } from './retell-tools.service';
 
 /** Telnyx's default call length (1800 s), so an organization that switches keeps the same ceiling. */
 const DEFAULT_MAX_CALL_MS = 1_800_000;
@@ -42,25 +47,68 @@ export interface RetellAgentPatch {
   recordCalls?: boolean;
 }
 
-/** Recording off = Retell keeps no transcript or recording either, only what scoring needs. */
-const storageFor = (record: boolean) => (record ? 'everything' : 'basic_attributes_only');
-
 /**
  * The organization's Retell workspace through its own API key: the agent
  * (a Retell LLM for the prompt plus a voice agent), voices, phone numbers and
- * concurrency. Retell is voice only here, so nothing touches SMS.
+ * concurrency. The SMS agent is RetellSmsService's; the callback and outcome
+ * tools on both agents are RetellToolsService's. Everything that names this
+ * server's address (webhooks, tool URLs) is pointed at it again on start-up
+ * and whenever the agent is saved, so a new domain or tunnel needs no re-setup.
  */
 @Injectable()
-export class RetellAccountService {
+export class RetellAccountService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(RetellAccountService.name);
   private readonly publicUrl: string;
+  private readonly retellOn: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly creds: RetellCredentialsService,
     config: ConfigService<IntegrationEnv, true>,
     private readonly slots: CallSlots,
+    private readonly tools: RetellToolsService,
+    private readonly sms: RetellSmsService,
   ) {
     this.publicUrl = (config.get('PUBLIC_API_URL', { infer: true }) ?? '').replace(/\/+$/, '');
+    this.retellOn = retellEnabled(config);
+  }
+
+  /** The server's address can change (a new deploy domain, a dev tunnel): every Retell org's webhooks and tools keep reaching it. */
+  onApplicationBootstrap(): void {
+    if (this.retellOn && this.publicUrl) void this.refreshAllUrls();
+  }
+
+  async refreshAllUrls(): Promise<void> {
+    const rows = await this.prisma.integration
+      .findMany({ where: { provider: IntegrationProvider.retell, status: IntegrationStatus.active, revokedAt: null }, select: { orgId: true } })
+      .catch((error) => {
+        this.logger.warn(`Retell URL check: ${(error as Error).message}`);
+        return [];
+      });
+    for (const { orgId } of rows) {
+      await this.ensureUrls(orgId).catch((error) => this.logger.warn(`Retell URLs for org ${orgId}: ${(error as Error).message}`));
+    }
+  }
+
+  /**
+   * Points the agent's webhook, the SMS agent's webhook, the number's inbound
+   * SMS webhook and our tools' URLs at this server. Idempotent: nothing is
+   * written where the address already matches.
+   */
+  async ensureUrls(orgId: string): Promise<void> {
+    if (!this.publicUrl) return;
+    const c = await this.creds.getCreds(orgId);
+    if (!c?.apiKey) return;
+    if (c.agentId) {
+      const agent = await retell<{ webhook_url?: string | null }>(c.apiKey, `/get-agent/${c.agentId}`);
+      const wanted = `${this.publicUrl}${WEBHOOK_PATH}`;
+      if ((agent.webhook_url ?? '') !== wanted) {
+        await retell(c.apiKey, `/update-agent/${c.agentId}`, { method: 'PATCH', body: JSON.stringify({ webhook_url: wanted }) });
+        this.logger.log(`Retell agent ${c.agentId}: webhook moved to ${wanted}`);
+      }
+    }
+    await this.tools.refreshUrls(c);
+    await this.sms.refreshUrls(c);
   }
 
   /** Both keys must belong to one workspace: the API key places calls, the webhook key proves Retell's deliveries. */
@@ -135,6 +183,8 @@ export class RetellAccountService {
       throw error;
     }
     await this.creds.save(orgId, { agentId: agent.agent_id, llmId: llm.llm_id });
+    // The callback and outcome tools go on the new LLM now; a failure here is retried before the first call.
+    await this.tools.provisionNow(orgId).catch((error) => this.logger.warn(`Retell call tools for org ${orgId}: ${(error as Error).message}`));
     return this.getAgent(orgId) as Promise<RetellAgentView>;
   }
 
@@ -162,7 +212,7 @@ export class RetellAccountService {
   async updateAgent(orgId: string, patch: RetellAgentPatch): Promise<RetellAgentView> {
     const c = await this.requireAgent(orgId);
     const llm: Record<string, unknown> = {};
-    if (patch.prompt != null) llm.general_prompt = await this.withBooking(orgId, patch.prompt);
+    if (patch.prompt != null) llm.general_prompt = await this.withCallTools(orgId, c.llmId, await this.withBooking(orgId, patch.prompt));
     if (patch.greeting != null) llm.begin_message = patch.greeting;
     if (Object.keys(llm).length) await retell(c.apiKey, `/update-retell-llm/${c.llmId}`, { method: 'PATCH', body: JSON.stringify(llm) });
 
@@ -175,12 +225,15 @@ export class RetellAccountService {
     if (Object.keys(agent).length) await retell(c.apiKey, `/update-agent/${c.agentId}`, { method: 'PATCH', body: JSON.stringify(agent) });
 
     if (patch.recordCalls != null) {
+      await this.sms.setDataStorage(c, patch.recordCalls).catch((error) => this.logger.warn(`Retell SMS agent storage for org ${orgId}: ${(error as Error).message}`));
       await this.prisma.organizationSetting.upsert({
         where: { orgId },
         create: { orgId, callRecordingEnabled: patch.recordCalls },
         update: { callRecordingEnabled: patch.recordCalls },
       });
     }
+    // A save is the moment to make sure everything still points at this server (a tunnel may have changed).
+    await this.ensureUrls(orgId).catch((error) => this.logger.warn(`Retell URLs for org ${orgId}: ${(error as Error).message}`));
     return (await this.getAgent(orgId))!;
   }
 
@@ -297,6 +350,13 @@ export class RetellAccountService {
       .findUnique({ where: { orgId }, select: { callRecordingEnabled: true, callRecordingAnnounce: true } })
       .catch(() => null);
     return s?.callRecordingEnabled && s.callRecordingAnnounce ? `${RECORDING_NOTICE} ${base}` : base;
+  }
+
+  /** Keeps the callbacks-and-outcomes section on a prompt whose LLM carries those tools, as the prompt text is replaced. */
+  private async withCallTools(orgId: string, llmId: string, prompt: string): Promise<string> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
+    const provisioned = ((row?.callTools ?? null) as { retell?: { llmIds?: string[] } } | null)?.retell?.llmIds ?? [];
+    return callToolsSettings(row?.callTools).enabled && provisioned.includes(llmId) ? withCallToolsSection(prompt) : prompt;
   }
 
   /** Keeps in-call booking's marked prompt section, when booking is set up on Retell, as the prompt text is replaced. */

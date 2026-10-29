@@ -478,12 +478,14 @@ export class EngineService implements OnModuleDestroy {
       const text = fillTemplate(step.message ?? '', { ...variables, brokerage: office.brokerage });
       try {
         const provider = await this.providers.for(e.orgId);
-        if (!provider.capabilities.sms) {
-          // Retell sends no SMS: the step is logged as skipped, never as failed, and the strategy goes on.
-          this.logger.log(`lead ${e.leadId}: SMS step ${step.id} skipped — ${provider.name} sends no SMS`);
-          this.state.quietly({ ...event, type: 'step_skipped', reason: SMS_UNAVAILABLE });
+        const sms = await provider.smsCapability(e.orgId);
+        if (!sms.available) {
+          // The provider cannot text for this organization (Retell without SMS set up): the step is logged
+          // as skipped with the reason, never as failed or sent, and the strategy goes on.
+          this.logger.log(`lead ${e.leadId}: SMS step ${step.id} skipped — ${provider.name}: ${sms.reason ?? SMS_UNAVAILABLE}`);
+          this.state.quietly({ ...event, type: 'step_skipped', reason: sms.reason ?? SMS_UNAVAILABLE });
         } else {
-          const sent = await provider.sendSms(e.orgId, phone ?? '', text);
+          const sent = await provider.sendSms(e.orgId, phone ?? '', text, { leadId: e.leadId });
           await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
           this.state.quietly({ ...event, type: 'step_sent' });
           this.conversations

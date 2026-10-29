@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from '@/common/utils/crypto';
 import { BOOKING_PROMPT_START } from './booking-prompt';
 import { InCallBookingSettingsService } from './in-call-booking-settings.service';
+import { RetellToolAuthService } from '@/retell/retell-tool-auth.service';
 import { ToolAuthService, type RetellToolRequest } from './tool-auth.service';
 
 /** In-call booking on a Retell agent: custom functions on its LLM, calling the neutral /tools/booking URL. */
@@ -20,23 +21,26 @@ function signedRequest(over: Partial<RetellToolRequest> = {}, key = keys.webhook
     signature: `v=${ts},d=${createHmac('sha256', key).update(Buffer.concat([rawBody, Buffer.from(String(ts))])).digest('hex')}`,
     rawBody,
     callId: 'call_abc',
+    chatId: undefined,
     ...over,
   };
 }
 
-function authSetup(opts: { call?: Record<string, unknown> | null; config?: unknown } = {}) {
+function authSetup(opts: { call?: Record<string, unknown> | null; chat?: Record<string, unknown> | null; config?: unknown } = {}) {
   const call = opts.call === undefined ? { id: 'call-1', orgId: ORG, leadId: 'lead-1', status: 'in_progress' } : opts.call;
-  const prisma = { call: { findFirst: vi.fn().mockResolvedValue(call) } };
+  const chat = opts.chat === undefined ? { id: 'chat-row-1', orgId: ORG, leadId: 'lead-1', status: 'ongoing' } : opts.chat;
+  const prisma = { call: { findFirst: vi.fn().mockResolvedValue(call) }, smsChat: { findFirst: vi.fn().mockResolvedValue(chat) } };
   const settings = { activeConfig: vi.fn().mockResolvedValue(opts.config === undefined ? config : opts.config) };
   const retellCreds = { getCreds: vi.fn().mockResolvedValue(keys) };
-  const auth = new ToolAuthService({} as any, settings as any, prisma as any, retellCreds as any, { get: () => 'test' } as any);
+  const retellAuth = new RetellToolAuthService(prisma as any, retellCreds as any, { get: () => 'test' } as any);
+  const auth = new ToolAuthService({} as any, settings as any, retellAuth);
   return { auth, prisma };
 }
 
 describe('ToolAuthService.verifyRetell', () => {
   it('admits a live Retell call with our token and a Retell signature, taking org and lead from the call', async () => {
     const { auth, prisma } = authSetup();
-    await expect(auth.verifyRetell(signedRequest())).resolves.toEqual({ orgId: ORG, leadId: 'lead-1', callId: 'call-1', config });
+    await expect(auth.verifyRetell(signedRequest())).resolves.toEqual({ orgId: ORG, leadId: 'lead-1', callId: 'call-1', provider: 'retell', config });
     expect(prisma.call.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { providerCallId: 'call_abc', provider: 'retell' } }));
   });
 
@@ -44,11 +48,20 @@ describe('ToolAuthService.verifyRetell', () => {
     await expect(authSetup().auth.verifyRetell(signedRequest({}, keys.apiKey))).resolves.toMatchObject({ callId: 'call-1' });
   });
 
+  it('admits an ongoing Retell text chat named in the tool URL, taking org and lead from the chat', async () => {
+    const { auth, prisma } = authSetup();
+    await expect(auth.verifyRetell(signedRequest({ callId: undefined, chatId: 'chat_xyz' }))).resolves.toEqual({ orgId: ORG, leadId: 'lead-1', callId: null, provider: 'retell', config });
+    expect(prisma.smsChat.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { provider: 'retell', providerChatId: 'chat_xyz' } }));
+  });
+
   it.each([
     ['no bearer token', authSetup(), signedRequest({ authorization: undefined })],
     ['no call id', authSetup(), signedRequest({ callId: undefined })],
+    ['no call id', authSetup(), signedRequest({ callId: undefined, chatId: '{{chat_id}}' })],
     ['unknown call', authSetup({ call: null }), signedRequest()],
-    ['in-call booking is off on Retell', authSetup({ config: { ...config, provider: undefined } }), signedRequest()],
+    ['unknown chat', authSetup({ chat: null }), signedRequest({ callId: undefined, chatId: 'chat_xyz' })],
+    ['chat chat-row-1 is ended, not ongoing', authSetup({ chat: { id: 'chat-row-1', orgId: ORG, leadId: 'lead-1', status: 'ended' } }), signedRequest({ callId: undefined, chatId: 'chat_xyz' })],
+    ['booking tools are off for org-1', authSetup({ config: { ...config, provider: undefined } }), signedRequest()],
     ['bad token', authSetup(), signedRequest({ authorization: 'Bearer nope' })],
     ['call call-1 is completed, not live', authSetup({ call: { id: 'call-1', orgId: ORG, leadId: 'lead-1', status: 'completed' } }), signedRequest()],
     ['bad Retell signature', authSetup(), signedRequest({}, 'someone_else')],

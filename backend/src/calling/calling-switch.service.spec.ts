@@ -4,7 +4,7 @@ import { CallingSwitchService } from './calling-switch.service';
 const ORG = 'org-1';
 const readyRetell = { id: 'retell-row', apiKey: 'key_api', webhookKey: 'key_hook', agentId: 'agent_1', fromNumber: '+12025550100' };
 
-function setup(opts: { from?: 'telnyx' | 'retell'; live?: number; retell?: Record<string, unknown> | null; telnyx?: Record<string, unknown> | null; smsSteps?: number; smsEnrollments?: number; booking?: boolean } = {}) {
+function setup(opts: { from?: 'telnyx' | 'retell'; live?: number; retell?: Record<string, unknown> | null; telnyx?: Record<string, unknown> | null; smsSteps?: number; smsEnrollments?: number; booking?: boolean; smsReady?: boolean } = {}) {
   const tx = { integration: { updateMany: vi.fn(), update: vi.fn() } };
   const prisma = {
     integration: { findFirst: vi.fn().mockResolvedValue(opts.telnyx === undefined ? { id: 'telnyx-row', credentials: 'sealed', phoneNumber: '+12025550199' } : opts.telnyx) },
@@ -23,7 +23,14 @@ function setup(opts: { from?: 'telnyx' | 'retell'; live?: number; retell?: Recor
   const strategies = { getStrategy: vi.fn().mockResolvedValue({ steps }) };
   const booking = { activeConfig: vi.fn().mockResolvedValue(opts.booking ? { tokenHash: 'h' } : null), disable: vi.fn() };
   const audit = { record: vi.fn() };
-  const svc = new CallingSwitchService(prisma as any, providers as any, retellCreds as any, slots as any, strategies as any, booking as any, audit as any);
+  const retellSms = {
+    capability: vi.fn(async () =>
+      opts.smsReady
+        ? { available: true, state: 'unverified', reason: 'Retell does not report A2P registration.', deliveryReports: false }
+        : { available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet.', deliveryReports: false },
+    ),
+  };
+  const svc = new CallingSwitchService(prisma as any, providers as any, retellCreds as any, slots as any, strategies as any, booking as any, audit as any, retellSms as any);
   return { svc, prisma, tx, booking, audit };
 }
 
@@ -34,7 +41,7 @@ describe('CallingSwitchService.preview', () => {
     const p = await setup().svc.preview(ORG, 'retell');
     expect(p).toMatchObject({ from: 'telnyx', to: 'retell', liveCalls: 0, blockers: [] });
     expect(p.warnings).toContain('Calls already queued will dial through the new provider, still inside the contact window.');
-    expect(p.warnings).toContain('SMS follow-ups are not available with Retell.');
+    expect(p.warnings).toContain('SMS will not be sent while you call through Retell: SMS is not set up on Retell yet.');
   });
 
   it('blocks while a call is live', async () => {

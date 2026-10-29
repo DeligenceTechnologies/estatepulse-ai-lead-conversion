@@ -4,6 +4,7 @@ import { verifyRetellSignature } from '@/common/utils/crypto';
 import { POST_CALL_ANALYSIS_DATA, extractionFromRetell } from './retell-analysis';
 import { RetellAccountService } from './retell-account.service';
 import { RetellCallingProvider } from './retell-calling.provider';
+import { inVoicemail, voicemailExtraction } from './retell-analysis';
 
 const ORG = 'org-1';
 const KEY = 'key_webhook_123';
@@ -73,10 +74,20 @@ describe('extractionFromRetell', () => {
     expect(x).toMatchObject({ timeline: 'unknown', bedrooms: null, budget_min: null, financing: null });
   });
 
-  it('is null for voicemail and for calls with no analysis', () => {
-    expect(extractionFromRetell({ in_voicemail: true, custom_analysis_data: { pre_approved: true } })).toBeNull();
+  it('is null for calls with no analysis', () => {
     expect(extractionFromRetell({ custom_analysis_data: {} })).toBeNull();
     expect(extractionFromRetell(undefined)).toBeNull();
+  });
+
+  it('reads Retell’s own voicemail verdict as a call that reached no one, scoring nothing from the greeting', () => {
+    expect(inVoicemail({ in_voicemail: true })).toBe(true);
+    expect(inVoicemail({ in_voicemail: false })).toBe(false);
+    expect(inVoicemail(undefined)).toBe(false);
+    expect(voicemailExtraction({ in_voicemail: true, call_summary: 'Left at the beep.' })).toMatchObject({ reached_person: false, summary: 'Left at the beep.', pre_approved: false, timeline: 'unknown' });
+  });
+
+  it('reads a chat’s summary too', () => {
+    expect(extractionFromRetell({ chat_summary: 'Texted back.', custom_analysis_data: { not_interested: true } })).toMatchObject({ not_interested: true, summary: 'Texted back.' });
   });
 });
 
@@ -96,11 +107,16 @@ describe('RetellCallingProvider', () => {
   const active = { active: true, apiKey: 'key_api', agentId: 'agent_1', fromNumber: '+12025550100' };
   const setup = (c: Record<string, unknown> | null = active) => {
     const activity = { leadVariables: vi.fn().mockResolvedValue({ firstName: 'Asha', leadId: 'lead-1' }) };
-    return new RetellCallingProvider({ getCreds: vi.fn().mockResolvedValue(c) } as any, activity as any);
+    const sms = { capability: vi.fn().mockResolvedValue({ available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet', deliveryReports: false }), sendSms: vi.fn().mockResolvedValue({ id: 'chat_1:opening' }) };
+    const tools = { ensure: vi.fn().mockResolvedValue(undefined) };
+    const provider = new RetellCallingProvider({ getCreds: vi.fn().mockResolvedValue(c) } as any, activity as any, sms as any, tools as any);
+    return Object.assign(provider, { mocks: { sms, tools } });
   };
 
-  it('is voice only', () => {
-    expect(setup().capabilities).toEqual({ sms: false });
+  it('can text once its SMS agent is set up, and says why not until then', async () => {
+    const p = setup();
+    expect(p.capabilities).toEqual({ sms: true });
+    expect(await p.smsCapability(ORG)).toMatchObject({ available: false, state: 'not_configured' });
   });
 
   it('places the call on the organization’s agent with the lead as dynamic variables', async () => {
@@ -133,8 +149,17 @@ describe('RetellCallingProvider', () => {
     await expect(setup().startCall(ORG, '+12895550111', { leadId: 'l', orgId: ORG })).rejects.toThrow('Retell POST /v2/create-phone-call failed 429');
   });
 
-  it('never sends a text', async () => {
-    await expect(setup().sendSms()).rejects.toThrow('Retell sends no SMS');
+  it('hands a text to the Retell SMS service with the lead it is for, never to Telnyx', async () => {
+    const p = setup();
+    expect(await p.sendSms(ORG, '+12895550111', 'Hi', { leadId: 'lead-1' })).toEqual({ id: 'chat_1:opening' });
+    expect(p.mocks.sms.sendSms).toHaveBeenCalledWith(ORG, '+12895550111', 'Hi', { leadId: 'lead-1' });
+  });
+
+  it('makes sure the callback and outcome tools are on the agent before dialing', async () => {
+    fetchMock.mockResolvedValue(json({ call_id: 'call_abc' }));
+    const p = setup();
+    await p.startCall(ORG, '+12895550111', { leadId: 'lead-1', orgId: ORG });
+    expect(p.mocks.tools.ensure).toHaveBeenCalledWith(ORG);
   });
 
   it('reports the workspace concurrency limit', async () => {
@@ -154,8 +179,10 @@ describe('RetellAccountService', () => {
       upsert: vi.fn(),
     },
   });
-  const config = { get: () => 'https://api.example.com/' };
+  const config = { get: (key: string) => (key === 'PUBLIC_API_URL' ? 'https://api.example.com/' : false) };
   const slots = { inUse: vi.fn().mockResolvedValue(1) };
+  const tools = { provisionNow: vi.fn().mockResolvedValue(undefined), refreshUrls: vi.fn().mockResolvedValue(undefined) };
+  const smsSvc = { refreshUrls: vi.fn().mockResolvedValue(undefined), setDataStorage: vi.fn().mockResolvedValue(undefined) };
 
   it('creates the LLM and the agent, wired for our webhook, scoring fields, DNC and voicemail', async () => {
     fetchMock
@@ -164,7 +191,7 @@ describe('RetellAccountService', () => {
       .mockResolvedValueOnce(json({ voice_id: 'voice_1', language: 'en-US', max_call_duration_ms: 1_800_000, voicemail_option: { action: { type: 'hangup' } } }))
       .mockResolvedValueOnce(json({ general_prompt: 'p', begin_message: 'g' }));
     const c = creds();
-    const svc = new RetellAccountService(prisma(false) as any, c as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma(false) as any, c as any, config as any, slots as any, tools as any, smsSvc as any);
     await svc.createAgent(ORG, { voiceId: 'voice_1' });
 
     const llm = sent(0);
@@ -194,34 +221,34 @@ describe('RetellAccountService', () => {
       .mockResolvedValueOnce(json({ llm_id: 'llm_1' }))
       .mockResolvedValueOnce(new Response('{"message":"bad voice"}', { status: 400 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     await expect(svc.createAgent(ORG, { voiceId: 'nope' })).rejects.toThrow('failed 400');
     expect(sent(2)).toMatchObject({ url: 'https://api.retellai.com/delete-retell-llm/llm_1', method: 'DELETE' });
   });
 
   it('refuses keys from two different Retell workspaces', async () => {
     fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1' })).mockResolvedValueOnce(json({ org_id: 'ws_2' }));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     await expect(svc.verifyKeys('key_api', 'key_hook')).rejects.toThrow('different Retell workspaces');
   });
 
   it('says which key Retell rejected', async () => {
     fetchMock.mockResolvedValueOnce(json({ org_id: 'ws_1' })).mockResolvedValueOnce(new Response('{"message":"invalid"}', { status: 401 }));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     await expect(svc.verifyKeys('key_api', 'bad')).rejects.toThrow('Retell rejected the webhook key');
   });
 
   it('keeps our call limit within the Retell workspace limit, which only Retell can raise', async () => {
     fetchMock.mockResolvedValueOnce(json({ current_concurrency: 0, concurrency_limit: 20 }));
     const p = prisma();
-    const svc = new RetellAccountService(p as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(p as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     await expect(svc.setCallCapacity(ORG, 25)).rejects.toThrow('allows 20 concurrent calls');
     expect(p.organizationSetting.upsert).not.toHaveBeenCalled();
   });
 
   it('offers only voices a Retell LLM agent can use (xAI voices need xAI speech-to-speech)', async () => {
     fetchMock.mockResolvedValueOnce(json([{ voice_id: 'xai-Iris', voice_name: 'Iris', provider: 'xai' }, { voice_id: '11labs-Adrian', voice_name: 'Adrian', provider: 'elevenlabs' }]));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     expect((await svc.listVoices(ORG)).map((v) => v.id)).toEqual(['11labs-Adrian']);
   });
 
@@ -230,7 +257,7 @@ describe('RetellAccountService', () => {
       .mockResolvedValueOnce(json({ llm_id: 'llm_1' }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'error', message: 'Voice xai-Iris is only supported with xai speech-to-speech models.' }), { status: 400 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any);
+    const svc = new RetellAccountService(prisma() as any, creds() as any, config as any, slots as any, tools as any, smsSvc as any);
     await expect(svc.createAgent(ORG, { voiceId: 'xai-Iris' })).rejects.toThrow('Retell POST /create-agent failed 400: Voice xai-Iris is only supported with xai speech-to-speech models.');
   });
 });

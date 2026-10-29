@@ -1,14 +1,15 @@
 import React from 'react';
 import { Flame, Gauge } from 'lucide-react';
-import { qualificationOf } from '../../utils/leadScoringApi';
+import { SOURCE_LABEL, analysisUnavailableOf, qualificationOf } from '../../utils/leadScoringApi';
 
 /**
  * How this call scored the lead: "HOT — 80" and every point behind it.
  *
- * Scoring is automatic when a call ends — Telnyx's post-call Insight feeds the
- * backend's deterministic scorer, and if that result does not arrive the
- * backend scores the transcript itself. Nothing here is manual; a call that is
- * not scored yet simply shows nothing.
+ * Scoring is automatic when a call ends — the provider's post-call analysis
+ * (Telnyx's Insight, Retell's call analysis) feeds the backend's deterministic
+ * scorer, and if that result does not arrive the backend scores the transcript
+ * itself where it can. Nothing here is manual; a call that is not scored yet
+ * shows nothing, and one whose analysis never came says so.
  */
 
 const TEMP_STYLES: Record<string, string> = {
@@ -19,7 +20,18 @@ const TEMP_STYLES: Record<string, string> = {
 
 export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ extractedIntel }) => {
   const q = qualificationOf(extractedIntel);
-  if (!q) return null;
+  const unavailable = analysisUnavailableOf(extractedIntel);
+  if (!q) {
+    return unavailable ? (
+      <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-1">
+        <div className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+          <Gauge className="w-3.5 h-3.5 text-emerald-400" />
+          Lead qualification
+        </div>
+        <p className="text-xs text-amber-300">Not scored: {unavailable}.</p>
+      </div>
+    ) : null;
+  }
 
   return (
     <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
@@ -39,7 +51,7 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
         </span>
         <span className="text-xs text-slate-500">
           Hot from {q.thresholds.hot}, warm from {q.thresholds.warm} •{' '}
-          {q.source === 'telnyx_insights' ? 'scored when the call ended' : 'scored from the transcript'}
+          {SOURCE_LABEL[q.source] ?? 'scored from the transcript'}
         </span>
       </div>
 

@@ -9,6 +9,7 @@ import { sha256Hex } from '@/common/utils/crypto';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { retell } from '@/retell/retell-api';
 import { RetellCredentialsService } from '@/retell/retell-credentials.service';
+import { retellToolUrl, type RetellSession } from '@/retell/retell-tools';
 import { telnyx } from '@/telnyx/telnyx-api';
 import { TelnyxCredentialsService } from '@/telnyx/telnyx-credentials.service';
 import { CalendarAccessService } from '../connection/calendar-access.service';
@@ -34,6 +35,8 @@ export interface InCallBookingConfig {
   /** Set when booking lives on the Retell agent (its LLM carries the tools and the token); absent = Telnyx. */
   provider?: 'retell';
   llmId?: string;
+  /** The Retell SMS agent's LLM, when it carries the tools too (booking in a text chat). */
+  smsLlmId?: string;
 }
 
 export interface InCallBookingStatusDTO {
@@ -220,6 +223,7 @@ export class InCallBookingSettingsService {
     if (config.provider === 'retell') {
       const r = await this.retellCreds.getCreds(orgId).catch(() => null);
       if (r?.apiKey && config.llmId) await this.removeFromRetell(r.apiKey, config.llmId);
+      if (r?.apiKey && config.smsLlmId) await this.removeFromRetell(r.apiKey, config.smsLlmId);
     } else {
       const c = await this.creds.getCreds(orgId).catch(() => null);
       if (c?.apiKey) await this.removeFromTelnyx(c.apiKey, config.assistantId ?? c.assistantId, config.toolIds ?? [], config.secretId);
@@ -236,9 +240,16 @@ export class InCallBookingSettingsService {
     const r = (await this.retellCreds.getCreds(orgId))!;
     const token = randomBytes(32).toString('base64url');
     await this.editRetellLlm(r.apiKey, r.llmId, (tools, prompt) => ({
-      general_tools: [...tools.filter(notBookingTool), ...this.retellToolDefinitions(token)],
+      general_tools: [...tools.filter(notBookingTool), ...this.retellToolDefinitions(token, 'call')],
       general_prompt: withBookingSection(prompt, et.name, et.durationMinutes),
     }));
+    // The SMS agent books in a text chat with the same tools; its chat is named in the tool URL.
+    if (r.smsLlmId) {
+      await this.editRetellLlm(r.apiKey, r.smsLlmId, (tools, prompt) => ({
+        general_tools: [...tools.filter(notBookingTool), ...this.retellToolDefinitions(token, 'chat')],
+        general_prompt: withBookingSection(prompt, et.name, et.durationMinutes),
+      }));
+    }
     const config: InCallBookingConfig = {
       eventTypeUri: et.uri,
       eventTypeName: et.name,
@@ -250,10 +261,25 @@ export class InCallBookingSettingsService {
       assistantId: r.agentId,
       provider: 'retell',
       llmId: r.llmId,
+      ...(r.smsLlmId ? { smsLlmId: r.smsLlmId } : {}),
     };
     await this.save(orgId, config as unknown as Prisma.InputJsonObject);
-    this.logger.log(`in-call booking enabled on Retell for ${orgId} on ${et.name}`);
+    this.logger.log(`in-call booking enabled on Retell for ${orgId} on ${et.name}${r.smsLlmId ? ' (calls and texts)' : ''}`);
     return this.status(orgId);
+  }
+
+  /**
+   * An SMS agent created after booking was switched on for Retell gets the
+   * booking tools too; provisioned afresh (a new token on both LLMs), since
+   * only the token's hash is kept here. Nothing happens unless booking is on
+   * for Retell and the SMS agent lacks the tools.
+   */
+  async syncRetellSmsAgent(orgId: string): Promise<void> {
+    const config = await this.activeConfig(orgId);
+    if (config?.provider !== 'retell') return;
+    const r = await this.retellCreds.getCreds(orgId).catch(() => null);
+    if (!r?.apiKey || !r.smsLlmId || config.smsLlmId === r.smsLlmId) return;
+    await this.enableOnRetell(orgId, { uri: config.eventTypeUri, name: config.eventTypeName, durationMinutes: config.durationMinutes });
   }
 
   private async removeFromRetell(apiKey: string, llmId: string): Promise<void> {
@@ -269,19 +295,24 @@ export class InCallBookingSettingsService {
     await retell(apiKey, `/update-retell-llm/${llmId}`, { method: 'PATCH', body: JSON.stringify(edit(llm.general_tools ?? [], llm.general_prompt)) });
   }
 
-  /** The Telnyx tools, worded the same, as Retell custom functions on the provider-neutral /tools/booking URL. */
-  retellToolDefinitions(token: string) {
+  /**
+   * The Telnyx tools, worded the same, as Retell custom functions on the
+   * provider-neutral /tools/booking URL. On a call the agent says a filler
+   * sentence while the tool runs; in a text chat that would be a text, so it
+   * does not, and the chat id travels in the URL (see retellToolUrl).
+   */
+  retellToolDefinitions(token: string, session: RetellSession = 'call') {
     return this.toolDefinitions('').map((t) => ({
       type: 'custom',
       name: t.webhook.name,
       description: t.webhook.description,
-      url: `${this.publicApiUrl}/tools/booking/${t.webhook.url.split('/').at(-1)}`,
+      url: retellToolUrl(this.publicApiUrl, `/tools/booking/${t.webhook.url.split('/').at(-1)}`, session),
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       parameters: t.webhook.body_parameters,
-      speak_during_execution: true,
-      execution_message_description: t.webhook.messages[0].content,
-      execution_message_type: 'static_text',
+      ...(session === 'call'
+        ? { speak_during_execution: true, execution_message_description: t.webhook.messages[0].content, execution_message_type: 'static_text' }
+        : { speak_during_execution: false }),
       timeout_ms: t.timeout_ms,
     }));
   }

@@ -3,6 +3,9 @@ import { CallingProviders, TelnyxCallingProvider } from '@/calling/calling-provi
 import { FollowupModule } from '@/followup/followup.module';
 import { RetellCallingProvider } from '@/retell/retell-calling.provider';
 import { RetellCredentialsService } from '@/retell/retell-credentials.service';
+import { RetellSmsService } from '@/retell/retell-sms.service';
+import { RetellToolAuthService } from '@/retell/retell-tool-auth.service';
+import { RetellToolsService } from '@/retell/retell-tools.service';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
 import { CallCapacityService } from './calls/call-capacity.service';
@@ -64,6 +67,9 @@ import { VoicemailService } from './voicemail/voicemail.service';
     NumbersService,
     RetellCallingProvider,
     RetellCredentialsService,
+    RetellSmsService,
+    RetellToolAuthService,
+    RetellToolsService,
     SmsService,
     SmsConversationService,
     SmsIntentService,
@@ -90,6 +96,12 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallingProviders,
     LeadScoringService,
     RetellCredentialsService,
+    RetellSmsService,
+    RetellToolAuthService,
+    RetellToolsService,
+    InboundSmsService,
+    OutcomeService,
+    CallbackService,
   ],
 })
 export class TelnyxModule {}

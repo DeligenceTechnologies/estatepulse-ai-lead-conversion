@@ -1,20 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Loader2, PhoneCall, Plug, Save, ShieldCheck, Sliders, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader2, MessageSquare, PhoneCall, Plug, Save, ShieldCheck, Sliders, Sparkles } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { SMS_UNAVAILABLE_ON_RETELL } from '../../utils/callingProviderApi';
+import { smsDisabledReasonOf, useCallingProvider } from '../../utils/callingProviderApi';
 import {
   getRetellAgent,
+  getRetellSmsAgent,
   retellMessage,
   getRetellCallCapacity,
   listRetellVoices,
   saveRetellCallCapacity,
   updateRetellAgent,
+  updateRetellSmsAgent,
   type RetellAgent,
   type RetellCallCapacity,
+  type RetellSmsAgent,
   type RetellVoice,
 } from '../../utils/retellApi';
 import { CallPacingCard } from './CallPacingCard';
+import { CallToolsCard } from './CallToolsCard';
 import { ContactWindowCard } from './ContactWindowCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { LeadTemperatureCard } from './LeadTemperatureCard';
@@ -23,8 +27,10 @@ import { StrategyEditor } from './StrategyEditor';
 /**
  * AI Agent settings for an organization that calls through Retell. The agent
  * lives in the organization's Retell workspace; this edits its prompt,
- * greeting and voice. The strategy, contact window, pacing, scoring and
- * in-call booking are the same as on Telnyx; SMS steps are not sent.
+ * greeting and voice, and the SMS agent's prompt once SMS is set up in
+ * Settings → Calling. The strategy, contact window, pacing, scoring, callbacks
+ * and in-call booking are the same as on Telnyx; SMS steps go through the SMS
+ * agent, or are shown as not sent with the reason until it is set up.
  */
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl';
@@ -161,6 +167,53 @@ const AgentCard: React.FC<{ agent: RetellAgent; voices: RetellVoice[]; onSaved: 
   );
 };
 
+/** The SMS agent's prompt: how the AI texts. Its opening message is always the strategy or sequence text, as written. */
+const SmsAgentCard: React.FC<{ agent: RetellSmsAgent; onSaved: (a: RetellSmsAgent) => void }> = ({ agent, onSaved }) => {
+  const [prompt, setPrompt] = useState(agent.prompt);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      onSaved(await updateRetellSmsAgent(prompt));
+      toast.success('SMS agent saved.');
+    } catch (e) {
+      toast.error(retellMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className={card}>
+      <div>
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <MessageSquare className="w-4 h-4 text-cyan-400" /> SMS Agent
+        </h3>
+        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+          How the AI texts with a lead. The first text of every conversation is the strategy or sequence message exactly as
+          you wrote it; this prompt guides the replies that follow. The same lead details as on calls are available.
+        </p>
+      </div>
+      <div>
+        <label className={label}>Prompt</label>
+        <textarea className={`${input} h-48 resize-y font-mono`} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || !prompt.trim()}
+          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {saving ? 'Saving to Retell…' : 'Save SMS agent'}
+        </button>
+      </div>
+    </section>
+  );
+};
+
 /** Our own call limit, never above the Retell workspace's, which only Retell can raise. */
 const RetellCallCapacityCard: React.FC = () => {
   const [status, setStatus] = useState<RetellCallCapacity | null>(null);
@@ -247,8 +300,11 @@ const RetellCallCapacityCard: React.FC = () => {
 export const RetellAISettingsView: React.FC = () => {
   const navigate = useNavigate();
   const [agent, setAgent] = useState<RetellAgent | null | undefined>(undefined);
+  const [smsAgent, setSmsAgent] = useState<RetellSmsAgent | null>(null);
   const [voices, setVoices] = useState<RetellVoice[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const calling = useCallingProvider();
+  const smsDisabledReason = smsDisabledReasonOf(calling);
 
   useEffect(() => {
     getRetellAgent()
@@ -257,6 +313,9 @@ export const RetellAISettingsView: React.FC = () => {
         setAgent(null);
         setLoadError(retellMessage(e));
       });
+    getRetellSmsAgent()
+      .then(setSmsAgent)
+      .catch(() => setSmsAgent(null));
     listRetellVoices()
       .then(setVoices)
       .catch(() => setVoices([]));
@@ -295,13 +354,18 @@ export const RetellAISettingsView: React.FC = () => {
         <AgentCard key={agent.agentId} agent={agent} voices={voices} onSaved={setAgent} />
       )}
 
+      {smsAgent && <SmsAgentCard key={smsAgent.agentId} agent={smsAgent} onSaved={setSmsAgent} />}
+
       <section className={card}>
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Sliders className="w-4 h-4 text-emerald-400" />
           Outbound Communication Strategy
           <span className="text-xs text-slate-500 font-normal">— the call sequence run for every new lead</span>
         </h3>
-        <StrategyEditor smsDisabledReason={SMS_UNAVAILABLE_ON_RETELL} />
+        {smsDisabledReason && (
+          <p className="text-2xs text-slate-500 leading-relaxed">Set SMS up in Settings → Calling → Retell to send the SMS steps through Retell.</p>
+        )}
+        <StrategyEditor smsDisabledReason={smsDisabledReason} />
       </section>
 
       {/* The ids are link targets (OutreachPicker's "Change" links): /ai-settings#<id>. */}
@@ -321,6 +385,8 @@ export const RetellAISettingsView: React.FC = () => {
 
       <InCallBookingCard />
 
+      <CallToolsCard />
+
       <section className={card}>
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-400" /> Compliance
@@ -333,7 +399,9 @@ export const RetellAISettingsView: React.FC = () => {
           </p>
         </div>
         <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400">
-          {SMS_UNAVAILABLE_ON_RETELL} Texts and SMS STOP replies are handled only when your organization calls through Telnyx.
+          {smsDisabledReason
+            ? `SMS steps are not sent: ${smsDisabledReason}`
+            : 'A lead who texts STOP is set to do-not-contact and the SMS conversation is ended; one who asks the AI not to be contacted, on a call or by text, is recorded the same way.'}
         </div>
       </section>
     </div>

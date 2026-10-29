@@ -6,9 +6,10 @@ import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { stepsOf } from '@/followup/followup.service';
 import { RetellCredentialsService } from '@/retell/retell-credentials.service';
+import { RetellSmsService } from '@/retell/retell-sms.service';
 import { CallSlots } from '@/telnyx/calls/call-slots';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
-import { CallingProviders, type CallingProviderName } from './calling-providers';
+import { CallingProviders, SMS_UNAVAILABLE, type CallingProviderName } from './calling-providers';
 
 const LABEL: Record<CallingProviderName, string> = { telnyx: 'Telnyx', retell: 'Retell' };
 
@@ -38,11 +39,13 @@ export class CallingSwitchService {
     private readonly strategies: StrategyStoreService,
     private readonly booking: InCallBookingSettingsService,
     private readonly audit: AuditService,
+    private readonly retellSms: RetellSmsService,
   ) {}
 
+  /** The provider in use and whether it can text for this organization right now. */
   async current(orgId: string) {
     const provider = await this.providers.for(orgId);
-    return { provider: provider.name, capabilities: provider.capabilities };
+    return { provider: provider.name, capabilities: provider.capabilities, sms: await provider.smsCapability(orgId) };
   }
 
   async preview(orgId: string, to: CallingProviderName): Promise<SwitchPreview> {
@@ -55,11 +58,18 @@ export class CallingSwitchService {
     const warnings = ['Calls already queued will dial through the new provider, still inside the contact window.'];
     if (to === 'telnyx') warnings.push(...(await this.telnyxNotes(orgId)));
     if (to === 'retell') {
-      warnings.push('SMS follow-ups are not available with Retell.');
-      const smsSteps = (await this.strategies.getStrategy(orgId)).steps.filter((s) => s.channel === 'sms').length;
-      if (smsSteps) warnings.push(`Your outreach strategy has ${smsSteps} SMS step(s); they will not be sent while you call through Retell.`);
-      const enrolled = await this.enrolledInSmsSequences(orgId);
-      if (enrolled) warnings.push(`${enrolled} lead(s) are in follow-up sequences with SMS steps; those steps will not be sent.`);
+      // Texts go through Retell only once its SMS agent is set up on an eligible number; what the owner has to know is said here.
+      const c = await this.retellCreds.getCreds(orgId);
+      const sms = await this.retellSms.capability(orgId, c ? { ...c, active: true } : c);
+      if (!sms.available) {
+        warnings.push(`SMS will not be sent while you call through Retell: ${sms.reason ?? SMS_UNAVAILABLE}`);
+        const smsSteps = (await this.strategies.getStrategy(orgId)).steps.filter((s) => s.channel === 'sms').length;
+        if (smsSteps) warnings.push(`Your outreach strategy has ${smsSteps} SMS step(s); they will not be sent while you call through Retell.`);
+        const enrolled = await this.enrolledInSmsSequences(orgId);
+        if (enrolled) warnings.push(`${enrolled} lead(s) are in follow-up sequences with SMS steps; those steps will not be sent.`);
+      } else if (sms.reason) {
+        warnings.push(`SMS goes through Retell’s SMS agent. ${sms.reason}`);
+      }
     }
     if (await this.booking.activeConfig(orgId)) warnings.push(`In-call booking will be switched off; turn it on again once you are on ${LABEL[to]}.`);
     return { from, to, liveCalls, blockers, warnings };

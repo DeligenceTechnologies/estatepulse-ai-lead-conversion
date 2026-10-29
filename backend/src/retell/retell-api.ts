@@ -30,3 +30,34 @@ export async function retell<T = any>(apiKey: string, path: string, init: Reques
   }
   return (res.status === 204 ? {} : await res.json()) as T;
 }
+
+/** Retell rate-limited the workspace: wait before the next request. */
+export const isRetellRateLimited = (error: unknown): boolean => error instanceof Error && /failed 429\b/.test(error.message);
+
+/** Recording off = Retell keeps no transcript or recording either, only what scoring needs. */
+export const storageFor = (record: boolean) => (record ? 'everything' : 'basic_attributes_only');
+
+export interface RetellLlmTool {
+  type?: string;
+  name?: string;
+  url?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * One read and one write of a Retell LLM's tools and prompt; refuses to write
+ * when the current prompt cannot be read, so a prompt is never wiped by mistake.
+ * `edit` returns the patch, or null to leave the LLM as it is.
+ */
+export async function editRetellLlm(
+  apiKey: string,
+  llmId: string,
+  edit: (tools: RetellLlmTool[], prompt: string) => Record<string, unknown> | null,
+): Promise<boolean> {
+  const llm = await retell<{ general_tools?: RetellLlmTool[] | null; general_prompt?: unknown }>(apiKey, `/get-retell-llm/${llmId}`);
+  if (typeof llm.general_prompt !== 'string') throw new AppError('UPSTREAM_ERROR', 'Could not read the agent prompt from Retell; it was left unchanged.');
+  const patch = edit(llm.general_tools ?? [], llm.general_prompt);
+  if (!patch) return false;
+  await retell(apiKey, `/update-retell-llm/${llmId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  return true;
+}

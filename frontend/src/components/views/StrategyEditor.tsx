@@ -9,7 +9,7 @@ import { AlwaysOnRules, StepRules } from '../journey/StepRules';
 const fit = (steps: StrategyStep[]) => fitSteps(steps, (s) => s.channel);
 
 // Single editable strategy: the voice + SMS sequence for new leads.
-// smsDisabledReason: the calling provider sends no SMS (Retell) — SMS steps stay
+// smsDisabledReason: the calling provider cannot text for this organization (Retell without SMS set up) — SMS steps stay
 // visible, marked as not sent with the reason, and no new ones can be added.
 export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDisabledReason }) => {
   const [steps, setStepsRaw] = useState<StrategyStep[]>([]);

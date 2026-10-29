@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SMS_READY } from '@/calling/calling-providers';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { EngineService, remainingSteps } from './engine.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
@@ -70,7 +71,12 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const state = new LeadStateService(prisma as any);
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
-  const provider = { name: sms ? 'telnyx' : 'retell', capabilities: { sms }, sendSms: smsService.sendSms };
+  const provider = {
+    name: sms ? 'telnyx' : 'retell',
+    capabilities: { sms: true },
+    smsCapability: vi.fn(async () => (sms ? SMS_READY : { available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet', deliveryReports: false })),
+    sendSms: smsService.sendSms,
+  };
   const providers = { for: vi.fn(async () => provider), nameFor: vi.fn(async () => provider.name) };
   const engine = new EngineService(prisma as any, strategies as any, providers as any, queue as any, activity as any, followup as any, state, conversations as any);
   const text = (direction: 'inbound' | 'outbound') => texts.push({ direction, createdAt: new Date() });

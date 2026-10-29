@@ -18,7 +18,7 @@ function setup(opts: { texting?: boolean; call?: { status: string } | null } = {
   const settings = { activeConfig: vi.fn(async () => ({ tokenHash: sha256Hex(TOKEN), eventTypeUri: 'et' })) };
   const creds = { getCreds: vi.fn(async () => ({ publicKey: '' })) };
   const auth = new AssistantToolAuth(prisma as any, creds as any, { get: () => 'development' } as any);
-  const service = new ToolAuthService(auth, settings as any, prisma as any, {} as any, { get: () => 'development' } as any);
+  const service = new ToolAuthService(auth, settings as any, {} as any);
   const request = (body: Record<string, unknown>) => ({
     authorization: `Bearer ${TOKEN}`,
     signature: undefined,

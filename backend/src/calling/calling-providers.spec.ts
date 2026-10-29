@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CallingProviders, TelnyxCallingProvider } from './calling-providers';
+import { CallingProviders, SMS_READY, TelnyxCallingProvider } from './calling-providers';
 
 const ORG = 'org-1';
 const config = (on: boolean) => ({ get: vi.fn((key: string) => (key === 'RETELL_ENABLED' ? on : undefined)) });
@@ -46,6 +46,7 @@ describe('TelnyxCallingProvider', () => {
     expect(voice.placeCall).toHaveBeenCalledWith(ORG, '+12895550111', { leadId: 'lead-1', orgId: ORG });
     // Key order reaches Telnyx's base64 client_state, so it stays as the caller built it.
     expect(Object.keys(voice.placeCall.mock.calls[0][2])).toEqual(['leadId', 'orgId']);
+    expect(await p.smsCapability()).toEqual(SMS_READY);
     expect(await p.sendSms(ORG, '+12895550111', 'Hi')).toEqual({ id: 'msg-1' });
     expect(sms.sendSms).toHaveBeenCalledWith(ORG, '+12895550111', 'Hi');
     expect(await p.providerLimit(ORG)).toBe(7);

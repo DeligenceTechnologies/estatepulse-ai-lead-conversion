@@ -1,19 +1,30 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { InCallBookingSettingsService } from '@/calendar/booking/in-call-booking-settings.service';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { CallCapacityDto } from '@/telnyx/dto/telnyx.dto';
-import { BuyRetellNumberDto, CreateRetellAgentDto, ImportRetellNumberDto, RetellCredentialsDto, RetellPhoneNumberDto, UpdateRetellAgentDto } from './dto/retell.dto';
+import {
+  BuyRetellNumberDto,
+  CreateRetellAgentDto,
+  ImportRetellNumberDto,
+  RetellCredentialsDto,
+  RetellPhoneNumberDto,
+  UpdateRetellAgentDto,
+  UpdateRetellSmsAgentDto,
+} from './dto/retell.dto';
 import { RetellAccountService } from './retell-account.service';
 import { RetellCredentialsService } from './retell-credentials.service';
 import { RetellEnabledGuard } from './retell-enabled.guard';
+import { RetellSmsService } from './retell-sms.service';
 
 /**
- * Setting up the organization's Retell account: keys, agent, voices, numbers.
- * None of it changes which provider the organization calls through; that is
- * the switch (PUT /calling-provider). Outbound calling on Retell needs the
- * workspace's KYC done in the Retell dashboard first.
+ * Setting up the organization's Retell account: keys, agent, voices, numbers
+ * and the SMS agent. None of it changes which provider the organization calls
+ * through; that is the switch (PUT /calling-provider). Outbound calling on
+ * Retell needs the workspace's KYC done in the Retell dashboard first; SMS
+ * needs the number's A2P registration approved there.
  */
 @UseGuards(RetellEnabledGuard)
 @Controller('retell')
@@ -21,6 +32,8 @@ export class RetellController {
   constructor(
     private readonly creds: RetellCredentialsService,
     private readonly account: RetellAccountService,
+    private readonly sms: RetellSmsService,
+    private readonly booking: InCallBookingSettingsService,
   ) {}
 
   @Get('status')
@@ -92,6 +105,42 @@ export class RetellController {
   async assign(@CurrentAuth() auth: AuthContext, @Body() body: RetellPhoneNumberDto) {
     await this.account.assignNumber(auth.organizationId, body.phoneNumber);
     return this.creds.publicStatus(auth.organizationId);
+  }
+
+  /** Whether texts can go through Retell from the calling number, and what is missing. */
+  @Get('sms')
+  @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
+  smsStatus(@CurrentAuth() auth: AuthContext) {
+    return this.sms.status(auth.organizationId);
+  }
+
+  /** Creates (once) the SMS agent and binds it to the calling number; safe to run again to finish or repair a setup. */
+  @Post('sms/setup')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
+  async setupSms(@CurrentAuth() auth: AuthContext) {
+    const status = await this.sms.setup(auth.organizationId);
+    // In-chat booking: the booking tools go on the new SMS agent when booking is on for Retell.
+    await this.booking.syncRetellSmsAgent(auth.organizationId).catch(() => undefined);
+    return status;
+  }
+
+  @Delete('sms')
+  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
+  disableSms(@CurrentAuth() auth: AuthContext) {
+    return this.sms.disable(auth.organizationId);
+  }
+
+  @Get('sms/agent')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  async smsAgent(@CurrentAuth() auth: AuthContext) {
+    return { agent: await this.sms.getAgent(auth.organizationId) };
+  }
+
+  @Patch('sms/agent')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  async updateSmsAgent(@CurrentAuth() auth: AuthContext, @Body() body: UpdateRetellSmsAgentDto) {
+    return { agent: await this.sms.updateAgent(auth.organizationId, body) };
   }
 
   @Get('concurrency')

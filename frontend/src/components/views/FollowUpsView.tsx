@@ -22,7 +22,7 @@ import { messageFor } from '../../lib/api';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { EnrollLeadsModal } from '../modals/EnrollLeadsModal';
 import { SequenceEditorModal } from '../modals/SequenceEditorModal';
-import { SMS_UNAVAILABLE_ON_RETELL, useCallingProvider } from '../../utils/callingProviderApi';
+import { smsDisabledReasonOf, useCallingProvider } from '../../utils/callingProviderApi';
 import { ContactWindowCard } from './ContactWindowCard';
 import {
   archiveSequence,
@@ -85,7 +85,7 @@ export const FollowUpsView: React.FC = () => {
   const { role } = useAuth();
   const isOwner = role === 'owner';
   const calling = useCallingProvider();
-  const smsDisabledReason = calling && !calling.capabilities.sms ? SMS_UNAVAILABLE_ON_RETELL : undefined;
+  const smsDisabledReason = smsDisabledReasonOf(calling);
 
   const [editing, setEditing] = useState<Sequence | null | undefined>(undefined);
   const [enrolling, setEnrolling] = useState<Sequence | null>(null);

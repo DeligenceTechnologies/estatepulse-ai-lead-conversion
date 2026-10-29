@@ -13,9 +13,18 @@ export interface Thresholds {
   warmThreshold: number;
 }
 
+/** Where a call's qualification came from: the provider's own post-call analysis, or our read of the transcript. */
+export type QualificationSource = 'telnyx_insights' | 'retell_analysis' | 'transcript';
+
+export const SOURCE_LABEL: Record<QualificationSource, string> = {
+  telnyx_insights: 'scored when the call ended',
+  retell_analysis: 'scored from Retell’s post-call analysis',
+  transcript: 'scored from the transcript',
+};
+
 /** voice_calls.extracted_intel.qualification, as the backend stores it. */
 export interface Qualification {
-  source: 'telnyx_insights' | 'transcript';
+  source: QualificationSource;
   score: number;
   temperature: Temperature;
   reasons: { label: string; points: number }[];
@@ -34,4 +43,11 @@ export function qualificationOf(extractedIntel: unknown): Qualification | null {
   if (!extractedIntel || typeof extractedIntel !== 'object') return null;
   const q = (extractedIntel as { qualification?: Qualification }).qualification;
   return q && typeof q.score === 'number' && Array.isArray(q.reasons) ? q : null;
+}
+
+/** Why a call could not be scored (the provider's analysis never came), when the backend noted it and no score followed. */
+export function analysisUnavailableOf(extractedIntel: unknown): string | null {
+  if (!extractedIntel || typeof extractedIntel !== 'object' || qualificationOf(extractedIntel)) return null;
+  const a = (extractedIntel as { analysis?: { status?: string; reason?: string } }).analysis;
+  return a?.status === 'unavailable' ? (a.reason ?? 'The call analysis is unavailable') : null;
 }

@@ -43,12 +43,14 @@ const retellToolRequest = (req: RawBodyRequest<Request>, body: any): RetellToolR
   signature: req.header('x-retell-signature'),
   rawBody: req.rawBody,
   callId: body?.call?.call_id,
+  chatId: req.query?.chat_id ?? body?.chat?.chat_id,
 });
 
 /**
  * The provider-neutral booking tool URL, the same booking logic behind it.
- * The Retell agent's custom functions call it (body `{ name, call, args }`);
- * Telnyx keeps /tools/telnyx/booking, which its installed tools point at.
+ * The Retell agent's custom functions call it (body `{ name, call, args }`
+ * on a call; in a text chat the chat id comes in the URL); Telnyx keeps
+ * /tools/telnyx/booking, which its installed tools point at.
  */
 @Public()
 @UseGuards(RetellEnabledGuard)

@@ -9,6 +9,7 @@ const CALLER_ONLY = 'Answer strictly from what the caller (user) said; the agent
 /**
  * The lead-qualification fields, as Retell post-call analysis fields: the same
  * names and descriptions the Telnyx Insight uses, so one scorer reads both.
+ * The SMS agent asks the same of a text chat (post_chat_analysis_data).
  */
 export const POST_CALL_ANALYSIS_DATA: RetellField[] = Object.entries(EXTRACTION_JSON_SCHEMA.properties).map(([name, spec]) => {
   const p = spec as { type: string | readonly string[]; enum?: readonly (string | null)[]; description: string };
@@ -21,14 +22,13 @@ export const POST_CALL_ANALYSIS_DATA: RetellField[] = Object.entries(EXTRACTION_
 });
 
 /**
- * Retell's `call_analysis` as our Extraction. Missing booleans read false and
- * a missing timeline reads unknown, as the extraction instructions say;
- * out-of-range values are dropped rather than failing the whole call. Null
- * when the call produced no analysis (it never connected).
+ * Retell's `call_analysis` (or a chat's `chat_analysis`) as our Extraction.
+ * Missing booleans read false and a missing timeline reads unknown, as the
+ * extraction instructions say; out-of-range values are dropped rather than
+ * failing the whole call. Null when there is no custom analysis to read.
  */
 export function extractionFromRetell(analysis: unknown): Extraction | null {
-  const a = (analysis ?? {}) as { custom_analysis_data?: unknown; call_summary?: unknown; in_voicemail?: unknown };
-  if (a.in_voicemail === true) return null;
+  const a = (analysis ?? {}) as { custom_analysis_data?: unknown; call_summary?: unknown; chat_summary?: unknown };
   const data = a.custom_analysis_data;
   if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length === 0) return null;
   const d = data as Record<string, unknown>;
@@ -53,7 +53,7 @@ export function extractionFromRetell(analysis: unknown): Extraction | null {
     invalid_lead: bool('invalid_lead'),
     human_requested: bool('human_requested'),
     callback_requested: bool('callback_requested'),
-    summary: text(d.summary, 2000) ?? text(a.call_summary, 2000) ?? '',
+    summary: text(d.summary, 2000) ?? text(a.call_summary, 2000) ?? text(a.chat_summary, 2000) ?? '',
     budget_min: num('budget_min', 0, 1_000_000_000),
     budget_max: num('budget_max', 0, 1_000_000_000),
     location: text(d.location, 255),
@@ -65,3 +65,34 @@ export function extractionFromRetell(analysis: unknown): Extraction | null {
     ...('do_not_contact' in d ? { do_not_contact: bool('do_not_contact') } : {}),
   });
 }
+
+/**
+ * Retell's own verdict that the call went to voicemail (`in_voicemail`), as
+ * the extraction the scorer reads for a call that reached no one: the lead is
+ * left as they were, nothing is scored from the machine's greeting.
+ */
+export function voicemailExtraction(analysis: unknown): Extraction {
+  const a = (analysis ?? {}) as { call_summary?: unknown };
+  return parseExtraction({
+    timeline: 'unknown',
+    budget_identified: false,
+    location_identified: false,
+    pre_approved: false,
+    appointment_requested: false,
+    high_engagement: false,
+    not_interested: false,
+    invalid_lead: false,
+    human_requested: false,
+    callback_requested: false,
+    summary: typeof a.call_summary === 'string' && a.call_summary.trim() ? a.call_summary.trim().slice(0, 2000) : 'Reached voicemail',
+    budget_min: null,
+    budget_max: null,
+    location: null,
+    bedrooms: null,
+    financing: null,
+    motivation: null,
+    reached_person: false,
+  })!;
+}
+
+export const inVoicemail = (analysis: unknown): boolean => (analysis as { in_voicemail?: unknown } | null)?.in_voicemail === true;

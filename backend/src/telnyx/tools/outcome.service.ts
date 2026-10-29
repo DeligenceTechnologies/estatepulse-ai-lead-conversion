@@ -51,7 +51,8 @@ export class OutcomeService {
     else await this.engine.setStatus(ctx.orgId, ctx.leadId, outcome === 'wrong_number' ? LeadStatus.invalid : LeadStatus.not_interested, reason, { source });
     this.engine.stopStrategy(ctx.orgId, ctx.leadId, source, said);
 
-    const hangup = ctx.callId ? ' Then end the call with the hangup tool.' : '';
+    // Each provider's agent ends a call with its own tool: Telnyx's assistant has hangup, Retell's agent end_call.
+    const hangup = ctx.callId ? ` Then end the call with the ${ctx.provider === 'retell' ? 'end_call' : 'hangup'} tool.` : '';
     return { ok: true, recorded: outcome, say: `${GOODBYE[outcome]}${hangup}` };
   }
 

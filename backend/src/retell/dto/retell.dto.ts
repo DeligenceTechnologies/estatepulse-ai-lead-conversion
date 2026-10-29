@@ -116,6 +116,13 @@ export class RetellPhoneNumberDto {
   phoneNumber!: string;
 }
 
+export class UpdateRetellSmsAgentDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60_000)
+  prompt!: string;
+}
+
 export class SwitchCallingProviderDto {
   @IsIn(['telnyx', 'retell'])
   provider!: 'telnyx' | 'retell';

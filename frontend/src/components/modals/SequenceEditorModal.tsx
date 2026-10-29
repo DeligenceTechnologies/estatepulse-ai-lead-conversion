@@ -61,7 +61,7 @@ interface Props {
   sequence: Sequence | null;
   onClose: () => void;
   onSaved: () => void;
-  /** Set when the calling provider sends no SMS (Retell): SMS steps stay, marked as not sent, and no new ones are offered. */
+  /** Set when the calling provider cannot text for this organization (Retell without SMS set up): SMS steps stay, marked as not sent, and no new ones are offered. */
   smsDisabledReason?: string;
 }
 

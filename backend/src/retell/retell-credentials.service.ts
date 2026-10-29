@@ -13,6 +13,9 @@ export interface RetellCreds {
   webhookKey: string;
   agentId: string;
   llmId: string;
+  /** The chat agent that texts for the organization, and its own Retell LLM; empty until SMS is set up. */
+  smsAgentId: string;
+  smsLlmId: string;
   fromNumber: string;
   /** Active = the organization calls through Retell now; inactive = set up, waiting for the switch. */
   active: boolean;
@@ -22,6 +25,8 @@ export interface RetellCreds {
 interface RetellConfig {
   agentId?: string;
   llmId?: string;
+  smsAgentId?: string;
+  smsLlmId?: string;
 }
 
 interface Sealed {
@@ -29,7 +34,7 @@ interface Sealed {
   webhookKey: string;
 }
 
-export type RetellPatch = Partial<Pick<RetellCreds, 'apiKey' | 'webhookKey' | 'agentId' | 'llmId' | 'fromNumber'>>;
+export type RetellPatch = Partial<Pick<RetellCreds, 'apiKey' | 'webhookKey' | 'agentId' | 'llmId' | 'smsAgentId' | 'smsLlmId' | 'fromNumber'>>;
 
 const PROVIDER = IntegrationProvider.retell;
 const mask = (key: string): string => (key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '');
@@ -52,6 +57,16 @@ export class RetellCredentialsService {
     return row ? this.fromRow(row) : null;
   }
 
+  /** The organization whose Retell account texts and calls from this number, the active one first. */
+  async orgForNumber(phoneNumber: string): Promise<string | null> {
+    if (!phoneNumber) return null;
+    const rows = await this.prisma.integration.findMany({
+      where: { provider: PROVIDER, phoneNumber, revokedAt: null },
+      select: { orgId: true, status: true },
+    });
+    return (rows.find((r) => r.status === IntegrationStatus.active) ?? rows[0])?.orgId ?? null;
+  }
+
   /** Updates the account, creating it (inactive) on first save. */
   async save(orgId: string, patch: RetellPatch): Promise<RetellCreds> {
     const row = await this.row(orgId);
@@ -61,6 +76,8 @@ export class RetellCredentialsService {
       webhookKey: patch.webhookKey ?? current?.webhookKey ?? '',
       agentId: patch.agentId ?? current?.agentId ?? '',
       llmId: patch.llmId ?? current?.llmId ?? '',
+      smsAgentId: patch.smsAgentId ?? current?.smsAgentId ?? '',
+      smsLlmId: patch.smsLlmId ?? current?.smsLlmId ?? '',
       fromNumber: patch.fromNumber ?? current?.fromNumber ?? '',
     };
     const id = row?.id ?? randomUUID();
@@ -69,7 +86,7 @@ export class RetellCredentialsService {
       credentialPreview: mask(next.apiKey),
       phoneNumber: next.fromNumber || null,
       externalAccountId: next.agentId || null,
-      config: { agentId: next.agentId, llmId: next.llmId } satisfies RetellConfig as Prisma.InputJsonObject,
+      config: { agentId: next.agentId, llmId: next.llmId, smsAgentId: next.smsAgentId, smsLlmId: next.smsLlmId } satisfies RetellConfig as Prisma.InputJsonObject,
     };
     const saved = row
       ? await this.prisma.integration.update({ where: { id }, data: columns })
@@ -95,6 +112,7 @@ export class RetellCredentialsService {
       apiKeyMasked: mask(c?.apiKey ?? ''),
       hasWebhookKey: Boolean(c?.webhookKey),
       agentId: c?.agentId ?? '',
+      smsAgentId: c?.smsAgentId ?? '',
       fromNumber: c?.fromNumber ?? '',
       connectedAt: c?.connectedAt ?? null,
     };
@@ -118,6 +136,8 @@ export class RetellCredentialsService {
       webhookKey: sealed.webhookKey,
       agentId: config.agentId ?? '',
       llmId: config.llmId ?? '',
+      smsAgentId: config.smsAgentId ?? '',
+      smsLlmId: config.smsLlmId ?? '',
       fromNumber: row.phoneNumber ?? '',
       active: row.status === IntegrationStatus.active,
       connectedAt: row.createdAt.toISOString(),
