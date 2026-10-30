@@ -51,7 +51,7 @@ export const CONFIRM_MESSAGE_MAX_CHARS = 320;
 
 /** The greeting of the callback call itself, instead of the assistant's first-call greeting. */
 export const CALLBACK_GREETING =
-  "Hi {{firstName}}, it's your home-buying assistant from {{brokerage}}, calling you back as you asked. Is now still a good time?";
+  "Hi {{firstName}}, it's the AI assistant from {{brokerage}}, calling you back as you asked. Is now still a good time?";
 
 export function callToolsSettings(raw: unknown): CallToolsSettings & { telnyx: CallToolsTelnyx | null } {
   const v = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as StoredCallTools) : {};

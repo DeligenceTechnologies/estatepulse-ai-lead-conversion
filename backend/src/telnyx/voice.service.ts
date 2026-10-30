@@ -10,10 +10,19 @@ import { VoicemailService } from './voicemail/voicemail.service';
  * abroad: an international call can take 10-15s just to start ringing.
  */
 const DIAL_TIMEOUT_SECS = 60;
+/** How long a successful reachability probe of the webhook URL is trusted, and a failed one remembered. */
+const WEBHOOK_OK_TTL_MS = 60_000;
+const WEBHOOK_DOWN_TTL_MS = 15_000;
+const WEBHOOK_PROBE_TIMEOUT_MS = 5_000;
+
+/** Thrown before dialing when Telnyx could not reach us: the call would be answered into silence. */
+export const WEBHOOK_UNREACHABLE = 'Webhook unreachable';
 
 @Injectable()
 export class VoiceService {
   private readonly publicUrl: string;
+  private webhook: { ok: boolean; until: number; reason: string } | null = null;
+  private probing: Promise<void> | null = null;
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
@@ -29,6 +38,9 @@ export class VoiceService {
     if (!c.fromNumber) throw new Error('No from number configured');
     const connectionId = await this.creds.ensureConnectionId(orgId, c);
     if (!connectionId) throw new Error('No Call Control application found on the Telnyx account for outbound calls');
+    // The assistant is only started from our call.answered webhook; dialing while Telnyx cannot reach us
+    // rings the lead, who picks up and hears nothing.
+    await this.assertWebhookReachable();
     // Tells a person from an answering machine, so the assistant never talks to a voicemail greeting.
     // A per-call charge, so only where the organization keeps it on; the webhooks learn which from client_state.
     const { detect } = await this.voicemail.settings(orgId);
@@ -52,5 +64,27 @@ export class VoiceService {
     }
     await this.creds.keyAccepted(orgId, c).catch(() => undefined);
     return res.data ?? {};
+  }
+
+  /** Probes this API's health route through its public URL (the tunnel or load balancer Telnyx posts to). */
+  private async assertWebhookReachable(): Promise<void> {
+    if (!this.publicUrl) throw new Error(`${WEBHOOK_UNREACHABLE}: PUBLIC_API_URL is not set, so Telnyx has nowhere to send call events`);
+    if (!this.webhook || this.webhook.until <= Date.now()) {
+      this.probing ??= this.probeWebhook().finally(() => (this.probing = null));
+      await this.probing;
+    }
+    if (!this.webhook?.ok) throw new Error(`${WEBHOOK_UNREACHABLE}: ${this.publicUrl} ${this.webhook?.reason ?? 'did not answer'}`);
+  }
+
+  private async probeWebhook(): Promise<void> {
+    let reason = '';
+    try {
+      const res = await fetch(`${this.publicUrl}/health`, { signal: AbortSignal.timeout(WEBHOOK_PROBE_TIMEOUT_MS) });
+      if (!res.ok) reason = `answered ${res.status}`;
+    } catch (error) {
+      reason = `did not answer (${(error as Error).message})`;
+    }
+    const ok = !reason;
+    this.webhook = { ok, reason, until: Date.now() + (ok ? WEBHOOK_OK_TTL_MS : WEBHOOK_DOWN_TTL_MS) };
   }
 }

@@ -32,8 +32,10 @@ describe('answering-machine detection as an organization setting', () => {
       keyRejected: vi.fn(async () => undefined),
     };
     const voicemail = { settings: vi.fn(async () => ({ detect, enabled: true, message: 'hi' })) };
-    const voice = new VoiceService(creds as any, { get: vi.fn(() => '') } as any, voicemail as any);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const voice = new VoiceService(creds as any, { get: vi.fn(() => 'https://api.example.com') } as any, voicemail as any);
     await voice.placeCall('org-1', '+12895550100', { leadId: 'lead-1', orgId: 'org-1' });
+    vi.unstubAllGlobals();
     const body = JSON.parse(String((vi.mocked(telnyx).mock.calls[0][2] as any).body));
     return { body, state: callIntent(body.client_state) };
   };
