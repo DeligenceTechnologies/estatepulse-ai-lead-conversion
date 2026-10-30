@@ -184,7 +184,6 @@ export class PasswordResetService {
       record.expiresAt.getTime() <= Date.now() ||
       user.status !== 'active' ||
       user.organization.status !== 'active' ||
-      // Any password change after the link was issued retires it.
       (user.passwordChangedAt && user.passwordChangedAt > record.createdAt)
     ) {
       throw invalidLink();
