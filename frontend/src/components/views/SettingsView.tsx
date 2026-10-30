@@ -36,10 +36,12 @@ import {
 } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { ConnectCalendar } from '../calendar/connect/ConnectCalendar';
+import { CallingSettings } from '../integrations/CallingSettings';
 import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
+import { useCallingProvider } from '../../utils/callingProviderApi';
 
-type SettingsTab = 'general' | 'telnyx' | 'calendar';
+type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'calling';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
@@ -47,7 +49,8 @@ const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementT
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
 ];
 
-const isTab = (value: string | null): value is SettingsTab => TABS.some((t) => t.id === value);
+/** Where Retell is enabled on the server, one Calling section (Telnyx or Retell) takes the Telnyx section's place. */
+const CALLING_TAB = { id: 'calling' as const, label: 'Calling', hint: 'Telnyx or Retell, and phone numbers', icon: PhoneCall };
 
 /** The device's zone, offered as a one-click choice. */
 const browserZone = (): string | null => {
@@ -530,14 +533,20 @@ const GeneralSettings: React.FC = () => {
 /**
  * Settings: everything about how the organization runs, in one place, one
  * section at a time — General (timezone, business hours), Calendar (Calendly
- * or Cal.com) and Telnyx (calling). The open section is in the URL
+ * or Cal.com) and Telnyx (calling); where the server enables Retell, Calling
+ * (Telnyx or Retell) in Telnyx's place. The open section is in the URL
  * (?tab=telnyx) so it can be linked to and survives a reload.
  */
 export const SettingsView: React.FC = () => {
   const [params, setParams] = useSearchParams();
+  const calling = useCallingProvider();
+  const tabs = calling?.enabled ? TABS.map((t) => (t.id === 'telnyx' ? CALLING_TAB : t)) : TABS;
   const requested = params.get('tab');
-  const tab: SettingsTab = isTab(requested) ? requested : 'general';
-  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+  // With Retell on, links to ?tab=telnyx or ?tab=retell open Calling with that provider chosen.
+  const providerLink = requested === 'telnyx' || requested === 'retell' ? requested : undefined;
+  const asked = calling?.enabled && providerLink ? 'calling' : requested;
+  const tab: SettingsTab = tabs.find((t) => t.id === asked)?.id ?? 'general';
+  const current = tabs.find((t) => t.id === tab) ?? TABS[0];
 
   const select = (id: SettingsTab): void => {
     setParams(id === 'general' ? {} : { tab: id }, { replace: true });
@@ -554,7 +563,7 @@ export const SettingsView: React.FC = () => {
         {/* Section nav: a column on desktop, a scrolling row on phones */}
         <nav aria-label="Settings sections" className="lg:w-60 shrink-0">
           <ul className="flex lg:flex-col gap-1.5 overflow-x-auto custom-scrollbar -mx-1 px-1 pb-1 lg:pb-0 list-none">
-            {TABS.map(({ id, label, hint, icon: Icon }) => {
+            {tabs.map(({ id, label, hint, icon: Icon }) => {
               const active = id === tab;
               return (
                 <li key={id} className="shrink-0">
@@ -601,6 +610,8 @@ export const SettingsView: React.FC = () => {
               <TelnyxCard />
             </div>
           )}
+
+          {tab === 'calling' && <CallingSettings initial={providerLink} />}
 
           {tab === 'calendar' && <ConnectCalendar />}
         </div>

@@ -7,7 +7,7 @@ import { ActivityService } from './activity.service';
  * may leave a call stuck live or overwrite how it ended.
  */
 describe('ActivityService call row', () => {
-  const CALL = { id: 'call-1', orgId: 'org-1', leadId: 'lead-1', status: 'ringing', disposition: null, endedAt: null };
+  const CALL = { id: 'call-1', orgId: 'org-1', leadId: 'lead-1', provider: 'telnyx', status: 'ringing', disposition: null, endedAt: null };
 
   const make = (row: { status: string; started_at: Date | null; disposition: string | null } | null) => {
     const tx = { $queryRaw: vi.fn(async () => (row ? [row] : [])), call: { update: vi.fn(async () => ({})) } };

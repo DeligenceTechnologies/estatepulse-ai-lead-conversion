@@ -3,6 +3,7 @@ import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs
 import { ConfigService } from '@nestjs/config';
 import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus } from '@prisma/client';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
+import { CallingProviders, type CallingProvider } from '@/calling/calling-providers';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
@@ -11,7 +12,6 @@ import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
-import { VoiceService } from '../voice.service';
 import { CallSlots } from './call-slots';
 import { DEFAULT_CALL_LIMIT, type CallIntent, type CallJobData } from './call.types';
 
@@ -34,7 +34,7 @@ export function isCapacityError(message: string): boolean {
 
 /** Telnyx unreachable, or failing on its side: the dial may work a little later. */
 export function isTransientDialError(message: string): boolean {
-  return /Telnyx unreachable|failed 5\d\d\b/i.test(message);
+  return /(?:Telnyx|Retell) unreachable|failed 5\d\d\b/i.test(message);
 }
 
 /** Telnyx refuses the dial itself for a number that does not exist (error 10010, D50: no valid LRN); no webhook follows. */
@@ -51,7 +51,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<QueueEnv, true>,
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
-    private readonly voice: VoiceService,
+    private readonly providers: CallingProviders,
     private readonly activity: ActivityService,
     private readonly slots: CallSlots,
   ) {
@@ -124,30 +124,33 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       return this.delay(job, Date.now() + SLOT_WAIT_MS + Math.floor(Math.random() * SLOT_WAIT_JITTER_MS), token);
     }
 
-    let call: { call_control_id?: string };
+    // Resolved at dial time, so a job queued before a provider switch dials through the new provider.
+    let provider: CallingProvider | undefined;
+    let call: { providerCallId?: string };
     try {
-      call = await this.voice.placeCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}), ...intent });
+      provider = await this.providers.for(orgId);
+      call = await provider.startCall(orgId, lead.phone ?? '', { leadId, orgId, ...(sequenceId ? { sequenceId } : {}), ...intent });
     } catch (error) {
       await this.slots.release(orgId, slotId);
       const message = (error as Error).message;
       if (isCapacityError(message)) {
-        this.logger.warn(`Telnyx is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
+        this.logger.warn(`${provider?.name === 'retell' ? 'Retell' : 'Telnyx'} is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
         return this.delay(job, Date.now() + SLOT_WAIT_MS * 6, token);
       }
       if (isTransientDialError(message) && !job.data.dialRetried) {
-        this.logger.warn(`Dial for lead ${leadId} failed on Telnyx's side; one retry in ${DIAL_RETRY_MS / 60_000} min: ${message}`);
+        this.logger.warn(`Dial for lead ${leadId} failed on the provider's side; one retry in ${DIAL_RETRY_MS / 60_000} min: ${message}`);
         await job.updateData({ ...job.data, dialRetried: true });
         return this.delay(job, Date.now() + DIAL_RETRY_MS, token);
       }
       const invalid = isInvalidNumberError(message);
-      await this.activity.recordCallFailed(orgId, leadId, message, invalid ? CallDisposition.invalid_number : CallDisposition.failed);
+      await this.activity.recordCallFailed(orgId, leadId, message, invalid ? CallDisposition.invalid_number : CallDisposition.failed, provider?.name);
       if (invalid) await this.activity.markInvalid(leadId, 'Invalid number (Telnyx D50: the number does not exist)');
       return;
     }
 
-    if (call.call_control_id) await this.slots.rename(orgId, slotId, call.call_control_id);
+    if (call.providerCallId) await this.slots.rename(orgId, slotId, call.providerCallId);
     else await this.slots.release(orgId, slotId);
-    await this.activity.startCall(orgId, leadId, call.call_control_id, intent);
+    await this.activity.startCall(orgId, leadId, call.providerCallId, intent, provider.name);
   }
 
   /** A strategy call needs the lead still in the strategy; a sequence call, its enrolment still active. A callback has its own check. */

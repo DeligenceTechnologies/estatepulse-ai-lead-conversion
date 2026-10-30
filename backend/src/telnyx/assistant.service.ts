@@ -64,7 +64,7 @@ function shape(a: any) {
   };
 }
 
-const DEFAULT_TEMPLATE = {
+export const DEFAULT_TEMPLATE = {
   name: 'EstatePulse AI Agent',
   greeting: 'Hi, this is your home-buying assistant, calling about your recent enquiry. Are you looking to buy a home sometime soon?',
   instructions:
@@ -80,7 +80,7 @@ const HANGUP_TOOL = {
   },
 };
 
-const RECORDING_NOTICE = 'Just so you know, this call is recorded for quality and training.';
+export const RECORDING_NOTICE = 'Just so you know, this call is recorded for quality and training.';
 const VOICE_CACHE_MS = 10 * 60 * 1000;
 
 const ASSISTANT_MODELS = [

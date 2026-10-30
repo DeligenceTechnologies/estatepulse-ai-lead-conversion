@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SMS_READY } from '@/calling/calling-providers';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { EngineService, remainingSteps } from './engine.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
@@ -22,7 +23,8 @@ interface CallRow {
   endedAt?: Date | null;
 }
 
-function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
+/** `sms` false: the organization calls through a provider without SMS (Retell). */
+function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}, sms = true) {
   const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', status: 'new', dncStatus: false, automationPaused: false };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
@@ -69,7 +71,14 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const state = new LeadStateService(prisma as any);
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
-  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any);
+  const provider = {
+    name: sms ? 'telnyx' : 'retell',
+    capabilities: { sms: true },
+    smsCapability: vi.fn(async () => (sms ? SMS_READY : { available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet', deliveryReports: false })),
+    sendSms: smsService.sendSms,
+  };
+  const providers = { for: vi.fn(async () => provider), nameFor: vi.fn(async () => provider.name) };
+  const engine = new EngineService(prisma as any, strategies as any, providers as any, queue as any, activity as any, followup as any, state, conversations as any);
   const text = (direction: 'inbound' | 'outbound') => texts.push({ direction, createdAt: new Date() });
   const dial = (status: string, durationSeconds: number | null = null, disposition?: string) => {
     const ended = !['ringing', 'in_progress', 'queued'].includes(status);
@@ -107,6 +116,18 @@ describe('EngineService strategy', () => {
     vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
   });
   afterEach(() => vi.useRealTimers());
+
+  it('skips SMS steps for a provider without SMS (Retell), logs them as skipped, and still places the calls', async () => {
+    const s = setup(SCREENSHOT, {}, false);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.smsService.sendSms).not.toHaveBeenCalled();
+    expect(s.activity.recordSms).not.toHaveBeenCalled();
+    expect(JSON.stringify(s.prisma.leadEvent.create.mock.calls)).toContain('step_skipped');
+
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.queue.enqueue).toHaveBeenCalledOnce();
+  });
 
   it('counts each wait from the step before, so the SMS after a call never goes out with it', async () => {
     const s = setup();

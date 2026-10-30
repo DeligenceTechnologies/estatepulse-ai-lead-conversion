@@ -9,7 +9,7 @@ import { LeadStateService } from '@/lead/lead-state.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from '@/telnyx/activity.service';
-import { SmsService } from '@/telnyx/sms.service';
+import { CallingProviders, SMS_UNAVAILABLE } from '@/calling/calling-providers';
 import { CallQueue } from '@/telnyx/calls/call.queue';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
 import { fillTemplate } from '@/telnyx/template';
@@ -52,7 +52,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly followup: FollowupService,
-    private readonly sms: SmsService,
+    private readonly providers: CallingProviders,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
     private readonly state: LeadStateService,
@@ -270,12 +270,21 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
       if (!text) return;
       try {
-        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
-        this.state.quietly({ ...event, type: 'step_sent' });
-        this.conversations
-          .appendOurMessage(row.organization_id, lead.phone, text)
-          .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
+        const provider = await this.providers.for(row.organization_id);
+        const sms = await provider.smsCapability(row.organization_id);
+        if (!sms.available) {
+          // The provider cannot text for this organization (Retell without SMS set up): the step is logged
+          // as skipped with the reason, never as failed or sent, and the sequence goes on.
+          this.logger.log(`enrolment ${row.id} step ${row.current_step}: SMS skipped — ${provider.name}: ${sms.reason ?? SMS_UNAVAILABLE}`);
+          this.state.quietly({ ...event, type: 'step_skipped', reason: sms.reason ?? SMS_UNAVAILABLE });
+        } else {
+          const sent = await provider.sendSms(row.organization_id, lead.phone ?? '', text, { leadId: row.lead_id });
+          await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+          this.state.quietly({ ...event, type: 'step_sent' });
+          this.conversations
+            .appendOurMessage(row.organization_id, lead.phone, text)
+            .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
+        }
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
         this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
@@ -296,7 +305,13 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       );
       this.state.quietly({ ...event, type: 'step_sent', reason: 'Call queued' });
     } catch (error) {
-      await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
+      await this.activity.recordCallFailed(
+        row.organization_id,
+        row.lead_id,
+        (error as Error).message,
+        undefined,
+        await this.providers.nameFor(row.organization_id).catch(() => undefined),
+      );
       this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
     }
   }

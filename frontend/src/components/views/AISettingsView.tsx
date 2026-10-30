@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Sliders,
   Sparkles,
@@ -58,8 +58,28 @@ import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
+import { useCallingProvider } from '../../utils/callingProviderApi';
+import { getRetellStatus, type RetellStatus } from '../../utils/retellApi';
+import { RetellAISettingsView } from './RetellAISettingsView';
 
+/**
+ * A Telnyx assistant and a Retell agent have different settings, so the
+ * organization's calling provider picks the page. Without Retell on the
+ * server every organization gets the Telnyx page, as before.
+ */
 export const AISettingsView: React.FC = () => {
+  const calling = useCallingProvider();
+  if (!calling) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto text-xs text-slate-400 flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading AI settings…
+      </div>
+    );
+  }
+  return calling.provider === 'retell' ? <RetellAISettingsView /> : <TelnyxAISettingsView />;
+};
+
+const TelnyxAISettingsView: React.FC = () => {
   const { orgSettings, updateOrgSettings, setActiveView } = useApp();
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
@@ -72,6 +92,18 @@ export const AISettingsView: React.FC = () => {
   const [status, setStatus] = useState<TelnyxStatus | null>(null);
   const [assistants, setAssistants] = useState<AssistantSummary[]>([]);
   const [switching, setSwitching] = useState(false);
+
+  // Retell set up but not the provider yet: "not connected" alone would send the owner to the wrong place.
+  const calling = useCallingProvider();
+  const navigate = useNavigate();
+  const [retell, setRetell] = useState<RetellStatus | null>(null);
+  useEffect(() => {
+    if (!calling?.enabled) return;
+    getRetellStatus()
+      .then(setRetell)
+      .catch(() => setRetell(null));
+  }, [calling?.enabled]);
+  const retellSetUp = !!retell?.connected && !retell.active;
 
   const refreshStatus = () => {
     getTelnyxStatus()
@@ -426,6 +458,15 @@ export const AISettingsView: React.FC = () => {
                   <span className="text-slate-200">Settings → Telnyx</span>. Prompt,
                   tone and voice settings are written straight to the live agent, so there is nothing
                   to edit until it exists.
+                  {retellSetUp && (
+                    <>
+                      {' '}Retell is set up but not in use yet: switch to it under{' '}
+                      <button type="button" onClick={() => navigate('/settings?tab=retell')} className="text-sky-400 hover:text-sky-300 underline cursor-pointer">
+                        Settings → Calling
+                      </button>{' '}
+                      to edit the Retell agent here.
+                    </>
+                  )}
                 </>
               )}
             </p>

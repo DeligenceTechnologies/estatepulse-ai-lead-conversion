@@ -406,7 +406,7 @@ export const CallsView: React.FC = () => {
               ) : (
                 <p className="text-xs text-slate-500">
                   No recording. Either the office has call recording switched off, or the file has
-                  not finished uploading — Telnyx delivers it a little after the call ends.
+                  not finished uploading — the calling provider delivers it a little after the call ends.
                 </p>
               )}
             </div>
@@ -438,7 +438,7 @@ export const CallsView: React.FC = () => {
                   </pre>
                 ) : (
                   <p className="text-xs text-slate-500">
-                    No transcript yet. Telnyx transcribes after the recording is closed, so it
+                    No transcript yet. The calling provider transcribes after the recording is closed, so it
                     arrives a minute or two behind the call.
                   </p>
                 )}

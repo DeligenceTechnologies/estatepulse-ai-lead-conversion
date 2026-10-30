@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SMS_READY, type SmsCapability } from '@/calling/calling-providers';
 import { CallbackService, LATER_MS, resolveCallback } from './callback.service';
 import { DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_MINUTES } from './call-tools';
 
@@ -74,6 +75,7 @@ function setup(
     confirmSms?: boolean;
     retryMinutes?: number;
     retryAttempts?: number;
+    smsCapability?: SmsCapability;
   } = {},
 ) {
   const prisma = {
@@ -98,6 +100,7 @@ function setup(
   const engine = { stopStrategy: vi.fn() };
   const calls = { schedule: vi.fn(async () => 'job-1') };
   const sms = { sendSms: vi.fn(async () => ({ id: 'msg-1' })) };
+  const providers = { for: vi.fn(async () => ({ name: 'telnyx', capabilities: { sms: true }, smsCapability: async () => opts.smsCapability ?? SMS_READY, sendSms: sms.sendSms })) };
   const activity = { leadVariables: vi.fn(async () => ({ firstName: 'Ana' })), recordSms: vi.fn(async () => undefined) };
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
   const tools = {
@@ -114,7 +117,7 @@ function setup(
     followup as any,
     engine as any,
     calls as any,
-    sms as any,
+    providers as any,
     activity as any,
     conversations as any,
     tools as any,
@@ -188,7 +191,7 @@ describe('CallbackService.onCallEnded', () => {
   it('after the call that set it: the lead gets the time by SMS', async () => {
     const s = setup({ callbackAt: new Date('2026-10-28T11:30:00.000Z'), setHere: true });
     await s.service.onCallEnded('cc-1', NOW);
-    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12899174129', "Thanks Ana! I'll call you on Wednesday, October 28 at 5:00 PM.");
+    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12899174129', "Thanks Ana! I'll call you on Wednesday, October 28 at 5:00 PM.", { leadId: 'lead-1' });
     expect(s.activity.recordSms).toHaveBeenCalledWith('org-1', 'lead-1', expect.any(String), true, 'msg-1');
     expect(s.calls.schedule).not.toHaveBeenCalled();
   });

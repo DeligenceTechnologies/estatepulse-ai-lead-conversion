@@ -89,6 +89,31 @@ export class InboundSmsService {
   }
 
   /**
+   * A text from a lead that another provider's own agent answers (Retell's
+   * SMS agent), already filed in messages by that provider's chat sync. The
+   * same STOP and START rules as a Telnyx text; any other reply makes the
+   * lead engaged while the agent keeps the conversation going. The agent's
+   * outcome tool and the post-chat analysis record a "no" or a "stop" said in
+   * other words, so no classifier runs here. Returns what was decided.
+   */
+  async onProviderText(orgId: string, leadId: string, text: string): Promise<'opt_out' | 'opt_in' | 'reply'> {
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { id: true, firstResponseAt: true, dncStatus: true } });
+    if (!lead) return 'reply';
+    const word = keyword(text);
+    if (STOP_WORDS.has(word)) {
+      await this.onOptOut(orgId, lead.id);
+      return 'opt_out';
+    }
+    if (START_WORDS.has(word) && lead.dncStatus) {
+      await this.onOptIn(orgId, lead.id);
+      return 'opt_in';
+    }
+    await this.prisma.lead.update({ where: { id: lead.id }, data: { lastContactAt: new Date(), ...(lead.firstResponseAt ? {} : { firstResponseAt: new Date() }) } });
+    await this.state.move(lead.id, LeadStatus.engaged, { source: 'sms_reply', reason: 'Replied by SMS; the AI is answering', channel: 'sms' });
+    return 'reply';
+  }
+
+  /**
    * A text sent from our number reached its end state. One we sent is marked
    * delivered or failed; one we did not send is the AI assistant's reply in a
    * chat, stored so the conversation shows both sides.

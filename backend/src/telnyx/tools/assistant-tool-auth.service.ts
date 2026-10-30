@@ -14,6 +14,8 @@ export interface AssistantToolCaller {
   leadId: string;
   /** The live call the tool was used on; null in a text chat. */
   callId: string | null;
+  /** Whose agent used the tool; Telnyx when absent. */
+  provider?: 'telnyx' | 'retell';
 }
 
 export interface ToolRequest {

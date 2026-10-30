@@ -1,5 +1,11 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { CallingProviders, TelnyxCallingProvider } from '@/calling/calling-providers';
 import { FollowupModule } from '@/followup/followup.module';
+import { RetellCallingProvider } from '@/retell/retell-calling.provider';
+import { RetellCredentialsService } from '@/retell/retell-credentials.service';
+import { RetellSmsService } from '@/retell/retell-sms.service';
+import { RetellToolAuthService } from '@/retell/retell-tool-auth.service';
+import { RetellToolsService } from '@/retell/retell-tools.service';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
 import { CallCapacityService } from './calls/call-capacity.service';
@@ -49,6 +55,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     ActivityService,
     AssistantService,
     CallCapacityService,
+    CallingProviders,
     CallQueue,
     CallSlots,
     CallWorker,
@@ -58,10 +65,16 @@ import { VoicemailService } from './voicemail/voicemail.service';
     LeadScoringService,
     LeadWatcherService,
     NumbersService,
+    RetellCallingProvider,
+    RetellCredentialsService,
+    RetellSmsService,
+    RetellToolAuthService,
+    RetellToolsService,
     SmsService,
     SmsConversationService,
     SmsIntentService,
     StrategyStoreService,
+    TelnyxCallingProvider,
     VoiceService,
     VoicemailService,
     AssistantToolAuth,
@@ -80,6 +93,15 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantService,
     AssistantToolAuth,
     SmsConversationService,
+    CallingProviders,
+    LeadScoringService,
+    RetellCredentialsService,
+    RetellSmsService,
+    RetellToolAuthService,
+    RetellToolsService,
+    InboundSmsService,
+    OutcomeService,
+    CallbackService,
   ],
 })
 export class TelnyxModule {}

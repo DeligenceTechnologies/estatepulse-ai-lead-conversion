@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SMS_READY } from '@/calling/calling-providers';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { FollowupRunner } from './followup.runner';
 import { DEFAULT_LIMITS } from './journey';
@@ -10,7 +11,8 @@ const NOW = new Date('2026-10-26T10:00:00Z');
 const smsStep = (text: string) => ({ actionType: 'sms', delayMinutes: 60, messageTemplate: text, voicePrompt: null, maxAttempts: 1 });
 const voiceStep = () => ({ actionType: 'voice', delayMinutes: 60, messageTemplate: null, voicePrompt: 'call back', maxAttempts: 1 });
 
-function setup(steps: unknown[], currentStep: number) {
+/** `smsOn` false: the organization calls through a provider without SMS (Retell). */
+function setup(steps: unknown[], currentStep: number, smsOn = true) {
   const tx = {
     sequenceEnrollment: { update: vi.fn(async () => ({})) },
     lead: { findUnique: vi.fn(async () => ({ orgId: 'org-1', status: 'follow_up' })), updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -40,7 +42,15 @@ function setup(steps: unknown[], currentStep: number) {
     prisma as any,
     { get: vi.fn() } as any,
     followup as any,
-    sms as any,
+    {
+      for: async () => ({
+        name: smsOn ? 'telnyx' : 'retell',
+        capabilities: { sms: true },
+        smsCapability: async () => (smsOn ? SMS_READY : { available: false, state: 'not_configured', reason: 'SMS is not set up on Retell yet', deliveryReports: false }),
+        sendSms: sms.sendSms,
+      }),
+      nameFor: async () => (smsOn ? 'telnyx' : 'retell'),
+    } as any,
     calls as any,
     activity as any,
     new LeadStateService(prisma as any),
@@ -58,10 +68,17 @@ describe('FollowupRunner last step', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('skips an SMS step for a provider without SMS (Retell) instead of sending or failing it, and moves on', async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 1, false);
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({ where: { id: 'enr-1' }, data: expect.objectContaining({ currentStep: 2 }) });
+  });
+
   it('sends the last step, then gives the lead time to answer instead of closing them out at once', async () => {
     const s = setup([smsStep('one'), smsStep('two')], 2);
     await s.execute();
-    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'two');
+    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'two', { leadId: 'lead-1' });
     expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({
       where: { id: 'enr-1' },
       data: expect.objectContaining({ currentStep: 3, nextActionAt: new Date(NOW.getTime() + CLOSE_OUT_AFTER_MS) }),
@@ -123,7 +140,7 @@ describe('FollowupRunner last step', () => {
     off.followup.guardrailsFor.mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits: { ...DEFAULT_LIMITS, chatQuietMinutes: 0 } } as any);
     off.prisma.message.findFirst.mockResolvedValue({ createdAt: lastText });
     await off.execute();
-    expect(off.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'two');
+    expect(off.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'two', { leadId: 'lead-1' });
   });
 
   it('does not close out a lead who replied during the wait', async () => {
@@ -162,7 +179,7 @@ describe('FollowupRunner journey rules', () => {
   it('fills the lead variables into a text and adds it to the AI chat', async () => {
     const s = setup([{ ...smsStep('Hi {{firstName}}, still looking in {{location}}?') }], 1);
     await s.execute();
-    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'Hi Ana, still looking in Austin?');
+    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'Hi Ana, still looking in Austin?', { leadId: 'lead-1' });
     expect(s.conversations.appendOurMessage).toHaveBeenCalledWith('org-1', '+12895550100', 'Hi Ana, still looking in Austin?');
   });
 

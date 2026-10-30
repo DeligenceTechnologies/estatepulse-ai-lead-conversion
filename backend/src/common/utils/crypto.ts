@@ -83,3 +83,18 @@ export function verifyTelnyxSignature(input: {
     return false;
   }
 }
+
+const RETELL_TOLERANCE_MS = 5 * 60 * 1000;
+
+/**
+ * Retell's `X-Retell-Signature: v=<ms>,d=<hex>`: HMAC-SHA256 of the raw body
+ * followed by the timestamp, keyed with the workspace's webhook API key.
+ */
+export function verifyRetellSignature(input: { key: string; header: string | undefined; rawBody: Buffer | undefined; nowMs?: number }): boolean {
+  const match = /^v=(\d+),d=([0-9a-f]+)$/i.exec(input.header ?? '');
+  if (!input.key || !match || !input.rawBody) return false;
+  if (Math.abs((input.nowMs ?? Date.now()) - Number(match[1])) > RETELL_TOLERANCE_MS) return false;
+  const expected = createHmac('sha256', input.key).update(Buffer.concat([input.rawBody, Buffer.from(match[1])])).digest();
+  const given = Buffer.from(match[2], 'hex');
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}

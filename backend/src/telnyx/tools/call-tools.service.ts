@@ -6,6 +6,9 @@ import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { sha256Hex } from '@/common/utils/crypto';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { RetellCredentialsService } from '@/retell/retell-credentials.service';
+import { retellEnabled } from '@/retell/retell-enabled.guard';
+import { RetellToolsService } from '@/retell/retell-tools.service';
 import { telnyx } from '../telnyx-api';
 import { TelnyxCredentialsService } from '../telnyx-credentials.service';
 import {
@@ -36,12 +39,14 @@ const READY_TTL_MS = 10 * 60_000;
  * tools pointing at this API and a marked prompt section. They are provisioned
  * on the first call that needs them, and again when the assistant or this
  * server's public URL changes. Off removes all of it; the organization's own
- * prompt text is never touched. Only the token's hash is kept here.
+ * prompt text is never touched. Only the token's hash is kept here. For an
+ * organization calling through Retell the same switch drives RetellToolsService.
  */
 @Injectable()
 export class CallToolsService {
   private readonly logger = new Logger(CallToolsService.name);
   private readonly publicApiUrl: string;
+  private readonly retellOn: boolean;
   private readonly ready = new Map<string, number>();
   /** One provisioning or teardown at a time per organization: two would fight over the same secret identifier. */
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -50,8 +55,18 @@ export class CallToolsService {
     private readonly prisma: PrismaService,
     private readonly creds: TelnyxCredentialsService,
     config: ConfigService<IntegrationEnv, true>,
+    private readonly retellCreds: RetellCredentialsService,
+    private readonly retellTools: RetellToolsService,
   ) {
     this.publicApiUrl = (config.get('PUBLIC_API_URL', { infer: true }) ?? '').replace(/\/+$/, '');
+    this.retellOn = retellEnabled(config);
+  }
+
+  /** The organization's active Retell account, when it calls through Retell; null on Telnyx (or with Retell off). */
+  private async onRetell(orgId: string) {
+    if (!this.retellOn) return null;
+    const r = await this.retellCreds.getCreds(orgId).catch(() => null);
+    return r?.active ? r : null;
   }
 
   async settings(orgId: string) {
@@ -66,10 +81,16 @@ export class CallToolsService {
   }
 
   async status(orgId: string): Promise<CallToolsStatus> {
-    const [s, c] = await Promise.all([this.settings(orgId), this.creds.getCreds(orgId).catch(() => null)]);
+    const [s, r] = await Promise.all([this.settings(orgId), this.onRetell(orgId)]);
+    const { telnyx: _telnyx, ...settings } = s;
+    if (r) {
+      const active = await this.retellTools.isCurrent(orgId, r);
+      const problem = !r.agentId ? 'Create your Retell agent first.' : null;
+      return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, active: s.enabled && active, problem };
+    }
+    const c = await this.creds.getCreds(orgId).catch(() => null);
     const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId);
     const problem = !c?.apiKey || !c.assistantId ? 'Connect Telnyx and create your AI assistant first.' : null;
-    const { telnyx: _telnyx, ...settings } = s;
     return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, active: s.enabled && active, problem };
   }
 
@@ -86,9 +107,14 @@ export class CallToolsService {
     };
     await this.serial(orgId, async () => {
       await this.save(orgId, { ...next, telnyx: (await this.settings(orgId)).telnyx });
-      // Only switching the tools on or off touches Telnyx; the texts and the retry live here.
+      // Only switching the tools on or off touches the provider; the texts and the retry live here.
       if (patch.enabled === undefined) return;
       this.ready.delete(orgId);
+      if (await this.onRetell(orgId)) {
+        if (next.enabled) await this.retellTools.provisionNow(orgId);
+        else await this.retellTools.teardownNow(orgId);
+        return;
+      }
       if (next.enabled) await this.provision(orgId, true);
       else await this.teardown(orgId);
     });
@@ -217,8 +243,11 @@ export class CallToolsService {
     };
   }
 
+  /** The Retell provisioning (RetellToolsService's `retell`) lives beside ours in the same JSON and is kept as it is. */
   private async save(orgId: string, value: StoredCallTools): Promise<void> {
-    const callTools = value as unknown as Prisma.InputJsonObject;
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } });
+    const retell = (row?.callTools as { retell?: unknown } | null)?.retell;
+    const callTools = { ...value, ...(retell ? { retell } : {}) } as unknown as Prisma.InputJsonObject;
     await this.prisma.organizationSetting.upsert({ where: { orgId }, create: { orgId, callTools }, update: { callTools } });
   }
 }

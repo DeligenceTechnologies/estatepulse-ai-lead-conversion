@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, PhoneCall, Plus, Settings2 } from 'lucide-react';
 import { getTelnyxStatus, type TelnyxStatus } from '../../utils/assistantApi';
-import { PanelClose } from '../leadsources/ManualWebhookPanel';
+import { Overlay } from '../common/Overlay';
 import { IntegrationCard } from './IntegrationCard';
 import { ProviderConnect } from './ProviderConnect';
 
@@ -12,45 +12,12 @@ import { ProviderConnect } from './ProviderConnect';
  */
 
 /** One labelled fact about the live connection. */
-const Fact: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
+export const Fact: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
   <div className="flex items-baseline justify-between gap-3">
     <span className="text-xs text-slate-500 shrink-0">{label}</span>
     <span className={`text-xs text-slate-200 truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
   </div>
 );
-
-/** The credentials + assistant flow, in the same overlay the other cards use. */
-const TelnyxConnectModal: React.FC<{
-  status: TelnyxStatus;
-  onClose: () => void;
-  onChange: () => void;
-}> = ({ status, onClose, onChange }) => {
-  // Escape closes, and the page behind must not scroll under the overlay.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
-      onClick={onClose}
-    >
-      <div className="w-full max-w-2xl my-8" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end mb-2">
-          <PanelClose onClose={onClose} />
-        </div>
-        <ProviderConnect status={status} onChange={onChange} />
-      </div>
-    </div>
-  );
-};
 
 export const TelnyxCard: React.FC = () => {
   const [status, setStatus] = useState<TelnyxStatus | null>(null);
@@ -176,13 +143,9 @@ export const TelnyxCard: React.FC = () => {
       </IntegrationCard>
 
       {open && (
-        <TelnyxConnectModal
-          status={status!}
-          onClose={() => setOpen(false)}
-          onChange={() => {
-            void load();
-          }}
-        />
+        <Overlay onClose={() => setOpen(false)}>
+          <ProviderConnect status={status!} onChange={() => void load()} />
+        </Overlay>
       )}
     </>
   );

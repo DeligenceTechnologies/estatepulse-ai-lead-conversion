@@ -9,7 +9,7 @@ import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
-import { SmsService } from './sms.service';
+import { CallingProviders, SMS_UNAVAILABLE } from '@/calling/calling-providers';
 import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from './strategy-store.service';
 import { CallQueue } from './calls/call.queue';
 import { CONVERSATION_MIN_SECS } from './calls/call.types';
@@ -130,7 +130,7 @@ export class EngineService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly strategies: StrategyStoreService,
-    private readonly sms: SmsService,
+    private readonly providers: CallingProviders,
     private readonly calls: CallQueue,
     private readonly activity: ActivityService,
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
@@ -477,12 +477,21 @@ export class EngineService implements OnModuleDestroy {
       const variables = await this.activity.leadVariables(e.orgId, e.leadId);
       const text = fillTemplate(step.message ?? '', { ...variables, brokerage: office.brokerage });
       try {
-        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text);
-        await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
-        this.state.quietly({ ...event, type: 'step_sent' });
-        this.conversations
-          .appendOurMessage(e.orgId, phone, text)
-          .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
+        const provider = await this.providers.for(e.orgId);
+        const sms = await provider.smsCapability(e.orgId);
+        if (!sms.available) {
+          // The provider cannot text for this organization (Retell without SMS set up): the step is logged
+          // as skipped with the reason, never as failed or sent, and the strategy goes on.
+          this.logger.log(`lead ${e.leadId}: SMS step ${step.id} skipped — ${provider.name}: ${sms.reason ?? SMS_UNAVAILABLE}`);
+          this.state.quietly({ ...event, type: 'step_skipped', reason: sms.reason ?? SMS_UNAVAILABLE });
+        } else {
+          const sent = await provider.sendSms(e.orgId, phone ?? '', text, { leadId: e.leadId });
+          await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
+          this.state.quietly({ ...event, type: 'step_sent' });
+          this.conversations
+            .appendOurMessage(e.orgId, phone, text)
+            .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
+        }
       } catch (error) {
         await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
         this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
@@ -502,7 +511,7 @@ export class EngineService implements OnModuleDestroy {
         );
         this.state.quietly({ ...event, type: 'step_sent', reason: `Call ${e.voiceAttempts} queued` });
       } catch (error) {
-        await this.activity.recordCallFailed(e.orgId, e.leadId, (error as Error).message);
+        await this.activity.recordCallFailed(e.orgId, e.leadId, (error as Error).message, undefined, await this.providers.nameFor(e.orgId).catch(() => undefined));
         this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
       }
     } else if (step.channel === 'voice') {

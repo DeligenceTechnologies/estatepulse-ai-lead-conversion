@@ -5,10 +5,10 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { inQuietHours, nextAllowedAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { LeadStateService } from '@/lead/lead-state.service';
+import { CallingProviders } from '@/calling/calling-providers';
 import { ActivityService } from '../activity.service';
 import { CallQueue } from '../calls/call.queue';
 import { EngineService } from '../engine.service';
-import { SmsService } from '../sms.service';
 import { SmsConversationService } from '../sms/sms-conversation.service';
 import { fillTemplate } from '../template';
 import type { AssistantToolCaller } from './assistant-tool-auth.service';
@@ -85,7 +85,7 @@ export class CallbackService {
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
     private readonly engine: EngineService,
     private readonly calls: CallQueue,
-    private readonly sms: SmsService,
+    private readonly providers: CallingProviders,
     private readonly activity: ActivityService,
     private readonly conversations: SmsConversationService,
     private readonly tools: CallToolsService,
@@ -223,7 +223,15 @@ export class CallbackService {
     const [{ timeZone }, variables] = await Promise.all([this.followup.guardrailsFor(orgId), this.activity.leadVariables(orgId, leadId)]);
     const text = fillTemplate(settings.confirmMessage, { ...variables, callbackTime: spoken(at, timeZone) });
     try {
-      const sent = await this.sms.sendSms(orgId, phone, text);
+      // Through the organization's own calling provider, never another: a provider that cannot text records why.
+      const provider = await this.providers.for(orgId);
+      const sms = await provider.smsCapability(orgId);
+      if (!sms.available) {
+        this.logger.warn(`callback confirmation for lead ${leadId} not sent: ${sms.reason}`);
+        await this.activity.recordSms(orgId, leadId, text, false, sms.reason);
+        return;
+      }
+      const sent = await provider.sendSms(orgId, phone, text, { leadId });
       await this.activity.recordSms(orgId, leadId, text, true, sent.id);
       await this.conversations.appendOurMessage(orgId, phone, text).catch(() => undefined);
     } catch (error) {

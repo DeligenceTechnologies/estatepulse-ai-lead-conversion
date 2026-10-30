@@ -34,14 +34,16 @@ function setup(
   const config = { get: vi.fn() };
   const limits = { ...DEFAULT_LIMITS, ...(overrides.redialGapMinutes === undefined ? {} : { redialGapMinutes: overrides.redialGapMinutes }) };
   const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits }) };
-  const voice = { placeCall: vi.fn(overrides.placeCall ?? (() => Promise.resolve({ call_control_id: 'ccid-1' }))) };
+  const voice = { placeCall: vi.fn(overrides.placeCall ?? (() => Promise.resolve({ providerCallId: 'ccid-1' }))) };
+  // RETELL_ENABLED off in effect: every organization is on Telnyx, whose provider hands the dial to the voice service.
+  const providers = { for: vi.fn(async () => ({ name: 'telnyx', capabilities: { sms: true }, startCall: voice.placeCall })), nameFor: vi.fn(async () => 'telnyx') };
   const activity = { startCall: vi.fn(), recordCallFailed: vi.fn(), markInvalid: vi.fn() };
   const slots = {
     acquire: vi.fn().mockResolvedValue(overrides.slot ?? true),
     rename: vi.fn(),
     release: vi.fn(),
   };
-  const worker = new CallWorker(prisma as any, config as any, followup as any, voice as any, activity as any, slots as any);
+  const worker = new CallWorker(prisma as any, config as any, followup as any, providers as any, activity as any, slots as any);
   const job = { id: 'job-1', name: 'dial', data: { orgId: ORG, leadId: LEAD, source: 'strategy' } as Record<string, unknown>, moveToDelayed: vi.fn(), updateData: vi.fn() };
   return { worker, job, prisma, voice, activity, slots };
 }
@@ -59,7 +61,7 @@ describe('CallWorker', () => {
     await worker.process(job as any, 'tok');
     expect(slots.acquire).toHaveBeenCalledWith(ORG, 'job-1', 2);
     expect(voice.placeCall).toHaveBeenCalledWith(ORG, '+12895550100', { leadId: LEAD, orgId: ORG });
-    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1', {});
+    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1', {}, 'telnyx');
     expect(slots.rename).toHaveBeenCalledWith(ORG, 'job-1', 'ccid-1');
   });
 
@@ -76,7 +78,7 @@ describe('CallWorker', () => {
     await worker.process(job as any, 'tok');
     const intent = { voicemail: 'skip', context: 'Second try; mention the open house' };
     expect(voice.placeCall).toHaveBeenCalledWith(ORG, '+12895550100', { leadId: LEAD, orgId: ORG, ...intent });
-    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1', intent);
+    expect(activity.startCall).toHaveBeenCalledWith(ORG, LEAD, 'ccid-1', intent, 'telnyx');
   });
 
   describe('a callback', () => {
@@ -159,7 +161,7 @@ describe('CallWorker', () => {
       const second = setup({ placeCall: failing });
       second.job.data = { ...second.job.data, dialRetried: true };
       await second.worker.process(second.job as any, 'tok');
-      expect(second.activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('503'), 'failed');
+      expect(second.activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('503'), 'failed', 'telnyx');
     });
 
     it('a refused account or a bad request is not retried', () => {
@@ -208,7 +210,7 @@ describe('CallWorker', () => {
     const { worker, job, slots, activity } = setup({ placeCall: () => Promise.reject(new Error('Telnyx POST /calls failed 422: invalid number')) });
     await worker.process(job as any, 'tok');
     expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
-    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('invalid number'), 'failed');
+    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('invalid number'), 'failed', 'telnyx');
     expect(activity.markInvalid).not.toHaveBeenCalled();
   });
 
@@ -219,7 +221,7 @@ describe('CallWorker', () => {
       '"detail":"The destination number is invalid D50. The destination number is a US/CA number that does not have a valid LRN."}]}';
     const { worker, job, activity } = setup({ placeCall: () => Promise.reject(new Error(d50)) });
     await worker.process(job as any, 'tok');
-    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, d50, 'invalid_number');
+    expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, d50, 'invalid_number', 'telnyx');
     expect(activity.markInvalid).toHaveBeenCalledWith(LEAD, expect.stringContaining('D50'));
   });
 

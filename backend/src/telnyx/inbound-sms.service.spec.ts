@@ -46,6 +46,35 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn };
 }
 
+describe('InboundSmsService.onProviderText (a text another provider’s agent answers)', () => {
+  it('STOP opts the lead out at once: DNC set, sequences stopped, no classifier asked', async () => {
+    const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+    await expect(s.service.onProviderText('org-1', 'lead-1', 'Stop')).resolves.toBe('opt_out');
+    expect(s.lead.status).toBe('not_interested');
+    expect(s.followup.stopForLead).toHaveBeenCalledWith('org-1', 'lead-1', 'opted_out', expect.anything());
+    expect(s.events()).toContain('opted_out');
+    expect(s.intents.classify).not.toHaveBeenCalled();
+  });
+
+  it('START from an opted-out lead lifts the do-not-contact; from anyone else it is an ordinary reply', async () => {
+    const back = setup({ status: 'not_interested', dncStatus: true });
+    await expect(back.service.onProviderText('org-1', 'lead-1', 'START')).resolves.toBe('opt_in');
+    expect(back.optedIn()).toBe(true);
+    const plain = setup({ status: 'contacting', dncStatus: false });
+    await expect(plain.service.onProviderText('org-1', 'lead-1', 'start')).resolves.toBe('reply');
+    expect(plain.optedIn()).toBe(false);
+  });
+
+  it('any other text makes the lead engaged while the provider’s agent keeps answering: automation is not paused', async () => {
+    const s = setup({ status: 'contacting', dncStatus: false });
+    await expect(s.service.onProviderText('org-1', 'lead-1', 'Yes, still looking')).resolves.toBe('reply');
+    expect(s.lead.status).toBe('engaged');
+    expect(s.prisma.lead.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ firstResponseAt: expect.any(Date) }) }));
+    expect(s.prisma.lead.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ automationPaused: true }) }));
+    expect(s.followup.pauseForLead).not.toHaveBeenCalled();
+  });
+});
+
 describe('InboundSmsService', () => {
   it('treats "Yes" as a reply: the lead is engaged and a person must see it, not an opt-in', async () => {
     const s = setup({ status: 'contacting', dncStatus: false });

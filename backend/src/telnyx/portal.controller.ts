@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { CallingProviders, SMS_UNAVAILABLE } from '@/calling/calling-providers';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { LeadOutcomeDto, LeadQualifiedDto, SetLeadStatusDto } from '@/lead/dto/lead-status.dto';
@@ -188,6 +189,7 @@ export class PortalLeadsController {
     private readonly prisma: PrismaService,
     private readonly engine: EngineService,
     private readonly strategies: StrategyStoreService,
+    private readonly providers: CallingProviders,
   ) {}
 
   @Get()
@@ -268,6 +270,18 @@ export class PortalLeadsController {
     if (!logged) {
       const pending = stepsOut.findIndex((s) => s.outcome === null);
       if (pending >= 0) stepsOut[pending].state = 'current';
+    }
+    // A provider that cannot text for this organization (Retell without SMS set up) never sends these
+    // steps: shown as not sent, with the reason, not left waiting forever.
+    const sms = await (await this.providers.for(orgId)).smsCapability(orgId);
+    if (!sms.available) {
+      for (const s of stepsOut) {
+        if (s.channel === 'sms' && (s.state === 'pending' || s.state === 'current')) Object.assign(s, { state: 'skipped', outcome: 'Not sent', detail: sms.reason ?? SMS_UNAVAILABLE });
+      }
+      if (!logged && !stepsOut.some((s) => s.state === 'current')) {
+        const pending = stepsOut.findIndex((s) => s.state === 'pending');
+        if (pending >= 0) stepsOut[pending].state = 'current';
+      }
     }
     const nextIndex = stepsOut.findIndex((s) => s.state === 'current');
 

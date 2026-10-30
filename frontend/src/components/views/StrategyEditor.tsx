@@ -9,7 +9,9 @@ import { AlwaysOnRules, StepRules } from '../journey/StepRules';
 const fit = (steps: StrategyStep[]) => fitSteps(steps, (s) => s.channel);
 
 // Single editable strategy: the voice + SMS sequence for new leads.
-export const StrategyEditor: React.FC = () => {
+// smsDisabledReason: the calling provider cannot text for this organization (Retell without SMS set up) — SMS steps stay
+// visible, marked as not sent with the reason, and no new ones can be added.
+export const StrategyEditor: React.FC<{ smsDisabledReason?: string }> = ({ smsDisabledReason }) => {
   const [steps, setStepsRaw] = useState<StrategyStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -112,8 +114,17 @@ export const StrategyEditor: React.FC = () => {
 
       {steps.length === 0 && <p className="text-xs text-slate-500">No steps yet — add at least one call or SMS below.</p>}
 
+      {smsDisabledReason && steps.some((s) => s.channel === 'sms') && (
+        <div className="flex items-center gap-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {smsDisabledReason} SMS steps below are kept but not sent.
+        </div>
+      )}
+
       {steps.map((step, i) => (
-        <div key={step.id} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
+        <div
+          key={step.id}
+          className={`p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2 ${smsDisabledReason && step.channel === 'sms' ? 'opacity-60' : ''}`}
+        >
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-slate-500 font-mono text-2xs w-5">{i + 1}</span>
 
@@ -122,9 +133,12 @@ export const StrategyEditor: React.FC = () => {
               onChange={(e) => setStep(i, { channel: e.target.value as 'sms' | 'voice', action: e.target.value === 'voice' ? 'ai_call' : 'send_sms' })}
               className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-emerald-500"
             >
-              <option value="sms">💬 SMS</option>
+              <option value="sms" disabled={!!smsDisabledReason && step.channel !== 'sms'}>💬 SMS</option>
               <option value="voice">📞 AI Voice Call</option>
             </select>
+            {smsDisabledReason && step.channel === 'sms' && (
+              <span className="text-2xs font-bold uppercase text-amber-300" title={smsDisabledReason}>Not sent</span>
+            )}
 
             <span className="text-slate-400 text-xs">wait</span>
             <input
@@ -165,6 +179,8 @@ export const StrategyEditor: React.FC = () => {
               value={step.message || ''}
               onChange={(e) => setStep(i, { message: e.target.value })}
               rows={2}
+              readOnly={!!smsDisabledReason}
+              title={smsDisabledReason}
               placeholder="Message text… use {{firstName}}, {{brokerage}}, {{location}}"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
             />
@@ -188,7 +204,13 @@ export const StrategyEditor: React.FC = () => {
       <AlwaysOnRules />
 
       <div className="flex items-center gap-2 pt-1">
-        <button type="button" onClick={() => addStep('sms')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">
+        <button
+          type="button"
+          onClick={() => addStep('sms')}
+          disabled={!!smsDisabledReason}
+          title={smsDisabledReason}
+          className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-emerald-400"
+        >
           <MessageSquare className="w-3.5 h-3.5" /> Add SMS
         </button>
         <button type="button" onClick={() => addStep('voice')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">

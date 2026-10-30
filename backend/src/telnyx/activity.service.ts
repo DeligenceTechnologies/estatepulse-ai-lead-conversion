@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CallDisposition, CallStatus, FollowUpReason, LeadStatus } from '@prisma/client';
+import type { CallingProviderName } from '@/calling/calling-providers';
 import { spoken } from '@/calendar/booking/booking-time';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
@@ -142,11 +143,12 @@ export class ActivityService {
     else await this.noteAttemptFailure(leadId, providerIdOrReason ? `SMS failed: ${providerIdOrReason}` : 'SMS failed');
   }
 
-  async startCall(orgId: string, leadId: string, providerCallId?: string | null, intent: CallIntent = {}): Promise<void> {
-    if (providerCallId) this.prepareAttach(providerCallId, orgId, leadId, intent);
+  /** Only a Telnyx call needs its assistant attached on answer; another provider runs its own agent. */
+  async startCall(orgId: string, leadId: string, providerCallId?: string | null, intent: CallIntent = {}, provider: CallingProviderName = 'telnyx'): Promise<void> {
+    if (providerCallId && provider === 'telnyx') this.prepareAttach(providerCallId, orgId, leadId, intent);
     try {
       await this.prisma.call.create({
-        data: { orgId, leadId, provider: 'telnyx', providerCallId: providerCallId ?? null, status: CallStatus.ringing, startedAt: new Date() },
+        data: { orgId, leadId, provider, providerCallId: providerCallId ?? null, status: CallStatus.ringing, startedAt: new Date() },
       });
     } catch (error) {
       this.logger.error(`startCall: ${(error as Error).message}`);
@@ -154,10 +156,16 @@ export class ActivityService {
     await this.markContacted(leadId);
   }
 
-  async recordCallFailed(orgId: string, leadId: string, reason?: string, disposition: CallDisposition = CallDisposition.failed): Promise<void> {
+  async recordCallFailed(
+    orgId: string,
+    leadId: string,
+    reason?: string,
+    disposition: CallDisposition = CallDisposition.failed,
+    provider: CallingProviderName = 'telnyx',
+  ): Promise<void> {
     try {
       const call = await this.prisma.call.create({
-        data: { orgId, leadId, provider: 'telnyx', status: CallStatus.failed, disposition, startedAt: new Date(), endedAt: new Date() },
+        data: { orgId, leadId, provider, status: CallStatus.failed, disposition, startedAt: new Date(), endedAt: new Date() },
         select: { id: true },
       });
       this.state.quietly({ orgId, leadId, type: 'call_ended', source: 'call', channel: 'voice', callId: call.id, reason: reason ?? null, payload: { disposition } });
@@ -213,12 +221,18 @@ export class ActivityService {
     const bookkeeping = Promise.all([this.slots.extend(call.orgId, ccid).catch(() => undefined), this.markContacted(call.leadId)]).catch((error) =>
       this.logger.error(`onCallAnswered ${ccid}: ${(error as Error).message}`),
     );
+    // Another provider's own agent is already on the line: nothing to attach.
+    if (call.provider !== 'telnyx') {
+      await bookkeeping;
+      return;
+    }
     const p = await (plan ?? this.prepareAttach(ccid, call.orgId, call.leadId, intent));
     if (p) await this.attach(ccid, p, intent.amd !== false);
     await bookkeeping;
   }
 
-  async onCallHangup(ccid: string, payload: { hangup_cause?: string; sip_hangup_cause?: string } = {}): Promise<void> {
+  /** `machine`: another provider's own answering-machine verdict (Retell), where Telnyx's comes from onMachineDetection. */
+  async onCallHangup(ccid: string, payload: { hangup_cause?: string; sip_hangup_cause?: string; machine?: boolean } = {}): Promise<void> {
     const verdict = this.verdicts.get(ccid) ?? null;
     this.forget(ccid);
     const call = await this.callByProvider(ccid);
@@ -236,7 +250,7 @@ export class ActivityService {
       const answered = row.status === CallStatus.in_progress;
       const endedAt = new Date();
       const durationSeconds = row.started_at ? Math.round((endedAt.getTime() - new Date(row.started_at).getTime()) / 1000) : null;
-      const machine = row.disposition === CallDisposition.voicemail || verdict === 'machine';
+      const machine = row.disposition === CallDisposition.voicemail || verdict === 'machine' || payload.machine === true;
       const disposition = dispositionOf({ answered, machine, durationSeconds, hangupCause: cause, sipCause });
       await tx.call.update({
         where: { id: call.id },

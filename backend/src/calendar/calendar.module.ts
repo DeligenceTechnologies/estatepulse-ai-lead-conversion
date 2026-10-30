@@ -3,7 +3,7 @@ import { LeadModule } from '@/lead/lead.module';
 import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AppointmentsController } from './appointments/appointments.controller';
 import { AppointmentsService } from './appointments/appointments.service';
-import { InCallBookingSettingsController, InCallBookingToolController } from './booking/in-call-booking.controller';
+import { BookingToolController, InCallBookingSettingsController, InCallBookingToolController } from './booking/in-call-booking.controller';
 import { InCallBookingSettingsService } from './booking/in-call-booking-settings.service';
 import { InCallBookingService } from './booking/in-call-booking.service';
 import { LeadBookingController } from './booking/lead-booking.controller';
@@ -36,6 +36,7 @@ import { CalendarWebhookController } from './sync/calendar-webhook.controller';
     LeadBookingController,
     InCallBookingSettingsController,
     InCallBookingToolController,
+    BookingToolController,
   ],
   providers: [
     CalendlyClient,
@@ -53,6 +54,6 @@ import { CalendarWebhookController } from './sync/calendar-webhook.controller';
     InCallBookingService,
     ToolAuthService,
   ],
-  exports: [AppointmentsService],
+  exports: [AppointmentsService, InCallBookingSettingsService],
 })
 export class CalendarModule {}
