@@ -7,6 +7,7 @@ import { LeadStateService } from '@/lead/lead-state.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
+import { LeadMemoryService } from './lead-memory.service';
 import {
   leadDetailsFrom,
   parseExtraction,
@@ -54,6 +55,7 @@ export class LeadScoringService {
     private readonly engine: EngineService,
     private readonly state: LeadStateService,
     private readonly outcomes: OutcomeService,
+    private readonly memory: LeadMemoryService,
   ) {}
 
   /** The Insight's result for a call. Signed by Telnyx; refused when the signature does not verify. */
@@ -142,6 +144,8 @@ export class LeadScoringService {
       this.logger.log(`call ${call.id} reached no one (${source}) — counted as not answered, the lead left as it was`);
       return qualification;
     }
+    // From any call, not just the latest: an answer newer than this call is kept.
+    await this.memory.afterCall(call, extraction);
 
     const lead = await this.prisma.lead.findFirst({ where: { id: call.leadId, orgId }, select: { status: true, dncStatus: true } });
     if (!lead) return qualification;

@@ -18,7 +18,7 @@ describe('ActivityService call row', () => {
     };
     const slots = { extend: vi.fn(async () => undefined), release: vi.fn(async () => undefined) };
     const state = { quietly: vi.fn(), move: vi.fn(async () => ({ moved: true, from: 'contacting' })) };
-    const service = new ActivityService(prisma as any, {} as any, {} as any, {} as any, slots as any, { get: vi.fn() } as any, state as any, {} as any, {} as any);
+    const service = new ActivityService(prisma as any, {} as any, {} as any, {} as any, slots as any, { get: vi.fn() } as any, state as any, {} as any, {} as any, { get: vi.fn(async () => []) } as any);
     const attach = vi.fn(async () => undefined);
     (service as any).attach = attach;
     (service as any).prepareAttach = vi.fn(async () => ({ apiKey: 'KEY', assistantId: 'a-1' }));

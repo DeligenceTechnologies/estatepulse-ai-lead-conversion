@@ -42,8 +42,9 @@ function setup(x: Extraction, lead = { status: 'contacting', dncStatus: false })
   const engine = { qualified: vi.fn(), setStatus: vi.fn() };
   const state = { move: vi.fn(async () => ({ moved: true, from: 'engaged' })) };
   const outcomes = { record: vi.fn(async () => ({ ok: true })) };
-  const service = new LeadScoringService(prisma as any, {} as any, insights as any, engine as any, state as any, outcomes as any);
-  return { service, prisma, engine, state, outcomes, run: () => service.classifyCall('org-1', 'call-1') };
+  const memory = { afterCall: vi.fn(async () => undefined) };
+  const service = new LeadScoringService(prisma as any, {} as any, insights as any, engine as any, state as any, outcomes as any, memory as any);
+  return { service, prisma, engine, state, outcomes, memory, run: () => service.classifyCall('org-1', 'call-1') };
 }
 
 describe('the call analysis', () => {
@@ -75,5 +76,18 @@ describe('the call analysis', () => {
     await s.run();
     expect(s.state.move).not.toHaveBeenCalled();
     expect(s.engine.qualified).toHaveBeenCalled();
+  });
+
+  it('a call that reached the lead updates the lead memory with what was said', async () => {
+    const x = extraction({ answers: { family: 5 } });
+    const s = setup(x);
+    await s.run();
+    expect(s.memory.afterCall).toHaveBeenCalledWith(expect.objectContaining({ id: 'call-1' }), x);
+  });
+
+  it('a call that reached no one leaves the lead memory alone', async () => {
+    const s = setup(extraction({ reached_person: false }));
+    await s.run();
+    expect(s.memory.afterCall).not.toHaveBeenCalled();
   });
 });
