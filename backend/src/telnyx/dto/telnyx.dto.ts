@@ -203,6 +203,11 @@ export class ThresholdsDto {
   @Min(1)
   @Max(100)
   warmThreshold!: number;
+
+  /** The office's points chart ({ within_30_days, budget_identified, … }); left out, the saved one stays. Each value is checked in the service. */
+  @IsOptional()
+  @IsObject()
+  points?: Record<string, unknown>;
 }
 
 export class TestToolDto {

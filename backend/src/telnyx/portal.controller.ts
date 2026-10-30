@@ -164,8 +164,8 @@ export class LeadScoringController {
   @Get('settings')
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
   async settings(@CurrentAuth() auth: AuthContext) {
-    const t = await this.scoring.getThresholds(auth.organizationId);
-    return { hotThreshold: t.hot, warmThreshold: t.warm };
+    const s = await this.scoring.getSettings(auth.organizationId);
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points };
   }
 
   @Put('settings')
@@ -176,8 +176,8 @@ export class LeadScoringController {
         { path: 'warmThreshold', message: 'The warm threshold must be lower than the hot threshold' },
       ]);
     }
-    const t = await this.scoring.setThresholds(auth.organizationId, body);
-    return { hotThreshold: t.hot, warmThreshold: t.warm };
+    const s = await this.scoring.setSettings(auth.organizationId, body);
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points };
   }
 }
 

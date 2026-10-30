@@ -3,11 +3,13 @@ import { Flame, Gauge } from 'lucide-react';
 import { qualificationOf } from '../../utils/leadScoringApi';
 
 /**
- * How this call scored the lead: "HOT — 80" and every point behind it.
+ * How this call scored the lead: "HOT — 80" and every reason behind it.
  *
- * Scoring is automatic when a call ends — Telnyx's post-call Insight feeds the
- * backend's deterministic scorer, and if that result does not arrive the
- * backend scores the transcript itself. Nothing here is manual; a call that is
+ * Scoring is automatic when a call ends — Telnyx's post-call Insight has the
+ * assistant extract, score and rate the lead by the office's thresholds, and
+ * if that result does not arrive the backend scores the transcript itself. An
+ * analysis without the assistant's score (every call before it was asked) is
+ * scored by the backend's point rules. Nothing here is manual; a call that is
  * not scored yet simply shows nothing.
  */
 
@@ -39,7 +41,11 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
         </span>
         <span className="text-xs text-slate-500">
           Hot from {q.thresholds.hot}, warm from {q.thresholds.warm} •{' '}
-          {q.source === 'telnyx_insights' ? 'scored when the call ended' : 'scored from the transcript'}
+          {q.scoredBy === 'assistant'
+            ? 'scored by the AI assistant'
+            : q.source === 'telnyx_insights'
+              ? 'scored when the call ended'
+              : 'scored from the transcript'}
         </span>
       </div>
 
@@ -53,10 +59,13 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
               className="bg-slate-900 border border-slate-800/80 px-2 py-1.5 rounded-lg flex items-center justify-between text-xs"
             >
               <span className="text-slate-300 truncate pr-2">{r.label}</span>
-              <span className={`font-bold font-mono shrink-0 ${r.points < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {r.points > 0 ? '+' : ''}
-                {r.points}
-              </span>
+              {/* The assistant writes its points into the reason itself; only the rules give them separately. */}
+              {r.points !== 0 && (
+                <span className={`font-bold font-mono shrink-0 ${r.points < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {r.points > 0 ? '+' : ''}
+                  {r.points}
+                </span>
+              )}
             </li>
           ))}
         </ul>

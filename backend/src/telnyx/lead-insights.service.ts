@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '@/common/errors/app-error';
-import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, parseExtraction, type Extraction } from './lead-scoring';
+import { PrismaService } from '@/common/prisma/prisma.service';
+import { EXTRACTION_JSON_SCHEMA, parseExtraction, scoringInstructions, scoringSettingsFrom, type Extraction, type ScoringSettings } from './lead-scoring';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { telnyx } from './telnyx-api';
 
@@ -13,8 +14,9 @@ const TRANSCRIPT_NOTE =
 
 /**
  * Lead qualification from a call: a Telnyx conversation Insight attached to
- * the assistant scores every call, and a transcript can be classified directly
- * when the Insight did not run.
+ * the assistant extracts, scores and rates every call by the office's own
+ * thresholds, and a transcript can be classified directly when the Insight
+ * did not run.
  */
 @Injectable()
 export class LeadInsightsService {
@@ -22,16 +24,21 @@ export class LeadInsightsService {
   private readonly provisioned = new Set<string>();
   private readonly inflight = new Map<string, Promise<void>>();
 
-  constructor(private readonly creds: TelnyxCredentialsService) {}
+  constructor(
+    private readonly creds: TelnyxCredentialsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async ensureProvisioned(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
-    const key = `${orgId}:${c.assistantId}`;
+    const settings = await this.settings(orgId);
+    // The points and thresholds are written into the Insight, so a change to them writes it again.
+    const key = `${orgId}:${c.assistantId}:${JSON.stringify(settings)}`;
     if (this.provisioned.has(key)) return;
     const running = this.inflight.get(key);
     if (running) return running;
-    const run = this.provision(c.apiKey, c.assistantId)
+    const run = this.provision(c.apiKey, c.assistantId, settings)
       .then(() => {
         this.provisioned.add(key);
       })
@@ -41,10 +48,18 @@ export class LeadInsightsService {
     return run;
   }
 
-  private async provision(apiKey: string, assistantId: string): Promise<void> {
+  private async settings(orgId: string): Promise<ScoringSettings> {
+    const row = await this.prisma.organizationSetting.findUnique({
+      where: { orgId },
+      select: { leadHotThreshold: true, leadWarmThreshold: true, leadScorePoints: true },
+    });
+    return scoringSettingsFrom(row);
+  }
+
+  private async provision(apiKey: string, assistantId: string, settings: ScoringSettings): Promise<void> {
     const call = (path: string, init: RequestInit = {}) => telnyx(apiKey, path, init);
     const insights: { id: string; name: string }[] = (await call('/ai/conversations/insights?page[size]=99')).data ?? [];
-    const body = { name: INSIGHT_NAME, instructions: EXTRACTION_INSTRUCTIONS, json_schema: EXTRACTION_JSON_SCHEMA };
+    const body = { name: INSIGHT_NAME, instructions: scoringInstructions(settings), json_schema: EXTRACTION_JSON_SCHEMA };
     const existing = insights.find((i) => i.name === INSIGHT_NAME);
     const insightId: string = existing
       ? ((await call(`/ai/conversations/insights/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) })).data?.id ?? existing.id)
@@ -67,7 +82,7 @@ export class LeadInsightsService {
     this.logger.log(`lead insight ready on assistant ${assistantId}`);
   }
 
-  async extractFromTranscript(orgId: string, transcript: string): Promise<Extraction> {
+  async extractFromTranscript(orgId: string, transcript: string, settings: ScoringSettings): Promise<Extraction> {
     const c = await this.creds.getCreds(orgId);
     if (!c?.apiKey) throw new AppError('CONFLICT', 'Connect your Telnyx account first');
     const res = await telnyx(c.apiKey, '/ai/chat/completions', {
@@ -76,7 +91,7 @@ export class LeadInsightsService {
         model: TRANSCRIPT_MODEL,
         temperature: 0,
         messages: [
-          { role: 'system', content: EXTRACTION_INSTRUCTIONS + TRANSCRIPT_NOTE },
+          { role: 'system', content: scoringInstructions(settings) + TRANSCRIPT_NOTE },
           { role: 'user', content: transcript.slice(0, 30_000) },
         ],
         response_format: { type: 'json_schema', json_schema: { name: 'lead_qualification', schema: EXTRACTION_JSON_SCHEMA, strict: true } },
