@@ -27,6 +27,8 @@ import { CallOutcomeToolController, CallToolsSettingsController } from './tools/
 import { CallToolsService } from './tools/call-tools.service';
 import { CallbackService } from './tools/callback.service';
 import { OutcomeService } from './tools/outcome.service';
+import { TextBackService } from './tools/text-back.service';
+import { TextBackWorker } from './tools/text-back.worker';
 import { VoicemailController } from './voicemail/voicemail.controller';
 import { VoicemailService } from './voicemail/voicemail.service';
 
@@ -68,6 +70,8 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallToolsService,
     CallbackService,
     OutcomeService,
+    TextBackService,
+    TextBackWorker,
   ],
   exports: [
     CallQueue,

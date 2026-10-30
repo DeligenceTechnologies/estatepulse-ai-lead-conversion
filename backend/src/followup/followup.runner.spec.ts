@@ -159,6 +159,30 @@ describe('FollowupRunner journey rules', () => {
   const loggedEvent = (s: ReturnType<typeof setup>, type: string) =>
     (s.prisma.leadEvent.create.mock.calls as any[]).some((c) => c[0].data.type === type);
 
+  const withTextBack = (s: ReturnType<typeof setup>, textBackAt: Date) =>
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false, textBackAt } as any);
+
+  it('a text the lead asked for comes first: the step looks again every 5 minutes until then', async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 1);
+    withTextBack(s, new Date(NOW.getTime() + 60 * 60_000));
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(deferredTo(s)).toEqual([new Date(NOW.getTime() + 5 * 60_000)]);
+  });
+
+  it('after that text the lead gets the chat quiet time to answer it, then the step goes', async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 1);
+    const sentAt = new Date(NOW.getTime() - 28 * 60_000);
+    withTextBack(s, sentAt);
+    await s.execute();
+    expect(deferredTo(s)).toEqual([new Date(sentAt.getTime() + CHAT_QUIET_MS)]);
+
+    const later = setup([smsStep('one'), smsStep('two')], 1);
+    withTextBack(later, new Date(NOW.getTime() - 31 * 60_000));
+    await later.execute();
+    expect(later.sms.sendSms).toHaveBeenCalledOnce();
+  });
+
   it('fills the lead variables into a text and adds it to the AI chat', async () => {
     const s = setup([{ ...smsStep('Hi {{firstName}}, still looking in {{location}}?') }], 1);
     await s.execute();

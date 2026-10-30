@@ -17,6 +17,8 @@ model Lead {
   followUpReason  FollowUpReason?  @map("follow_up_reason")
   /// When the lead asked to be called back; nothing else contacts them before it. Cleared once the callback is done.
   callbackAt      DateTime?        @map("callback_at") @db.Timestamptz(6)
+  /// When the lead asked to be texted ("message me in 10 minutes"); nothing else contacts them before it. Cleared if it is cancelled or dropped; kept once sent.
+  textBackAt      DateTime?        @map("text_back_at") @db.Timestamptz(6)
   temperature    LeadTemperature? @default(cold)
   score           Decimal?         @db.Decimal(5, 2)
   aiSummary       String?          @map("ai_summary")

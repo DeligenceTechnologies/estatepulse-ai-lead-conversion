@@ -275,4 +275,15 @@ export class UpdateCallToolsDto {
   @IsString()
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   confirmMessage?: string;
+
+  /** The AI may schedule a text at the time the lead asks. */
+  @IsOptional()
+  @IsBoolean()
+  textBack?: boolean;
+
+  /** {{firstName}}, {{brokerage}} and the other lead variables are filled in. Empty restores the default. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
+  textBackMessage?: string;
 }

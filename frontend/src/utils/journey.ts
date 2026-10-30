@@ -61,7 +61,7 @@ export const ALWAYS_ON_RULES = [
   'Nothing canned is sent while the lead is texting with the AI; a call waits until the chat goes quiet.',
   'Nothing is sent over a call that is still ringing or live.',
   'After a real conversation, the rest of the steps stop and the call scoring decides what happens next.',
-  'A callback the lead asked for comes first: nothing else reaches them before it.',
+  'A callback or a text the lead asked for ("call me at 5", "message me in 10 minutes") comes first: nothing else reaches them before it.',
   'A lead who declined or was busy is not called again until the wait set in the contact window has passed.',
   'Quiet hours, days off and the daily limits below apply to every step. A step that cannot go now waits; it is never dropped.',
   'A step’s condition is about the step right before it. If that step was skipped, the step is skipped too.',

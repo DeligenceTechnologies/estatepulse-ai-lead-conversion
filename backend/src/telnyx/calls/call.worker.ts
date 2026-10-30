@@ -7,7 +7,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
-import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
+import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
@@ -79,7 +79,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true },
+      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true, textBackAt: true },
     });
     if (!lead || lead.dncStatus || lead.automationPaused || (callback ? CALLBACK_BLOCKED : OUTCOME_STATUSES).includes(lead.status)) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead can no longer be called`);
@@ -98,6 +98,8 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       this.logger.log(`Call for lead ${leadId} dropped: a meeting with the lead is on the calendar`);
       return;
     }
+    // A strategy or sequence call queued before the lead asked to be texted waits for that text; a callback they asked for does not.
+    if (!callback && textBackPending(lead)) return this.delay(job, textBackRecheckAt(lead), token);
     const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(orgId);
     if (callback) {
       const live = await this.prisma.call.count({

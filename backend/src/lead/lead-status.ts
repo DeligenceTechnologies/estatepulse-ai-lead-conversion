@@ -35,3 +35,18 @@ export const isLeadStatus = (value: unknown): value is LeadStatus =>
 export function callbackPending(lead: { callbackAt: Date | null }, now = Date.now()): boolean {
   return !!lead.callbackAt && lead.callbackAt.getTime() > now;
 }
+
+/** The lead asked to be texted at a time still ahead: until then nothing else reaches them. */
+export function textBackPending(lead: { textBackAt: Date | null }, now = Date.now()): boolean {
+  return !!lead.textBackAt && lead.textBackAt.getTime() > now;
+}
+
+/** A step held for that text goes on this long after it, so the lead can answer it first. */
+export const AFTER_TEXT_BACK_MS = 2 * 60_000;
+/** A held step looks again this often, so a text the lead cancelled (by texting first) stops holding it. */
+export const TEXT_BACK_RECHECK_MS = 5 * 60_000;
+
+/** When a step held for that text looks again: just after it, or sooner. */
+export function textBackRecheckAt(lead: { textBackAt: Date | null }, now = Date.now()): number {
+  return Math.min((lead.textBackAt?.getTime() ?? now) + AFTER_TEXT_BACK_MS, now + TEXT_BACK_RECHECK_MS);
+}

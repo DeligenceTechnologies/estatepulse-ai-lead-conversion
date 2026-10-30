@@ -6,7 +6,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { nextContactAt } from '@/common/utils/quiet-hours';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { OUTCOME_STATUSES } from '@/lead/lead-status';
+import { AFTER_TEXT_BACK_MS, OUTCOME_STATUSES, TEXT_BACK_RECHECK_MS } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from '@/telnyx/activity.service';
 import { SmsService } from '@/telnyx/sms.service';
@@ -134,6 +134,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
 
       const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
       const chatQuietMs = limits.chatQuietMinutes * 60_000;
+      if (await this.textBackWait(row, lead, chatQuietMs)) return;
       if (await this.chatBusy(row, chatQuietMs)) return;
 
       const now = new Date();
@@ -166,7 +167,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       // Looked at once more right before anything goes out: a reply, an opt-out, a booking or a
       // pause may have come in while the step was being decided.
       const fresh = await this.liveLead(row);
-      if (!fresh || (await this.chatBusy(row, chatQuietMs))) return;
+      if (!fresh || (await this.textBackWait(row, fresh, chatQuietMs)) || (await this.chatBusy(row, chatQuietMs))) return;
       await this.fire(row, step, fresh);
       await this.advance(row, steps, closeOutMs);
     } catch (error) {
@@ -175,10 +176,10 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   }
 
   /** The lead when a step may go to it; otherwise the enrolment is stopped or paused, and null. */
-  private async liveLead(row: ClaimedEnrollment): Promise<{ firstName: string | null; phone: string | null } | null> {
+  private async liveLead(row: ClaimedEnrollment): Promise<{ firstName: string | null; phone: string | null; textBackAt: Date | null } | null> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: row.lead_id },
-      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true },
+      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
     });
     if (!lead) await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
     else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
@@ -190,6 +191,19 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       await this.finish(row.id, EnrollmentStatus.stopped, 'appointment_booked');
     } else return lead;
     return null;
+  }
+
+  /**
+   * A text the lead asked for comes first, and they get the chat's quiet time
+   * (at least AFTER_TEXT_BACK_MS) to answer it. The step looks again every few
+   * minutes meanwhile, so a text the lead cancelled stops holding it.
+   */
+  private async textBackWait(row: ClaimedEnrollment, lead: { textBackAt: Date | null }, chatQuietMs: number): Promise<boolean> {
+    if (!lead.textBackAt) return false;
+    const until = lead.textBackAt.getTime() + Math.max(chatQuietMs, AFTER_TEXT_BACK_MS);
+    if (until <= Date.now()) return false;
+    await this.deferTo(row, new Date(Math.min(until, Date.now() + TEXT_BACK_RECHECK_MS)));
+    return true;
   }
 
   /** A lead texting with the AI is not sent the next step until the chat has been quiet as long as the organization set: deferred to then. */

@@ -1,7 +1,8 @@
 /**
  * The assistant's call-outcome tools: schedule_callback (an exact time the
- * lead asked to be called back) and record_outcome (a clear "no", "stop
- * contacting me" or wrong number). They work on a call and in a text chat.
+ * lead asked to be called back), schedule_text (a time they asked to be
+ * texted) and record_outcome (a clear "no", "stop contacting me" or wrong
+ * number). They work on a call and in a text chat.
  */
 
 export interface CallToolsSettings {
@@ -15,6 +16,10 @@ export interface CallToolsSettings {
   retryMinutes: number;
   /** …this many times (0: not at all), before the lead goes to the no-answer follow-up. */
   retryAttempts: number;
+  /** The AI may promise a text at the time the lead asks ("message me in 10 minutes"); off, it asks them to text back instead. */
+  textBack: boolean;
+  /** What that text says. {{firstName}}, {{brokerage}} and the other lead variables are filled in. */
+  textBackMessage: string;
 }
 
 export const DEFAULT_RETRY_MINUTES = 15;
@@ -40,7 +45,7 @@ export interface CallToolsTelnyx {
 }
 
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 3;
+export const CALL_TOOLS_VERSION = 4;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -48,6 +53,8 @@ export const DEFAULT_CONFIRM_MESSAGE =
   "Thanks {{firstName}}! I'll call you back on {{callbackTime}}. If another time suits you better, just reply here.";
 
 export const CONFIRM_MESSAGE_MAX_CHARS = 320;
+
+export const DEFAULT_TEXT_BACK_MESSAGE = "Hi {{firstName}}, it's {{brokerage}} again, following up as you asked. Is now a better time to chat?";
 
 /** The greeting of the callback call itself, instead of the assistant's first-call greeting. */
 export const CALLBACK_GREETING =
@@ -61,6 +68,8 @@ export function callToolsSettings(raw: unknown): CallToolsSettings & { telnyx: C
     confirmMessage: typeof v.confirmMessage === 'string' && v.confirmMessage.trim() ? v.confirmMessage.trim() : DEFAULT_CONFIRM_MESSAGE,
     retryMinutes: whole(v.retryMinutes, RETRY_MINUTES_MIN, RETRY_MINUTES_MAX, DEFAULT_RETRY_MINUTES),
     retryAttempts: whole(v.retryAttempts, 0, RETRY_ATTEMPTS_MAX, DEFAULT_RETRY_ATTEMPTS),
+    textBack: typeof v.textBack === 'boolean' ? v.textBack : true,
+    textBackMessage: typeof v.textBackMessage === 'string' && v.textBackMessage.trim() ? v.textBackMessage.trim() : DEFAULT_TEXT_BACK_MESSAGE,
     telnyx: v.telnyx?.tokenHash ? v.telnyx : null,
   };
 }
@@ -73,6 +82,7 @@ export function callToolsSection(): string {
     CALL_TOOLS_PROMPT_START,
     '# Callbacks and outcomes',
     '- If the lead is busy or asks to be called at another time, call schedule_callback: with day and time for a clock time ("tomorrow at 5"), with in_minutes for a delay ("in 5 minutes", "after an hour"), or with nothing if they named no time ("try me later"). Read back the returned "spoken" time, then say goodbye. If the result is not ok, offer the time it suggests. Never promise a callback without it.',
+    '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
     '- If the lead clearly says they are not interested or have already bought, call record_outcome with not_interested. If they ask us to stop calling or texting them, use do_not_contact. If this is not the person we wanted, or they never asked about buying a home, use wrong_number. Only on a clear statement, never on a guess. Then say one short, polite goodbye. Never argue or try to change their mind after do_not_contact.',
     '- If {{callback_due}} is yes, this call is the callback they asked for ({{callback_time}}). They have just heard that you are calling back, so go straight to helping them.',
     '- If {{call_context}} is not empty, it is why we are calling them this time. Let it guide the conversation, without reading it out.',
@@ -99,7 +109,7 @@ export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as 
 export type Outcome = (typeof OUTCOMES)[number];
 
 /**
- * The two tools as Telnyx webhook tools. lead_id, call_control_id and
+ * The three tools as Telnyx webhook tools. lead_id, call_control_id and
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
@@ -130,6 +140,31 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
             time: { type: 'string', description: 'The time they asked for, 24-hour HH:MM, e.g. 17:00. Omit if they named no time.' },
             in_minutes: { type: 'integer', description: 'A delay they asked for instead of a clock time, in minutes: "in 5 minutes" is 5, "after an hour" is 60.' },
             note: { type: 'string', description: 'Why they want the callback, in a few words, if they said.' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'webhook',
+      display_name: 'EstatePulse: schedule a text',
+      timeout_ms: 10000,
+      webhook: {
+        ...shared,
+        name: 'schedule_text',
+        description:
+          'Schedule a text message to the lead at the time they ask to be texted or messaged later ("message me in 2 ' +
+          'minutes", "text me tomorrow at 10"). For a clock time pass `day` (YYYY-MM-DD, "today", "tomorrow" or a ' +
+          'weekday name) and `time` (24-hour HH:MM). For a delay pass only `in_minutes`. Pass nothing if they named no ' +
+          'time. Confirm the returned `spoken` time. If the result is not ok, do what its `say` tells you.',
+        url: `${apiUrl}/tools/telnyx/outcome/text`,
+        body_parameters: {
+          type: 'object',
+          properties: {
+            day: { type: 'string', description: 'YYYY-MM-DD, "today", "tomorrow" or a weekday name. Omit if they named no day.' },
+            time: { type: 'string', description: 'The time they asked for, 24-hour HH:MM, e.g. 17:00. Omit if they named no time.' },
+            in_minutes: { type: 'integer', description: 'A delay they asked for instead of a clock time, in minutes: "in 2 minutes" is 2, "after an hour" is 60.' },
+            note: { type: 'string', description: 'Why they want the text later, in a few words, if they said.' },
           },
           required: [],
         },

@@ -28,6 +28,8 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const engine = { setStatus: vi.fn(async () => true) };
   const conversations = { isEnabled: vi.fn(async () => Boolean(opts.ai)) };
   const intents = { classify: vi.fn(async () => ({ intent: opts.intent ?? 'continue', reason: 'test' })) };
+  const textBacks = { onLeadTexted: vi.fn(async () => undefined) };
+  const callTools = { ensure: vi.fn(async () => undefined) };
   const service = new InboundSmsService(
     prisma as any,
     creds as any,
@@ -36,6 +38,8 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
     engine as any,
     conversations as any,
     intents as any,
+    textBacks as any,
+    callTools as any,
   );
   const receive = (text: string) =>
     service.onMessageReceived({ id: 'm-1', text, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
@@ -43,7 +47,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const optedIn = () => prisma.lead.update.mock.calls.some((c: any[]) => c[0]?.data?.consentStatus === 'granted');
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
     service.onMessageFinalized('org-1', { id, text, from: { phone_number: '+17427245092' }, to: [{ phone_number: '+12899174129', status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn };
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools };
 }
 
 describe('InboundSmsService', () => {
@@ -145,5 +149,20 @@ describe('InboundSmsService', () => {
     const s = setup({ status: 'contacting', dncStatus: false });
     await s.finalize('someone-else');
     expect(s.prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it("dates a text by when Telnyx got it, and reads the intent from the texts before it, not the AI's answer to it", async () => {
+    const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+    const receivedAt = '2026-10-28T11:36:20.259+00:00';
+    await s.service.onMessageReceived({ id: 'm-2', text: 'message me after 2 mins', received_at: receivedAt, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
+    expect(s.prisma.message.create).toHaveBeenCalledWith({ data: expect.objectContaining({ direction: 'inbound', sentAt: new Date(receivedAt), createdAt: new Date(receivedAt) }) });
+    expect(s.prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ createdAt: { lt: new Date(receivedAt) } }) }));
+  });
+
+  it('lets a text the lead asked for know they texted again, and makes sure the AI has its tools in a chat', async () => {
+    const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+    await s.receive('ok I am free now');
+    expect(s.textBacks.onLeadTexted).toHaveBeenCalledWith('org-1', 'lead-1');
+    expect(s.callTools.ensure).toHaveBeenCalledWith('org-1');
   });
 });

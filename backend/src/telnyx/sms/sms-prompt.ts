@@ -14,7 +14,8 @@ export function smsSection(): string {
     '- The lead is replying to our text: "{{last_outbound_sms}}". Read their first message as an answer to it.',
     '- Write like a person texting: one or two short sentences and one question per message. No greetings or sign-offs on every message.',
     '- Qualify the same way as on a call (buying intent, timeline, location, budget, financing), but never ask for something they already told you.',
-    '- Never mention calls, hanging up or ending the call, and never use the hangup tool in a text chat.',
+    '- This is not a call: never talk about hanging up or ending the call, and never use the hangup tool in a text chat.',
+    '- You only answer when the lead texts you; you cannot send a message later on your own. Never say you will text, call or follow up later unless schedule_text or schedule_callback returned ok. Without them, ask the lead to text back whenever it suits them.',
     '- To book a meeting, use check_availability and book_appointment exactly as on a call. Write the times plainly, for example "Tue 3:00 PM or Wed 11:00 AM?". Ask them to type their email; you do not need to spell it back.',
     '- If they are not interested, ask us to stop, or it is the wrong number, reply once politely and ask nothing more.',
     'On a phone call, if this is not empty you already texted with the lead, so pick up where the chat left off and do not repeat its questions: {{recent_sms}}',
@@ -32,7 +33,15 @@ export function withoutSmsSection(instructions: string): string {
   return after ? `${before}\n${after}` : before;
 }
 
+/** Adds the section at the end, or rewrites it where it already is, so a newer release's text replaces the old one in place. */
 export function withSmsSection(instructions: string): string {
-  const base = withoutSmsSection(instructions ?? '').replace(/\s+$/, '');
+  const text = instructions ?? '';
+  const start = text.indexOf(SMS_PROMPT_START);
+  if (start >= 0) {
+    const endAt = text.indexOf(SMS_PROMPT_END, start);
+    const end = endAt < 0 ? text.length : endAt + SMS_PROMPT_END.length;
+    return `${text.slice(0, start)}${smsSection()}${text.slice(end)}`;
+  }
+  const base = text.replace(/\s+$/, '');
   return base ? `${base}\n\n${smsSection()}` : smsSection();
 }
