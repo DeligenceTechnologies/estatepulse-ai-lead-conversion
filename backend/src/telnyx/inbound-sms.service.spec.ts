@@ -28,6 +28,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const engine = { setStatus: vi.fn(async () => true) };
   const conversations = { isEnabled: vi.fn(async () => Boolean(opts.ai)) };
   const intents = { classify: vi.fn(async () => ({ intent: opts.intent ?? 'continue', reason: 'test' })) };
+  const memory = { onLeadText: vi.fn() };
   const service = new InboundSmsService(
     prisma as any,
     creds as any,
@@ -36,6 +37,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
     engine as any,
     conversations as any,
     intents as any,
+    memory as any,
   );
   const receive = (text: string) =>
     service.onMessageReceived({ id: 'm-1', text, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
@@ -43,7 +45,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const optedIn = () => prisma.lead.update.mock.calls.some((c: any[]) => c[0]?.data?.consentStatus === 'granted');
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
     service.onMessageFinalized('org-1', { id, text, from: { phone_number: '+17427245092' }, to: [{ phone_number: '+12899174129', status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn };
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, memory };
 }
 
 describe('InboundSmsService', () => {
@@ -145,5 +147,22 @@ describe('InboundSmsService', () => {
     const s = setup({ status: 'contacting', dncStatus: false });
     await s.finalize('someone-else');
     expect(s.prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it("remembers what the lead texts, whoever answers it", async () => {
+    for (const ai of [true, false]) {
+      const s = setup({ status: 'contacting', dncStatus: false }, { ai });
+      await s.receive('A flat in Noida please');
+      expect(s.memory.onLeadText).toHaveBeenCalledWith('org-1', 'lead-1');
+    }
+  });
+
+  it('does not read a STOP or a START into the lead memory', async () => {
+    const stop = setup({ status: 'contacting', dncStatus: false });
+    await stop.receive('STOP');
+    const start = setup({ status: 'not_interested', dncStatus: true });
+    await start.receive('START');
+    expect(stop.memory.onLeadText).not.toHaveBeenCalled();
+    expect(start.memory.onLeadText).not.toHaveBeenCalled();
   });
 });

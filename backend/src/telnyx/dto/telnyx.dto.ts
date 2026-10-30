@@ -276,3 +276,47 @@ export class UpdateCallToolsDto {
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   confirmMessage?: string;
 }
+
+export class QualificationQuestionDto {
+  @Transform(trim)
+  @Matches(/^[a-z][a-z0-9_]{0,39}$/, { message: 'Question keys use lowercase letters, digits and underscores, starting with a letter.' })
+  key!: string;
+
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  label!: string;
+
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(300)
+  question!: string;
+
+  @IsIn(['text', 'number', 'boolean', 'choice'])
+  type!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  options?: string[];
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+export class QualificationQuestionsDto {
+  @IsArray()
+  @ArrayMaxSize(36)
+  @ValidateNested({ each: true })
+  @Type(() => QualificationQuestionDto)
+  questions!: QualificationQuestionDto[];
+}
+
+export class QualificationAnswerDto {
+  @IsOptional()
+  value?: string | number | boolean | null;
+}

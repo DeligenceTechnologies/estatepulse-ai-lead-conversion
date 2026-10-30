@@ -17,6 +17,7 @@ import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
+import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import {
   getCall,
@@ -411,10 +412,11 @@ export const LeadDetailModal: React.FC = () => {
               {/* What the lead told us. Each value is a real field or an honest dash. */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                 {[
-                  { icon: <DollarSign className="w-4 h-4 text-emerald-400" />, label: 'Budget', value: lead.budgetMin || lead.budgetMax ? `$${(lead.budgetMin / 1000).toFixed(0)}K – $${(lead.budgetMax / 1000).toFixed(0)}K` : '—' },
+                  { icon: <DollarSign className="w-4 h-4 text-emerald-400" />, label: 'Budget', value: budgetText(lead.budgetMin, lead.budgetMax) },
                   { icon: <MapPin className="w-4 h-4 text-cyan-400" />, label: 'Location', value: lead.preferredLocation || '—' },
                   { icon: <Clock className="w-4 h-4 text-amber-400" />, label: 'Timeline', value: lead.timeline || '—' },
                   { icon: <Home className="w-4 h-4 text-purple-400" />, label: 'Bedrooms', value: lead.bedrooms ? `${lead.bedrooms} beds${lead.propertyType ? ` · ${lead.propertyType}` : ''}` : '—' },
+                  { icon: <ShieldCheck className="w-4 h-4 text-cyan-400" />, label: 'Financing', value: lead.financingStatus || '—' },
                 ].map((f) => (
                   <div key={f.label} className="min-w-0 bg-slate-950/60 border border-slate-800 px-3 py-3 sm:px-4 sm:py-3.5 rounded-xl">
                     <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
@@ -424,14 +426,8 @@ export const LeadDetailModal: React.FC = () => {
                     <div className="text-sm font-semibold text-slate-100 truncate" title={f.value}>{f.value}</div>
                   </div>
                 ))}
-              </div>
-
-              <div className="bg-slate-950/60 border border-slate-800 px-3 py-3 sm:px-4 sm:py-3.5 rounded-xl">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
-                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                  <span>Financing</span>
-                </div>
-                <div className="text-sm text-slate-100 break-words">{lead.financingStatus || '—'}</div>
+                {/* The rest of what the AI knows: the org's other questions and notes from earlier calls and texts. */}
+                {isLive && <LeadQualificationMemory leadId={lead.id} />}
               </div>
 
               {/* Everything the prospect said that has no field of its own.
@@ -534,3 +530,12 @@ export const LeadDetailModal: React.FC = () => {
     </div>
   );
 };
+
+/** "$300K", "$250K – $300K", "up to $300K" or "from $250K"; a dash when no budget is known. */
+function budgetText(min: number | null | undefined, max: number | null | undefined): string {
+  const k = (v: number) => `$${(v / 1000).toFixed(0)}K`;
+  if (min && max) return min === max ? k(max) : `${k(min)} – ${k(max)}`;
+  if (max) return `up to ${k(max)}`;
+  if (min) return `from ${k(min)}`;
+  return '—';
+}
