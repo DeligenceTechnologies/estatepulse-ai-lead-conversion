@@ -193,19 +193,27 @@ export class CalendlyClient {
     return this.missingConfig.length === 0;
   }
 
-  authorizeUrl(state: string): string {
+  /** Calendly requires PKCE (S256) for apps created since it tightened OAuth; older apps accept it too. */
+  authorizeUrl(state: string, codeChallenge: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId ?? '',
       response_type: 'code',
       redirect_uri: this.redirectUri ?? '',
       state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
       ...(this.scopes ? { scope: this.scopes } : {}),
     });
     return `${AUTH_BASE}/oauth/authorize?${params}`;
   }
 
-  exchangeCode(code: string): Promise<CalendlyGrant> {
-    return this.token({ grant_type: 'authorization_code', code, redirect_uri: this.redirectUri ?? '' });
+  exchangeCode(code: string, codeVerifier: string): Promise<CalendlyGrant> {
+    return this.token({
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: this.redirectUri ?? '',
+    });
   }
 
   refresh(refreshToken: string): Promise<CalendlyGrant> {
