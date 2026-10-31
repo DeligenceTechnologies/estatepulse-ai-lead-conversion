@@ -11,6 +11,8 @@ import { AssistantService } from './assistant.service';
 import { CallSlots } from './calls/call-slots';
 import { CONVERSATION_MIN_SECS, type CallIntent } from './calls/call.types';
 import { LeadInsightsService } from './lead-insights.service';
+import { memoryVariables } from './qualification';
+import { QualificationQuestionsService } from './qualification-questions.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TELNYX_API } from './telnyx-api';
 import { fillTemplate } from './template';
@@ -117,6 +119,7 @@ export class ActivityService {
     private readonly state: LeadStateService,
     private readonly voicemail: VoicemailService,
     private readonly callTools: CallToolsService,
+    private readonly questions: QualificationQuestionsService,
   ) {}
 
   async recordSms(orgId: string, leadId: string, text: string, ok: boolean, providerIdOrReason?: string | null): Promise<void> {
@@ -529,14 +532,14 @@ export class ActivityService {
     }
   }
 
-  /** The lead's details as the assistant's dynamic variables. */
   /**
    * The lead's details as the assistant's dynamic variables, on a call and in a
    * text chat. last_outbound_sms is the text a reply answers; recent_sms is the
-   * chat so far, only once the lead has texted back.
+   * chat so far, only once the lead has texted back. knownInfo, questionsToAsk
+   * and conversationSummary are the lead's memory across every call and chat.
    */
   async leadVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
-    const [lead, org, settings, texts] = await Promise.all([
+    const [lead, org, settings, texts, questions] = await Promise.all([
       this.prisma.lead.findFirst({ where: { id: leadId, orgId } }),
       this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),
       this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } }),
@@ -546,6 +549,7 @@ export class ActivityService {
         take: RECENT_SMS,
         select: { direction: true, body: true },
       }),
+      this.questions.get(orgId),
     ]);
     if (!lead) return {};
     const lastOutbound = texts.find((m) => m.direction === 'outbound')?.body ?? '';
@@ -585,6 +589,8 @@ export class ActivityService {
       // Why this call is being made, set per call by the step that placed it.
       call_context: '',
       callback_time: lead.callbackAt ? spoken(lead.callbackAt, settings?.timezone || 'UTC') : '',
+      ...memoryVariables(questions, lead),
+      conversationSummary: lead.memorySummary?.trim() || 'None yet.',
     };
   }
 }

@@ -7,6 +7,7 @@ import { LeadStateService } from '@/lead/lead-state.service';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
+import { LeadMemoryService } from './lead-memory.service';
 import {
   assistantScore,
   CRITERIA_RULE,
@@ -61,6 +62,7 @@ export class LeadScoringService {
     private readonly engine: EngineService,
     private readonly state: LeadStateService,
     private readonly outcomes: OutcomeService,
+    private readonly memory: LeadMemoryService,
   ) {}
 
   /** The Insight's result for a call. Signed by Telnyx; refused when the signature does not verify. */
@@ -103,7 +105,7 @@ export class LeadScoringService {
     const call = await this.prisma.call.findFirst({ where: { id: callId, orgId } });
     if (!call) throw new AppError('NOT_FOUND', 'No such call');
     if (!call.transcript?.trim()) throw new AppError('CONFLICT', 'This call has no transcript to classify yet');
-    return this.apply(call, await this.insights.extractFromTranscript(orgId, call.transcript, await this.getSettings(orgId)), 'transcript');
+    return this.apply(call, await this.insights.extractFromTranscript(orgId, call.transcript), 'transcript');
   }
 
   async getSettings(orgId: string): Promise<ScoringSettings> {
@@ -162,6 +164,8 @@ export class LeadScoringService {
       this.logger.log(`call ${call.id} reached no one (${source}) — counted as not answered, the lead left as it was`);
       return qualification;
     }
+    // From any call, not just the latest: an answer newer than this call is kept.
+    await this.memory.afterCall(call, extraction);
 
     const lead = await this.prisma.lead.findFirst({ where: { id: call.leadId, orgId }, select: { status: true, dncStatus: true } });
     if (!lead) return qualification;

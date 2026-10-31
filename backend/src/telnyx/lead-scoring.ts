@@ -37,6 +37,8 @@ export const extractionSchema = z.object({
   lead_score: maybe(z.number().min(0).max(100)),
   lead_temperature: maybe(z.enum(TEMPERATURES)),
   score_reasons: maybe(z.string().max(1000)),
+  /** Answers to the org's custom qualification questions, keyed by question key. */
+  answers: maybe(z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]).nullable())),
 });
 export type Extraction = z.infer<typeof extractionSchema>;
 
@@ -160,16 +162,16 @@ export const EXTRACTION_INSTRUCTIONS =
   'or "unknown" for the timeline. The assistant’s own questions are not answers.';
 
 /**
- * What the analysis is asked to do: extract the facts, then score and rate the
- * lead itself. The point weights are a guide for its judgement (partial or
- * mixed answers included), and the office's own thresholds draw the lines, so
- * the Insight is written again whenever those change.
+ * What the analysis is told after the extraction instructions: score and rate
+ * the lead itself. The chart is a guide for its judgement (partial or mixed
+ * answers included), and the office's own thresholds draw the lines, so the
+ * Insight is written again whenever either changes.
  */
 export function scoringInstructions({ thresholds: t, points }: ScoringSettings): string {
   const s = (n: number) => (n > 0 ? `+${n}` : `${n}`);
   const chart = points.map((c) => `${c.label} ${s(c.points)}`).join('; ');
   return (
-    `${EXTRACTION_INSTRUCTIONS} Then score the lead yourself as lead_score, 0 to 100, weighing what the caller said by these points ` +
+    `Then score the lead yourself as lead_score, 0 to 100, weighing what the caller said by these points ` +
     `and using your judgement for partial or mixed answers: ${chart}. ` +
     `Set lead_temperature to hot at ${t.hot} or above, warm at ${t.warm} or above, otherwise cold; ` +
     'a caller who asked to speak with a person is hot unless the lead is invalid. ' +

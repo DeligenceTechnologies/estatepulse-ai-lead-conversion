@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { EXTRACTION_JSON_SCHEMA, parseExtraction, scoringInstructions, scoringSettingsFrom, type Extraction, type ScoringSettings } from './lead-scoring';
+import { parseExtraction, scoringInstructions, scoringSettingsFrom, type Extraction, type ScoringSettings } from './lead-scoring';
+import { extractionInstructionsFor, extractionJsonSchemaFor, questionsHash, type Question } from './qualification';
+import { QualificationQuestionsService } from './qualification-questions.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { telnyx } from './telnyx-api';
 
@@ -11,12 +13,35 @@ const TRANSCRIPT_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 const TRANSCRIPT_NOTE =
   ' The transcript labels speakers by recording channel (for example "Channel 1" and "Channel 2"); ' +
   'the assistant is the speaker asking the qualification questions, and the caller is the other one.';
+const CHAT_NOTE =
+  ' This is a text-message chat, not a call: lines starting "Us:" are the brokerage, lines starting "Lead:" are the lead. ' +
+  'Treat "caller" in these instructions as the lead. A lead who texts back has reached a person.';
+
+/** Longest memory note kept on a lead: it goes into every call and chat prompt. */
+export const MEMORY_SUMMARY_MAX = 1200;
+const MEMORY_INSTRUCTIONS = [
+  'You keep a short memory note about one home-buying lead for a real estate brokerage, so the AI assistant that calls and texts them never makes them repeat themselves.',
+  'You get the current note and the newest conversation (a call transcript or a text chat). Write the updated note.',
+  '- Keep only what helps the next conversation: their situation, preferences, constraints, objections, promises we made, when and how they want to be contacted, who else decides.',
+  '- Leave out what the structured fields already hold unless there is nuance: budget, timeline, location, bedrooms and financing.',
+  '- Newer facts replace older ones. Drop anything outdated.',
+  `- Plain short sentences, no headings, under ${MEMORY_SUMMARY_MAX} characters. If there is nothing worth keeping, return the current note unchanged (or an empty string).`,
+].join('\n');
+const MEMORY_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['note'],
+  properties: { note: { type: 'string', description: 'The updated memory note.' } },
+} as const;
+
+/** What the analysis is told: extract the org's questions, then score and rate the lead by its chart and thresholds. */
+const instructionsFor = (questions: Question[], settings: ScoringSettings) => `${extractionInstructionsFor(questions)} ${scoringInstructions(settings)}`;
 
 /**
  * Lead qualification from a call: a Telnyx conversation Insight attached to
- * the assistant extracts, scores and rates every call by the office's own
- * thresholds, and a transcript can be classified directly when the Insight
- * did not run.
+ * the assistant extracts the org's questions, then scores and rates every
+ * call by the office's own points chart and thresholds. A transcript or a
+ * text chat can be qualified directly when the Insight did not run.
  */
 @Injectable()
 export class LeadInsightsService {
@@ -26,19 +51,20 @@ export class LeadInsightsService {
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
+    private readonly questions: QualificationQuestionsService,
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Once per assistant, question list and scoring settings: a change to any of them writes the Insight again. */
   async ensureProvisioned(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
-    const settings = await this.settings(orgId);
-    // The points and thresholds are written into the Insight, so a change to them writes it again.
-    const key = `${orgId}:${c.assistantId}:${JSON.stringify(settings)}`;
+    const [questions, settings] = await Promise.all([this.questions.get(orgId), this.settings(orgId)]);
+    const key = `${orgId}:${c.assistantId}:${questionsHash(questions)}:${JSON.stringify(settings)}`;
     if (this.provisioned.has(key)) return;
     const running = this.inflight.get(key);
     if (running) return running;
-    const run = this.provision(c.apiKey, c.assistantId, settings)
+    const run = this.provision(c.apiKey, c.assistantId, questions, settings)
       .then(() => {
         this.provisioned.add(key);
       })
@@ -56,10 +82,10 @@ export class LeadInsightsService {
     return scoringSettingsFrom(row);
   }
 
-  private async provision(apiKey: string, assistantId: string, settings: ScoringSettings): Promise<void> {
+  private async provision(apiKey: string, assistantId: string, questions: Question[], settings: ScoringSettings): Promise<void> {
     const call = (path: string, init: RequestInit = {}) => telnyx(apiKey, path, init);
     const insights: { id: string; name: string }[] = (await call('/ai/conversations/insights?page[size]=99')).data ?? [];
-    const body = { name: INSIGHT_NAME, instructions: scoringInstructions(settings), json_schema: EXTRACTION_JSON_SCHEMA };
+    const body = { name: INSIGHT_NAME, instructions: instructionsFor(questions, settings), json_schema: extractionJsonSchemaFor(questions) };
     const existing = insights.find((i) => i.name === INSIGHT_NAME);
     const insightId: string = existing
       ? ((await call(`/ai/conversations/insights/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) })).data?.id ?? existing.id)
@@ -82,23 +108,64 @@ export class LeadInsightsService {
     this.logger.log(`lead insight ready on assistant ${assistantId}`);
   }
 
-  async extractFromTranscript(orgId: string, transcript: string, settings: ScoringSettings): Promise<Extraction> {
-    const c = await this.creds.getCreds(orgId);
-    if (!c?.apiKey) throw new AppError('CONFLICT', 'Connect your Telnyx account first');
-    const res = await telnyx(c.apiKey, '/ai/chat/completions', {
+  async extractFromTranscript(orgId: string, transcript: string): Promise<Extraction> {
+    return this.extract(orgId, transcript, TRANSCRIPT_NOTE);
+  }
+
+  /** The same qualification from a text chat, written as "Us: ..." / "Lead: ..." lines. */
+  async extractFromChat(orgId: string, chat: string): Promise<Extraction> {
+    return this.extract(orgId, chat, CHAT_NOTE);
+  }
+
+  /** The lead's memory note rewritten with what the newest conversation added. */
+  async rewriteMemory(orgId: string, current: string | null, conversation: string): Promise<string> {
+    const c = await this.requireKey(orgId);
+    const res = await telnyx(c, '/ai/chat/completions', {
       method: 'POST',
       body: JSON.stringify({
         model: TRANSCRIPT_MODEL,
         temperature: 0,
         messages: [
-          { role: 'system', content: scoringInstructions(settings) + TRANSCRIPT_NOTE },
-          { role: 'user', content: transcript.slice(0, 30_000) },
+          { role: 'system', content: MEMORY_INSTRUCTIONS },
+          { role: 'user', content: `Current note:\n${current?.trim() || '(empty)'}\n\nNewest conversation:\n${conversation.slice(-12_000)}` },
         ],
-        response_format: { type: 'json_schema', json_schema: { name: 'lead_qualification', schema: EXTRACTION_JSON_SCHEMA, strict: true } },
+        response_format: { type: 'json_schema', json_schema: { name: 'lead_memory', schema: MEMORY_JSON_SCHEMA, strict: true } },
+      }),
+    });
+    const raw = res.choices?.[0]?.message?.content;
+    let note: unknown;
+    try {
+      note = (typeof raw === 'string' ? JSON.parse(raw) : raw)?.note;
+    } catch {
+      note = undefined;
+    }
+    if (typeof note !== 'string') throw new AppError('UPSTREAM_ERROR', 'The AI did not return a usable memory note');
+    return note.trim().slice(0, MEMORY_SUMMARY_MAX);
+  }
+
+  private async extract(orgId: string, text: string, note: string): Promise<Extraction> {
+    const apiKey = await this.requireKey(orgId);
+    const [questions, settings] = await Promise.all([this.questions.get(orgId), this.settings(orgId)]);
+    const res = await telnyx(apiKey, '/ai/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: TRANSCRIPT_MODEL,
+        temperature: 0,
+        messages: [
+          { role: 'system', content: instructionsFor(questions, settings) + note },
+          { role: 'user', content: text.slice(0, 30_000) },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'lead_qualification', schema: extractionJsonSchemaFor(questions), strict: true } },
       }),
     });
     const extraction = parseExtraction(res.choices?.[0]?.message?.content);
     if (!extraction) throw new AppError('UPSTREAM_ERROR', 'The AI did not return a usable qualification');
     return extraction;
+  }
+
+  private async requireKey(orgId: string): Promise<string> {
+    const c = await this.creds.getCreds(orgId);
+    if (!c?.apiKey) throw new AppError('CONFLICT', 'Connect your Telnyx account first');
+    return c.apiKey;
   }
 }
