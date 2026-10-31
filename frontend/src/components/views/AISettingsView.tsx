@@ -1018,8 +1018,8 @@ export const AISettingsView: React.FC = () => {
             Post-Call Processing
           </h3>
           <p className="text-xs text-slate-400">
-            When enabled, the agent analyzes each finished call — generating a summary and extracting insights
-            (budget, timeline, financing, etc.) automatically.
+            When enabled, the assistant can run its tools after a call ends, for example to log notes from the
+            conversation. Lead scoring does not depend on this: every finished call is scored either way.
           </p>
           <button type="button" onClick={() => setPostCall(!postCall)} className="flex items-center gap-2 text-slate-300 text-xs">
             <span className={`w-9 h-5 rounded-full transition-colors relative ${postCall ? 'bg-emerald-600' : 'bg-slate-700'}`}>

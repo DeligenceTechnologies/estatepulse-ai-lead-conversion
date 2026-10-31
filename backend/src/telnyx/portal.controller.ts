@@ -13,6 +13,7 @@ import { AssistantService } from './assistant.service';
 import { SetToolsDto, StrategyDto, TestToolDto, ThresholdsDto } from './dto/telnyx.dto';
 import { EngineService } from './engine.service';
 import { flowFromLog } from './lead-flow';
+import { DEFAULT_POINTS } from './lead-scoring';
 import { LeadScoringService } from './lead-scoring.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
@@ -165,7 +166,7 @@ export class LeadScoringController {
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
   async settings(@CurrentAuth() auth: AuthContext) {
     const s = await this.scoring.getSettings(auth.organizationId);
-    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points };
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points, defaultPoints: DEFAULT_POINTS };
   }
 
   @Put('settings')

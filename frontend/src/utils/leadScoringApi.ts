@@ -8,28 +8,28 @@ import { apiFetch } from '../lib/api';
 
 export type Temperature = 'hot' | 'warm' | 'cold';
 
-/** Everything a caller can say that moves the score, with the label the form shows for it. */
-export const POINT_FIELDS = [
-  { key: 'within_30_days', label: 'Buying within 30 days' },
-  { key: '1_3_months', label: 'Buying within 1–3 months' },
-  { key: '3_6_months', label: 'Buying within 3–6 months' },
-  { key: 'over_6_months', label: 'Buying in over 6 months' },
-  { key: 'budget_identified', label: 'Budget identified' },
-  { key: 'location_identified', label: 'Location identified' },
-  { key: 'pre_approved', label: 'Pre-approved or cash buyer' },
-  { key: 'appointment_requested', label: 'Appointment requested' },
-  { key: 'high_engagement', label: 'High engagement' },
-  { key: 'not_interested', label: 'Not interested' },
-  { key: 'invalid_lead', label: 'Invalid lead (wrong number, spam)' },
-] as const;
-export type PointKey = (typeof POINT_FIELDS)[number]['key'];
-/** The office's points chart: what each thing is worth, each a whole number from -100 to 100. */
-export type Points = Record<PointKey, number>;
+/**
+ * One line of the office's points chart. A built-in line carries the field the
+ * analysis records as `key`; a line the office added has only its label, which
+ * the assistant reads and weighs like any other.
+ */
+export interface Criterion {
+  key?: string;
+  label: string;
+  points: number;
+}
+export const MAX_CRITERIA = 20;
+export const MAX_CRITERION_LABEL = 80;
 
 export interface ScoringSettings {
   hotThreshold: number;
   warmThreshold: number;
-  points: Points;
+  points: Criterion[];
+}
+
+/** What the server returns: the settings, plus the built-in chart for "Reset to defaults". */
+export interface ScoringSettingsResponse extends ScoringSettings {
+  defaultPoints: Criterion[];
 }
 
 /** voice_calls.extracted_intel.qualification, as the backend stores it. */
@@ -45,10 +45,10 @@ export interface Qualification {
   scoredAt: string;
 }
 
-export const getScoringSettings = () => apiFetch<ScoringSettings>('/lead-scoring/settings', { auth: true });
+export const getScoringSettings = () => apiFetch<ScoringSettingsResponse>('/lead-scoring/settings', { auth: true });
 
 export const saveScoringSettings = (s: ScoringSettings) =>
-  apiFetch<ScoringSettings>('/lead-scoring/settings', { method: 'PUT', body: s, auth: true });
+  apiFetch<ScoringSettingsResponse>('/lead-scoring/settings', { method: 'PUT', body: s, auth: true });
 
 /** The qualification on a call's extractedIntel, if it has been scored. */
 export function qualificationOf(extractedIntel: unknown): Qualification | null {

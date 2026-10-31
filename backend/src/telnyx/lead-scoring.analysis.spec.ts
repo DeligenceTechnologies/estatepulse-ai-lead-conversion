@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_POINTS, scoringInstructions, type Extraction } from './lead-scoring';
+import { DEFAULT_POINTS, scoringInstructions, type Criterion, type Extraction } from './lead-scoring';
 import { LeadScoringService } from './lead-scoring.service';
 
 const CALL = {
@@ -78,6 +78,9 @@ describe('the call analysis', () => {
   });
 });
 
+/** The chart with one built-in line re-pointed. */
+const at = (key: string, points: number) => (c: Criterion) => (c.key === key ? { ...c, points } : c);
+
 const qualification = (s: ReturnType<typeof setup>, expected: Record<string, unknown>) =>
   expect(s.prisma.call.update).toHaveBeenCalledWith(
     expect.objectContaining({ data: expect.objectContaining({ extractedIntel: expect.objectContaining({ qualification: expect.objectContaining(expected) }) }) }),
@@ -119,35 +122,50 @@ describe('the assistant’s own score', () => {
     qualification(s, { scoredBy: 'rules', score: 45, temperature: 'warm' });
   });
 
-  it('the analysis is told the office’s points and thresholds', () => {
-    const text = scoringInstructions({ thresholds: { hot: 70, warm: 40 }, points: { ...DEFAULT_POINTS, budget_identified: 12, over_6_months: -5 } });
+  it('the analysis is told the office’s points and thresholds, its own lines included', () => {
+    const points = DEFAULT_POINTS.map(at('budget_identified', 12)).map(at('over_6_months', -5)).concat({ label: 'Has a home to sell', points: 15 });
+    const text = scoringInstructions({ thresholds: { hot: 70, warm: 40 }, points });
     expect(text).toContain('hot at 70 or above, warm at 40 or above');
-    expect(text).toContain('budget stated +12');
-    expect(text).toContain('in over 6 months -5');
+    expect(text).toContain('Budget identified +12');
+    expect(text).toContain('Buying in over 6 months -5');
+    expect(text).toContain('Has a home to sell +15');
   });
 });
 
 describe('the office’s own points chart', () => {
-  const chart = { ...DEFAULT_POINTS, within_30_days: 40, appointment_requested: 40 };
+  const chart: Criterion[] = DEFAULT_POINTS.map(at('within_30_days', 40)).map(at('appointment_requested', 40));
+  const saved = (points: unknown) => ({ leadHotThreshold: 75, leadWarmThreshold: 45, leadScorePoints: points });
 
   it('scores the rules fallback', async () => {
-    const s = setup(extraction({ timeline: 'within_30_days', appointment_requested: true }), undefined, { leadHotThreshold: 75, leadWarmThreshold: 45, leadScorePoints: chart });
+    const s = setup(extraction({ timeline: 'within_30_days', appointment_requested: true }), undefined, saved(chart));
     await s.run();
     qualification(s, { scoredBy: 'rules', score: 80, temperature: 'hot', reasons: [{ label: 'Buying within 30 days', points: 40 }, { label: 'Appointment requested', points: 40 }] });
   });
 
+  it('…by its built-in lines only: a line the office took out counts nothing, a line it added is the assistant’s alone', async () => {
+    const own = chart.filter((c) => c.key !== 'appointment_requested').concat({ label: 'Has a home to sell', points: 15 });
+    const s = setup(extraction({ timeline: 'within_30_days', appointment_requested: true }), undefined, saved(own));
+    await s.run();
+    qualification(s, { scoredBy: 'rules', score: 40, temperature: 'cold' });
+  });
+
   it('is the built-in chart until the office sets one, and when what is saved is not a chart', async () => {
-    const s = setup(extraction({ timeline: 'within_30_days' }), undefined, { leadHotThreshold: 75, leadWarmThreshold: 45, leadScorePoints: { within_30_days: 'lots' } });
+    const s = setup(extraction({ timeline: 'within_30_days' }), undefined, saved({ within_30_days: 40 }));
     await s.run();
     qualification(s, { scoredBy: 'rules', score: 25 });
   });
 
-  it('is saved with the thresholds, and refused when a value is not a whole number from -100 to 100', async () => {
+  it('is saved with the thresholds, and refused when a line breaks the rule', async () => {
     const s = setup(extraction({}));
     await s.service.setSettings('org-1', { hotThreshold: 70, warmThreshold: 40, points: chart });
     expect(s.prisma.organizationSetting.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: { leadHotThreshold: 70, leadWarmThreshold: 40, leadScorePoints: chart } }));
-    await expect(s.service.setSettings('org-1', { hotThreshold: 70, warmThreshold: 40, points: { ...chart, budget_identified: 150 } })).rejects.toThrow('whole number');
-    await expect(s.service.setSettings('org-1', { hotThreshold: 70, warmThreshold: 40, points: { ...chart, extra: 1 } })).rejects.toThrow('whole number');
+    const refused = (points: unknown) => expect(s.service.setSettings('org-1', { hotThreshold: 70, warmThreshold: 40, points })).rejects.toThrow('whole number');
+    await refused(chart.map(at('budget_identified', 150)));
+    await refused(chart.concat({ label: ' ', points: 5 }));
+    await refused(chart.concat({ label: 'x'.repeat(81), points: 5 }));
+    await refused(chart.concat({ key: 'budget_identified', label: 'Budget again', points: 5 }));
+    await refused(chart.concat(Array.from({ length: 10 }, (_, i) => ({ label: `Line ${i}`, points: 1 }))));
+    await refused([]);
     await s.service.setSettings('org-1', { hotThreshold: 70, warmThreshold: 40 });
     expect(s.prisma.organizationSetting.upsert).toHaveBeenLastCalledWith(expect.objectContaining({ update: { leadHotThreshold: 70, leadWarmThreshold: 40 } }));
   });

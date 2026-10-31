@@ -9,13 +9,14 @@ import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
 import {
   assistantScore,
+  CRITERIA_RULE,
   leadDetailsFrom,
   parseExtraction,
   pointsSchema,
   scoreLead,
   scoringSettingsFrom,
+  type Criterion,
   type Extraction,
-  type Points,
   type ScoreReason,
   type ScoringSettings,
   type Thresholds,
@@ -113,19 +114,15 @@ export class LeadScoringService {
     return scoringSettingsFrom(row);
   }
 
-  /** The thresholds always; the points chart too when given, every value a whole number from -100 to 100. */
+  /** The thresholds always; the points chart too when given (see CRITERIA_RULE). */
   async setSettings(orgId: string, input: { hotThreshold: number; warmThreshold: number; points?: unknown }): Promise<ScoringSettings> {
-    const data: { leadHotThreshold: number; leadWarmThreshold: number; leadScorePoints?: Points } = {
+    const data: { leadHotThreshold: number; leadWarmThreshold: number; leadScorePoints?: Criterion[] } = {
       leadHotThreshold: input.hotThreshold,
       leadWarmThreshold: input.warmThreshold,
     };
     if (input.points !== undefined) {
       const points = pointsSchema.safeParse(input.points);
-      if (!points.success) {
-        throw new AppError('VALIDATION_ERROR', 'Each points value must be a whole number from -100 to 100', [
-          { path: 'points', message: 'Each points value must be a whole number from -100 to 100' },
-        ]);
-      }
+      if (!points.success) throw new AppError('VALIDATION_ERROR', CRITERIA_RULE, [{ path: 'points', message: CRITERIA_RULE }]);
       data.leadScorePoints = points.data;
     }
     const row = await this.prisma.organizationSetting.upsert({

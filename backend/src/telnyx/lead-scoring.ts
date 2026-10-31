@@ -165,22 +165,19 @@ export const EXTRACTION_INSTRUCTIONS =
  * mixed answers included), and the office's own thresholds draw the lines, so
  * the Insight is written again whenever those change.
  */
-export function scoringInstructions({ thresholds: t, points: p }: ScoringSettings): string {
+export function scoringInstructions({ thresholds: t, points }: ScoringSettings): string {
   const s = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  const chart = points.map((c) => `${c.label} ${s(c.points)}`).join('; ');
   return (
     `${EXTRACTION_INSTRUCTIONS} Then score the lead yourself as lead_score, 0 to 100, weighing what the caller said by these points ` +
-    'and using your judgement for partial or mixed answers: ' +
-    `buying within 30 days ${s(p.within_30_days)}, within 1–3 months ${s(p['1_3_months'])}, within 3–6 months ${s(p['3_6_months'])}, in over 6 months ${s(p.over_6_months)}; ` +
-    `budget stated ${s(p.budget_identified)}; location named ${s(p.location_identified)}; pre-approved or paying cash ${s(p.pre_approved)}; ` +
-    `appointment requested ${s(p.appointment_requested)}; engaged, substantive answers ${s(p.high_engagement)}; ` +
-    `not interested ${s(p.not_interested)}; wrong number, spam or never enquired ${s(p.invalid_lead)}. ` +
+    `and using your judgement for partial or mixed answers: ${chart}. ` +
     `Set lead_temperature to hot at ${t.hot} or above, warm at ${t.warm} or above, otherwise cold; ` +
     'a caller who asked to speak with a person is hot unless the lead is invalid. ' +
     'List every reason behind the score, with its points, in score_reasons.'
   );
 }
 
-/** Everything a caller can say that moves the score; a timeline they never gave moves nothing. */
+/** The things the analysis records as fields, which the rules fallback can score; a timeline the caller never gave moves nothing. */
 export const POINT_KEYS = [
   'within_30_days',
   '1_3_months',
@@ -195,25 +192,43 @@ export const POINT_KEYS = [
   'invalid_lead',
 ] as const;
 export type PointKey = (typeof POINT_KEYS)[number];
-export type Points = Record<PointKey, number>;
 
-const pointValue = z.number().int().min(-100).max(100);
-/** The office's own chart: what each thing is worth, each a whole number from -100 to 100. */
-export const pointsSchema = z.object(Object.fromEntries(POINT_KEYS.map((k) => [k, pointValue])) as Record<PointKey, typeof pointValue>).strict();
+export const MAX_CRITERIA = 20;
+export const MAX_CRITERION_LABEL = 80;
+/**
+ * One line of the office's chart. A built-in line carries the field it reads
+ * as `key`; a line the office added has only its label, which the assistant
+ * reads and weighs like any other (the rules fallback cannot see it).
+ */
+const criterionSchema = z
+  .object({
+    key: z.enum(POINT_KEYS).optional(),
+    label: z.string().trim().min(1).max(MAX_CRITERION_LABEL),
+    points: z.number().int().min(-100).max(100),
+  })
+  .strict();
+export type Criterion = z.infer<typeof criterionSchema>;
+export const CRITERIA_RULE = `Each criterion needs a label of up to ${MAX_CRITERION_LABEL} characters and a whole number of points from -100 to 100, at most ${MAX_CRITERIA} criteria with no built-in one twice`;
+/** The office's own chart: one to MAX_CRITERIA lines, each built-in field at most once. */
+export const pointsSchema = z
+  .array(criterionSchema)
+  .min(1)
+  .max(MAX_CRITERIA)
+  .refine((list) => new Set(list.map((c) => c.key).filter(Boolean)).size === list.filter((c) => c.key).length, CRITERIA_RULE);
 
-export const DEFAULT_POINTS: Points = {
-  within_30_days: 25,
-  '1_3_months': 20,
-  '3_6_months': 10,
-  over_6_months: 0,
-  budget_identified: 10,
-  location_identified: 10,
-  pre_approved: 15,
-  appointment_requested: 20,
-  high_engagement: 10,
-  not_interested: -30,
-  invalid_lead: -100,
-};
+export const DEFAULT_POINTS: Criterion[] = [
+  { key: 'within_30_days', label: 'Buying within 30 days', points: 25 },
+  { key: '1_3_months', label: 'Buying within 1–3 months', points: 20 },
+  { key: '3_6_months', label: 'Buying within 3–6 months', points: 10 },
+  { key: 'over_6_months', label: 'Buying in over 6 months', points: 0 },
+  { key: 'budget_identified', label: 'Budget identified', points: 10 },
+  { key: 'location_identified', label: 'Location identified', points: 10 },
+  { key: 'pre_approved', label: 'Pre-approved or cash buyer', points: 15 },
+  { key: 'appointment_requested', label: 'Appointment requested', points: 20 },
+  { key: 'high_engagement', label: 'High engagement', points: 10 },
+  { key: 'not_interested', label: 'Not interested', points: -30 },
+  { key: 'invalid_lead', label: 'Invalid lead (wrong number, spam)', points: -100 },
+];
 
 export const DEFAULT_THRESHOLDS = { hot: 75, warm: 45 } as const;
 export interface Thresholds {
@@ -224,7 +239,7 @@ export interface Thresholds {
 /** How the office scores: its points chart and where hot and warm begin. */
 export interface ScoringSettings {
   thresholds: Thresholds;
-  points: Points;
+  points: Criterion[];
 }
 
 /** The settings as org_settings holds them: no row, or no (valid) chart, means the defaults. */
@@ -248,28 +263,15 @@ export interface ScoreResult {
   override: string | null;
 }
 
-const TIMELINE_LABEL: Record<Timeline, string> = {
-  within_30_days: 'Buying within 30 days',
-  '1_3_months': 'Buying within 1–3 months',
-  '3_6_months': 'Buying within 3–6 months',
-  over_6_months: 'Buying in over 6 months',
-  unknown: 'Timeline unknown',
-};
+const TIMELINE_KEYS = new Set<string>(TIMELINES);
+/** Whether the analysis recorded what a built-in criterion is about. */
+const met = (x: Extraction, key: PointKey): boolean => (TIMELINE_KEYS.has(key) ? x.timeline === key : x[key as Exclude<PointKey, Timeline>]);
 
-export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS, p: Points = DEFAULT_POINTS): ScoreResult {
-  const reasons: ScoreReason[] = [];
-  const add = (label: string, points: number) => {
-    if (points !== 0) reasons.push({ label, points });
-  };
-
-  add(TIMELINE_LABEL[x.timeline], x.timeline === 'unknown' ? 0 : p[x.timeline]);
-  if (x.budget_identified) add('Budget identified', p.budget_identified);
-  if (x.location_identified) add('Location identified', p.location_identified);
-  if (x.pre_approved) add('Pre-approved', p.pre_approved);
-  if (x.appointment_requested) add('Appointment requested', p.appointment_requested);
-  if (x.high_engagement) add('High engagement', p.high_engagement);
-  if (x.not_interested) add('Not interested', p.not_interested);
-  if (x.invalid_lead) add('Invalid lead', p.invalid_lead);
+/** The rules fallback: the built-in lines of the chart the analysis recorded, added up. Lines the office added are the assistant's alone. */
+export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS, chart: Criterion[] = DEFAULT_POINTS): ScoreResult {
+  const reasons: ScoreReason[] = chart
+    .filter((c) => c.key && c.points !== 0 && met(x, c.key))
+    .map(({ label, points }) => ({ label, points }));
 
   const raw = reasons.reduce((sum, r) => sum + r.points, 0);
   const score = Math.max(0, Math.min(100, raw));
