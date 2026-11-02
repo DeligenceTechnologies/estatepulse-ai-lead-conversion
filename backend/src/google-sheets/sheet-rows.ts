@@ -17,6 +17,7 @@ export const SHEET_TARGETS = [
   'last_name',
   'phone',
   'email',
+  'timezone',
   'location',
   'min_budget',
   'max_budget',
@@ -63,6 +64,8 @@ export interface LeadFields {
   phone: string | null;
   normalized_phone: string | null;
   phone_valid: boolean;
+  /** The lead's own IANA zone when the source provides one; null = the phone number decides. */
+  timezone: string | null;
   location: string | null;
   min_budget: number | null;
   max_budget: number | null;
@@ -121,6 +124,8 @@ export function transformFor(target: SheetTarget | typeof CUSTOM_TARGET, region:
       return { kind: 'phone_e164', defaultRegion: region };
     case 'email':
       return { kind: 'email' };
+    case 'timezone':
+      return { kind: 'timezone' };
     case 'min_budget':
       return { kind: 'currency_range', part: 'min' };
     case 'max_budget':
@@ -282,6 +287,7 @@ export function buildRow(
     phone,
     normalized_phone: normalizedPhone,
     phone_valid: Boolean(normalizedPhone),
+    timezone: str(v.timezone),
     location: str(v.location),
     min_budget: num(v.min_budget),
     max_budget: num(v.max_budget),

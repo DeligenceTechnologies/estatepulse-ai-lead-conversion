@@ -5,13 +5,14 @@ import type { Queue } from 'bullmq';
 import { spoken } from '@/calendar/booking/booking-time';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { sha256Hex } from '@/common/utils/crypto';
+import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { FollowupService } from '@/followup/followup.service';
 import { OUTCOME_STATUSES, textBackPending } from '@/lead/lead-status';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { TEXT_QUEUE, TextJob } from '@/queue/queue.constants';
 import type { AssistantToolCaller } from './assistant-tool-auth.service';
 import { CallToolsService } from './call-tools.service';
-import { resolveCallback, retrySay } from './callback.service';
+import { hoursSay, resolveCallback, retrySay, withinLeadHours } from './callback.service';
 
 /** "Message me in 1 minute" is the soonest; the AI's reply has to land first. */
 const MIN_AHEAD_MS = 60_000;
@@ -56,7 +57,10 @@ export class TextBackService {
     if (!(await this.tools.settings(ctx.orgId)).textBack) {
       return { ok: false, reason: 'off', say: 'You cannot text them later. Ask them to text back whenever it suits them.' };
     }
-    const lead = await this.prisma.lead.findFirst({ where: { id: ctx.leadId, orgId: ctx.orgId }, select: { status: true, dncStatus: true, phone: true } });
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: ctx.leadId, orgId: ctx.orgId },
+      select: { status: true, dncStatus: true, phone: true, normalizedPhone: true, timezone: true },
+    });
     if (!lead?.phone) return { ok: false, reason: 'lead_not_found', say: 'Ask them to text back whenever it suits them.' };
     if (lead.status === LeadStatus.appointment_booked) {
       return { ok: false, reason: 'already_booked', say: 'Their appointment is already booked; say the agent will be in touch before it.' };
@@ -65,15 +69,19 @@ export class TextBackService {
       return { ok: false, reason: 'not_textable', say: 'Do not offer to text them later. Say someone from the team will be in touch if needed.' };
     }
 
-    const { timeZone, quiet } = await this.followup.guardrailsFor(ctx.orgId);
-    const resolved = resolveCallback(input, now, timeZone, quiet, MIN_AHEAD_MS);
+    // "Their time" is the lead's own zone when it is known; the office's only to read the request
+    // when it is not (the text-back worker still holds the text until someone sets a zone).
+    const { timeZone: officeZone, quiet } = await this.followup.guardrailsFor(ctx.orgId);
+    const zone = leadZone(lead);
+    const timeZone = contactZone(zone) ?? officeZone;
+    const resolved = withinLeadHours(resolveCallback(input, now, timeZone, quiet, MIN_AHEAD_MS), zone, quiet);
     if (!resolved.ok) {
       if (resolved.reason === 'outside_hours' && resolved.suggested) {
         const when = spoken(resolved.suggested, timeZone);
         return {
           ok: false,
           reason: 'outside_hours',
-          say: `We only text between ${quiet!.end} and ${quiet!.start} their time. Offer ${when} instead, or ask for another time in those hours.`,
+          say: `We only text ${hoursSay(quiet)} their time. Offer ${when} instead, or ask for another time in those hours.`,
           suggested: { at: resolved.suggested.toISOString(), spoken: when },
         };
       }

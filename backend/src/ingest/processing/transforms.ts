@@ -1,10 +1,13 @@
 import parsePhoneNumberFromString, { type CountryCode } from 'libphonenumber-js';
+import { canonicalZone } from '@/common/utils/lead-timezone';
+import { isTimeZone } from '@/common/utils/zoned-time';
 
 export type Transform =
   | { kind: 'passthrough' }
   | { kind: 'text'; maxLen?: number }
   | { kind: 'name_split'; part: 'first' | 'last' }
   | { kind: 'phone_e164'; defaultRegion?: string }
+  | { kind: 'timezone' }
   | { kind: 'email' }
   | { kind: 'number' }
   | { kind: 'currency_range'; part: 'min' | 'max' }
@@ -18,6 +21,36 @@ export interface TransformResult {
 }
 
 const DEFAULT_TRUTHY = ['yes', 'true', '1', 'on', 'agree', 'i agree', 'ok', 'okay', 'sure', 'consent'];
+
+/**
+ * What a form's "time zone" dropdown usually offers, as the IANA zone that keeps the right clock.
+ * ponytail: North American labels only; add a row when a source sends something else.
+ */
+const ZONE_LABELS: [RegExp, string][] = [
+  [/^(eastern|et|est|edt)(\s+(time|standard time|daylight time))?$/i, 'America/New_York'],
+  [/^(central|ct|cst|cdt)(\s+(time|standard time|daylight time))?$/i, 'America/Chicago'],
+  [/^(mountain|mt|mst|mdt)(\s+(time|standard time|daylight time))?$/i, 'America/Denver'],
+  [/^(pacific|pt|pst|pdt)(\s+(time|standard time|daylight time))?$/i, 'America/Los_Angeles'],
+  [/^(atlantic|ast|adt)(\s+(time|standard time|daylight time))?$/i, 'America/Halifax'],
+  [/^(newfoundland|nst|ndt)(\s+(time|standard time|daylight time))?$/i, 'America/St_Johns'],
+  [/^(alaska|akst|akdt)(\s+(time|standard time|daylight time))?$/i, 'America/Anchorage'],
+  [/^(hawaii|hst|hawaii-aleutian)(\s+(time|standard time))?$/i, 'Pacific/Honolulu'],
+  [/^arizona(\s+time)?$/i, 'America/Phoenix'],
+  [/^(utc|gmt)$/i, 'UTC'],
+];
+
+/** An IANA zone from what a source sent: the name itself, an old alias, or a common label; null when it is none of those. */
+export function parseTimeZone(raw: string): string | null {
+  const text = raw.trim().replace(/\s+/g, ' ');
+  if (!text) return null;
+  const label = ZONE_LABELS.find(([re]) => re.test(text));
+  if (label) return label[1];
+  // "Pacific Time (US & Canada)" and the like: the first word decides.
+  const first = ZONE_LABELS.find(([re]) => re.test(text.split(/[\s(/]/)[0] ?? ''));
+  if (first && /time/i.test(text)) return first[1];
+  const zone = canonicalZone(text.replace(/ /g, '_'));
+  return /^[A-Za-z]+(\/[A-Za-z0-9_+-]+){1,2}$/.test(zone) && isTimeZone(zone) ? zone : null;
+}
 
 export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase());
@@ -105,6 +138,12 @@ export function applyTransform(
         return { value: scalarText, warning: `Could not parse "${scalarText}" as a phone number` };
       }
       return { value: parsed.number };
+    }
+
+    case 'timezone': {
+      if (!scalarText.trim()) return { value: null };
+      const zone = parseTimeZone(scalarText);
+      return zone ? { value: zone } : { value: null, warning: `Unrecognised time zone "${scalarText}" — the lead's phone number decides instead` };
     }
 
     case 'number': {

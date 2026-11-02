@@ -90,6 +90,18 @@ export class FollowupService {
     private readonly state: LeadStateService,
   ) {}
 
+  /**
+   * Records why a lead is being held back (no time zone, a closed window),
+   * once per reason per day: an hourly re-check must not fill the timeline.
+   */
+  async holdOnce(orgId: string, leadId: string, reason: string, source: string, channel?: 'sms' | 'voice'): Promise<void> {
+    const recent = await this.prisma.leadEvent.findFirst({
+      where: { leadId, type: 'contact_held', reason, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) } },
+      select: { id: true },
+    });
+    if (!recent) this.state.quietly({ orgId, leadId, type: 'contact_held', source, reason, ...(channel ? { channel } : {}) });
+  }
+
   async guardrailsFor(orgId: string): Promise<Guardrails> {
     const [settings, strategy] = await Promise.all([
       this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } }),

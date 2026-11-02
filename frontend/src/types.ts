@@ -1,5 +1,7 @@
 /** Shared front-end data models: the shapes the views and the demo store use. */
 
+import type { LeadTimezone } from './api/client';
+
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
 
 /** The 9 statuses of leads_status_check, in lifecycle order (lib/leadStatus.ts). */
@@ -125,6 +127,8 @@ export interface Lead {
   updatedAt: string;
   notes?: string;
   automationPaused?: boolean;
+  /** Live leads only: the lead's own time zone as the API worked it out; calls and texts keep to it. */
+  timezone?: LeadTimezone;
   /**
    * Answers the prospect gave that no canonical field covers, kept verbatim.
    *

@@ -7,13 +7,15 @@ interface TimezoneSelectProps {
   onChange: (zone: string) => void;
   disabled?: boolean;
   className?: string;
+  /** Shown for an empty value, when no zone is known yet. */
+  placeholder?: string;
 }
 
 /**
  * Every IANA zone the browser knows, labelled "Asia/Kolkata (GMT+5:30)". A
  * saved zone the browser does not list is still shown, so it is never lost.
  */
-export const TimezoneSelect: React.FC<TimezoneSelectProps> = ({ id, value, onChange, disabled, className }) => {
+export const TimezoneSelect: React.FC<TimezoneSelectProps> = ({ id, value, onChange, disabled, className, placeholder }) => {
   const zones = useMemo(() => {
     const now = new Date();
     return allTimeZones().map((zone) => ({ zone, label: `${zone.replace(/_/g, ' ')} (${utcOffset(zone, now)})` }));
@@ -26,7 +28,7 @@ export const TimezoneSelect: React.FC<TimezoneSelectProps> = ({ id, value, onCha
       disabled={disabled}
       className={className}
     >
-      {!zones.some((z) => z.zone === value) && <option value={value}>{value}</option>}
+      {!zones.some((z) => z.zone === value) && <option value={value}>{value || placeholder || ''}</option>}
       {zones.map(({ zone, label }) => (
         <option key={zone} value={zone}>
           {label}
