@@ -30,7 +30,8 @@ const EXTRACTION = {
 
 function make(questions: Question[] = custom, creds: object | null = { apiKey: 'KEY', assistantId: 'assistant-1' }) {
   const questionsService = { get: vi.fn(async () => questions) };
-  const service = new LeadInsightsService({ getCreds: vi.fn(async () => creds) } as any, questionsService as any);
+  const prisma = { organizationSetting: { findUnique: vi.fn(async () => null) } };
+  const service = new LeadInsightsService({ getCreds: vi.fn(async () => creds) } as any, questionsService as any, prisma as any);
   return { service, questionsService };
 }
 
@@ -131,6 +132,15 @@ describe('the call Insight follows the question list', () => {
     );
     await m.service.ensureProvisioned('org-1');
     expect(insightWrites()).toHaveLength(2);
+  });
+
+  it('says so when Telnyx refuses the write, and tries again next time', async () => {
+    vi.mocked(telnyx).mockRejectedValue(new Error('telnyx down'));
+    const m = make();
+    expect(await m.service.ensureProvisioned('org-1')).toBe(false);
+    routes();
+    expect(await m.service.ensureProvisioned('org-1')).toBe(true);
+    expect(insightWrites()).toHaveLength(1);
   });
 
   it('does nothing without an assistant', async () => {

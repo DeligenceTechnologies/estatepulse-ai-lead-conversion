@@ -9,19 +9,26 @@ import { EngineService } from './engine.service';
 import { LeadInsightsService } from './lead-insights.service';
 import { LeadMemoryService } from './lead-memory.service';
 import {
+  assistantScore,
+  CRITERIA_RULE,
   leadDetailsFrom,
   parseExtraction,
+  pointsSchema,
   scoreLead,
+  scoringSettingsFrom,
+  type Criterion,
   type Extraction,
   type ScoreReason,
+  type ScoringSettings,
   type Thresholds,
-  type ThresholdsInput,
 } from './lead-scoring';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { OutcomeService } from './tools/outcome.service';
 
 export interface Qualification {
   source: 'telnyx_insights' | 'transcript';
+  /** The assistant's own score and rating, or the point rules for an analysis that came without one. */
+  scoredBy: 'assistant' | 'rules';
   score: number;
   temperature: LeadTemperature;
   reasons: ScoreReason[];
@@ -101,28 +108,41 @@ export class LeadScoringService {
     return this.apply(call, await this.insights.extractFromTranscript(orgId, call.transcript), 'transcript');
   }
 
-  async getThresholds(orgId: string): Promise<Thresholds> {
-    const s = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { leadHotThreshold: true, leadWarmThreshold: true } });
-    return { hot: s?.leadHotThreshold ?? 75, warm: s?.leadWarmThreshold ?? 45 };
+  async getSettings(orgId: string): Promise<ScoringSettings> {
+    const row = await this.prisma.organizationSetting.findUnique({
+      where: { orgId },
+      select: { leadHotThreshold: true, leadWarmThreshold: true, leadScorePoints: true },
+    });
+    return scoringSettingsFrom(row);
   }
 
-  async setThresholds(orgId: string, input: ThresholdsInput): Promise<Thresholds> {
-    const data = { leadHotThreshold: input.hotThreshold, leadWarmThreshold: input.warmThreshold };
-    const s = await this.prisma.organizationSetting.upsert({
+  /** The thresholds always; the points chart too when given (see CRITERIA_RULE). */
+  async setSettings(orgId: string, input: { hotThreshold: number; warmThreshold: number; points?: unknown }): Promise<ScoringSettings> {
+    const data: { leadHotThreshold: number; leadWarmThreshold: number; leadScorePoints?: Criterion[] } = {
+      leadHotThreshold: input.hotThreshold,
+      leadWarmThreshold: input.warmThreshold,
+    };
+    if (input.points !== undefined) {
+      const points = pointsSchema.safeParse(input.points);
+      if (!points.success) throw new AppError('VALIDATION_ERROR', CRITERIA_RULE, [{ path: 'points', message: CRITERIA_RULE }]);
+      data.leadScorePoints = points.data;
+    }
+    const row = await this.prisma.organizationSetting.upsert({
       where: { orgId },
       create: { orgId, ...data },
       update: data,
-      select: { leadHotThreshold: true, leadWarmThreshold: true },
+      select: { leadHotThreshold: true, leadWarmThreshold: true, leadScorePoints: true },
     });
-    return { hot: s.leadHotThreshold, warm: s.leadWarmThreshold };
+    return scoringSettingsFrom(row);
   }
 
   /** Scores the call, and moves the lead only when this is its latest call. */
   private async apply(call: Call, extraction: Extraction, source: Qualification['source']): Promise<Qualification> {
     const orgId = call.orgId;
-    const thresholds = await this.getThresholds(orgId);
-    const result = scoreLead(extraction, thresholds);
-    const qualification: Qualification = { source, ...result, thresholds, extraction, scoredAt: new Date().toISOString() };
+    const { thresholds, points } = await this.getSettings(orgId);
+    const own = assistantScore(extraction, thresholds);
+    const result = own ?? scoreLead(extraction, thresholds, points);
+    const qualification: Qualification = { source, scoredBy: own ? 'assistant' : 'rules', ...result, thresholds, extraction, scoredAt: new Date().toISOString() };
     const intel =
       call.extractedIntel && typeof call.extractedIntel === 'object' && !Array.isArray(call.extractedIntel)
         ? (call.extractedIntel as Record<string, unknown>)
@@ -171,7 +191,7 @@ export class LeadScoringService {
         callbackRequested: Boolean(extraction.callback_requested),
       });
     }
-    this.logger.log(`lead ${call.leadId} scored ${result.score} → ${result.temperature} (${source})`);
+    this.logger.log(`lead ${call.leadId} scored ${result.score} → ${result.temperature} (${source}, by ${qualification.scoredBy})`);
     return qualification;
   }
 

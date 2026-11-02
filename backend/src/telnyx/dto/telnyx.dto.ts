@@ -203,6 +203,11 @@ export class ThresholdsDto {
   @Min(1)
   @Max(100)
   warmThreshold!: number;
+
+  /** The office's points chart, a list of { key?, label, points }; left out, the saved one stays. Each line is checked in the service. */
+  @IsOptional()
+  @IsArray()
+  points?: unknown[];
 }
 
 export class TestToolDto {

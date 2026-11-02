@@ -14,9 +14,12 @@ import { QualificationAnswerDto, QualificationQuestionsDto, SetToolsDto, Strateg
 import { EngineService } from './engine.service';
 import { flowFromLog } from './lead-flow';
 import { LeadInsightsService } from './lead-insights.service';
+import { DEFAULT_POINTS } from './lead-scoring';
 import { LeadScoringService } from './lead-scoring.service';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
+
+const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',
@@ -161,13 +164,16 @@ export class StrategyController {
 
 @Controller('lead-scoring')
 export class LeadScoringController {
-  constructor(private readonly scoring: LeadScoringService) {}
+  constructor(
+    private readonly scoring: LeadScoringService,
+    private readonly insights: LeadInsightsService,
+  ) {}
 
   @Get('settings')
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
   async settings(@CurrentAuth() auth: AuthContext) {
-    const t = await this.scoring.getThresholds(auth.organizationId);
-    return { hotThreshold: t.hot, warmThreshold: t.warm };
+    const s = await this.scoring.getSettings(auth.organizationId);
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points, defaultPoints: DEFAULT_POINTS };
   }
 
   @Put('settings')
@@ -178,8 +184,10 @@ export class LeadScoringController {
         { path: 'warmThreshold', message: 'The warm threshold must be lower than the hot threshold' },
       ]);
     }
-    const t = await this.scoring.setThresholds(auth.organizationId, body);
-    return { hotThreshold: t.hot, warmThreshold: t.warm };
+    const s = await this.scoring.setSettings(auth.organizationId, body);
+    // The chart and thresholds are written into the Insight, so Telnyx is told now rather than at the next call.
+    const ready = await this.insights.ensureProvisioned(auth.organizationId);
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points, warning: ready ? null : ASSISTANT_NOT_UPDATED };
   }
 }
 
@@ -209,7 +217,7 @@ export class QualificationQuestionsController {
     let warning: string | null = null;
     await Promise.all([this.insights.ensureProvisioned(orgId), this.assistants.syncQualification(orgId)]).catch((error) => {
       this.logger.warn(`qualification sync for org ${orgId}: ${(error as Error).message}`);
-      warning = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+      warning = ASSISTANT_NOT_UPDATED;
     });
     return { questions, warning };
   }
