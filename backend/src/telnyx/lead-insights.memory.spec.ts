@@ -134,6 +134,15 @@ describe('the call Insight follows the question list', () => {
     expect(insightWrites()).toHaveLength(2);
   });
 
+  it('says so when Telnyx refuses the write, and tries again next time', async () => {
+    vi.mocked(telnyx).mockRejectedValue(new Error('telnyx down'));
+    const m = make();
+    expect(await m.service.ensureProvisioned('org-1')).toBe(false);
+    routes();
+    expect(await m.service.ensureProvisioned('org-1')).toBe(true);
+    expect(insightWrites()).toHaveLength(1);
+  });
+
   it('does nothing without an assistant', async () => {
     await make(custom, { apiKey: 'KEY' }).service.ensureProvisioned('org-1');
     expect(telnyx).not.toHaveBeenCalled();

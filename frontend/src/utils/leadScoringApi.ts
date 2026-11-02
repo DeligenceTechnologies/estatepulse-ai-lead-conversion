@@ -47,8 +47,9 @@ export interface Qualification {
 
 export const getScoringSettings = () => apiFetch<ScoringSettingsResponse>('/lead-scoring/settings', { auth: true });
 
+/** Saves and writes the chart into the Telnyx Insight; `warning` is set when that write was refused (it is retried at the next call). */
 export const saveScoringSettings = (s: ScoringSettings) =>
-  apiFetch<ScoringSettingsResponse>('/lead-scoring/settings', { method: 'PUT', body: s, auth: true });
+  apiFetch<ScoringSettings & { warning: string | null }>('/lead-scoring/settings', { method: 'PUT', body: s, auth: true });
 
 /** The qualification on a call's extractedIntel, if it has been scored. */
 export function qualificationOf(extractedIntel: unknown): Qualification | null {

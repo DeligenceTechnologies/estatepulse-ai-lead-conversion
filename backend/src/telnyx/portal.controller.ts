@@ -19,6 +19,8 @@ import { LeadScoringService } from './lead-scoring.service';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
+const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',
   appointment_requested: 'Appointment requested',
@@ -162,7 +164,10 @@ export class StrategyController {
 
 @Controller('lead-scoring')
 export class LeadScoringController {
-  constructor(private readonly scoring: LeadScoringService) {}
+  constructor(
+    private readonly scoring: LeadScoringService,
+    private readonly insights: LeadInsightsService,
+  ) {}
 
   @Get('settings')
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
@@ -180,7 +185,9 @@ export class LeadScoringController {
       ]);
     }
     const s = await this.scoring.setSettings(auth.organizationId, body);
-    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points };
+    // The chart and thresholds are written into the Insight, so Telnyx is told now rather than at the next call.
+    const ready = await this.insights.ensureProvisioned(auth.organizationId);
+    return { hotThreshold: s.thresholds.hot, warmThreshold: s.thresholds.warm, points: s.points, warning: ready ? null : ASSISTANT_NOT_UPDATED };
   }
 }
 
@@ -210,7 +217,7 @@ export class QualificationQuestionsController {
     let warning: string | null = null;
     await Promise.all([this.insights.ensureProvisioned(orgId), this.assistants.syncQualification(orgId)]).catch((error) => {
       this.logger.warn(`qualification sync for org ${orgId}: ${(error as Error).message}`);
-      warning = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+      warning = ASSISTANT_NOT_UPDATED;
     });
     return { questions, warning };
   }

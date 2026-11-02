@@ -62,7 +62,8 @@ export const LeadTemperatureCard: React.FC = () => {
       setHot(s.hotThreshold);
       setWarm(s.warmThreshold);
       setPoints(s.points);
-      toast.success('Lead scoring saved.');
+      if (s.warning) toast.warn(s.warning);
+      else toast.success('Lead scoring saved.');
     } catch (e) {
       toast.error(messageFor(e));
     } finally {

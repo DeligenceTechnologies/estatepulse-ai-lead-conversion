@@ -47,7 +47,7 @@ const instructionsFor = (questions: Question[], settings: ScoringSettings) => `$
 export class LeadInsightsService {
   private readonly logger = new Logger(LeadInsightsService.name);
   private readonly provisioned = new Set<string>();
-  private readonly inflight = new Map<string, Promise<void>>();
+  private readonly inflight = new Map<string, Promise<boolean>>();
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
@@ -55,20 +55,29 @@ export class LeadInsightsService {
     private readonly prisma: PrismaService,
   ) {}
 
-  /** Once per assistant, question list and scoring settings: a change to any of them writes the Insight again. */
-  async ensureProvisioned(orgId: string): Promise<void> {
+  /**
+   * Once per assistant, question list and scoring settings: a change to any of
+   * them writes the Insight again. False when Telnyx refused the write (logged,
+   * tried again next time); true when it is in place, or there is no assistant
+   * to write it on yet.
+   */
+  async ensureProvisioned(orgId: string): Promise<boolean> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
-    if (!c?.apiKey || !c.assistantId) return;
+    if (!c?.apiKey || !c.assistantId) return true;
     const [questions, settings] = await Promise.all([this.questions.get(orgId), this.settings(orgId)]);
     const key = `${orgId}:${c.assistantId}:${questionsHash(questions)}:${JSON.stringify(settings)}`;
-    if (this.provisioned.has(key)) return;
+    if (this.provisioned.has(key)) return true;
     const running = this.inflight.get(key);
     if (running) return running;
     const run = this.provision(c.apiKey, c.assistantId, questions, settings)
       .then(() => {
         this.provisioned.add(key);
+        return true;
       })
-      .catch((error) => this.logger.warn(`lead insight setup for org ${orgId}: ${(error as Error).message}`))
+      .catch((error) => {
+        this.logger.warn(`lead insight setup for org ${orgId}: ${(error as Error).message}`);
+        return false;
+      })
       .finally(() => this.inflight.delete(key));
     this.inflight.set(key, run);
     return run;
