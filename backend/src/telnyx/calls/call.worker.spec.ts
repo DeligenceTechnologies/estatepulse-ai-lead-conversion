@@ -223,6 +223,16 @@ describe('CallWorker', () => {
     expect(activity.markInvalid).toHaveBeenCalledWith(LEAD, expect.stringContaining('D50'));
   });
 
+  it('waits without dialing or recording a failure while our webhook URL is unreachable', async () => {
+    const down = () => Promise.reject(new Error('Webhook unreachable: https://x.trycloudflare.com answered 530'));
+    const { worker, job, slots, activity } = setup({ placeCall: down });
+    await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+    expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
+    expect(job.moveToDelayed).toHaveBeenCalled();
+    expect(job.updateData).not.toHaveBeenCalled();
+    expect(activity.recordCallFailed).not.toHaveBeenCalled();
+  });
+
   it('frees the slot and waits when Telnyx is at capacity', async () => {
     const { worker, job, slots, activity } = setup({ placeCall: () => Promise.reject(new Error('Telnyx POST /calls failed 429: too many requests')) });
     await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
