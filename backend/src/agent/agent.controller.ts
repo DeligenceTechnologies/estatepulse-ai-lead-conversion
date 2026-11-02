@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { BaseStatus, CalendarMeetingStatus, LeadStatus, Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -14,7 +14,9 @@ import { INACTIVE_STATUSES } from '@/lead/lead-status';
 import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { ChatTakeoverService } from '@/telnyx/sms/chat-takeover.service';
 import { PutAvailabilityDto } from './dto/availability.dto';
+import { SendChatMessageDto } from './dto/chat-message.dto';
 
 const AGENT_LEAD_FIELDS = {
   id: true,
@@ -51,6 +53,7 @@ export class AgentController {
     private readonly prisma: PrismaService,
     private readonly appointments: AppointmentsService,
     private readonly history: HistoryService,
+    private readonly chats: ChatTakeoverService,
   ) {}
 
   @Get()
@@ -186,6 +189,24 @@ export class AgentController {
   @Get('me/leads/:leadId/messages')
   messages(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
     return this.history.listMessages(auth, leadId, 'mine');
+  }
+
+  /** Takes over the lead's text chat: the AI stops answering them and no automated call or text reaches them. */
+  @Post('me/leads/:leadId/takeover')
+  takeOver(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.chats.takeOver(auth, leadId);
+  }
+
+  /** Hands the chat back: the AI answers the lead's texts again; automated outreach stays stopped. */
+  @Delete('me/leads/:leadId/takeover')
+  handBack(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.chats.handBack(auth, leadId);
+  }
+
+  /** Texts the lead, while this agent holds the chat. */
+  @Post('me/leads/:leadId/messages')
+  sendMessage(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string, @Body() body: SendChatMessageDto) {
+    return this.chats.send(auth, leadId, body);
   }
 
   @Get('me/availability')

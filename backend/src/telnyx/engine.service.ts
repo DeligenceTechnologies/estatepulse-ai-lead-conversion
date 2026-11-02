@@ -6,7 +6,7 @@ import { nextContactAt, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
-import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending } from '@/lead/lead-status';
+import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
 import { SmsService } from './sms.service';
@@ -408,6 +408,13 @@ export class EngineService implements OnModuleDestroy {
       this.state.quietly({ ...event, type: 'step_held', reason });
     };
 
+    // A text the lead asked for comes first: the step waits for it, then goes on by the usual rules.
+    if (textBackPending(lead)) {
+      hold('Waiting for the text the lead asked for');
+      this.later(e, () => this.fireStep(e, step, office, guardrails), textBackRecheckAt(lead) - Date.now());
+      return;
+    }
+
     // While the lead is texting with the AI, a canned text would talk over the
     // chat, and a call waits until the chat has gone quiet for the step's wait.
     const chat = await this.chatState(e);
@@ -463,6 +470,7 @@ export class EngineService implements OnModuleDestroy {
       const fresh = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
       if (e.stopped) return;
       if (!fresh || fresh.dncStatus || fresh.automationPaused || OUTCOME_STATUSES.includes(fresh.status) || callbackPending(fresh)) return this.stop(e);
+      if (textBackPending(fresh)) return this.fireStep(e, step, office, guardrails, heldSince);
       if (step.channel === 'sms' && (await this.chatState(e)).replied) return this.fireStep(e, step, office, guardrails, heldSince);
       phone = fresh.phone;
       e.sent.add(step.id);

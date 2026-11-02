@@ -122,6 +122,7 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
                skip_reason = CASE WHEN l.dnc_status THEN 'DO_NOT_CONTACT'
                                   WHEN l.status <> 'new' THEN 'STATUS_CHANGED'
                                   WHEN l.normalized_phone IS NULL THEN 'NO_DIALABLE_PHONE'
+                                  WHEN l.taken_over_by_id IS NOT NULL THEN 'AGENT_TAKEOVER'
                                   ELSE 'ALREADY_RELEASED' END
           FROM leads AS l
          WHERE i.batch_id = ${batch.id}::uuid AND i.state = 'queued'

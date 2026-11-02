@@ -3,8 +3,9 @@ import { apiFetch } from '../lib/api';
 /**
  * The AI's call-outcome tools, on a call and in a text chat: schedule_callback
  * (calls the lead back at the exact time they asked for, with nothing else
- * sent before it) and record_outcome (not interested, do not contact, wrong
- * number — recorded the moment the lead says it).
+ * sent before it), schedule_text (texts them at the time they asked for) and
+ * record_outcome (not interested, do not contact, wrong number — recorded the
+ * moment the lead says it).
  */
 export interface CallToolsStatus {
   enabled: boolean;
@@ -17,6 +18,11 @@ export interface CallToolsStatus {
   retryMinutes: number;
   /** …this many times (0: not at all), then the lead goes to the no-answer follow-up. */
   retryAttempts: number;
+  /** "Message me in 10 minutes": the AI may promise a text at that time; off, it asks the lead to text back. */
+  textBack: boolean;
+  /** {{firstName}}, {{brokerage}} and the other lead variables are filled in. */
+  textBackMessage: string;
+  defaultTextBackMessage: string;
   /** The tools are on the assistant and point at this server. */
   active: boolean;
   problem: string | null;
@@ -29,5 +35,13 @@ export const RETRY_ATTEMPTS_MAX = 3;
 export const getCallTools = () => apiFetch<CallToolsStatus>('/call-tools', { auth: true });
 
 /** An empty message restores the default one. */
-export const updateCallTools = (patch: { enabled?: boolean; confirmSms?: boolean; confirmMessage?: string; retryMinutes?: number; retryAttempts?: number }) =>
+export const updateCallTools = (patch: {
+  enabled?: boolean;
+  confirmSms?: boolean;
+  confirmMessage?: string;
+  retryMinutes?: number;
+  retryAttempts?: number;
+  textBack?: boolean;
+  textBackMessage?: string;
+}) =>
   apiFetch<CallToolsStatus>('/call-tools', { method: 'PUT', body: patch, auth: true });

@@ -16,6 +16,7 @@ import { NumbersService } from './numbers.service';
 import { AssistantController, LeadScoringController, PortalLeadsController, QualificationQuestionsController, StrategyController } from './portal.controller';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { SmsService } from './sms.service';
+import { ChatTakeoverService } from './sms/chat-takeover.service';
 import { SmsConversationController } from './sms/sms-conversation.controller';
 import { SmsConversationService } from './sms/sms-conversation.service';
 import { SmsIntentService } from './sms/sms-intent.service';
@@ -29,6 +30,8 @@ import { CallOutcomeToolController, CallToolsSettingsController } from './tools/
 import { CallToolsService } from './tools/call-tools.service';
 import { CallbackService } from './tools/callback.service';
 import { OutcomeService } from './tools/outcome.service';
+import { TextBackService } from './tools/text-back.service';
+import { TextBackWorker } from './tools/text-back.worker';
 import { VoicemailController } from './voicemail/voicemail.controller';
 import { VoicemailService } from './voicemail/voicemail.service';
 
@@ -65,6 +68,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     QualificationQuestionsService,
     SmsService,
     SmsConversationService,
+    ChatTakeoverService,
     SmsIntentService,
     StrategyStoreService,
     VoiceService,
@@ -73,6 +77,8 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallToolsService,
     CallbackService,
     OutcomeService,
+    TextBackService,
+    TextBackWorker,
   ],
   exports: [
     CallQueue,
@@ -85,6 +91,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantService,
     AssistantToolAuth,
     SmsConversationService,
+    ChatTakeoverService,
   ],
 })
 export class TelnyxModule {}

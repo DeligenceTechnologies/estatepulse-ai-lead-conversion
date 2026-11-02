@@ -7,6 +7,7 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { normalizePhone } from '../phone';
 import { TelnyxCredentialsService } from '../telnyx-credentials.service';
 import { telnyx } from '../telnyx-api';
+import { CallToolsService } from '../tools/call-tools.service';
 import { withSmsSection, withoutSmsSection } from './sms-prompt';
 
 /** Where Telnyx asks for a conversation's variables (the lead's details). Kept at the root, outside /api. */
@@ -35,7 +36,9 @@ export interface SmsConversationStatus {
  * The AI assistant answering a lead's texts. Turning it on links three things
  * on Telnyx: the org's messaging profile to the assistant, the assistant's
  * messaging feature to that profile, and the assistant's variables webhook to
- * this server, plus the text-chat section of its prompt. Off undoes them.
+ * this server, plus the text-chat section of its prompt. Off undoes them. The
+ * call tools (callback, text later, outcome) are put on the assistant too, so
+ * a chat has them before the organization's first AI call.
  */
 @Injectable()
 export class SmsConversationService implements OnApplicationBootstrap {
@@ -47,6 +50,7 @@ export class SmsConversationService implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly creds: TelnyxCredentialsService,
     config: ConfigService<IntegrationEnv, true>,
+    private readonly callTools: CallToolsService,
   ) {
     this.publicApiUrl = (config.get('PUBLIC_API_URL', { infer: true }) ?? '').replace(/\/+$/, '');
   }
@@ -55,34 +59,46 @@ export class SmsConversationService implements OnApplicationBootstrap {
     return `${this.publicApiUrl}${ASSISTANT_VARIABLES_PATH}`;
   }
 
-  /** The server's address can change (a new deploy domain, a dev tunnel): text chats keep reaching it. */
+  /** The server's address can change (a new deploy domain, a dev tunnel), and a release can change the chat prompt or tools. */
   onApplicationBootstrap(): void {
-    if (this.publicApiUrl) void this.refreshVariablesUrls();
+    if (this.publicApiUrl) void this.refreshChats();
   }
 
   /**
-   * Points each chatting assistant's variables webhook at this server again
-   * when it still names our path on an older address. An address the
-   * organization typed in itself is left alone.
+   * Brings every chatting assistant up to date: its variables webhook moves to
+   * this server when it still names our path on an older address (an address
+   * the organization typed in itself is left alone), its text-chat prompt
+   * section is rewritten when this release changed it, and it gets the call
+   * tools.
    */
-  async refreshVariablesUrls(): Promise<void> {
+  async refreshChats(): Promise<void> {
     const rows = await this.prisma.organizationSetting
       .findMany({ where: { smsConversation: { path: ['enabled'], equals: true } }, select: { orgId: true } })
       .catch((error) => {
-        this.logger.warn(`variables webhook check: ${(error as Error).message}`);
+        this.logger.warn(`text chat check: ${(error as Error).message}`);
         return [];
       });
     for (const { orgId } of rows) {
       try {
         const c = await this.creds.getCreds(orgId);
         if (!c?.apiKey || !c.assistantId) continue;
-        const current = String((await this.assistant(c.apiKey, c.assistantId)).dynamic_variables_webhook_url ?? '');
-        if (!current.endsWith(ASSISTANT_VARIABLES_PATH) || current === this.variablesUrl) continue;
-        await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}`, { method: 'PATCH', body: JSON.stringify({ dynamic_variables_webhook_url: this.variablesUrl }) });
-        this.logger.log(`assistant ${c.assistantId}: variables webhook moved from ${current} to ${this.variablesUrl}`);
+        const assistant = await this.assistant(c.apiKey, c.assistantId);
+        const patch: Record<string, string> = {};
+        const current = String(assistant.dynamic_variables_webhook_url ?? '');
+        if (current.endsWith(ASSISTANT_VARIABLES_PATH) && current !== this.variablesUrl) patch.dynamic_variables_webhook_url = this.variablesUrl;
+        // Unreadable instructions are never written over.
+        if (typeof assistant.instructions === 'string') {
+          const instructions = withSmsSection(assistant.instructions);
+          if (instructions !== assistant.instructions) patch.instructions = instructions;
+        }
+        if (Object.keys(patch).length) {
+          await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+          this.logger.log(`assistant ${c.assistantId}: text chat brought up to date (${Object.keys(patch).join(', ')})`);
+        }
       } catch (error) {
-        this.logger.warn(`variables webhook for org ${orgId}: ${(error as Error).message}`);
+        this.logger.warn(`text chat for org ${orgId}: ${(error as Error).message}`);
       }
+      await this.callTools.ensure(orgId);
     }
   }
 
@@ -138,6 +154,8 @@ export class SmsConversationService implements OnApplicationBootstrap {
     };
     await this.save(orgId, config as unknown as Prisma.InputJsonObject);
     this.logger.log(`AI text conversations on for ${orgId} (assistant ${c.assistantId}, profile ${c.messagingProfileId})`);
+    // Without them the AI could promise a callback or a text it has no way to keep.
+    await this.callTools.ensure(orgId);
     return this.status(orgId);
   }
 
@@ -177,22 +195,50 @@ export class SmsConversationService implements OnApplicationBootstrap {
    * gives the AI our last text then.
    */
   async appendOurMessage(orgId: string, leadPhone: string | null, text: string): Promise<void> {
+    await this.appendToChat(orgId, leadPhone, 'assistant', text);
+  }
+
+  /** Adds a turn to the lead's text conversation: ours as `assistant`, the lead's as `user`. */
+  async appendToChat(orgId: string, leadPhone: string | null, role: 'assistant' | 'user', text: string, sentAt = new Date()): Promise<void> {
     if (!leadPhone || !(await this.isEnabled(orgId))) return;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return;
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ role, content: text, sent_at: sentAt.toISOString() }),
+    });
+  }
+
+  /**
+   * Stops the AI answering this one lead's texts, or lets it answer again;
+   * every other lead's chat goes on. False when the lead has no text
+   * conversation yet (Telnyx starts one at their first text). Not gated on the
+   * org's toggle, so a chat paused before the AI was turned off can still be
+   * let go.
+   */
+  async pauseAi(orgId: string, leadPhone: string | null, paused: boolean): Promise<boolean> {
+    if (!leadPhone) return false;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return false;
+    // A real boolean: Telnyx ignores the string "true" its own docs show (live-tested 2026-10-30). PUT merges into the metadata.
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ metadata: { ai_disabled: paused } }) });
+    return true;
+  }
+
+  /** The lead's text conversation with the assistant: the newest, should inactivity have started another. */
+  private async chatWith(orgId: string, leadPhone: string): Promise<{ apiKey: string; id: string } | null> {
     const c = await this.creds.getCreds(orgId);
-    if (!c?.apiKey || !c.fromNumber) return;
+    if (!c?.apiKey || !c.fromNumber) return null;
     const filter = (key: string, value: string) => `metadata->${key}=eq.${encodeURIComponent(value)}`;
     const query = [
       filter('telnyx_conversation_channel', 'sms_chat'),
       filter('telnyx_agent_target', normalizePhone(c.fromNumber)),
       filter('telnyx_end_user_target', normalizePhone(leadPhone)),
+      'order=last_message_at.desc',
     ].join('&');
     const found = await telnyx<{ data?: { id: string }[] }>(c.apiKey, `/ai/conversations?${query}`);
-    const conversationId = found.data?.[0]?.id;
-    if (!conversationId) return;
-    await telnyx(c.apiKey, `/ai/conversations/${conversationId}/message`, {
-      method: 'POST',
-      body: JSON.stringify({ role: 'assistant', content: text, sent_at: new Date().toISOString() }),
-    });
+    const id = found.data?.[0]?.id;
+    return id ? { apiKey: c.apiKey, id } : null;
   }
 
   private async assistant(apiKey: string, assistantId: string): Promise<any> {

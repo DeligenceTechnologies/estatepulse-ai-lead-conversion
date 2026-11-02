@@ -27,6 +27,7 @@ model User {
 
   calendarConnections CalendarConnection[]
   assignedLeads       Lead[]               @relation("LeadAssignee")
+  takenOverLeads      Lead[]               @relation("LeadChatTakeover")
   sentMessages        Message[]
   enrollments         SequenceEnrollment[]
   reviewedImportRows  SheetImportRow[]

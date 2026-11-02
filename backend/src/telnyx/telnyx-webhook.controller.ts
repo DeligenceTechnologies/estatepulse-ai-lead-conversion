@@ -85,15 +85,22 @@ export class TelnyxWebhookController {
   /**
    * Telnyx asks for a conversation's variables when it starts (a call, or a
    * text chat): the lead's details. Answered within the assistant's timeout;
-   * an unknown lead gets none, and the assistant goes on without them.
+   * an unknown lead gets none, and the assistant goes on without them. A text
+   * chat an agent has taken over is also marked AI-paused, which covers a
+   * conversation Telnyx starts after the takeover (the lead's first text, or
+   * one after the inactivity limit).
    */
   @Post('assistant-variables')
   @HttpCode(HttpStatus.OK)
-  async assistantVariables(@Body() body: any, @Req() req: RawBodyRequest<Request>): Promise<{ dynamic_variables?: Record<string, string> }> {
+  async assistantVariables(
+    @Body() body: any,
+    @Req() req: RawBodyRequest<Request>,
+  ): Promise<{ dynamic_variables?: Record<string, string>; conversation?: { metadata: { ai_disabled: true } } }> {
     const p = body?.data?.payload ?? {};
     try {
       let orgId: string | null = null;
       let leadId: string | null = null;
+      let takenOver = false;
       const ccid = typeof p.call_control_id === 'string' ? p.call_control_id : '';
       if (ccid) {
         const call = await this.activity.callByProvider(ccid);
@@ -105,10 +112,12 @@ export class TelnyxWebhookController {
           ? await this.prisma.lead.findFirst({
               where: { orgId, normalizedPhone: normalizePhone(p.telnyx_end_user_target) },
               orderBy: { createdAt: 'desc' },
-              select: { id: true },
+              select: { id: true, takenOverById: true },
             })
           : null;
         leadId = lead?.id ?? null;
+        // Never on a call: a paused phone_call conversation would leave the lead in silence.
+        takenOver = Boolean(lead?.takenOverById) && p.telnyx_conversation_channel === 'sms_chat';
       }
       const channel = String(p.telnyx_conversation_channel ?? 'unknown');
       if (!orgId || !leadId) {
@@ -120,7 +129,7 @@ export class TelnyxWebhookController {
       const variables = await this.activity.leadVariables(orgId, leadId);
       // On a call, the call's own context was given when the assistant started; an empty one here must not replace it.
       if (ccid) delete variables.call_context;
-      return { dynamic_variables: variables };
+      return { dynamic_variables: variables, ...(takenOver ? { conversation: { metadata: { ai_disabled: true as const } } } : {}) };
     } catch (error) {
       this.logger.error(`assistant variables (${p.telnyx_conversation_channel}): ${(error as Error).message}`);
       return {};

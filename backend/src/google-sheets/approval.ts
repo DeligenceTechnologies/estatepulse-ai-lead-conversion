@@ -19,8 +19,8 @@ export interface ApprovalResult {
   outreach?: OutreachSummary;
 }
 
-/** Whether an imported lead (aliased `l`) may start outreach; the outreach runner re-checks it at release. */
-export const RELEASABLE_LEAD = Prisma.sql`l.automation_paused AND NOT l.dnc_status AND l.status = 'new' AND l.normalized_phone IS NOT NULL`;
+/** Whether an imported lead (aliased `l`) may start outreach; the outreach runner re-checks it at release. Never while an agent holds its chat. */
+export const RELEASABLE_LEAD = Prisma.sql`l.automation_paused AND NOT l.dnc_status AND l.status = 'new' AND l.normalized_phone IS NOT NULL AND l.taken_over_by_id IS NULL`;
 
 /**
  * Approves imported rows still pending review. A lead is released to the

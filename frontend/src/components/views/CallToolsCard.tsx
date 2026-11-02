@@ -9,12 +9,13 @@ const MAX_CHARS = 320;
 
 /**
  * Callbacks and outcomes: on a call or in a text chat, the AI can book a call
- * back at the exact time the lead asks for, and record a clear "no", "stop
- * contacting me" or wrong number the moment it hears it.
+ * back or a text at the exact time the lead asks for, and record a clear "no",
+ * "stop contacting me" or wrong number the moment it hears it.
  */
 export const CallToolsCard: React.FC = () => {
   const [status, setStatus] = useState<CallToolsStatus | null>(null);
   const [draft, setDraft] = useState('');
+  const [textBackDraft, setTextBackDraft] = useState('');
   const [retryMinutes, setRetryMinutes] = useState(15);
   const [retryAttempts, setRetryAttempts] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -23,6 +24,7 @@ export const CallToolsCard: React.FC = () => {
   const apply = (s: CallToolsStatus) => {
     setStatus(s);
     setDraft(s.confirmMessage);
+    setTextBackDraft(s.textBackMessage);
     setRetryMinutes(s.retryMinutes);
     setRetryAttempts(s.retryAttempts);
   };
@@ -34,7 +36,7 @@ export const CallToolsCard: React.FC = () => {
   }, []);
 
   const save = async (
-    patch: { enabled?: boolean; confirmSms?: boolean; confirmMessage?: string; retryMinutes?: number; retryAttempts?: number },
+    patch: Parameters<typeof updateCallTools>[0],
     done: string,
   ) => {
     setBusy(true);
@@ -50,6 +52,8 @@ export const CallToolsCard: React.FC = () => {
 
   const changed = !!status && draft.trim() !== status.confirmMessage;
   const editable = !!status?.enabled && status.confirmSms && !busy;
+  const textBackChanged = !!status && textBackDraft.trim() !== status.textBackMessage;
+  const textBackEditable = !!status?.enabled && status.textBack && !busy;
   const retryValid =
     Number.isInteger(retryMinutes) && retryMinutes >= RETRY_MINUTES_RANGE.min && retryMinutes <= RETRY_MINUTES_RANGE.max &&
     Number.isInteger(retryAttempts) && retryAttempts >= 0 && retryAttempts <= RETRY_ATTEMPTS_MAX;
@@ -69,12 +73,14 @@ export const CallToolsCard: React.FC = () => {
         </h3>
         <p className="text-[11px] text-slate-400 mt-1">
           When a lead says &ldquo;call me tomorrow at 5&rdquo;, the AI books the callback for that exact time, in your
-          calling hours, and nothing else is sent to them before it. {retryText} When a lead clearly says they are not interested,
+          calling hours, and nothing else is sent to them before it. {retryText} When a lead says &ldquo;message me in 10
+          minutes&rdquo;, the AI texts them at that time with your text-back message below; nothing else reaches them before
+          it, and if they text again first it is cancelled. When a lead clearly says they are not interested,
           asks not to be contacted, or it is the wrong number, the AI records it straight away and all outreach to them
           stops; &ldquo;don&apos;t contact me&rdquo; also sets do-not-contact.
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
-          This adds two tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
+          This adds three tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
           Turning it off removes just those; the rest of your prompt is never changed.
         </p>
       </div>
@@ -101,7 +107,7 @@ export const CallToolsCard: React.FC = () => {
             status.enabled && (
               <p className={`text-xs flex items-center gap-1.5 ${status.active ? 'text-emerald-300' : 'text-slate-400'}`}>
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                {status.active ? 'On — the tools are on your assistant.' : 'On — the tools are added on the next call.'}
+                {status.active ? 'On — the tools are on your assistant.' : 'On — the tools are added on the next call or text chat.'}
               </p>
             )
           )}
@@ -215,6 +221,63 @@ export const CallToolsCard: React.FC = () => {
             >
               {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Save text
+            </button>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-slate-300 font-semibold cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={status.textBack}
+              disabled={busy || !status.enabled}
+              onChange={(e) =>
+                void save({ textBack: e.target.checked }, e.target.checked ? 'Texting leads back is on.' : 'Texting leads back is off.')
+              }
+              className="accent-emerald-500"
+            />
+            Text the lead back at the time they ask (&ldquo;message me in 10 minutes&rdquo;)
+          </label>
+          {!status.textBack && (
+            <p className="text-[11px] text-slate-500">Off: the AI asks the lead to text back whenever it suits them instead.</p>
+          )}
+
+          <div className="text-xs space-y-1">
+            <label className="block text-slate-300 font-semibold">
+              Text-back message{' '}
+              <span className="text-slate-500 font-normal">
+                — {'{{firstName}}'} and {'{{brokerage}}'} are filled in for each lead; their answer goes on in the AI chat
+              </span>
+            </label>
+            <textarea
+              value={textBackDraft}
+              onChange={(e) => setTextBackDraft(e.target.value.slice(0, MAX_CHARS))}
+              disabled={!textBackEditable}
+              rows={2}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600 disabled:opacity-50"
+            />
+            <div className="text-right text-[11px] text-slate-500">
+              {textBackDraft.length}/{MAX_CHARS}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
+            {status.textBackMessage !== status.defaultTextBackMessage && (
+              <button
+                type="button"
+                onClick={() => void save({ textBackMessage: '' }, 'Default text-back message restored.')}
+                disabled={!textBackEditable}
+                className="px-4 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold cursor-pointer disabled:opacity-40"
+              >
+                Use default
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void save({ textBackMessage: textBackDraft }, 'Text-back message saved.')}
+              disabled={!textBackEditable || !textBackChanged || !textBackDraft.trim()}
+              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
+            >
+              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Save message
             </button>
           </div>
         </>
