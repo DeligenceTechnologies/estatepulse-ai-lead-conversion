@@ -49,3 +49,30 @@ describe('refreshing text chats', () => {
     expect(callTools.ensure).toHaveBeenCalledWith('org-1');
   });
 });
+
+/** Pausing the AI for one lead's chat (an agent's takeover): the details live-tested on Telnyx. */
+describe('pausing the AI for one chat', () => {
+  const make = (found: { id: string }[]) => {
+    vi.mocked(telnyx).mockImplementation((async (_key: string, path: string, init?: { method?: string }) =>
+      init?.method ? {} : String(path).startsWith('/ai/conversations?') ? { data: found } : {}) as any);
+    const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', fromNumber: '+17427245092' })) };
+    const config = { get: vi.fn(() => 'https://api.example') };
+    return new SmsConversationService({} as any, creds as any, config as any, { ensure: vi.fn() } as any);
+  };
+
+  beforeEach(() => vi.mocked(telnyx).mockReset());
+
+  it('sets ai_disabled as a real boolean on the newest chat with that lead; the string "true" is ignored by Telnyx', async () => {
+    expect(await make([{ id: 'conv-new' }, { id: 'conv-old' }]).pauseAi('org-1', '+1 (289) 555-0100', true)).toBe(true);
+    const [lookup, put] = vi.mocked(telnyx).mock.calls;
+    expect(lookup[1]).toContain('metadata->telnyx_end_user_target=eq.%2B12895550100');
+    expect(lookup[1]).toContain('order=last_message_at.desc');
+    expect(put[1]).toBe('/ai/conversations/conv-new');
+    expect(put[2]).toEqual({ method: 'PUT', body: '{"metadata":{"ai_disabled":true}}' });
+  });
+
+  it('nothing to pause when the lead has not texted yet', async () => {
+    expect(await make([]).pauseAi('org-1', '+12895550100', true)).toBe(false);
+    expect(vi.mocked(telnyx).mock.calls).toHaveLength(1);
+  });
+});

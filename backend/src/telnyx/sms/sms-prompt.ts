@@ -1,6 +1,10 @@
 export const SMS_PROMPT_START = '[EstatePulse: text conversations — added by "Let this agent handle SMS" in AI Settings; turn it off there to remove]';
 export const SMS_PROMPT_END = '[End of EstatePulse text conversations]';
 
+/** How an agent's text reads in the AI's copy of the chat, e.g. "[Agent Priya] I'll call you at 5". */
+export const AGENT_MESSAGE_PREFIX = '[Agent <name>]';
+export const agentMessageForAi = (agentName: string, text: string) => `${AGENT_MESSAGE_PREFIX.replace('<name>', agentName)} ${text}`;
+
 /**
  * How the assistant behaves in a text chat, and on a call that follows one.
  * `{{last_outbound_sms}}` and `{{recent_sms}}` come from the variables
@@ -18,6 +22,7 @@ export function smsSection(): string {
     '- You only answer when the lead texts you; you cannot send a message later on your own. Never say you will text, call or follow up later unless schedule_text or schedule_callback returned ok. Without them, ask the lead to text back whenever it suits them.',
     '- To book a meeting, use check_availability and book_appointment exactly as on a call. Write the times plainly, for example "Tue 3:00 PM or Wed 11:00 AM?". Ask them to type their email; you do not need to spell it back.',
     '- If they are not interested, ask us to stop, or it is the wrong number, reply once politely and ask nothing more.',
+    `- A message of ours that starts with "${AGENT_MESSAGE_PREFIX}" was texted by that person on our team, not by you. Never claim to be them or contradict them; carry on from what they said, and never start your own messages that way.`,
     'On a phone call, if this is not empty you already texted with the lead, so pick up where the chat left off and do not repeat its questions: {{recent_sms}}',
     SMS_PROMPT_END,
   ].join('\n');

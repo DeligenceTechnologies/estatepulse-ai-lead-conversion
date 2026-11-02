@@ -4,6 +4,7 @@ import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
+import { ChatTakeoverService } from '@/telnyx/sms/chat-takeover.service';
 import { LeadAssignmentNotifier } from './lead-assignment-notifier.service';
 import { INACTIVE_STATUSES } from './lead-status';
 import { AGENT_ROLE_WHERE, fullName } from './lead-scope';
@@ -44,6 +45,7 @@ export class LeadAssignmentService {
     private readonly audit: AuditService,
     private readonly events: EventsBus,
     private readonly notifier: LeadAssignmentNotifier,
+    private readonly chats: ChatTakeoverService,
   ) {}
 
   async assign(orgId: string, leadId: string, userId: string, by: AssignedBy): Promise<LeadAssignmentDTO> {
@@ -134,6 +136,8 @@ export class LeadAssignmentService {
         previousAgentId: result.previousAgentId,
         assignedAt: result.dto.assignedAt,
       });
+      // The previous agent's takeover of the lead's chat ends with their hold on the lead.
+      void this.chats.releaseIfReassigned(orgId, leadId);
     }
     return result.dto;
   }

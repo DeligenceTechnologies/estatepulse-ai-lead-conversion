@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Ban, RotateCw, Search } from 'lucide-react';
+import { AlertTriangle, Ban, RotateCw, Search, UserRound } from 'lucide-react';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import {
   listConversations,
@@ -126,6 +126,15 @@ export const ConversationsView: React.FC = () => {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-bold text-xs text-white truncate">{t.leadName}</span>
                   <div className="flex items-center gap-1 shrink-0">
+                    {t.takenOver && (
+                      <span
+                        title={`${t.takenOver.byName} is texting this lead; the AI is off`}
+                        className="text-2xs uppercase font-bold px-1.5 rounded border bg-emerald-500/20 text-emerald-300 border-emerald-500/40 flex items-center gap-0.5"
+                      >
+                        <UserRound className="w-2.5 h-2.5" />
+                        agent
+                      </span>
+                    )}
                     {t.dncStatus && (
                       <span
                         title="Opted out"
@@ -193,6 +202,16 @@ export const ConversationsView: React.FC = () => {
                 View Lead Dossier
               </button> */}
             </div>
+
+            {current.takenOver && (
+              <div className="mx-5 mt-4 flex items-start gap-2 text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-2">
+                <UserRound className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  {current.takenOver.byName} took over this chat on {formatDateTime(current.takenOver.at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}.
+                  The AI does not answer this lead, and no automated call or text goes out.
+                </span>
+              </div>
+            )}
 
             {current.dncStatus && (
               <div className="mx-5 mt-4 flex items-start gap-2 text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConsentStatus, DeliveryStatus, FollowUpReason, LeadStatus } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { EngineService } from './engine.service';
@@ -30,7 +31,8 @@ const providerTime = (value: unknown): Date | null => {
  * sequence stopped), START from an opted-out lead lifts it. Any other reply
  * either goes to the AI assistant, which answers it on Telnyx while this side
  * records it and checks whether it ends the conversation, or, when the org has
- * not turned that on, pauses automation so a person takes over.
+ * not turned that on, pauses automation so a person takes over. In a chat an
+ * agent has taken over, the agent answers.
  */
 @Injectable()
 export class InboundSmsService {
@@ -46,6 +48,7 @@ export class InboundSmsService {
     private readonly intents: SmsIntentService,
     private readonly textBacks: TextBackService,
     private readonly callTools: CallToolsService,
+    private readonly events: EventsBus,
   ) {}
 
   async onMessageReceived(payload: any): Promise<void> {
@@ -70,7 +73,7 @@ export class InboundSmsService {
     const lead = await this.prisma.lead.findFirst({
       where: { orgId, normalizedPhone: from },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, firstResponseAt: true, dncStatus: true },
+      select: { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true },
     });
     if (!lead) {
       this.logger.warn(`Inbound SMS matches no lead in org ${orgId}`);
@@ -94,11 +97,13 @@ export class InboundSmsService {
         },
       })
       .catch((error) => this.logger.error(`storeInbound: ${(error as Error).message}`));
+    this.events.publish({ organizationId: orgId, type: 'conversation.updated', leadSourceId: null, leadId: lead.id });
     await this.textBacks.onLeadTexted(orgId, lead.id).catch((error) => this.logger.warn(`text back check: ${(error as Error).message}`));
 
     const word = keyword(text);
     if (STOP_WORDS.has(word)) return this.onOptOut(orgId, lead.id);
     if (START_WORDS.has(word) && lead.dncStatus) return this.onOptIn(orgId, lead.id);
+    if (lead.takenOverById) return this.onAgentChat(orgId, lead.id, from, text, !lead.firstResponseAt, receivedAt);
     if (await this.conversations.isEnabled(orgId)) return this.onChatReply(orgId, lead.id, text, !lead.firstResponseAt, receivedAt);
     return this.onHumanReply(orgId, lead.id, !lead.firstResponseAt);
   }
@@ -127,7 +132,11 @@ export class InboundSmsService {
     }
     const to = normalizePhone(recipient.phone_number);
     if (!to || !(await this.conversations.isEnabled(orgId))) return;
-    const lead = await this.prisma.lead.findFirst({ where: { orgId, normalizedPhone: to }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+    const lead = await this.prisma.lead.findFirst({
+      where: { orgId, normalizedPhone: to },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, takenOverById: true },
+    });
     if (!lead) return;
     await this.prisma.message.create({
       data: {
@@ -143,6 +152,12 @@ export class InboundSmsService {
       },
     });
     await this.prisma.lead.update({ where: { id: lead.id }, data: { lastContactAt: new Date() } }).catch(() => undefined);
+    this.events.publish({ organizationId: orgId, type: 'conversation.updated', leadSourceId: null, leadId: lead.id });
+    // The AI answered in a chat an agent holds: a new conversation (inactivity), or a text that beat the pause. Pause it again.
+    if (lead.takenOverById) {
+      this.logger.warn(`lead ${lead.id}: the AI replied in a chat an agent has taken over; pausing it again`);
+      await this.conversations.pauseAi(orgId, to, true).catch((error) => this.logger.error(`re-pausing the AI for lead ${lead.id}: ${(error as Error).message}`));
+    }
   }
 
   /**
@@ -224,6 +239,19 @@ export class InboundSmsService {
       return;
     }
     await this.engine.setStatus(orgId, leadId, LeadStatus.not_interested, `Not interested, said by SMS: ${quoted}`, { source: 'sms_reply' });
+  }
+
+  /**
+   * A text in a chat an agent has taken over: the agent answers it, so the
+   * intent check does not run and nothing moves the lead (a STOP is still
+   * honoured before this). It goes into the AI's copy of the chat, which
+   * Telnyx does not keep while the AI is paused, for when it is handed back.
+   */
+  private async onAgentChat(orgId: string, leadId: string, from: string, text: string, isFirst: boolean, receivedAt: Date): Promise<void> {
+    await this.prisma.lead.update({ where: { id: leadId }, data: { lastContactAt: new Date(), ...(isFirst ? { firstResponseAt: new Date() } : {}) } });
+    await this.conversations
+      .appendToChat(orgId, from, 'user', text, receivedAt)
+      .catch((error) => this.logger.warn(`lead ${leadId}: adding a text to the paused AI chat failed: ${(error as Error).message}`));
   }
 
   private async onHumanReply(orgId: string, leadId: string, isFirst: boolean): Promise<void> {

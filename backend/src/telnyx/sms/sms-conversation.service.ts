@@ -195,22 +195,50 @@ export class SmsConversationService implements OnApplicationBootstrap {
    * gives the AI our last text then.
    */
   async appendOurMessage(orgId: string, leadPhone: string | null, text: string): Promise<void> {
+    await this.appendToChat(orgId, leadPhone, 'assistant', text);
+  }
+
+  /** Adds a turn to the lead's text conversation: ours as `assistant`, the lead's as `user`. */
+  async appendToChat(orgId: string, leadPhone: string | null, role: 'assistant' | 'user', text: string, sentAt = new Date()): Promise<void> {
     if (!leadPhone || !(await this.isEnabled(orgId))) return;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return;
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ role, content: text, sent_at: sentAt.toISOString() }),
+    });
+  }
+
+  /**
+   * Stops the AI answering this one lead's texts, or lets it answer again;
+   * every other lead's chat goes on. False when the lead has no text
+   * conversation yet (Telnyx starts one at their first text). Not gated on the
+   * org's toggle, so a chat paused before the AI was turned off can still be
+   * let go.
+   */
+  async pauseAi(orgId: string, leadPhone: string | null, paused: boolean): Promise<boolean> {
+    if (!leadPhone) return false;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return false;
+    // A real boolean: Telnyx ignores the string "true" its own docs show (live-tested 2026-10-30). PUT merges into the metadata.
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ metadata: { ai_disabled: paused } }) });
+    return true;
+  }
+
+  /** The lead's text conversation with the assistant: the newest, should inactivity have started another. */
+  private async chatWith(orgId: string, leadPhone: string): Promise<{ apiKey: string; id: string } | null> {
     const c = await this.creds.getCreds(orgId);
-    if (!c?.apiKey || !c.fromNumber) return;
+    if (!c?.apiKey || !c.fromNumber) return null;
     const filter = (key: string, value: string) => `metadata->${key}=eq.${encodeURIComponent(value)}`;
     const query = [
       filter('telnyx_conversation_channel', 'sms_chat'),
       filter('telnyx_agent_target', normalizePhone(c.fromNumber)),
       filter('telnyx_end_user_target', normalizePhone(leadPhone)),
+      'order=last_message_at.desc',
     ].join('&');
     const found = await telnyx<{ data?: { id: string }[] }>(c.apiKey, `/ai/conversations?${query}`);
-    const conversationId = found.data?.[0]?.id;
-    if (!conversationId) return;
-    await telnyx(c.apiKey, `/ai/conversations/${conversationId}/message`, {
-      method: 'POST',
-      body: JSON.stringify({ role: 'assistant', content: text, sent_at: new Date().toISOString() }),
-    });
+    const id = found.data?.[0]?.id;
+    return id ? { apiKey: c.apiKey, id } : null;
   }
 
   private async assistant(apiKey: string, assistantId: string): Promise<any> {

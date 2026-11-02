@@ -48,6 +48,9 @@ model Lead {
   assignedToId   String?         @map("assigned_to_id") @db.Uuid
   assignedAt     DateTime?       @map("assigned_at") @db.Timestamptz(6)
   assignmentType AssignmentType? @map("assignment_type")
+  /// The agent texting the lead in place of the AI ("Take over" in their Conversations). Until they hand it back, the AI does not answer the lead and no automated step reaches them.
+  takenOverById  String?         @map("taken_over_by_id") @db.Uuid
+  takenOverAt    DateTime?       @map("taken_over_at") @db.Timestamptz(6)
 
   firstContactAt   DateTime? @map("first_contact_at") @db.Timestamptz(6)
   firstResponseAt  DateTime? @map("first_response_at") @db.Timestamptz(6)
@@ -61,6 +64,7 @@ model Lead {
   organization    Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   leadSource      LeadSource?          @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
   assignedTo      User?                @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  takenOverBy     User?                @relation("LeadChatTakeover", fields: [takenOverById], references: [id], onDelete: SetNull)
   messages        Message[]
   calls           Call[]
   enrollments     SequenceEnrollment[]

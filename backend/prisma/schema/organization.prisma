@@ -49,6 +49,8 @@ model OrganizationSetting {
   voicemail             Json?   @map("voicemail")
   /// The AI's call-outcome tools on Telnyx (callback, outcome), as provisioned there.
   callTools             Json?   @map("call_tools")
+  /// What is texted to a lead when an agent takes their chat over ({ enabled, message }); unset means on, with the default text.
+  chatTakeover          Json?   @map("chat_takeover")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
   /// The owners' end-of-day summary email.

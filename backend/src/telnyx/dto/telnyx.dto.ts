@@ -287,3 +287,16 @@ export class UpdateCallToolsDto {
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   textBackMessage?: string;
 }
+
+export class UpdateTakeoverGreetingDto {
+  /** Text the lead a greeting from the agent when they take the chat over. */
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  /** {{firstName}}, {{brokerage}}, {{agentName}}, {{agentFirstName}} and the other lead variables are filled in. Empty restores the default. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
+  message?: string;
+}

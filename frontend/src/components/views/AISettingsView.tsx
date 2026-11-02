@@ -56,6 +56,7 @@ import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
+import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
 
@@ -1166,6 +1167,8 @@ export const AISettingsView: React.FC = () => {
         <VoicemailCard />
 
         <CallToolsCard />
+
+        <TakeoverGreetingCard />
 
         {/* Statements of behaviour, not settings — nothing here is editable. */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">

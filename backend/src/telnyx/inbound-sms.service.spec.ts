@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { InboundSmsService } from './inbound-sms.service';
 
-function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boolean; intent?: string } = {}) {
-  const lead = { id: 'lead-1', orgId: 'org-1', firstResponseAt: null, ...start };
+function setup(start: { status: string; dncStatus: boolean; takenOverById?: string | null }, opts: { ai?: boolean; intent?: string } = {}) {
+  const lead = { id: 'lead-1', orgId: 'org-1', firstResponseAt: null, takenOverById: null, ...start };
   const prisma = {
     message: {
       findFirst: vi.fn(async () => null as unknown),
@@ -26,10 +26,15 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const creds = { orgForNumber: vi.fn(async () => 'org-1') };
   const followup = { pauseForLead: vi.fn(), stopForLead: vi.fn() };
   const engine = { setStatus: vi.fn(async () => true) };
-  const conversations = { isEnabled: vi.fn(async () => Boolean(opts.ai)) };
+  const conversations = {
+    isEnabled: vi.fn(async () => Boolean(opts.ai)),
+    appendToChat: vi.fn(async () => undefined),
+    pauseAi: vi.fn(async () => true),
+  };
   const intents = { classify: vi.fn(async () => ({ intent: opts.intent ?? 'continue', reason: 'test' })) };
   const textBacks = { onLeadTexted: vi.fn(async () => undefined) };
   const callTools = { ensure: vi.fn(async () => undefined) };
+  const bus = { publish: vi.fn() };
   const service = new InboundSmsService(
     prisma as any,
     creds as any,
@@ -40,6 +45,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
     intents as any,
     textBacks as any,
     callTools as any,
+    bus as any,
   );
   const receive = (text: string) =>
     service.onMessageReceived({ id: 'm-1', text, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
@@ -47,7 +53,7 @@ function setup(start: { status: string; dncStatus: boolean }, opts: { ai?: boole
   const optedIn = () => prisma.lead.update.mock.calls.some((c: any[]) => c[0]?.data?.consentStatus === 'granted');
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
     service.onMessageFinalized('org-1', { id, text, from: { phone_number: '+17427245092' }, to: [{ phone_number: '+12899174129', status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools };
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools, conversations, bus };
 }
 
 describe('InboundSmsService', () => {
@@ -157,6 +163,32 @@ describe('InboundSmsService', () => {
     await s.service.onMessageReceived({ id: 'm-2', text: 'message me after 2 mins', received_at: receivedAt, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
     expect(s.prisma.message.create).toHaveBeenCalledWith({ data: expect.objectContaining({ direction: 'inbound', sentAt: new Date(receivedAt), createdAt: new Date(receivedAt) }) });
     expect(s.prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ createdAt: { lt: new Date(receivedAt) } }) }));
+  });
+
+  describe('in a chat an agent has taken over', () => {
+    it('leaves the reply to the agent: no intent check, no status move, and the text goes into the paused AI chat', async () => {
+      const s = setup({ status: 'appointment_booked', dncStatus: false, takenOverById: 'agent-1' }, { ai: true, intent: 'not_interested' });
+      await s.receive('Can we move it to Friday?');
+      expect(s.intents.classify).not.toHaveBeenCalled();
+      expect(s.engine.setStatus).not.toHaveBeenCalled();
+      expect(s.lead.status).toBe('appointment_booked');
+      expect(s.conversations.appendToChat).toHaveBeenCalledWith('org-1', '+12899174129', 'user', 'Can we move it to Friday?', expect.any(Date));
+      expect(s.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'conversation.updated', leadId: 'lead-1' }));
+    });
+
+    it('still honours STOP', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false, takenOverById: 'agent-1' }, { ai: true });
+      await s.receive('STOP');
+      expect(s.prisma.lead.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dncStatus: true }) }));
+      expect(s.followup.stopForLead).toHaveBeenCalled();
+    });
+
+    it('pauses the AI again when a reply from it gets through', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false, takenOverById: 'agent-1' }, { ai: true });
+      await s.finalize('ai-msg-2');
+      expect(s.prisma.message.create).toHaveBeenCalledWith({ data: expect.objectContaining({ senderType: 'ai' }) });
+      expect(s.conversations.pauseAi).toHaveBeenCalledWith('org-1', '+12899174129', true);
+    });
   });
 
   it('lets a text the lead asked for know they texted again, and makes sure the AI has its tools in a chat', async () => {

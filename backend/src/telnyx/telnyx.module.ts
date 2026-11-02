@@ -14,6 +14,7 @@ import { LeadWatcherService } from './lead-watcher.service';
 import { NumbersService } from './numbers.service';
 import { AssistantController, LeadScoringController, PortalLeadsController, StrategyController } from './portal.controller';
 import { SmsService } from './sms.service';
+import { ChatTakeoverService } from './sms/chat-takeover.service';
 import { SmsConversationController } from './sms/sms-conversation.controller';
 import { SmsConversationService } from './sms/sms-conversation.service';
 import { SmsIntentService } from './sms/sms-intent.service';
@@ -62,6 +63,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     NumbersService,
     SmsService,
     SmsConversationService,
+    ChatTakeoverService,
     SmsIntentService,
     StrategyStoreService,
     VoiceService,
@@ -84,6 +86,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantService,
     AssistantToolAuth,
     SmsConversationService,
+    ChatTakeoverService,
   ],
 })
 export class TelnyxModule {}
