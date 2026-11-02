@@ -30,6 +30,8 @@ export const extractionSchema = z.object({
   bedrooms: maybe(z.number().int().min(0).max(20)),
   financing: maybe(z.enum(FINANCING)),
   motivation: maybe(z.string().max(1000)),
+  /** Answers to the org's custom qualification questions, keyed by question key. */
+  answers: maybe(z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]).nullable())),
 });
 export type Extraction = z.infer<typeof extractionSchema>;
 

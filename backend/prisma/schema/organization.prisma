@@ -43,6 +43,8 @@ model OrganizationSetting {
   maxConcurrentCalls    Int     @default(5) @map("max_concurrent_calls")
   outreachStrategy      Json?   @map("outreach_strategy")
   inCallBooking         Json?   @map("in_call_booking")
+  /// The qualification questions the AI asks this org's leads, on calls and in texts; NULL = the built-in defaults.
+  qualificationQuestions Json?  @map("qualification_questions")
   /// When set, the AI assistant answers a lead's texts (what was linked on Telnyx to do it).
   smsConversation       Json?   @map("sms_conversation")
   /// What an AI call leaves on an answering machine ({ enabled, message }); unset means the default message.

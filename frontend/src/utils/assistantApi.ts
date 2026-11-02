@@ -370,7 +370,15 @@ export const LEAD_VARIABLES: Array<{ name: string; example: string }> = [
   { name: 'motivation', example: 'relocating for work' },
   { name: 'brokerage', example: 'Austin Home Advisors' },
   { name: 'leadId', example: 'a3f1…' },
+  // The lead's memory across calls and texts (Qualification Questions).
+  { name: 'knownInfo', example: '- Budget: 450,000 to 600,000\n- Location: North Austin' },
+  { name: 'questionsToAsk', example: '1. House or condo?\n2. Are you working with an agent?' },
+  { name: 'nextQuestion', example: 'House or condo?' },
+  { name: 'conversationSummary', example: 'Prefers texts after 6pm. Deciding with their partner.' },
 ];
+
+/** Kept on the assistant by the server (Qualification Questions) and filled per lead; never edited by hand. */
+export const MANAGED_VARIABLES = new Set(['knownInfo', 'questionsToAsk', 'nextQuestion', 'conversationSummary']);
 
 // ---- Tone: stored as a managed directive line on the prompt ----
 export const TONE_DIRECTIVE: Record<string, string> = {

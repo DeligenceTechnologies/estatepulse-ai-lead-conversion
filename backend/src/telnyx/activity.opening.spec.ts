@@ -27,7 +27,7 @@ describe('ActivityService call opening', () => {
     const voicemail = {
       settings: vi.fn(async () => ({ enabled: opts.voicemail ?? true, message: 'Hi {{firstName}}, this is {{brokerage}}. Text us back!' })),
     };
-    const service = new ActivityService(prisma as any, creds as any, {} as any, assistants as any, {} as any, config as any, state as any, voicemail as any, {} as any);
+    const service = new ActivityService(prisma as any, creds as any, {} as any, assistants as any, {} as any, config as any, state as any, voicemail as any, {} as any, { get: vi.fn(async () => []) } as any);
     service.leadVariables = vi.fn(async () => ({ firstName: 'Ana', brokerage: 'Sunny Homes' }));
     return { service, prisma, state };
   };

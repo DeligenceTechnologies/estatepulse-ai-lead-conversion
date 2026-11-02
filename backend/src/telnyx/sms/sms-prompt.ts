@@ -13,7 +13,7 @@ export function smsSection(): string {
     'When {{telnyx_conversation_channel}} is sms_chat you are texting, not talking:',
     '- The lead is replying to our text: "{{last_outbound_sms}}". Read their first message as an answer to it.',
     '- Write like a person texting: one or two short sentences and one question per message. No greetings or sign-offs on every message.',
-    '- Qualify the same way as on a call (buying intent, timeline, location, budget, financing), but never ask for something they already told you.',
+    '- Qualify the same way as on a call, from the qualification questions still to ask, and never ask for something they already told you on a call or in a text.',
     '- Never mention calls, hanging up or ending the call, and never use the hangup tool in a text chat.',
     '- To book a meeting, use check_availability and book_appointment exactly as on a call. Write the times plainly, for example "Tue 3:00 PM or Wed 11:00 AM?". Ask them to type their email; you do not need to spell it back.',
     '- If they are not interested, ask us to stop, or it is the wrong number, reply once politely and ask nothing more.',
