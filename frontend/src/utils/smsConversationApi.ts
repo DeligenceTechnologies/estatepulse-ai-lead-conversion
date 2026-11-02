@@ -20,3 +20,16 @@ export const enableSmsConversation = () => apiFetch<SmsConversationStatus>('/sms
 
 export const disableSmsConversation = () =>
   apiFetch<SmsConversationStatus>('/sms-conversation/disable', { method: 'POST', auth: true });
+
+/** What is texted to a lead when an agent takes their chat over, so they know a person is answering now. */
+export interface TakeoverGreeting {
+  enabled: boolean;
+  message: string;
+  defaultMessage: string;
+}
+
+export const getTakeoverGreeting = () => apiFetch<TakeoverGreeting>('/sms-conversation/takeover-greeting', { auth: true });
+
+/** An empty message restores the default. */
+export const updateTakeoverGreeting = (patch: { enabled?: boolean; message?: string }) =>
+  apiFetch<TakeoverGreeting>('/sms-conversation/takeover-greeting', { method: 'PUT', body: patch, auth: true });

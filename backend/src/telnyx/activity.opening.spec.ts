@@ -119,6 +119,61 @@ describe('ActivityService call opening', () => {
     });
   });
 
+  describe('recording notice', () => {
+    const announced = { ...plan, record: true, announce: true, voice: 'Telnyx.Ultra.v1' };
+    const NOTICE = { name: 'speak', body: { payload: 'Just so you know, this call is recorded for quality and training.', voice: 'Telnyx.Ultra.v1' } };
+
+    it('is played first; the recording and then the assistant start only once it has been heard', async () => {
+      const { service } = make({ waitMs: 0 });
+      await (service as any).attach('cc-1', announced);
+      expect(actions).toEqual([NOTICE]);
+      await service.onSpeakEnded('cc-1', 'completed');
+      expect(names()).toEqual(['speak', 'record_start', 'ai_assistant_start']);
+      await service.onSpeakEnded('cc-1', 'completed');
+      expect(count('record_start')).toBe(1);
+    });
+
+    it('waits for a person like the assistant does: nothing plays or records before the verdict', async () => {
+      const { service } = make();
+      await (service as any).attach('cc-1', announced);
+      expect(names()).toEqual([]);
+      await service.onMachineDetection('cc-1', 'human_residence');
+      expect(names()).toEqual(['speak']);
+    });
+
+    it('a notice cut short is not followed by a recording, but the assistant still talks', async () => {
+      const { service } = make({ waitMs: 0 });
+      await (service as any).attach('cc-1', announced);
+      await service.onSpeakEnded('cc-1', 'call_hangup');
+      expect(names()).toEqual(['speak', 'ai_assistant_start']);
+    });
+
+    it('a lost speak-ended webhook does not hold the call: it goes on after the notice time', async () => {
+      const { service } = make({ waitMs: 0 });
+      await (service as any).attach('cc-1', announced);
+      vi.advanceTimersByTime(12_000);
+      await flush();
+      expect(names()).toEqual(['speak', 'record_start', 'ai_assistant_start']);
+    });
+
+    it('a machine found while the notice plays gets neither a recording nor the assistant', async () => {
+      const { service } = make();
+      await (service as any).attach('cc-1', announced);
+      vi.advanceTimersByTime(5000);
+      await flush();
+      await service.onMachineDetection('cc-1', 'machine');
+      await service.onSpeakEnded('cc-1', 'completed');
+      expect(count('record_start')).toBe(0);
+      expect(count('ai_assistant_start')).toBe(0);
+    });
+
+    it('without announcing, the call records from the pick-up', async () => {
+      const { service } = make({ waitMs: 0 });
+      await (service as any).attach('cc-1', { ...plan, record: true, announce: false });
+      expect(names()).toEqual(['record_start', 'ai_assistant_start']);
+    });
+  });
+
   describe('an answering machine', () => {
     it('never hears the assistant: the message is left after the beep, then the call ends', async () => {
       const { service, prisma, state } = make();

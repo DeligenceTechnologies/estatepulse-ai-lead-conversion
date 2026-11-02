@@ -10,6 +10,7 @@ import { AssistantToolAuth, toolRequest } from './assistant-tool-auth.service';
 import { CallToolsService } from './call-tools.service';
 import { CallbackService } from './callback.service';
 import { OutcomeService } from './outcome.service';
+import { TextBackService } from './text-back.service';
 
 const str = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : undefined);
 /** A whole number of minutes, as a number or a numeric string; anything else is no delay. */
@@ -27,6 +28,7 @@ export class CallOutcomeToolController {
     private readonly tools: CallToolsService,
     private readonly callbacks: CallbackService,
     private readonly outcomes: OutcomeService,
+    private readonly textBacks: TextBackService,
   ) {}
 
   @Post('callback')
@@ -34,6 +36,18 @@ export class CallOutcomeToolController {
   async callback(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
     const caller = await this.verify(req, body);
     return this.callbacks.schedule(caller, {
+      day: str(body?.day, 40),
+      time: str(body?.time, 10),
+      inMinutes: minutes(body?.in_minutes),
+      note: str(body?.note, 200),
+    });
+  }
+
+  @Post('text')
+  @HttpCode(HttpStatus.OK)
+  async text(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
+    const caller = await this.verify(req, body);
+    return this.textBacks.schedule(caller, {
       day: str(body?.day, 40),
       time: str(body?.time, 10),
       inMinutes: minutes(body?.in_minutes),
@@ -53,7 +67,7 @@ export class CallOutcomeToolController {
   }
 }
 
-/** Whether the AI may schedule callbacks and record outcomes, and the callback confirmation text. */
+/** Whether the AI may schedule callbacks and texts and record outcomes, and the texts it sends for them. */
 @Controller('call-tools')
 export class CallToolsSettingsController {
   constructor(private readonly tools: CallToolsService) {}

@@ -7,7 +7,7 @@ import { getVoicemail, updateVoicemail, type VoicemailStatus } from '../../utils
 /** Matches the server's limit: about 30 seconds spoken. */
 const MAX_CHARS = 500;
 
-const Switch: React.FC<{ id: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void; label: string }> = ({ id, on, disabled, onChange, label }) => (
+export const Switch: React.FC<{ id: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void; label: string }> = ({ id, on, disabled, onChange, label }) => (
   <button
     id={id}
     type="button"

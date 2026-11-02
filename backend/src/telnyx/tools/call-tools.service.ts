@@ -13,6 +13,7 @@ import {
   callToolDefinitions,
   callToolsSettings,
   DEFAULT_CONFIRM_MESSAGE,
+  DEFAULT_TEXT_BACK_MESSAGE,
   withCallToolsSection,
   withoutCallToolsSection,
   type CallToolsSettings,
@@ -22,6 +23,7 @@ import {
 
 export interface CallToolsStatus extends CallToolsSettings {
   defaultConfirmMessage: string;
+  defaultTextBackMessage: string;
   /** The tools are on the organization's current assistant, pointing at this server. */
   active: boolean;
   problem: string | null;
@@ -70,23 +72,26 @@ export class CallToolsService {
     const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId);
     const problem = !c?.apiKey || !c.assistantId ? 'Connect Telnyx and create your AI assistant first.' : null;
     const { telnyx: _telnyx, ...settings } = s;
-    return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, active: s.enabled && active, problem };
+    return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, defaultTextBackMessage: DEFAULT_TEXT_BACK_MESSAGE, active: s.enabled && active, problem };
   }
 
   /** Turning it on provisions the tools now, so a problem shows here rather than on the next call. */
   async update(orgId: string, patch: Partial<CallToolsSettings>): Promise<CallToolsStatus> {
     const current = await this.settings(orgId);
     const confirmMessage = patch.confirmMessage === undefined ? current.confirmMessage : patch.confirmMessage.trim() || DEFAULT_CONFIRM_MESSAGE;
-    const next: StoredCallTools = {
+    const textBackMessage = patch.textBackMessage === undefined ? current.textBackMessage : patch.textBackMessage.trim() || DEFAULT_TEXT_BACK_MESSAGE;
+    const next = this.stored({
       enabled: patch.enabled ?? current.enabled,
       confirmSms: patch.confirmSms ?? current.confirmSms,
-      ...(confirmMessage === DEFAULT_CONFIRM_MESSAGE ? {} : { confirmMessage }),
+      confirmMessage,
       retryMinutes: patch.retryMinutes ?? current.retryMinutes,
       retryAttempts: patch.retryAttempts ?? current.retryAttempts,
-    };
+      textBack: patch.textBack ?? current.textBack,
+      textBackMessage,
+    });
     await this.serial(orgId, async () => {
       await this.save(orgId, { ...next, telnyx: (await this.settings(orgId)).telnyx });
-      // Only switching the tools on or off touches Telnyx; the texts and the retry live here.
+      // Only switching the tools on or off touches Telnyx; the texts, the retry and the text-back switch live here.
       if (patch.enabled === undefined) return;
       this.ready.delete(orgId);
       if (next.enabled) await this.provision(orgId, true);
@@ -209,11 +214,16 @@ export class CallToolsService {
     if (t.secretId) await quiet(telnyx(apiKey, `/integration_secrets/${t.secretId}`, { method: 'DELETE' }));
   }
 
+  /** Every setting, so saving what was provisioned never resets the rest; a default message is not stored. */
   private stored(s: CallToolsSettings): StoredCallTools {
     return {
       enabled: s.enabled,
       confirmSms: s.confirmSms,
       ...(s.confirmMessage === DEFAULT_CONFIRM_MESSAGE ? {} : { confirmMessage: s.confirmMessage }),
+      retryMinutes: s.retryMinutes,
+      retryAttempts: s.retryAttempts,
+      textBack: s.textBack,
+      ...(s.textBackMessage === DEFAULT_TEXT_BACK_MESSAGE ? {} : { textBackMessage: s.textBackMessage }),
     };
   }
 

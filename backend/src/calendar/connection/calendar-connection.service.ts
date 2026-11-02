@@ -121,28 +121,32 @@ export class CalendarConnectionService implements OnModuleInit {
 
   // --- Calendly (OAuth) -------------------------------------------------------
 
-  /** The URL to send the person to, and the nonce the caller must keep in their browser's cookie. */
+  /**
+   * The URL to send the person to, and the nonce the caller must keep in their browser's cookie.
+   * The nonce doubles as the PKCE code verifier: its base64url sha256 is the S256 challenge.
+   */
   startCalendly(orgId: string, userId: string) {
     this.assertCanConnect('calendly');
     const nonce = randomBytes(32).toString('base64url');
+    const nonceHash = sha256(nonce);
     const state: CalendlyOAuthState = {
       orgId,
       userId,
       expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
-      nonceHash: sha256(nonce),
+      nonceHash,
     };
-    return { authorizeUrl: this.calendly.authorizeUrl(this.secrets.seal(JSON.stringify(state))), nonce };
+    return { authorizeUrl: this.calendly.authorizeUrl(this.secrets.seal(JSON.stringify(state)), nonceHash), nonce };
   }
 
   async completeCalendly(code: string, sealedState: string, nonce: string | undefined): Promise<void> {
     this.assertCanConnect('calendly');
-    const { orgId, userId } = this.readState(sealedState, nonce);
+    const { orgId, userId, codeVerifier } = this.readState(sealedState, nonce);
     // The person who started may have been removed from the organization since.
     const user = await this.prisma.user.findFirst({ where: { id: userId, orgId }, select: { id: true } });
     if (!user) {
       throw new ForbiddenException('You are no longer a member of this organization.');
     }
-    const grant = await this.callProvider(() => this.calendly.exchangeCode(code), CALENDLY_REJECTED);
+    const grant = await this.callProvider(() => this.calendly.exchangeCode(code, codeVerifier), CALENDLY_REJECTED);
 
     try {
       const [account, role] = await this.callProvider(
@@ -316,7 +320,7 @@ export class CalendarConnectionService implements OnModuleInit {
     return role;
   }
 
-  private readState(sealed: string, nonce: string | undefined): CalendlyOAuthState {
+  private readState(sealed: string, nonce: string | undefined): CalendlyOAuthState & { codeVerifier: string } {
     const state = this.access.unseal<CalendlyOAuthState>(sealed);
     if (!state?.orgId || !state.userId || typeof state.expiresAt !== 'number' || typeof state.nonceHash !== 'string') {
       throw new BadRequestException('This Calendly sign-in link is not valid. Start again from Settings.');
@@ -329,7 +333,7 @@ export class CalendarConnectionService implements OnModuleInit {
     if (!nonce || !safeEqual(sha256(nonce), state.nonceHash)) {
       throw new BadRequestException('Finish connecting Calendly in the same browser you started in. Start again from Settings.');
     }
-    return state;
+    return { ...state, codeVerifier: nonce };
   }
 
   /**

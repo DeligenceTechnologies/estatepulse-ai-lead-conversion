@@ -1,0 +1,117 @@
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
+import { PrismaService } from '@/common/prisma/prisma.service';
+import type { QueueEnv } from '@/common/utils/interface';
+import { nextAllowedAt } from '@/common/utils/quiet-hours';
+import { FollowupService } from '@/followup/followup.service';
+import { LeadStateService } from '@/lead/lead-state.service';
+import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
+import { TEXT_QUEUE, TextJob } from '@/queue/queue.constants';
+import { ActivityService } from '../activity.service';
+import { SmsService } from '../sms.service';
+import { SmsConversationService } from '../sms/sms-conversation.service';
+import { fillTemplate } from '../template';
+import { CallToolsService } from './call-tools.service';
+import { TEXT_BACK_BLOCKED, type TextBackJobData } from './text-back.service';
+
+/**
+ * Sends the text a lead asked for, at their time: the organization's message,
+ * added to the AI's text conversation so the lead's answer continues the chat.
+ * Runs on the instance that runs the call worker (CALL_WORKER_ENABLED).
+ */
+@Processor(TEXT_QUEUE, { autorun: false })
+export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap {
+  private readonly logger = new Logger(TextBackWorker.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService<QueueEnv, true>,
+    @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
+    private readonly state: LeadStateService,
+    private readonly tools: CallToolsService,
+    private readonly sms: SmsService,
+    private readonly activity: ActivityService,
+    private readonly conversations: SmsConversationService,
+  ) {
+    super();
+  }
+
+  onApplicationBootstrap(): void {
+    if (!this.config.get('CALL_WORKER_ENABLED', { infer: true })) {
+      this.logger.log('Text-back worker is off on this instance (CALL_WORKER_ENABLED=false)');
+      return;
+    }
+    void this.worker.run().catch((error) => this.logger.error(`Text-back worker stopped: ${(error as Error).message}`));
+    this.logger.log('Text-back worker started');
+  }
+
+  async process(job: Job<TextBackJobData>, token?: string): Promise<void> {
+    if (job.name !== TextJob.TextBack) throw new UnrecoverableError(`Unknown text job "${job.name}"`);
+    const { orgId, leadId, at } = job.data;
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+    });
+    if (!lead || lead.textBackAt?.toISOString() !== at) {
+      this.logger.log(`Text back for lead ${leadId} at ${at} dropped: it was moved or cancelled since`);
+      return;
+    }
+    const drop = async (reason: string) => {
+      await this.clear(leadId, at);
+      this.state.quietly({ orgId, leadId, type: 'text_back_dropped', source: 'text_back', channel: 'sms', reason });
+      this.logger.log(`Text back for lead ${leadId} dropped: ${reason}`);
+    };
+    if (lead.dncStatus) return drop('The lead opted out');
+    if (lead.automationPaused) return drop('Automation is paused for the lead');
+    if (TEXT_BACK_BLOCKED.includes(lead.status)) return drop(`The lead is ${lead.status}`);
+    if (!lead.phone) return drop('The lead has no phone number');
+    if (await hasUpcomingMeeting(this.prisma, orgId, leadId)) return drop('A meeting with the lead is on the calendar');
+
+    // The time was checked against quiet hours when it was set; a delay can still run into them.
+    const { timeZone, quiet } = await this.followup.guardrailsFor(orgId);
+    const allowed = nextAllowedAt(timeZone, quiet, new Date());
+    if (allowed.getTime() > Date.now()) {
+      await job.moveToDelayed(allowed.getTime(), token);
+      throw new DelayedError();
+    }
+
+    const { textBackMessage } = await this.tools.settings(orgId);
+    const text = fillTemplate(textBackMessage, await this.activity.leadVariables(orgId, leadId));
+    let sent: { id?: string };
+    try {
+      sent = await this.sms.sendSms(orgId, lead.phone, text);
+    } catch (error) {
+      const message = (error as Error).message;
+      // Tried again by the queue; only the last failure is recorded, and the promise is then given up.
+      if (job.attemptsMade + 1 < (job.opts.attempts ?? 1)) throw error;
+      await this.activity.recordSms(orgId, leadId, text, false, message);
+      return drop(`The text could not be sent: ${message}`);
+    }
+    // It went out: nothing below may throw, or the queue would send it twice. textBackAt stays as when it
+    // was due, so a sequence step after it still gives the lead time to answer.
+    try {
+      await this.activity.recordSms(orgId, leadId, text, true, sent.id);
+      await this.conversations.appendOurMessage(orgId, lead.phone, text).catch(() => undefined);
+      this.state.quietly({ orgId, leadId, type: 'text_back_sent', source: 'text_back', channel: 'sms', payload: { at } });
+    } catch (error) {
+      this.logger.warn(`text back for lead ${leadId} was sent, but recording it failed: ${(error as Error).message}`);
+    }
+  }
+
+  private clear(leadId: string, at: string) {
+    return this.prisma.lead.updateMany({ where: { id: leadId, textBackAt: new Date(at) }, data: { textBackAt: null } });
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<TextBackJobData> | undefined, error: Error): void {
+    if (!job || error instanceof DelayedError) return;
+    this.logger.error(`Text-back job ${job.id} for lead ${job.data.leadId} failed on attempt ${job.attemptsMade}: ${error.message}`);
+  }
+
+  @OnWorkerEvent('error')
+  onError(error: Error): void {
+    this.logger.error(`Text-back worker error: ${error.message}`);
+  }
+}

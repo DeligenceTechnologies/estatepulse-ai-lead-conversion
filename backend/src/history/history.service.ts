@@ -65,7 +65,7 @@ function withLeadOutcome(base: CallOutcome, leadStatus: LeadStatus | undefined, 
   return base;
 }
 
-const toMessageRow = (m: Message) => ({
+export const toMessageRow = (m: Message) => ({
   id: m.id,
   direction: m.direction,
   senderType: m.senderType,
@@ -166,6 +166,11 @@ export class HistoryService {
         last_at: Date;
         last_body: string;
         last_direction: string;
+        taken_over_by_id: string | null;
+        taken_over_at: Date | null;
+        taken_over_by_first: string | null;
+        taken_over_by_last: string | null;
+        taken_over_by_email: string | null;
       }[]
     >`
       SELECT m.lead_id, l.first_name, l.last_name, l.phone, l.temperature::text AS temperature, l.dnc_status,
@@ -174,13 +179,16 @@ export class HistoryService {
              min(m.created_at) AS first_at,
              max(m.created_at) AS last_at,
              (array_agg(m.body ORDER BY m.created_at DESC))[1] AS last_body,
-             (array_agg(m.direction::text ORDER BY m.created_at DESC))[1] AS last_direction
+             (array_agg(m.direction::text ORDER BY m.created_at DESC))[1] AS last_direction,
+             l.taken_over_by_id, l.taken_over_at,
+             t.first_name AS taken_over_by_first, t.last_name AS taken_over_by_last, t.email AS taken_over_by_email
         FROM messages m
         JOIN leads l ON l.id = m.lead_id AND l.organization_id = m.organization_id
+        LEFT JOIN users t ON t.id = l.taken_over_by_id
        WHERE m.organization_id = ${auth.organizationId}::uuid AND m.channel = 'sms'
              ${leadId ? Prisma.sql`AND m.lead_id = ${leadId}::uuid` : Prisma.empty}
              ${scoped}
-       GROUP BY m.lead_id, l.id
+       GROUP BY m.lead_id, l.id, t.id
        ORDER BY last_at DESC
        LIMIT ${Math.min(Math.max(limit, 1), 200)}`;
     return rows.map((r) => ({
@@ -197,6 +205,15 @@ export class HistoryService {
       lastMessageDirection: r.last_direction,
       hasInboundReply: r.has_inbound,
       dncStatus: r.dnc_status,
+      /** The agent texting the lead in place of the AI, if one took the chat over. */
+      takenOver:
+        r.taken_over_by_id && r.taken_over_at
+          ? {
+              byId: r.taken_over_by_id,
+              byName: fullName(r.taken_over_by_first, r.taken_over_by_last, r.taken_over_by_email ?? 'An agent'),
+              at: r.taken_over_at.toISOString(),
+            }
+          : null,
       createdAt: r.first_at.toISOString(),
     }));
   }

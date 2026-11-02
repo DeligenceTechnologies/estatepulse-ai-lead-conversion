@@ -7,11 +7,11 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
 import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
-import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES } from '@/lead/lead-status';
+import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
 import { ActivityService } from '../activity.service';
-import { VoiceService } from '../voice.service';
+import { VoiceService, WEBHOOK_UNREACHABLE } from '../voice.service';
 import { CallSlots } from './call-slots';
 import { DEFAULT_CALL_LIMIT, type CallIntent, type CallJobData } from './call.types';
 
@@ -22,6 +22,8 @@ const SLOT_WAIT_JITTER_MS = 5_000;
 const LIVE_CALL_WAIT_MS = 30_000;
 /** A call row older than this still marked live is a lost hangup, not a call in progress. */
 const LIVE_CALL_MAX_AGE_MS = 30 * 60_000;
+/** Our public webhook URL is down (tunnel or deploy): nothing was dialed, so the call waits this long and looks again. */
+export const WEBHOOK_WAIT_MS = 2 * 60_000;
 /** Telnyx or the network failing the dial (not the lead, not the number) is tried once more after this. */
 export const DIAL_RETRY_MS = 10 * 60_000;
 
@@ -79,7 +81,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true },
+      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true, textBackAt: true },
     });
     if (!lead || lead.dncStatus || lead.automationPaused || (callback ? CALLBACK_BLOCKED : OUTCOME_STATUSES).includes(lead.status)) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead can no longer be called`);
@@ -98,6 +100,8 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       this.logger.log(`Call for lead ${leadId} dropped: a meeting with the lead is on the calendar`);
       return;
     }
+    // A strategy or sequence call queued before the lead asked to be texted waits for that text; a callback they asked for does not.
+    if (!callback && textBackPending(lead)) return this.delay(job, textBackRecheckAt(lead), token);
     const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(orgId);
     if (callback) {
       const live = await this.prisma.call.count({
@@ -133,6 +137,10 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       if (isCapacityError(message)) {
         this.logger.warn(`Telnyx is at capacity for org ${orgId}; call for lead ${leadId} waits: ${message}`);
         return this.delay(job, Date.now() + SLOT_WAIT_MS * 6, token);
+      }
+      if (message.startsWith(WEBHOOK_UNREACHABLE)) {
+        this.logger.warn(`Call for lead ${leadId} waits ${WEBHOOK_WAIT_MS / 60_000} min, not dialed: ${message}`);
+        return this.delay(job, Date.now() + WEBHOOK_WAIT_MS, token);
       }
       if (isTransientDialError(message) && !job.data.dialRetried) {
         this.logger.warn(`Dial for lead ${leadId} failed on Telnyx's side; one retry in ${DIAL_RETRY_MS / 60_000} min: ${message}`);

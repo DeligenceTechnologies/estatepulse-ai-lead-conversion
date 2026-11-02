@@ -4,22 +4,27 @@ import {
   CALL_TOOLS_PROMPT_END,
   CALL_TOOLS_PROMPT_START,
   DEFAULT_CONFIRM_MESSAGE,
+  DEFAULT_TEXT_BACK_MESSAGE,
   callToolDefinitions,
+  callToolsSection,
   callToolsSettings,
   withCallToolsSection,
   withoutCallToolsSection,
 } from './call-tools';
 
 describe('call tools', () => {
-  it('are on by default, with the confirmation SMS, its default text and one retry 15 minutes after a miss', () => {
+  it('are on by default, with the confirmation SMS, one retry 15 minutes after a miss and texting the lead back', () => {
     expect(callToolsSettings(null)).toEqual({
       enabled: true,
       confirmSms: true,
       confirmMessage: DEFAULT_CONFIRM_MESSAGE,
       retryMinutes: 15,
       retryAttempts: 1,
+      textBack: true,
+      textBackMessage: DEFAULT_TEXT_BACK_MESSAGE,
       telnyx: null,
     });
+    expect(callToolsSettings({ textBack: false, textBackMessage: ' Hey {{firstName}} ' })).toMatchObject({ textBack: false, textBackMessage: 'Hey {{firstName}}' });
     expect(callToolsSettings({ enabled: false, confirmSms: false, confirmMessage: '  Hi  ' })).toMatchObject({ enabled: false, confirmSms: false, confirmMessage: 'Hi' });
   });
 
@@ -38,15 +43,24 @@ describe('call tools', () => {
   });
 
   it('identify the call or chat by Telnyx presets, never by the model', () => {
-    const [callback, outcome] = callToolDefinitions('https://api.example.com', 'ep_calltools_x');
+    const [callback, text, outcome] = callToolDefinitions('https://api.example.com', 'ep_calltools_x');
     expect(callback.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/callback');
+    expect(text.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/text');
+    expect(text.webhook.name).toBe('schedule_text');
     expect(outcome.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/record');
-    for (const tool of [callback, outcome]) {
+    for (const tool of [callback, text, outcome]) {
       expect(tool.webhook.preset_body_fields).toEqual({ lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}', end_user: '{{telnyx_end_user_target}}' });
       expect(Object.keys(tool.webhook.body_parameters.properties)).not.toContain('lead_id');
       expect(tool.webhook.headers[0].value).toContain('ep_calltools_x');
     }
     expect(outcome.webhook.body_parameters.properties.outcome?.enum).toEqual(['not_interested', 'do_not_contact', 'wrong_number']);
+  });
+
+  it('tell the AI a text later is schedule_text and a call later is schedule_callback', () => {
+    const section = callToolsSection();
+    expect(section).toContain('call schedule_text');
+    expect(section).toContain('Never promise a text without it');
+    expect(section).toContain('Never promise a callback without it');
   });
 
   it('fill a message template, dropping a placeholder with no value', () => {

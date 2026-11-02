@@ -197,6 +197,18 @@ describe('CallWorker', () => {
     });
   });
 
+  it('a strategy call queued before the lead asked to be texted waits until after that text', async () => {
+    const textBackAt = new Date(Date.now() + 10 * 60_000);
+    const { worker, job, voice } = setup({ lead: { phone: '+1', status: 'engaged', dncStatus: false, automationPaused: false, callbackAt: null, textBackAt } });
+    await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+    // It looks again within 5 minutes, in case the lead cancelled the text by texting first.
+    expect(job.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), 'tok');
+    const until = (job.moveToDelayed.mock.calls[0] as unknown[])[0] as number;
+    expect(until - Date.now()).toBeGreaterThan(4 * 60_000);
+    expect(until - Date.now()).toBeLessThanOrEqual(5 * 60_000);
+    expect(voice.placeCall).not.toHaveBeenCalled();
+  });
+
   it('drops the call when the lead opted out while it was queued', async () => {
     const { worker, job, voice, slots } = setup({ lead: { phone: '+1', status: 'contacting', dncStatus: true, automationPaused: false } });
     await worker.process(job as any, 'tok');
@@ -221,6 +233,16 @@ describe('CallWorker', () => {
     await worker.process(job as any, 'tok');
     expect(activity.recordCallFailed).toHaveBeenCalledWith(ORG, LEAD, d50, 'invalid_number');
     expect(activity.markInvalid).toHaveBeenCalledWith(LEAD, expect.stringContaining('D50'));
+  });
+
+  it('waits without dialing or recording a failure while our webhook URL is unreachable', async () => {
+    const down = () => Promise.reject(new Error('Webhook unreachable: https://x.trycloudflare.com answered 530'));
+    const { worker, job, slots, activity } = setup({ placeCall: down });
+    await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+    expect(slots.release).toHaveBeenCalledWith(ORG, 'job-1');
+    expect(job.moveToDelayed).toHaveBeenCalled();
+    expect(job.updateData).not.toHaveBeenCalled();
+    expect(activity.recordCallFailed).not.toHaveBeenCalled();
   });
 
   it('frees the slot and waits when Telnyx is at capacity', async () => {

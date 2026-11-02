@@ -229,6 +229,36 @@ describe('EngineService strategy', () => {
     });
   });
 
+  it('a text the lead asked for comes first: the call waits for it, then for the chat to go quiet after it', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // A minute in, "message me in 10 mins": the AI promised a text at minute 11.
+    await vi.advanceTimersByTimeAsync(1 * MIN);
+    s.text('inbound');
+    s.text('outbound');
+    Object.assign(s.lead, { textBackAt: new Date(Date.now() + 10 * MIN) });
+
+    // The call was due at minute 5; it is held for the text.
+    await vi.advanceTimersByTimeAsync(9 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.prisma.leadEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: 'step_held', reason: 'Waiting for the text the lead asked for' }),
+    });
+
+    // Minute 11: the text goes out and the hold is cleared.
+    await vi.advanceTimersByTimeAsync(1 * MIN);
+    s.text('outbound');
+    Object.assign(s.lead, { textBackAt: null });
+
+    // The step looks again at minute 13, and the chat rule then wants 5 quiet minutes after the text: minute 16.
+    await vi.advanceTimersByTimeAsync(4 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1 * MIN + 1_000);
+    expect(s.queue.enqueue).toHaveBeenCalledOnce();
+  });
+
   it('stops before the next step once the lead booked', async () => {
     const s = setup();
     await s.engine.enroll(ORG, LEAD);
