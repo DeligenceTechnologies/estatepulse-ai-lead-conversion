@@ -203,6 +203,11 @@ export class ThresholdsDto {
   @Min(1)
   @Max(100)
   warmThreshold!: number;
+
+  /** The office's points chart, a list of { key?, label, points }; left out, the saved one stays. Each line is checked in the service. */
+  @IsOptional()
+  @IsArray()
+  points?: unknown[];
 }
 
 export class TestToolDto {
@@ -299,4 +304,48 @@ export class UpdateTakeoverGreetingDto {
   @IsString()
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   message?: string;
+}
+
+export class QualificationQuestionDto {
+  @Transform(trim)
+  @Matches(/^[a-z][a-z0-9_]{0,39}$/, { message: 'Question keys use lowercase letters, digits and underscores, starting with a letter.' })
+  key!: string;
+
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  label!: string;
+
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(300)
+  question!: string;
+
+  @IsIn(['text', 'number', 'boolean', 'choice'])
+  type!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  options?: string[];
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+export class QualificationQuestionsDto {
+  @IsArray()
+  @ArrayMaxSize(36)
+  @ValidateNested({ each: true })
+  @Type(() => QualificationQuestionDto)
+  questions!: QualificationQuestionDto[];
+}
+
+export class QualificationAnswerDto {
+  @IsOptional()
+  value?: string | number | boolean | null;
 }

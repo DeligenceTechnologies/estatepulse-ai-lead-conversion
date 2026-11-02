@@ -8,9 +8,12 @@ import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
 import { AssistantService } from './assistant.service';
+import { RECORDING_NOTICE } from './recording-notice';
 import { CallSlots } from './calls/call-slots';
 import { CONVERSATION_MIN_SECS, type CallIntent } from './calls/call.types';
 import { LeadInsightsService } from './lead-insights.service';
+import { memoryVariables } from './qualification';
+import { QualificationQuestionsService } from './qualification-questions.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TELNYX_API } from './telnyx-api';
 import { fillTemplate } from './template';
@@ -22,6 +25,10 @@ interface AttachPlan {
   apiKey: string;
   assistantId: string | null;
   record: boolean;
+  /** The organization announces recording: the notice plays first, and the call records only after it. */
+  announce: boolean;
+  /** The voice the notice is spoken in (the assistant's own); null for the stock voice. */
+  voice?: string | null;
   variables: Record<string, string>;
   /** Replaces the assistant's own greeting (a callback the lead asked for). */
   greeting?: string;
@@ -47,6 +54,8 @@ const OPEN_CALL_STATUSES: CallStatus[] = [CallStatus.queued, CallStatus.ringing,
 const BEEP_WAIT_MAX_MS = 35_000;
 /** The longest a voicemail message may play before the call is hung up regardless. */
 const VOICEMAIL_PLAY_MAX_MS = 60_000;
+/** A lost "speak ended" webhook must not hold the assistant back: the call goes on after this. */
+const NOTICE_PLAY_MAX_MS = 12_000;
 /** For a voicemail when the assistant's own voice cannot be read or spoken. */
 const FALLBACK_TTS_VOICE = 'AWS.Polly.Joanna-Neural';
 
@@ -106,6 +115,8 @@ export class ActivityService {
   private readonly machines = new Map<string, MachineCall>();
   /** Calls whose machine greeting has ended, even before the verdict was handled. */
   private readonly greetingEnded = new Set<string>();
+  /** Calls playing the recording notice; the recording and the assistant start once it has played. */
+  private readonly notices = new Map<string, { plan: AttachPlan; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -117,6 +128,7 @@ export class ActivityService {
     private readonly state: LeadStateService,
     private readonly voicemail: VoicemailService,
     private readonly callTools: CallToolsService,
+    private readonly questions: QualificationQuestionsService,
   ) {}
 
   async recordSms(orgId: string, leadId: string, text: string, ok: boolean, providerIdOrReason?: string | null): Promise<void> {
@@ -351,15 +363,18 @@ export class ActivityService {
       const c = await this.creds.getCreds(orgId);
       if (!c?.apiKey) return null;
       const [settings, leadVars] = await Promise.all([
-        this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callRecordingEnabled: true } }),
+        this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callRecordingEnabled: true, callRecordingAnnounce: true } }),
         c.assistantId ? this.leadVariables(orgId, leadId) : Promise.resolve({} as Record<string, string>),
         c.assistantId ? this.assistants.ensureCallSetup(orgId) : Promise.resolve(),
         c.assistantId ? this.callTools.ensure(orgId) : Promise.resolve(),
       ]);
       if (c.assistantId) void this.insights.ensureProvisioned(orgId);
       const variables = intent.context ? { ...leadVars, call_context: intent.context } : leadVars;
-      const greeting = variables.callback_due === 'yes' ? await this.assistants.greetingFor(orgId, fillTemplate(CALLBACK_GREETING, variables)) : undefined;
-      return { apiKey: c.apiKey, assistantId: c.assistantId || null, record: settings?.callRecordingEnabled ?? true, variables, greeting };
+      const greeting = variables.callback_due === 'yes' ? fillTemplate(CALLBACK_GREETING, variables) : undefined;
+      const record = settings?.callRecordingEnabled ?? true;
+      const announce = record && (settings?.callRecordingAnnounce ?? true);
+      const voice = announce ? await this.assistants.voiceFor(orgId).catch(() => null) : null;
+      return { apiKey: c.apiKey, assistantId: c.assistantId || null, record, announce, voice, variables, greeting };
     })().catch((error) => {
       this.logger.error(`prepare attach ${ccid}: ${(error as Error).message}`);
       return null;
@@ -371,14 +386,15 @@ export class ActivityService {
 
   /** `detection`: the call was dialed with answering-machine detection, so a verdict is coming. */
   private async attach(ccid: string, p: AttachPlan, detection = true): Promise<void> {
-    if (p.record) await this.action(ccid, p.apiKey, 'record_start', { format: 'mp3', channels: 'dual', transcription: true });
-    if (!p.assistantId) return;
+    // Unannounced, the call records from the pick-up; announced, only once the lead has heard the notice.
+    if (p.record && !p.announce) await this.startRecording(ccid, p);
+    if (!p.assistantId) return p.announce ? this.open(ccid, p) : undefined;
     const verdict = this.verdicts.get(ccid);
     if (verdict && !PERSON_VERDICTS.has(verdict)) return;
     const waitMs = this.config.get('AI_OPENING_WAIT_MS', { infer: true });
     // Without detection there is nothing to wait for: the assistant starts on the pick-up, and the
     // call analysis tells a voicemail from a conversation afterwards.
-    if (verdict || !waitMs || !detection) return this.startAssistant(ccid, p);
+    if (verdict || !waitMs || !detection) return this.open(ccid, p);
     // The assistant, and with it the greeting, starts once Telnyx says a person
     // picked up (by then they have said "Hello?"), or when waitMs runs out
     // without a verdict. A machine never hears it.
@@ -409,6 +425,7 @@ export class ActivityService {
   }
 
   async onSpeakEnded(ccid: string, status: string | undefined): Promise<void> {
+    if (this.notices.has(ccid)) return this.afterNotice(ccid, status === 'completed');
     if (this.machines.get(ccid)?.stage === 'speaking') await this.endVoicemail(ccid, status === 'completed');
   }
 
@@ -418,7 +435,37 @@ export class ActivityService {
     if (!waiting) return;
     this.awaitingVerdict.delete(ccid);
     clearTimeout(waiting.timer);
-    await this.startAssistant(ccid, waiting.plan);
+    await this.open(ccid, waiting.plan);
+  }
+
+  /** A person is on the line: the recording notice plays first when the organization announces, else the assistant starts. */
+  private async open(ccid: string, p: AttachPlan): Promise<void> {
+    if (!p.announce) return p.assistantId ? this.startAssistant(ccid, p) : undefined;
+    const timer = setTimeout(() => void this.afterNotice(ccid, true), NOTICE_PLAY_MAX_MS);
+    timer.unref();
+    this.notices.set(ccid, { plan: p, timer });
+    let spoken = await this.action(ccid, p.apiKey, 'speak', { payload: RECORDING_NOTICE, voice: p.voice ?? FALLBACK_TTS_VOICE });
+    if (!spoken && p.voice) spoken = await this.action(ccid, p.apiKey, 'speak', { payload: RECORDING_NOTICE, voice: FALLBACK_TTS_VOICE });
+    if (!spoken) await this.afterNotice(ccid, false);
+  }
+
+  /**
+   * The notice is over: the recording starts only if it was heard in full (a lost webhook after an
+   * accepted speak counts as heard), then the assistant. Once per call.
+   */
+  private async afterNotice(ccid: string, heard: boolean): Promise<void> {
+    const notice = this.notices.get(ccid);
+    if (!notice) return;
+    this.notices.delete(ccid);
+    clearTimeout(notice.timer);
+    const p = notice.plan;
+    if (p.record && heard) await this.startRecording(ccid, p);
+    else if (p.record) this.logger.warn(`recording notice on ${ccid} was not played in full; the call is not recorded`);
+    if (p.assistantId) await this.startAssistant(ccid, p);
+  }
+
+  private startRecording(ccid: string, p: AttachPlan): Promise<boolean> {
+    return this.action(ccid, p.apiKey, 'record_start', { format: 'mp3', channels: 'dual', transcription: true });
   }
 
   private async startAssistant(ccid: string, p: AttachPlan): Promise<void> {
@@ -440,6 +487,12 @@ export class ActivityService {
     if (waiting) {
       clearTimeout(waiting.timer);
       this.awaitingVerdict.delete(ccid);
+    }
+    // A machine the wait mistook for a person, still hearing the notice: neither the recording nor the assistant follows.
+    const notice = this.notices.get(ccid);
+    if (notice) {
+      clearTimeout(notice.timer);
+      this.notices.delete(ccid);
     }
     const call = await this.callByProvider(ccid);
     if (!call || call.endedAt) return;
@@ -511,6 +564,9 @@ export class ActivityService {
     this.verdicts.delete(ccid);
     this.greetingEnded.delete(ccid);
     this.started.delete(ccid);
+    const notice = this.notices.get(ccid);
+    if (notice) clearTimeout(notice.timer);
+    this.notices.delete(ccid);
   }
 
   /** A Call Control command; false (logged) when Telnyx refused it or could not be reached. */
@@ -529,14 +585,14 @@ export class ActivityService {
     }
   }
 
-  /** The lead's details as the assistant's dynamic variables. */
   /**
    * The lead's details as the assistant's dynamic variables, on a call and in a
    * text chat. last_outbound_sms is the text a reply answers; recent_sms is the
-   * chat so far, only once the lead has texted back.
+   * chat so far, only once the lead has texted back. knownInfo, questionsToAsk
+   * and conversationSummary are the lead's memory across every call and chat.
    */
   async leadVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
-    const [lead, org, settings, texts] = await Promise.all([
+    const [lead, org, settings, texts, questions] = await Promise.all([
       this.prisma.lead.findFirst({ where: { id: leadId, orgId } }),
       this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),
       this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } }),
@@ -546,6 +602,7 @@ export class ActivityService {
         take: RECENT_SMS,
         select: { direction: true, body: true },
       }),
+      this.questions.get(orgId),
     ]);
     if (!lead) return {};
     const lastOutbound = texts.find((m) => m.direction === 'outbound')?.body ?? '';
@@ -585,6 +642,8 @@ export class ActivityService {
       // Why this call is being made, set per call by the step that placed it.
       call_context: '',
       callback_time: lead.callbackAt ? spoken(lead.callbackAt, settings?.timezone || 'UTC') : '',
+      ...memoryVariables(questions, lead),
+      conversationSummary: lead.memorySummary?.trim() || 'None yet.',
     };
   }
 }

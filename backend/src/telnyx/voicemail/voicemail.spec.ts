@@ -32,8 +32,10 @@ describe('answering-machine detection as an organization setting', () => {
       keyRejected: vi.fn(async () => undefined),
     };
     const voicemail = { settings: vi.fn(async () => ({ detect, enabled: true, message: 'hi' })) };
-    const voice = new VoiceService(creds as any, { get: vi.fn(() => '') } as any, voicemail as any);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const voice = new VoiceService(creds as any, { get: vi.fn(() => 'https://api.example.com') } as any, voicemail as any);
     await voice.placeCall('org-1', '+12895550100', { leadId: 'lead-1', orgId: 'org-1' });
+    vi.unstubAllGlobals();
     const body = JSON.parse(String((vi.mocked(telnyx).mock.calls[0][2] as any).body));
     return { body, state: callIntent(body.client_state) };
   };
@@ -67,7 +69,7 @@ describe('opening a call dialed without detection', () => {
   });
 
   it('starts the assistant at once: no verdict is coming to wait for', async () => {
-    const service = new ActivityService({} as any, {} as any, {} as any, {} as any, {} as any, { get: vi.fn(() => 5000) } as any, {} as any, {} as any, {} as any);
+    const service = new ActivityService({} as any, {} as any, {} as any, {} as any, {} as any, { get: vi.fn(() => 5000) } as any, {} as any, {} as any, {} as any, { get: vi.fn(async () => []) } as any);
     const plan = { apiKey: 'KEY', assistantId: 'assistant-1', record: false, variables: {} };
     await (service as any).attach('cc-1', plan, false);
     expect(actions).toEqual(['ai_assistant_start']);
@@ -85,8 +87,8 @@ describe("the assistant's own voicemail handling", () => {
       return { ok: true, status: 200, json: async () => ({ data: assistant }), text: async () => '' };
     }));
     const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', assistantId: 'assistant-1' })) };
-    await new AssistantService(creds as any, {} as any, {} as any).ensureCallSetup('org-1');
-    const patch = calls.find((c) => c.method === 'PATCH');
+    await new AssistantService(creds as any, {} as any, {} as any, { get: vi.fn(async () => []) } as any).ensureCallSetup('org-1');
+    const patch = calls.find((c) => c.method === 'PATCH' && c.body.telephony_settings);
     expect(patch?.body.telephony_settings).toEqual({ time_limit_secs: 1800, voicemail_detection: null });
   });
 });

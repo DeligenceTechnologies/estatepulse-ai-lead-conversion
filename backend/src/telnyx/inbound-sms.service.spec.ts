@@ -35,6 +35,7 @@ function setup(start: { status: string; dncStatus: boolean; takenOverById?: stri
   const textBacks = { onLeadTexted: vi.fn(async () => undefined) };
   const callTools = { ensure: vi.fn(async () => undefined) };
   const bus = { publish: vi.fn() };
+  const memory = { onLeadText: vi.fn() };
   const service = new InboundSmsService(
     prisma as any,
     creds as any,
@@ -46,6 +47,7 @@ function setup(start: { status: string; dncStatus: boolean; takenOverById?: stri
     textBacks as any,
     callTools as any,
     bus as any,
+    memory as any,
   );
   const receive = (text: string) =>
     service.onMessageReceived({ id: 'm-1', text, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
@@ -53,7 +55,7 @@ function setup(start: { status: string; dncStatus: boolean; takenOverById?: stri
   const optedIn = () => prisma.lead.update.mock.calls.some((c: any[]) => c[0]?.data?.consentStatus === 'granted');
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
     service.onMessageFinalized('org-1', { id, text, from: { phone_number: '+17427245092' }, to: [{ phone_number: '+12899174129', status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools, conversations, bus };
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools, conversations, bus, memory };
 }
 
 describe('InboundSmsService', () => {
@@ -173,6 +175,8 @@ describe('InboundSmsService', () => {
       expect(s.engine.setStatus).not.toHaveBeenCalled();
       expect(s.lead.status).toBe('appointment_booked');
       expect(s.conversations.appendToChat).toHaveBeenCalledWith('org-1', '+12899174129', 'user', 'Can we move it to Friday?', expect.any(Date));
+      // The agent answers, and the lead memory still learns what the lead said.
+      expect(s.memory.onLeadText).toHaveBeenCalledWith('org-1', 'lead-1');
       expect(s.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'conversation.updated', leadId: 'lead-1' }));
     });
 
@@ -196,5 +200,22 @@ describe('InboundSmsService', () => {
     await s.receive('ok I am free now');
     expect(s.textBacks.onLeadTexted).toHaveBeenCalledWith('org-1', 'lead-1');
     expect(s.callTools.ensure).toHaveBeenCalledWith('org-1');
+  });
+
+  it("remembers what the lead texts, whoever answers it", async () => {
+    for (const ai of [true, false]) {
+      const s = setup({ status: 'contacting', dncStatus: false }, { ai });
+      await s.receive('A flat in Noida please');
+      expect(s.memory.onLeadText).toHaveBeenCalledWith('org-1', 'lead-1');
+    }
+  });
+
+  it('does not read a STOP or a START into the lead memory', async () => {
+    const stop = setup({ status: 'contacting', dncStatus: false });
+    await stop.receive('STOP');
+    const start = setup({ status: 'not_interested', dncStatus: true });
+    await start.receive('START');
+    expect(stop.memory.onLeadText).not.toHaveBeenCalled();
+    expect(start.memory.onLeadText).not.toHaveBeenCalled();
   });
 });
