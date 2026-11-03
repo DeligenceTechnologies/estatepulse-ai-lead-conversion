@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ConnectFormPanel } from './ConnectFormPanel';
 
 /**
@@ -37,9 +38,11 @@ export const ConnectModal: React.FC<{
     };
   }, [onClose]);
 
-  return (
+  // Into document.body, so the overlay covers the screen and not just the card
+  // it was opened from.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div
@@ -49,6 +52,7 @@ export const ConnectModal: React.FC<{
       >
         <ConnectFormPanel provider={provider} onClose={onClose} onConnected={onConnected} onOpenSource={onOpenSource} onSetUpManually={onManual} />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
