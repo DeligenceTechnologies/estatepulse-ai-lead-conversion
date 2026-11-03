@@ -24,7 +24,7 @@ interface CallRow {
 
 function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
   // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way of the step timing under test.
-  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', timezone: 'UTC', status: 'new', dncStatus: false, automationPaused: false };
+  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
   const since = (where: { createdAt?: { gte: Date } }) => calls.filter((c) => !where.createdAt || c.createdAt >= where.createdAt.gte);

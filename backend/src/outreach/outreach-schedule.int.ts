@@ -231,6 +231,9 @@ describe('launch choice made at upload', () => {
     const done = await files.commit(o.who, file, preview.mapping.columns, randomUUID(), null, [2, 3], false, { mode: 'scheduled', ...wall(start) });
     expect(done.approval).toMatchObject({ approved: 2, outreach: { mode: 'scheduled', startAt: start.toISOString(), queued: 2 } });
     expect(done.review.pending).toBe(1);
+    // The upload carries no time zone column, so these leads would be read off their +1 415 numbers —
+    // night in California for most of the day here. Release is measured on the lead's clock, so pin them.
+    await prisma.lead.updateMany({ where: { orgId: o.orgId }, data: { timezone: LEAD_ZONE } });
     await runner.tick(new Date());
     expect(await prisma.lead.count({ where: { orgId: o.orgId, automationPaused: false } })).toBe(0);
     await runner.tick(new Date(start.getTime() + 1000));
@@ -451,7 +454,7 @@ describe('batch progress', () => {
 describe('leads list', () => {
   it('says where each lead stands with outreach: scheduled, waiting, released, skipped, paused', async () => {
     const o = await setupOrg({ max: 2, reserved: 1 });
-    const leads = new LeadsController(prisma, {} as never, {} as never);
+    const leads = new LeadsController(prisma, {} as never, {} as never, {} as never);
     const later = await imported(o, 1);
     const start = ahead(HOUR);
     await reviewsOn.approve(o.who, later.rowIds, { mode: 'scheduled', ...wall(start) });

@@ -155,7 +155,7 @@ describe('FollowupRunner last step', () => {
 
   it('does not close out a lead who replied during the wait', async () => {
     const s = setup([smsStep('one')], 2);
-    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+1', status: 'contacting', dncStatus: false, automationPaused: true });
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+1', timezone: 'UTC', status: 'contacting', dncStatus: false, automationPaused: true });
     await s.execute();
     expect(s.tx.lead.updateMany).not.toHaveBeenCalled();
     expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'paused' }) }));
