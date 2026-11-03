@@ -205,6 +205,7 @@ const SKIP_TEXT: Record<string, string> = {
   STATUS_CHANGED: 'already being worked',
   NO_DIALABLE_PHONE: 'no dialable phone',
   ALREADY_RELEASED: 'already in outreach',
+  AGENT_TAKEOVER: 'an agent is texting them',
 };
 
 /** The line under a lead's status that says where it stands with outreach, or null. */

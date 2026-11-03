@@ -6,9 +6,16 @@ export type Timeline = (typeof TIMELINES)[number];
 export const FINANCING = ['pre_approved', 'cash', 'needs_financing', 'unknown'] as const;
 export type Financing = (typeof FINANCING)[number];
 
+export const TEMPERATURES = ['hot', 'warm', 'cold'] as const;
+export type Temperature = (typeof TEMPERATURES)[number];
+
 const maybe = <T extends z.ZodTypeAny>(t: T) => t.nullable().optional();
 
 export const extractionSchema = z.object({
+  /** Absent from analyses made before it was asked: the call then counts as its disposition says. */
+  reached_person: maybe(z.boolean()),
+  /** Absent from analyses made before it was asked: "not interested" alone never sets do-not-contact. */
+  do_not_contact: maybe(z.boolean()),
   timeline: z.enum(TIMELINES),
   budget_identified: z.boolean(),
   location_identified: z.boolean(),
@@ -26,6 +33,12 @@ export const extractionSchema = z.object({
   bedrooms: maybe(z.number().int().min(0).max(20)),
   financing: maybe(z.enum(FINANCING)),
   motivation: maybe(z.string().max(1000)),
+  /** The assistant's own verdict. Absent from analyses made before it was asked to score: the rules score those. */
+  lead_score: maybe(z.number().min(0).max(100)),
+  lead_temperature: maybe(z.enum(TEMPERATURES)),
+  score_reasons: maybe(z.string().max(1000)),
+  /** Answers to the org's custom qualification questions, keyed by question key. */
+  answers: maybe(z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]).nullable())),
 });
 export type Extraction = z.infer<typeof extractionSchema>;
 
@@ -33,6 +46,8 @@ export const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: [
+    'reached_person',
+    'do_not_contact',
     'timeline',
     'budget_identified',
     'location_identified',
@@ -50,8 +65,23 @@ export const EXTRACTION_JSON_SCHEMA = {
     'bedrooms',
     'financing',
     'motivation',
+    'lead_score',
+    'lead_temperature',
+    'score_reasons',
   ],
   properties: {
+    reached_person: {
+      type: 'boolean',
+      description:
+        'A real person answered and spoke with the assistant. False for voicemail, an answering machine, ' +
+        'an automated phone menu, or a call where only the assistant spoke.',
+    },
+    do_not_contact: {
+      type: 'boolean',
+      description:
+        'The caller asked not to be called, texted or contacted again (for example "stop calling me", "take me off your list"). ' +
+        'Saying they are not interested is not enough.',
+    },
     timeline: {
       type: 'string',
       enum: [...TIMELINES],
@@ -70,7 +100,7 @@ export const EXTRACTION_JSON_SCHEMA = {
       type: 'boolean',
       description: 'The caller answered questions willingly and in substance, not with one-word or evasive replies.',
     },
-    not_interested: { type: 'boolean', description: 'The caller said they are not interested or asked not to be contacted.' },
+    not_interested: { type: 'boolean', description: 'The caller said they are not interested in buying or in our help.' },
     invalid_lead: {
       type: 'boolean',
       description: 'Wrong number, spam, a test, or the person never enquired about buying a home.',
@@ -107,6 +137,22 @@ export const EXTRACTION_JSON_SCHEMA = {
         'The reason the caller gave for moving, in a few words of their own (e.g. "relocating for work", "growing family"). ' +
         'null if they did not say why. Not a description of how engaged they were.',
     },
+    lead_score: {
+      type: 'integer',
+      description: 'Your score for this lead, 0 to 100, by the scoring rules in the instructions.',
+    },
+    lead_temperature: {
+      type: 'string',
+      enum: [...TEMPERATURES],
+      description:
+        'hot, warm or cold, from lead_score and the thresholds in the instructions. ' +
+        'A caller who asked to speak with a person is hot whatever the score, unless the lead is invalid.',
+    },
+    score_reasons: {
+      type: 'string',
+      description:
+        'Every reason behind the score with its points, separated by "; " (e.g. "Buying within 30 days +25; Budget identified +10; Not interested -30").',
+    },
   },
 } as const;
 
@@ -115,16 +161,76 @@ export const EXTRACTION_INSTRUCTIONS =
   'Answer every field strictly from what the CALLER said. Do not guess: if something was not said, answer false, ' +
   'or "unknown" for the timeline. The assistant’s own questions are not answers.';
 
-export const POINTS = {
-  timeline: { within_30_days: 25, '1_3_months': 20, '3_6_months': 10, over_6_months: 0, unknown: 0 } as Record<Timeline, number>,
-  budget_identified: 10,
-  location_identified: 10,
-  pre_approved: 15,
-  appointment_requested: 20,
-  high_engagement: 10,
-  not_interested: -30,
-  invalid_lead: -100,
-} as const;
+/**
+ * What the analysis is told after the extraction instructions: score and rate
+ * the lead itself. The chart is a guide for its judgement (partial or mixed
+ * answers included), and the office's own thresholds draw the lines, so the
+ * Insight is written again whenever either changes.
+ */
+export function scoringInstructions({ thresholds: t, points }: ScoringSettings): string {
+  const s = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  const chart = points.map((c) => `${c.label} ${s(c.points)}`).join('; ');
+  return (
+    `Then score the lead yourself as lead_score, 0 to 100, weighing what the caller said by these points ` +
+    `and using your judgement for partial or mixed answers: ${chart}. ` +
+    `Set lead_temperature to hot at ${t.hot} or above, warm at ${t.warm} or above, otherwise cold; ` +
+    'a caller who asked to speak with a person is hot unless the lead is invalid. ' +
+    'List every reason behind the score, with its points, in score_reasons.'
+  );
+}
+
+/** The things the analysis records as fields, which the rules fallback can score; a timeline the caller never gave moves nothing. */
+export const POINT_KEYS = [
+  'within_30_days',
+  '1_3_months',
+  '3_6_months',
+  'over_6_months',
+  'budget_identified',
+  'location_identified',
+  'pre_approved',
+  'appointment_requested',
+  'high_engagement',
+  'not_interested',
+  'invalid_lead',
+] as const;
+export type PointKey = (typeof POINT_KEYS)[number];
+
+export const MAX_CRITERIA = 20;
+export const MAX_CRITERION_LABEL = 80;
+/**
+ * One line of the office's chart. A built-in line carries the field it reads
+ * as `key`; a line the office added has only its label, which the assistant
+ * reads and weighs like any other (the rules fallback cannot see it).
+ */
+const criterionSchema = z
+  .object({
+    key: z.enum(POINT_KEYS).optional(),
+    label: z.string().trim().min(1).max(MAX_CRITERION_LABEL),
+    points: z.number().int().min(-100).max(100),
+  })
+  .strict();
+export type Criterion = z.infer<typeof criterionSchema>;
+export const CRITERIA_RULE = `Each criterion needs a label of up to ${MAX_CRITERION_LABEL} characters and a whole number of points from -100 to 100, at most ${MAX_CRITERIA} criteria with no built-in one twice`;
+/** The office's own chart: one to MAX_CRITERIA lines, each built-in field at most once. */
+export const pointsSchema = z
+  .array(criterionSchema)
+  .min(1)
+  .max(MAX_CRITERIA)
+  .refine((list) => new Set(list.map((c) => c.key).filter(Boolean)).size === list.filter((c) => c.key).length, CRITERIA_RULE);
+
+export const DEFAULT_POINTS: Criterion[] = [
+  { key: 'within_30_days', label: 'Buying within 30 days', points: 25 },
+  { key: '1_3_months', label: 'Buying within 1–3 months', points: 20 },
+  { key: '3_6_months', label: 'Buying within 3–6 months', points: 10 },
+  { key: 'over_6_months', label: 'Buying in over 6 months', points: 0 },
+  { key: 'budget_identified', label: 'Budget identified', points: 10 },
+  { key: 'location_identified', label: 'Location identified', points: 10 },
+  { key: 'pre_approved', label: 'Pre-approved or cash buyer', points: 15 },
+  { key: 'appointment_requested', label: 'Appointment requested', points: 20 },
+  { key: 'high_engagement', label: 'High engagement', points: 10 },
+  { key: 'not_interested', label: 'Not interested', points: -30 },
+  { key: 'invalid_lead', label: 'Invalid lead (wrong number, spam)', points: -100 },
+];
 
 export const DEFAULT_THRESHOLDS = { hot: 75, warm: 45 } as const;
 export interface Thresholds {
@@ -132,7 +238,20 @@ export interface Thresholds {
   warm: number;
 }
 
-export type Temperature = 'hot' | 'warm' | 'cold';
+/** How the office scores: its points chart and where hot and warm begin. */
+export interface ScoringSettings {
+  thresholds: Thresholds;
+  points: Criterion[];
+}
+
+/** The settings as org_settings holds them: no row, or no (valid) chart, means the defaults. */
+export function scoringSettingsFrom(row: { leadHotThreshold: number; leadWarmThreshold: number; leadScorePoints: unknown } | null): ScoringSettings {
+  const points = pointsSchema.safeParse(row?.leadScorePoints);
+  return {
+    thresholds: { hot: row?.leadHotThreshold ?? DEFAULT_THRESHOLDS.hot, warm: row?.leadWarmThreshold ?? DEFAULT_THRESHOLDS.warm },
+    points: points.success ? points.data : DEFAULT_POINTS,
+  };
+}
 
 export interface ScoreReason {
   label: string;
@@ -146,28 +265,15 @@ export interface ScoreResult {
   override: string | null;
 }
 
-const TIMELINE_LABEL: Record<Timeline, string> = {
-  within_30_days: 'Buying within 30 days',
-  '1_3_months': 'Buying within 1–3 months',
-  '3_6_months': 'Buying within 3–6 months',
-  over_6_months: 'Buying in over 6 months',
-  unknown: 'Timeline unknown',
-};
+const TIMELINE_KEYS = new Set<string>(TIMELINES);
+/** Whether the analysis recorded what a built-in criterion is about. */
+const met = (x: Extraction, key: PointKey): boolean => (TIMELINE_KEYS.has(key) ? x.timeline === key : x[key as Exclude<PointKey, Timeline>]);
 
-export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS): ScoreResult {
-  const reasons: ScoreReason[] = [];
-  const add = (label: string, points: number) => {
-    if (points !== 0) reasons.push({ label, points });
-  };
-
-  add(TIMELINE_LABEL[x.timeline], POINTS.timeline[x.timeline]);
-  if (x.budget_identified) add('Budget identified', POINTS.budget_identified);
-  if (x.location_identified) add('Location identified', POINTS.location_identified);
-  if (x.pre_approved) add('Pre-approved', POINTS.pre_approved);
-  if (x.appointment_requested) add('Appointment requested', POINTS.appointment_requested);
-  if (x.high_engagement) add('High engagement', POINTS.high_engagement);
-  if (x.not_interested) add('Not interested', POINTS.not_interested);
-  if (x.invalid_lead) add('Invalid lead', POINTS.invalid_lead);
+/** The rules fallback: the built-in lines of the chart the analysis recorded, added up. Lines the office added are the assistant's alone. */
+export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS, chart: Criterion[] = DEFAULT_POINTS): ScoreResult {
+  const reasons: ScoreReason[] = chart
+    .filter((c) => c.key && c.points !== 0 && met(x, c.key))
+    .map(({ label, points }) => ({ label, points }));
 
   const raw = reasons.reduce((sum, r) => sum + r.points, 0);
   const score = Math.max(0, Math.min(100, raw));
@@ -180,6 +286,33 @@ export function scoreLead(x: Extraction, t: Thresholds = DEFAULT_THRESHOLDS): Sc
     override = 'Asked to speak with a person — routed as hot';
   }
 
+  return { score, temperature, reasons, override };
+}
+
+/**
+ * The assistant's own verdict, when the analysis carries one: its score and
+ * temperature as given and each reason it listed. A rating that crosses the
+ * office's lines is kept but said so, and a caller who asked for a person is
+ * hot whoever scores. Null for an analysis made before the assistant was asked
+ * to score, which the rules score instead.
+ */
+export function assistantScore(x: Extraction, t: Thresholds): ScoreResult | null {
+  if (x.lead_score == null || !x.lead_temperature) return null;
+  const score = Math.round(Math.max(0, Math.min(100, x.lead_score)));
+  const reasons: ScoreReason[] = (x.score_reasons ?? '')
+    .split(/;|\n/)
+    .map((label) => label.trim())
+    .filter(Boolean)
+    .map((label) => ({ label, points: 0 }));
+
+  let temperature: Temperature = x.lead_temperature;
+  let override: string | null = null;
+  const byThresholds: Temperature = score >= t.hot ? 'hot' : score >= t.warm ? 'warm' : 'cold';
+  if (temperature !== byThresholds) override = `The assistant rated this lead ${temperature} at ${score}, which reads ${byThresholds} by your thresholds`;
+  if (x.human_requested && !x.invalid_lead && temperature !== 'hot') {
+    temperature = 'hot';
+    override = 'Asked to speak with a person — routed as hot';
+  }
   return { score, temperature, reasons, override };
 }
 
@@ -247,15 +380,3 @@ export function parseExtraction(raw: unknown): Extraction | null {
   const parsed = extractionSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
-
-export const thresholdsSchema = z
-  .object({
-    hotThreshold: z.number().int().min(1).max(100),
-    warmThreshold: z.number().int().min(1).max(100),
-  })
-  .strict()
-  .refine((v) => v.warmThreshold < v.hotThreshold, {
-    message: 'The warm threshold must be lower than the hot threshold',
-    path: ['warmThreshold'],
-  });
-export type ThresholdsInput = z.infer<typeof thresholdsSchema>;

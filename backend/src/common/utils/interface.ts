@@ -90,6 +90,7 @@ export interface IntegrationEnv {
 
 export interface QueueEnv {
   REDIS_URL: string;
+  QUEUE_PREFIX: string;
   EMAIL_WORKER_ENABLED: boolean;
   EMAIL_WORKER_CONCURRENCY: number;
   CALL_WORKER_ENABLED: boolean;

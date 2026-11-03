@@ -1,4 +1,7 @@
 import { apiFetch } from '../lib/api';
+import type { ConversationRow, MessageRow } from './historyApi';
+
+export type { ConversationRow, MessageRow };
 
 /**
  * The signed-in agent's own view of their work.
@@ -53,6 +56,36 @@ export const getMyLeads = (): Promise<AgentLead[]> =>
 
 export const getMyLead = (leadId: string): Promise<AgentLeadDetail> =>
   apiFetch<AgentLeadDetail>(`/agents/me/leads/${leadId}`, { auth: true });
+
+/**
+ * SMS threads of the leads assigned to this agent, the AI's chat included,
+ * newest first. A lead appears once it is assigned to them and is gone the
+ * moment it is reassigned.
+ */
+export const getMyConversations = (limit?: number): Promise<ConversationRow[]> =>
+  apiFetch<ConversationRow[]>(`/agents/me/conversations${limit ? `?limit=${limit}` : ''}`, { auth: true });
+
+/** The full thread of one of this agent's leads; any other lead answers not found. */
+export const getMyLeadMessages = (leadId: string): Promise<MessageRow[]> =>
+  apiFetch<MessageRow[]>(`/agents/me/leads/${leadId}/messages`, { auth: true });
+
+export interface TakeoverState {
+  leadId: string;
+  takenOverById: string | null;
+  takenOverAt: string | null;
+}
+
+/** Takes over the lead's text chat: the AI stops answering them and no automated call or text reaches them. */
+export const takeOverChat = (leadId: string): Promise<TakeoverState> =>
+  apiFetch<TakeoverState>(`/agents/me/leads/${leadId}/takeover`, { method: 'POST', auth: true });
+
+/** Hands the chat back: the AI answers the lead's texts again; automated outreach stays stopped. */
+export const handBackChat = (leadId: string): Promise<TakeoverState> =>
+  apiFetch<TakeoverState>(`/agents/me/leads/${leadId}/takeover`, { method: 'DELETE', auth: true });
+
+/** Texts the lead while this agent holds the chat. Reuse `id` on a retry: the server sends a given id once. */
+export const sendChatMessage = (leadId: string, id: string, body: string): Promise<MessageRow> =>
+  apiFetch<MessageRow>(`/agents/me/leads/${leadId}/messages`, { method: 'POST', body: { id, body }, auth: true });
 
 /** "Ada Lovelace", or the email, or a dash — never a fabricated placeholder. */
 export const leadName = (l: AgentLead): string => {

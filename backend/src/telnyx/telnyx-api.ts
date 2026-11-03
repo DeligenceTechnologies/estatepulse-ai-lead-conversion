@@ -22,5 +22,7 @@ export async function telnyx<T = any>(apiKey: string, path: string, init: Reques
     const detail = (await res.text()).slice(0, 300);
     throw new AppError('UPSTREAM_ERROR', `Telnyx ${init.method ?? 'GET'} ${path.split('?')[0]} failed ${res.status}: ${detail}`);
   }
-  return (res.status === 204 ? {} : await res.json()) as T;
+  // Some writes (adding a message to a conversation) answer 200 with no body.
+  const body = res.status === 204 ? '' : await res.text();
+  return (body ? JSON.parse(body) : {}) as T;
 }

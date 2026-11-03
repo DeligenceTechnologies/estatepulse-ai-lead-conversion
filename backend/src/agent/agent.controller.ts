@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { BaseStatus, CalendarMeetingStatus, LeadStatus, Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -8,11 +8,15 @@ import { inUse } from '@/calendar/connection/connection-state';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { DEFAULT_WORKING_HOURS, toWorkingHoursJson, type WorkingDay } from '@/common/utils/working-hours';
+import { ConversationsQuery } from '@/history/dto/history.query';
+import { HistoryService } from '@/history/history.service';
 import { INACTIVE_STATUSES } from '@/lead/lead-status';
 import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { ChatTakeoverService } from '@/telnyx/sms/chat-takeover.service';
 import { PutAvailabilityDto } from './dto/availability.dto';
+import { SendChatMessageDto } from './dto/chat-message.dto';
 
 const AGENT_LEAD_FIELDS = {
   id: true,
@@ -42,12 +46,14 @@ const toAgentLead = (l: AgentLeadRow) => ({
   assignedAt: l.assignedAt,
 });
 
-/** Who leads can go to, and an agent's own leads, hours, calendar and appointments. */
+/** Who leads can go to, and an agent's own leads, conversations, hours, calendar and appointments. */
 @Controller('agents')
 export class AgentController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly appointments: AppointmentsService,
+    private readonly history: HistoryService,
+    private readonly chats: ChatTakeoverService,
   ) {}
 
   @Get()
@@ -166,6 +172,41 @@ export class AgentController {
       consentStatus: lead.consentStatus,
       dncStatus: lead.dncStatus,
     };
+  }
+
+  /**
+   * The SMS threads of the leads assigned to this agent right now, the AI's
+   * chat included: a lead shows up once it is assigned to them and is gone the
+   * moment it is reassigned. Scoped to the agent even for someone who may read
+   * every lead; the office-wide list is /v1/conversations.
+   */
+  @Get('me/conversations')
+  conversations(@CurrentAuth() auth: AuthContext, @Query() query: ConversationsQuery) {
+    return this.history.listConversations(auth, query.limit, query.leadId, 'mine');
+  }
+
+  /** One thread, in full, of a lead assigned to this agent; any other lead is not found. */
+  @Get('me/leads/:leadId/messages')
+  messages(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.history.listMessages(auth, leadId, 'mine');
+  }
+
+  /** Takes over the lead's text chat: the AI stops answering them and no automated call or text reaches them. */
+  @Post('me/leads/:leadId/takeover')
+  takeOver(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.chats.takeOver(auth, leadId);
+  }
+
+  /** Hands the chat back: the AI answers the lead's texts again; automated outreach stays stopped. */
+  @Delete('me/leads/:leadId/takeover')
+  handBack(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.chats.handBack(auth, leadId);
+  }
+
+  /** Texts the lead, while this agent holds the chat. */
+  @Post('me/leads/:leadId/messages')
+  sendMessage(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string, @Body() body: SendChatMessageDto) {
+    return this.chats.send(auth, leadId, body);
   }
 
   @Get('me/availability')

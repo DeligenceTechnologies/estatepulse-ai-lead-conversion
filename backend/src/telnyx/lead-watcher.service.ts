@@ -10,16 +10,16 @@ const NEW_LEADS_PER_TICK = 10;
 
 /**
  * Starts the outreach strategy for new leads of every organization with an
- * active Telnyx account, resumes in-flight leads after a restart, and parks
- * leads whose strategy stalled for longer than it could resume. Off unless
- * STRATEGY_ENGINE is set, because it calls and texts real people.
+ * active Telnyx account, resumes in-flight leads this instance is not running
+ * (after a restart, or a claim whose start failed), and parks leads whose
+ * strategy stalled for longer than it could resume. Off unless STRATEGY_ENGINE
+ * is set, because it calls and texts real people.
  */
 @Injectable()
 export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('LeadWatcher');
   private timer: NodeJS.Timeout | null = null;
   private running = false;
-  private resumed = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -58,13 +58,15 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
       });
       for (const { orgId } of orgs) {
         const workable = { orgId, automationPaused: false, dncStatus: false };
-        if (!this.resumed) {
-          const inFlight = await this.prisma.lead.findMany({
-            where: { ...workable, status: { in: IN_STRATEGY_STATUSES }, firstContactAt: { gte: this.staleBefore() } },
-            select: { id: true },
-            take: 200,
-          });
-          for (const lead of inFlight) await this.engine.resume(orgId, lead.id);
+        // Every poll, not only the first: a lead whose start failed after its claim is claimed but not
+        // running. resume() skips the steps already logged and leads that left the strategy.
+        const inFlight = await this.prisma.lead.findMany({
+          where: { ...workable, status: { in: IN_STRATEGY_STATUSES }, firstContactAt: { gte: this.staleBefore() } },
+          select: { id: true },
+          take: 200,
+        });
+        for (const lead of inFlight) {
+          if (!this.engine.isRunning(lead.id)) await this.engine.resume(orgId, lead.id);
         }
         const fresh = await this.prisma.lead.findMany({
           where: { ...workable, status: LeadStatus.new, firstContactAt: null },
@@ -79,7 +81,6 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
         });
         for (const lead of stranded) await this.engine.finalizeAbandoned(orgId, lead.id);
       }
-      this.resumed = true;
     } catch (error) {
       this.logger.error(`poll error: ${(error as Error).message}`);
     } finally {

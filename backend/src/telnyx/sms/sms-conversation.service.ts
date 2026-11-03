@@ -1,0 +1,257 @@
+import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import { AppError } from '@/common/errors/app-error';
+import { PrismaService } from '@/common/prisma/prisma.service';
+import type { IntegrationEnv } from '@/common/utils/interface';
+import { normalizePhone } from '../phone';
+import { TelnyxCredentialsService } from '../telnyx-credentials.service';
+import { telnyx } from '../telnyx-api';
+import { CallToolsService } from '../tools/call-tools.service';
+import { withSmsSection, withoutSmsSection } from './sms-prompt';
+
+/** Where Telnyx asks for a conversation's variables (the lead's details). Kept at the root, outside /api. */
+export const ASSISTANT_VARIABLES_PATH = '/webhooks/telnyx/assistant-variables';
+const VARIABLES_TIMEOUT_MS = 3000;
+const ENABLED_CACHE_MS = 30_000;
+
+/** What was linked on Telnyx when the AI started answering texts, so it can be undone exactly. */
+export interface SmsConversationConfig {
+  enabled: true;
+  assistantId: string;
+  messagingProfileId: string;
+  enabledAt: string;
+}
+
+export interface SmsConversationStatus {
+  enabled: boolean;
+  assistantId: string | null;
+  messagingProfileId: string | null;
+  enabledAt: string | null;
+  /** In-call booking is on, so the AI can book a meeting in the chat too. */
+  bookingInChat: boolean;
+}
+
+/**
+ * The AI assistant answering a lead's texts. Turning it on links three things
+ * on Telnyx: the org's messaging profile to the assistant, the assistant's
+ * messaging feature to that profile, and the assistant's variables webhook to
+ * this server, plus the text-chat section of its prompt. Off undoes them. The
+ * call tools (callback, text later, outcome) are put on the assistant too, so
+ * a chat has them before the organization's first AI call.
+ */
+@Injectable()
+export class SmsConversationService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(SmsConversationService.name);
+  private readonly publicApiUrl: string;
+  private readonly enabledCache = new Map<string, { value: boolean; until: number }>();
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly creds: TelnyxCredentialsService,
+    config: ConfigService<IntegrationEnv, true>,
+    private readonly callTools: CallToolsService,
+  ) {
+    this.publicApiUrl = (config.get('PUBLIC_API_URL', { infer: true }) ?? '').replace(/\/+$/, '');
+  }
+
+  get variablesUrl(): string {
+    return `${this.publicApiUrl}${ASSISTANT_VARIABLES_PATH}`;
+  }
+
+  /** The server's address can change (a new deploy domain, a dev tunnel), and a release can change the chat prompt or tools. */
+  onApplicationBootstrap(): void {
+    if (this.publicApiUrl) void this.refreshChats();
+  }
+
+  /**
+   * Brings every chatting assistant up to date: its variables webhook moves to
+   * this server when it still names our path on an older address (an address
+   * the organization typed in itself is left alone), its text-chat prompt
+   * section is rewritten when this release changed it, and it gets the call
+   * tools.
+   */
+  async refreshChats(): Promise<void> {
+    const rows = await this.prisma.organizationSetting
+      .findMany({ where: { smsConversation: { path: ['enabled'], equals: true } }, select: { orgId: true } })
+      .catch((error) => {
+        this.logger.warn(`text chat check: ${(error as Error).message}`);
+        return [];
+      });
+    for (const { orgId } of rows) {
+      try {
+        const c = await this.creds.getCreds(orgId);
+        if (!c?.apiKey || !c.assistantId) continue;
+        const assistant = await this.assistant(c.apiKey, c.assistantId);
+        const patch: Record<string, string> = {};
+        const current = String(assistant.dynamic_variables_webhook_url ?? '');
+        if (current.endsWith(ASSISTANT_VARIABLES_PATH) && current !== this.variablesUrl) patch.dynamic_variables_webhook_url = this.variablesUrl;
+        // Unreadable instructions are never written over.
+        if (typeof assistant.instructions === 'string') {
+          const instructions = withSmsSection(assistant.instructions);
+          if (instructions !== assistant.instructions) patch.instructions = instructions;
+        }
+        if (Object.keys(patch).length) {
+          await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+          this.logger.log(`assistant ${c.assistantId}: text chat brought up to date (${Object.keys(patch).join(', ')})`);
+        }
+      } catch (error) {
+        this.logger.warn(`text chat for org ${orgId}: ${(error as Error).message}`);
+      }
+      await this.callTools.ensure(orgId);
+    }
+  }
+
+  async status(orgId: string): Promise<SmsConversationStatus> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { smsConversation: true, inCallBooking: true } });
+    const config = row?.smsConversation as SmsConversationConfig | null | undefined;
+    return {
+      enabled: Boolean(config?.enabled),
+      assistantId: config?.assistantId ?? null,
+      messagingProfileId: config?.messagingProfileId ?? null,
+      enabledAt: config?.enabledAt ?? null,
+      bookingInChat: Boolean((row?.inCallBooking as { tokenHash?: string } | null)?.tokenHash),
+    };
+  }
+
+  /** Cached briefly: it is read on every inbound text and every strategy step. */
+  async isEnabled(orgId: string): Promise<boolean> {
+    const hit = this.enabledCache.get(orgId);
+    if (hit && hit.until > Date.now()) return hit.value;
+    const value = (await this.status(orgId)).enabled;
+    this.enabledCache.set(orgId, { value, until: Date.now() + ENABLED_CACHE_MS });
+    return value;
+  }
+
+  async enable(orgId: string): Promise<SmsConversationStatus> {
+    if (!this.publicApiUrl) throw new AppError('CONFLICT', 'PUBLIC_API_URL is not configured on the server.');
+    const c = await this.creds.getCreds(orgId);
+    if (!c?.apiKey || !c.assistantId) throw new AppError('CONFLICT', 'Connect Telnyx and create the AI assistant first.');
+    if (!c.messagingProfileId) throw new AppError('CONFLICT', 'Assign your number to a Telnyx messaging profile first.');
+
+    const assistant = await this.assistant(c.apiKey, c.assistantId);
+    const features = new Set<string>([...(assistant.enabled_features ?? ['telephony']), 'messaging']);
+    await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        enabled_features: [...features],
+        messaging_settings: { ...(assistant.messaging_settings ?? {}), default_messaging_profile_id: c.messagingProfileId },
+        dynamic_variables_webhook_url: this.variablesUrl,
+        dynamic_variables_webhook_timeout_ms: VARIABLES_TIMEOUT_MS,
+        instructions: withSmsSection(String(assistant.instructions ?? '')),
+      }),
+    });
+    await telnyx(c.apiKey, `/messaging_profiles/${c.messagingProfileId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ai_assistant_id: c.assistantId }),
+    });
+
+    const config: SmsConversationConfig = {
+      enabled: true,
+      assistantId: c.assistantId,
+      messagingProfileId: c.messagingProfileId,
+      enabledAt: new Date().toISOString(),
+    };
+    await this.save(orgId, config as unknown as Prisma.InputJsonObject);
+    this.logger.log(`AI text conversations on for ${orgId} (assistant ${c.assistantId}, profile ${c.messagingProfileId})`);
+    // Without them the AI could promise a callback or a text it has no way to keep.
+    await this.callTools.ensure(orgId);
+    return this.status(orgId);
+  }
+
+  async disable(orgId: string): Promise<SmsConversationStatus> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { smsConversation: true } });
+    const config = row?.smsConversation as SmsConversationConfig | null | undefined;
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (config && c?.apiKey) {
+      const quiet = (what: string, p: Promise<unknown>) => p.catch((error) => this.logger.warn(`turning off texts, ${what}: ${(error as Error).message}`));
+      // An empty id unlinks the assistant; Telnyx refuses null.
+      await quiet('profile', telnyx(c.apiKey, `/messaging_profiles/${config.messagingProfileId}`, { method: 'PATCH', body: JSON.stringify({ ai_assistant_id: '' }) }));
+      const assistant = await this.assistant(c.apiKey, config.assistantId).catch(() => null);
+      if (assistant) {
+        await quiet(
+          'assistant',
+          telnyx(c.apiKey, `/ai/assistants/${config.assistantId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              enabled_features: (assistant.enabled_features ?? ['telephony']).filter((f: string) => f !== 'messaging'),
+              messaging_settings: { ...(assistant.messaging_settings ?? {}), default_messaging_profile_id: null },
+              dynamic_variables_webhook_url: null,
+              instructions: withoutSmsSection(String(assistant.instructions ?? '')),
+            }),
+          }),
+        );
+      }
+    }
+    await this.save(orgId, Prisma.DbNull);
+    this.logger.log(`AI text conversations off for ${orgId}`);
+    return this.status(orgId);
+  }
+
+  /**
+   * Adds a text we sent outside the assistant (a strategy or follow-up step) to
+   * the lead's text conversation, so the AI reads the lead's reply in context.
+   * A lead who never texted has no conversation yet; the variables endpoint
+   * gives the AI our last text then.
+   */
+  async appendOurMessage(orgId: string, leadPhone: string | null, text: string): Promise<void> {
+    await this.appendToChat(orgId, leadPhone, 'assistant', text);
+  }
+
+  /** Adds a turn to the lead's text conversation: ours as `assistant`, the lead's as `user`. */
+  async appendToChat(orgId: string, leadPhone: string | null, role: 'assistant' | 'user', text: string, sentAt = new Date()): Promise<void> {
+    if (!leadPhone || !(await this.isEnabled(orgId))) return;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return;
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ role, content: text, sent_at: sentAt.toISOString() }),
+    });
+  }
+
+  /**
+   * Stops the AI answering this one lead's texts, or lets it answer again;
+   * every other lead's chat goes on. False when the lead has no text
+   * conversation yet (Telnyx starts one at their first text). Not gated on the
+   * org's toggle, so a chat paused before the AI was turned off can still be
+   * let go.
+   */
+  async pauseAi(orgId: string, leadPhone: string | null, paused: boolean): Promise<boolean> {
+    if (!leadPhone) return false;
+    const chat = await this.chatWith(orgId, leadPhone);
+    if (!chat) return false;
+    // A real boolean: Telnyx ignores the string "true" its own docs show (live-tested 2026-10-30). PUT merges into the metadata.
+    await telnyx(chat.apiKey, `/ai/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ metadata: { ai_disabled: paused } }) });
+    return true;
+  }
+
+  /** The lead's text conversation with the assistant: the newest, should inactivity have started another. */
+  private async chatWith(orgId: string, leadPhone: string): Promise<{ apiKey: string; id: string } | null> {
+    const c = await this.creds.getCreds(orgId);
+    if (!c?.apiKey || !c.fromNumber) return null;
+    const filter = (key: string, value: string) => `metadata->${key}=eq.${encodeURIComponent(value)}`;
+    const query = [
+      filter('telnyx_conversation_channel', 'sms_chat'),
+      filter('telnyx_agent_target', normalizePhone(c.fromNumber)),
+      filter('telnyx_end_user_target', normalizePhone(leadPhone)),
+      'order=last_message_at.desc',
+    ].join('&');
+    const found = await telnyx<{ data?: { id: string }[] }>(c.apiKey, `/ai/conversations?${query}`);
+    const id = found.data?.[0]?.id;
+    return id ? { apiKey: c.apiKey, id } : null;
+  }
+
+  private async assistant(apiKey: string, assistantId: string): Promise<any> {
+    const raw = await telnyx<any>(apiKey, `/ai/assistants/${assistantId}`);
+    return raw?.data ?? raw ?? {};
+  }
+
+  private async save(orgId: string, smsConversation: Prisma.InputJsonObject | typeof Prisma.DbNull): Promise<void> {
+    await this.prisma.organizationSetting.upsert({
+      where: { orgId },
+      create: { orgId, smsConversation },
+      update: { smsConversation },
+    });
+    this.enabledCache.delete(orgId);
+  }
+}

@@ -66,6 +66,8 @@ export interface ConversationRow {
   lastMessageDirection: string | null;
   hasInboundReply: boolean;
   dncStatus: boolean;
+  /** The agent texting the lead in place of the AI, if one took the chat over. */
+  takenOver: { byId: string; byName: string; at: string } | null;
   createdAt: string;
 }
 

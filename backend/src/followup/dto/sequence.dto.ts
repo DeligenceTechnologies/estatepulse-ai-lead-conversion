@@ -22,8 +22,21 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { CLOSE_OUT_HOURS, STEP_VOICEMAILS, type StepVoicemail } from '../journey';
+
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const unique = ({ value }: { value: unknown }) => (Array.isArray(value) ? [...new Set(value)] : value);
+
+/** When a strategy or sequence step runs; both set means both must hold. */
+export class StepConditionsDto {
+  @IsOptional()
+  @IsBoolean()
+  lastCallMissed?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  noReply?: boolean;
+}
 
 export class SequenceStepDto {
   @IsIn(['sms', 'voice'])
@@ -55,6 +68,16 @@ export class SequenceStepDto {
   @Min(1)
   @Max(10)
   maxAttempts?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StepConditionsDto)
+  onlyIf?: StepConditionsDto;
+
+  /** A call step only: the organization's voicemail setting, always leave the message, or never. */
+  @IsOptional()
+  @IsIn(STEP_VOICEMAILS)
+  voicemail?: StepVoicemail;
 }
 
 export class ReplaceStepsDto {
@@ -93,6 +116,18 @@ export class CreateSequenceDto extends ReplaceStepsDto {
   @Transform(unique)
   @IsEnum(SequenceTrigger, { each: true })
   enrollTriggers?: SequenceTrigger[];
+
+  /** Hours a lead has to answer after the last step before the sequence closes out. */
+  @IsOptional()
+  @IsInt()
+  @Min(CLOSE_OUT_HOURS.min)
+  @Max(CLOSE_OUT_HOURS.max)
+  closeOutHours?: number;
+
+  /** At close-out, a lead who stayed silent is marked unresponsive; false leaves it in follow-up. */
+  @IsOptional()
+  @IsBoolean()
+  closeOutUnresponsive?: boolean;
 }
 
 export class UpdateSequenceDto {
@@ -119,6 +154,16 @@ export class UpdateSequenceDto {
   @Transform(unique)
   @IsEnum(SequenceTrigger, { each: true })
   enrollTriggers?: SequenceTrigger[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(CLOSE_OUT_HOURS.min)
+  @Max(CLOSE_OUT_HOURS.max)
+  closeOutHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  closeOutUnresponsive?: boolean;
 }
 
 export class LeadFilterDto {

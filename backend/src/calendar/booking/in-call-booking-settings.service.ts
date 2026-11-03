@@ -47,6 +47,12 @@ export function grantsBooking(scope: string | null): boolean {
   return BOOKING_SCOPES.every((s) => granted.includes(s));
 }
 
+/** Telnyx unreachable, rate-limited or failing on its side: worth one more try. A 4xx about our request is not. */
+export function isTransientTelnyxError(error: unknown): boolean {
+  if (!(error instanceof AppError) || error.code !== 'UPSTREAM_ERROR') return false;
+  return /unreachable|failed (429|5\d\d)\b/.test(error.message);
+}
+
 /**
  * The switch for in-call booking, and the Telnyx side of it. Enabling creates
  * in the organization's Telnyx account a bearer integration secret and two
@@ -133,26 +139,36 @@ export class InCallBookingSettingsService {
     await this.teardown(orgId);
 
     const c = (await this.creds.getCreds(orgId))!;
-    const token = randomBytes(32).toString('base64url');
     const identifier = `ep_booking_${orgId.replace(/-/g, '')}`;
-    const secret = await telnyx<{ data?: { id: string } }>(c.apiKey, '/integration_secrets', {
-      method: 'POST',
-      body: JSON.stringify({ identifier, type: 'bearer', token }),
-    });
-    const secretId = secret.data?.id ?? '';
-
-    const toolIds: string[] = [];
-    try {
-      for (const def of this.toolDefinitions(identifier)) {
-        const tool = await telnyx<{ id?: string; data?: { id: string } }>(c.apiKey, '/ai/tools', { method: 'POST', body: JSON.stringify(def) });
-        const toolId = tool.id ?? tool.data?.id ?? '';
-        toolIds.push(toolId);
-        await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}/tools/${toolId}`, { method: 'PUT' });
+    // Five Telnyx writes in a row: a momentary Telnyx failure on any of them is
+    // cleaned up and the whole provisioning tried once more before giving up.
+    let token = '';
+    let secretId = '';
+    let toolIds: string[] = [];
+    for (let attempt = 1; ; attempt++) {
+      token = randomBytes(32).toString('base64url');
+      secretId = '';
+      toolIds = [];
+      try {
+        const secret = await telnyx<{ data?: { id: string } }>(c.apiKey, '/integration_secrets', {
+          method: 'POST',
+          body: JSON.stringify({ identifier, type: 'bearer', token }),
+        });
+        secretId = secret.data?.id ?? '';
+        for (const def of this.toolDefinitions(identifier)) {
+          const tool = await telnyx<{ id?: string; data?: { id: string } }>(c.apiKey, '/ai/tools', { method: 'POST', body: JSON.stringify(def) });
+          const toolId = tool.id ?? tool.data?.id ?? '';
+          toolIds.push(toolId);
+          await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}/tools/${toolId}`, { method: 'PUT' });
+        }
+        await this.setPrompt(c.apiKey, c.assistantId, (p) => withBookingSection(p, et.name, et.durationMinutes));
+        break;
+      } catch (error) {
+        await this.removeFromTelnyx(c.apiKey, c.assistantId, toolIds, secretId);
+        if (attempt >= 2 || !isTransientTelnyxError(error)) throw error;
+        this.logger.warn(`in-call booking for ${orgId}: ${(error as Error).message}; retrying`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      await this.setPrompt(c.apiKey, c.assistantId, (p) => withBookingSection(p, et.name, et.durationMinutes));
-    } catch (error) {
-      await this.removeFromTelnyx(c.apiKey, c.assistantId, toolIds, secretId);
-      throw error;
     }
 
     const config: InCallBookingConfig = {
@@ -221,7 +237,8 @@ export class InCallBookingSettingsService {
     const shared = {
       method: 'POST',
       headers: [{ name: 'Authorization', value: `Bearer {{#integration_secret}}${secretIdentifier}{{/integration_secret}}` }],
-      preset_body_fields: { lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}' },
+      // In a text chat there is no call_control_id; the lead's number identifies the chat instead.
+      preset_body_fields: { lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}', end_user: '{{telnyx_end_user_target}}' },
     };
     return [
       {

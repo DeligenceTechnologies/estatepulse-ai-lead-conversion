@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { memoryVariables, QUALIFICATION_PROMPT_START, withQualificationSection } from './qualification';
+import { QualificationQuestionsService } from './qualification-questions.service';
+import { SmsConversationService } from './sms/sms-conversation.service';
+import { RECORDING_NOTICE } from './recording-notice';
+import { withSmsSection } from './sms/sms-prompt';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
+import { callToolsSettings, withCallToolsSection } from './tools/call-tools';
 
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
 
@@ -15,7 +21,6 @@ function shape(a: any) {
   const tr = a.transcription ?? {};
   const trs = tr.settings ?? {};
   const ms = a.messaging_settings ?? {};
-  const vm = ts.voicemail_detection ?? {};
   return {
     id: a.id,
     name: a.name,
@@ -50,8 +55,6 @@ function shape(a: any) {
 
     fallback_destination: ts.fallback_destination ?? '',
 
-    voicemail_detection: !!ts.voicemail_detection,
-    voicemail_action: vm.action ?? 'hangup',
     post_call_processing: !!a.post_conversation_settings?.enabled,
 
     enabled_features: a.enabled_features ?? ['telephony'],
@@ -64,12 +67,52 @@ function shape(a: any) {
   };
 }
 
+/**
+ * Names the brokerage and says up front that this is an AI, as callers are owed. {{firstName}} and
+ * {{brokerage}} are filled by Telnyx from the call's dynamic variables (the organization's name).
+ */
+export const DEFAULT_GREETING =
+  'Hi {{firstName}}, this is an AI assistant calling on behalf of {{brokerage}} about your recent home enquiry. Are you looking to buy a home sometime soon?';
+const DEFAULT_ROLE =
+  '# Role\nYou are a warm, professional AI assistant calling on behalf of {{brokerage}}, a real estate brokerage. You are calling a home-buyer lead who recently enquired, to qualify them over the phone. You placed this call, so never thank them for calling in. You are an AI: never claim or imply to be a person. If asked, say plainly that you are an AI assistant for {{brokerage}}, and offer to have a human agent follow up.';
+
+/** The defaults assistants were created with before, which ensureCallSetup moves onto the ones above. */
+const LEGACY_GREETING = 'Hi, this is your home-buying assistant, calling about your recent enquiry. Are you looking to buy a home sometime soon?';
+const LEGACY_ROLE =
+  '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. You are calling a home-buyer lead who recently enquired, to qualify them over the phone. You placed this call, so never thank them for calling in.';
+
 const DEFAULT_TEMPLATE = {
   name: 'EstatePulse AI Agent',
-  greeting: 'Hi, this is your home-buying assistant, calling about your recent enquiry. Are you looking to buy a home sometime soon?',
+  greeting: DEFAULT_GREETING,
   instructions:
-    '# Role\nYou are a warm, professional AI assistant for a real estate brokerage. You are calling a home-buyer lead who recently enquired, to qualify them over the phone. You placed this call, so never thank them for calling in.\n\n# Goal\nCollect, one question at a time: (1) buying intent, (2) timeline, (3) location, (4) budget, (5) property type and bedrooms, (6) financing / pre-approval. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
+    DEFAULT_ROLE +
+    '\n\n# Goal\nConfirm they are looking to buy, then work through the qualification questions below, one at a time. Acknowledge each answer briefly. Keep replies short and human.\n\n# Wrap up\nIf ready, offer to book a consultation with a human agent. Never give legal advice, never guarantee mortgage approval, and escalate to a human whenever uncertain.\n\n# Ending the call\nOnce the details are collected, or the caller is not interested or asks to stop, thank them, say a short goodbye, then use the hangup tool. Never stay silent on the line after saying goodbye.',
 };
+
+/**
+ * The recording notice is played by the call itself, before the recording starts (ActivityService),
+ * so it is never part of the assistant's greeting: one saved there before, or typed back in, is dropped.
+ */
+export function withoutRecordingNotice(greeting: string): string {
+  let g = greeting.trim();
+  while (g.startsWith(RECORDING_NOTICE)) g = g.slice(RECORDING_NOTICE.length).trim();
+  return g;
+}
+
+/**
+ * An assistant still on the old default greeting or role (one nobody edited) moves to the
+ * ones that name the brokerage and disclose the AI, and a recording notice saved in front of
+ * any greeting is taken out. Null when there is nothing to change.
+ */
+export function legacyDefaultsReplaced(a: { greeting?: string | null; instructions?: string | null }): { greeting?: string; instructions?: string } | null {
+  const patch: { greeting?: string; instructions?: string } = {};
+  const saved = a.greeting ?? '';
+  const greeting = withoutRecordingNotice(saved);
+  if (greeting === LEGACY_GREETING) patch.greeting = DEFAULT_GREETING;
+  else if (greeting !== saved.trim()) patch.greeting = greeting;
+  if (a.instructions?.includes(LEGACY_ROLE)) patch.instructions = a.instructions.replace(LEGACY_ROLE, DEFAULT_ROLE);
+  return Object.keys(patch).length ? patch : null;
+}
 
 const HANGUP_TOOL = {
   type: 'hangup',
@@ -80,7 +123,7 @@ const HANGUP_TOOL = {
   },
 };
 
-const RECORDING_NOTICE = 'Just so you know, this call is recorded for quality and training.';
+const VOICE_CACHE_MS = 10 * 60 * 1000;
 
 const ASSISTANT_MODELS = [
   'meta-llama/Llama-3.3-70B-Instruct',
@@ -95,13 +138,17 @@ export class AssistantService {
 
   private readonly hangupReady = new Set<string>();
   private readonly hangupInflight = new Map<string, Promise<void>>();
+  private readonly voices = new Map<string, { voice: string | null; until: number }>();
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
     private readonly prisma: PrismaService,
+    private readonly conversations: SmsConversationService,
+    private readonly questions: QualificationQuestionsService,
   ) {}
 
-  private async greetingFor(orgId: string, base: string): Promise<string> {
+  /** The greeting with the recording notice in front of it, when the organization announces recording. */
+  async greetingFor(orgId: string, base: string): Promise<string> {
     const settings = await this.prisma.organizationSetting
       .findUnique({ where: { orgId }, select: { callRecordingEnabled: true, callRecordingAnnounce: true } })
       .catch(() => null);
@@ -115,6 +162,17 @@ export class AssistantService {
     return c;
   }
 
+  /** The assistant's own voice, so a voicemail sounds like the AI that would have talked. Null when it cannot be read. */
+  async voiceFor(orgId: string): Promise<string | null> {
+    const hit = this.voices.get(orgId);
+    if (hit && hit.until > Date.now()) return hit.voice;
+    const voice = await this.fetchRaw(orgId)
+      .then((a) => (typeof a?.voice_settings?.voice === 'string' && a.voice_settings.voice) || null)
+      .catch(() => null);
+    this.voices.set(orgId, { voice, until: Date.now() + VOICE_CACHE_MS });
+    return voice;
+  }
+
   private async fetchRaw(orgId: string): Promise<any> {
     const c = await this.requireCreds(orgId);
     if (!c.assistantId) throw new AppError('CONFLICT', 'No AI assistant yet — create one or paste an existing assistant id.');
@@ -122,6 +180,13 @@ export class AssistantService {
     if (!res.ok) throw new AppError('UPSTREAM_ERROR', `AI agent fetch failed ${res.status}: ${await res.text()}`);
     const j = (await res.json()) as any;
     return j.data ?? j;
+  }
+
+  /** While the call-outcome tools are on the assistant, a form save keeps their prompt section. */
+  private async keepCallToolsSection(orgId: string, instructions: string): Promise<string> {
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
+    const tools = callToolsSettings(row?.callTools);
+    return tools.enabled && tools.telnyx ? withCallToolsSection(instructions) : instructions;
   }
 
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
@@ -151,18 +216,29 @@ export class AssistantService {
   }
 
   async updateAssistant(orgId: string, patch: any) {
+    this.voices.delete(orgId);
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
+    // While the AI answers texts, the pieces that switch it on are managed by SmsConversationService; a form save keeps them.
+    const texting = await this.conversations.isEnabled(orgId);
     const body: any = {};
-    if (patch.instructions != null) body.instructions = await this.keepBookingSection(orgId, patch.instructions);
-    if (patch.greeting != null) body.greeting = patch.greeting;
+    if (patch.instructions != null) {
+      const withBooking = await this.keepBookingSection(orgId, withQualificationSection(String(patch.instructions)));
+      const withTexting = texting ? withSmsSection(withBooking) : withBooking;
+      body.instructions = await this.keepCallToolsSection(orgId, withTexting);
+    }
+    if (patch.greeting != null) body.greeting = withoutRecordingNotice(patch.greeting);
     if (patch.model != null) body.model = patch.model;
     if (patch.description != null) body.description = patch.description;
-    if (patch.dynamic_variables != null) body.dynamic_variables = patch.dynamic_variables;
-    if (patch.dynamic_variables_webhook_url != null) {
+    if (patch.dynamic_variables != null) {
+      body.dynamic_variables = { ...patch.dynamic_variables, ...(await this.memoryDefaults(orgId)) };
+    }
+    if (patch.dynamic_variables_webhook_url != null && !texting) {
       body.dynamic_variables_webhook_url = patch.dynamic_variables_webhook_url || null;
     }
-    if (patch.enabled_features != null) body.enabled_features = patch.enabled_features;
+    if (patch.enabled_features != null) {
+      body.enabled_features = texting ? [...new Set<string>([...patch.enabled_features, 'messaging'])] : patch.enabled_features;
+    }
     if (patch.data_retention != null) {
       body.privacy_settings = { ...(cur.privacy_settings ?? {}), data_retention: !!patch.data_retention };
     }
@@ -238,8 +314,6 @@ export class AssistantService {
       'disable_dtmf',
       'noise_suppression',
       'fallback_destination',
-      'voicemail_detection',
-      'voicemail_action',
     ];
     if (telephonyKeys.some((k) => patch[k] != null)) {
       const ts: any = { ...(cur.telephony_settings ?? {}) };
@@ -250,13 +324,6 @@ export class AssistantService {
       if (patch.noise_suppression != null) ts.noise_suppression = patch.noise_suppression;
       if (patch.fallback_destination != null) ts.fallback_destination = patch.fallback_destination || null;
       if (patch.record_calls != null) ts.recording_settings = { ...(ts.recording_settings ?? {}), enabled: false };
-      if (patch.voicemail_detection != null) {
-        ts.voicemail_detection = patch.voicemail_detection
-          ? { ...(ts.voicemail_detection ?? {}), action: patch.voicemail_action ?? ts.voicemail_detection?.action ?? 'hangup' }
-          : null;
-      } else if (patch.voicemail_action != null && ts.voicemail_detection) {
-        ts.voicemail_detection = { ...ts.voicemail_detection, action: patch.voicemail_action };
-      }
       body.telephony_settings = ts;
     }
 
@@ -297,7 +364,11 @@ export class AssistantService {
     return shape(await this.fetchRaw(orgId));
   }
 
-  /** Once per assistant: the hangup tool is attached, and the assistant does not record on top of the call's own recording. */
+  /**
+   * Once per assistant: the hangup tool is attached, the assistant does not
+   * record on top of the call's own recording, and it does not act on voicemail
+   * by itself: the organization's Voicemail setting decides that for every call.
+   */
   async ensureCallSetup(orgId: string): Promise<void> {
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) return;
@@ -314,15 +385,32 @@ export class AssistantService {
         await this.setTools(orgId, [...tools.filter((t) => !t?.shared), HANGUP_TOOL]);
         this.logger.log(`hangup tool added to assistant ${c.assistantId}`);
       }
-      const ts = cur.telephony_settings ?? {};
-      if (ts.recording_settings?.enabled) {
+      const disclosure = legacyDefaultsReplaced(cur);
+      if (disclosure) {
         const res = await fetch(`${BASE}/${c.assistantId}`, {
           method: 'PATCH',
           headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telephony_settings: { ...ts, recording_settings: { ...ts.recording_settings, enabled: false } } }),
+          body: JSON.stringify(disclosure),
         });
-        if (!res.ok) throw new Error(`turning off the assistant's own recording failed ${res.status}: ${await res.text()}`);
-        this.logger.log(`assistant ${c.assistantId} no longer records on its own; the call's recording covers it`);
+        if (!res.ok) throw new Error(`updating the default greeting failed ${res.status}: ${await res.text()}`);
+        this.logger.log(`assistant ${c.assistantId} now names the brokerage and says it is an AI`);
+      }
+      await this.syncQualification(orgId, cur);
+      const ts = cur.telephony_settings ?? {};
+      if (ts.recording_settings?.enabled || ts.voicemail_detection) {
+        const res = await fetch(`${BASE}/${c.assistantId}`, {
+          method: 'PATCH',
+          headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telephony_settings: {
+              ...ts,
+              ...(ts.recording_settings?.enabled ? { recording_settings: { ...ts.recording_settings, enabled: false } } : {}),
+              ...(ts.voicemail_detection ? { voicemail_detection: null } : {}),
+            },
+          }),
+        });
+        if (!res.ok) throw new Error(`turning off the assistant's own recording or voicemail handling failed ${res.status}: ${await res.text()}`);
+        this.logger.log(`assistant ${c.assistantId} no longer records or handles voicemail on its own; the call's settings cover both`);
       }
       this.hangupReady.add(key);
     })()
@@ -330,6 +418,36 @@ export class AssistantService {
       .finally(() => this.hangupInflight.delete(key));
     this.hangupInflight.set(key, run);
     return run;
+  }
+
+  /**
+   * The managed qualification section is in the prompt, and the assistant's
+   * default memory variables cover a conversation the server could not match
+   * to a lead; every call and chat with a known lead overrides them.
+   */
+  async syncQualification(orgId: string, current?: any): Promise<void> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return;
+    const cur = current ?? (await this.fetchRaw(orgId));
+    const body: any = {};
+    const instructions = String(cur.instructions ?? '');
+    if (!instructions.includes(QUALIFICATION_PROMPT_START)) body.instructions = withQualificationSection(instructions);
+    const defaults = await this.memoryDefaults(orgId);
+    const vars = cur.dynamic_variables ?? {};
+    if (Object.entries(defaults).some(([k, v]) => vars[k] !== v)) body.dynamic_variables = { ...vars, ...defaults };
+    if (!Object.keys(body).length) return;
+    const res = await fetch(`${BASE}/${c.assistantId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`qualification prompt update failed ${res.status}: ${await res.text()}`);
+    this.logger.log(`qualification questions synced to assistant ${c.assistantId}`);
+  }
+
+  /** The memory variables for a lead we know nothing about: every question open. */
+  private async memoryDefaults(orgId: string): Promise<Record<string, string>> {
+    return { ...memoryVariables(await this.questions.get(orgId), null), conversationSummary: 'None yet.' };
   }
 
   async detachTool(orgId: string, toolId: string) {
@@ -383,15 +501,13 @@ export class AssistantService {
       candidates = preferred.length ? preferred : ASSISTANT_MODELS;
     }
     let lastErr = 'AI agent create failed';
-    const greeting = await this.greetingFor(
-      orgId,
-      overrides.greeting || DEFAULT_TEMPLATE.greeting,
-    );
+    const greeting = withoutRecordingNotice(overrides.greeting || DEFAULT_TEMPLATE.greeting);
     for (const model of candidates) {
       const body = {
         name: overrides.name || DEFAULT_TEMPLATE.name,
         model,
-        instructions: overrides.instructions || DEFAULT_TEMPLATE.instructions,
+        instructions: withQualificationSection(overrides.instructions || DEFAULT_TEMPLATE.instructions),
+        dynamic_variables: await this.memoryDefaults(orgId),
         greeting,
         tools: [HANGUP_TOOL],
       };

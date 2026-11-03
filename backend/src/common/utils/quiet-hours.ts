@@ -35,22 +35,27 @@ export function nextAllowedAt(timeZone: string, quiet: QuietHours | undefined, a
   const minutesUntilEnd = end > now ? end - now : 1440 - now + end;
   return new Date(at.getTime() + minutesUntilEnd * 60_000);
 }
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** 0 (Sunday) to 6 (Saturday), in `timeZone`. */
+export function weekdayOf(timeZone: string, at: Date): number {
+  return WEEKDAYS.indexOf(new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(at));
+}
+
+/** The first instant of the local day after the one `at` falls in. */
+export function nextLocalMidnight(timeZone: string, at: Date): Date {
+  return new Date(at.getTime() + (1440 - minutesOfDay(timeZone, at)) * 60_000 - (at.getTime() % 60_000));
+}
 
 /**
- * Pushes the remaining cadence back by however long quiet hours held a step,
- * so the gaps between steps stay as configured.
+ * `at`, or the first moment after it when the lead may be contacted: outside
+ * quiet hours and not on a day the organization skips (0 = Sunday).
  */
-export function deferredResume(args: {
-  timeZone: string;
-  quiet: QuietHours | undefined;
-  now: number;
-  enrolledAt: number;
-  offset: number;
-  shift: number;
-}): { shift: number; resumeAt: number } {
-  const { timeZone, quiet, now, enrolledAt, offset } = args;
-  const nominal = enrolledAt + offset + args.shift;
-  const opensAt = nextAllowedAt(timeZone, quiet, new Date(now)).getTime();
-  const shift = nominal < opensAt ? args.shift + (opensAt - nominal) : args.shift;
-  return { shift, resumeAt: enrolledAt + offset + shift };
+export function nextContactAt(timeZone: string, quiet: QuietHours | undefined, skipDays: readonly number[] | undefined, at: Date): Date {
+  let t = nextAllowedAt(timeZone, quiet, at);
+  if (!skipDays?.length || skipDays.length >= 7) return t;
+  for (let i = 0; i < 7 && skipDays.includes(weekdayOf(timeZone, t)); i++) {
+    t = nextAllowedAt(timeZone, quiet, nextLocalMidnight(timeZone, t));
+  }
+  return t;
 }
