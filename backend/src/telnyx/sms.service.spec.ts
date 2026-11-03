@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SmsService } from './sms.service';
+import { OptedOutError, SmsService, isTransientSmsError } from './sms.service';
 
 const US = '+15125550188';
 const CA = '+12899174129';
@@ -68,5 +68,34 @@ describe('SmsService.sendSms', () => {
       const sent = await s.service.sendSms('org-1', CA, 'Hi Ana, just tried you.', { outreach: true });
       expect(sent.text).toBe('Hi Ana, just tried you.\nSkyline Realty, (742) 724-5092. Reply STOP to opt out.');
     });
+  });
+});
+
+describe('when Telnyx refuses a text (SMS08)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('turns its STOP block (40300) into an opt-out', async () => {
+    const s = setup();
+    s.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ code: '40300', title: 'Blocked due to STOP message' }] }), { status: 409 }),
+    );
+    await expect(s.service.sendSms('org-1', US, 'Hi')).rejects.toBeInstanceOf(OptedOutError);
+  });
+
+  it.each([
+    ['a 503', 'Telnyx POST /messages failed 503: {}', true],
+    ['a 429', 'Telnyx POST /messages failed 429: {}', true],
+    ['a full sending queue', 'Telnyx POST /messages failed 400: {"errors":[{"code":"40318"}]}', true],
+    ['no connection', 'Telnyx unreachable: fetch failed', true],
+    ['a timeout', 'Telnyx unreachable: The operation was aborted due to timeout', false],
+    ['an invalid number', 'Telnyx POST /messages failed 400: {"errors":[{"code":"40310"}]}', false],
+    ['a refused key', 'Telnyx POST /messages failed 401: {}', false],
+    ['no number configured', 'No from number configured', false],
+  ])('after %s, tries again: %s', (_what, message, transient) => {
+    expect(isTransientSmsError(new Error(message))).toBe(transient);
+  });
+
+  it('never tries again for an opted-out number', () => {
+    expect(isTransientSmsError(new OptedOutError('This number asked not to be contacted'))).toBe(false);
   });
 });

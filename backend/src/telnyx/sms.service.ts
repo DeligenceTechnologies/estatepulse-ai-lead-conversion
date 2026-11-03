@@ -8,6 +8,32 @@ import { isCanadian, withOutreachFooter } from './sms/sms-compliance';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { isTelnyxKeyRejected, telnyx } from './telnyx-api';
 
+/** Nothing will reach the number: it is on our do-not-contact list, or Telnyx blocks it because it replied STOP (40300). */
+export class OptedOutError extends AppError {
+  constructor(message: string) {
+    super('CONFLICT', message);
+  }
+}
+
+/** When an outreach text that failed for a passing reason is tried again: twice, a minute and then five minutes later. */
+export const SMS_RETRY_DELAYS_MS = [60_000, 5 * 60_000];
+
+/**
+ * Whether a failed send may get through if tried again: Telnyx was busy or
+ * failing (429, a 5xx, its sending queue full: 40318) or could not be reached.
+ * Not for anything about the text or the number (invalid, landline, blocked),
+ * and not after a timeout, when the text may have gone out and a retry could
+ * send it twice.
+ */
+export function isTransientSmsError(error: unknown): boolean {
+  if (error instanceof OptedOutError) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith('Telnyx unreachable')) return !/abort|timeout|timed out/i.test(message);
+  if (/"code"\s*:\s*"40318"/.test(message)) return true;
+  const status = Number(/ failed (\d{3}):/.exec(message)?.[1]);
+  return status === 429 || status >= 500;
+}
+
 export interface SmsSendOptions {
   /** Only for the texts the rules require after an opt-out: its confirmation and a HELP answer. */
   evenIfOptedOut?: boolean;
@@ -30,7 +56,7 @@ export class SmsService {
   async sendSms(orgId: string, to: string, text: string, opts: SmsSendOptions = {}): Promise<{ id?: string; text: string }> {
     const phone = normalizePhone(to);
     if (!opts.evenIfOptedOut && (await isSuppressed(this.prisma, orgId, phone))) {
-      throw new AppError('CONFLICT', 'This number asked not to be contacted');
+      throw new OptedOutError('This number asked not to be contacted');
     }
     const c = await this.creds.getCreds(orgId);
     if (!c?.apiKey) throw new Error('No provider connected');
@@ -44,6 +70,9 @@ export class SmsService {
       });
     } catch (error) {
       if (isTelnyxKeyRejected(error)) await this.creds.keyRejected(orgId).catch(() => undefined);
+      if (/"code"\s*:\s*"40300"/.test((error as Error).message)) {
+        throw new OptedOutError('Telnyx refused the text: this number replied STOP to us (40300)');
+      }
       throw error;
     }
     await this.creds.keyAccepted(orgId, c).catch(() => undefined);

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { EngineService, remainingSteps } from './engine.service';
+import { OptedOutError } from './sms.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
 
 const ORG = 'org-1';
@@ -505,5 +506,66 @@ describe('EngineService outcomes', () => {
     expect(s.prisma.leadEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ fromStatus: 'appointment_booked', toStatus: 'follow_up', source: 'agent', actorType: 'user', actorId: 'user-1' }),
     });
+  });
+});
+
+describe('EngineService failed texts (SMS08)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const telnyx503 = new Error('Telnyx POST /messages failed 503: {"errors":[{"code":"10007"}]}');
+  const sentOk = (s: ReturnType<typeof setup>) => s.activity.recordSms.mock.calls.filter((c: unknown[]) => c[3] === true).map((c: unknown[]) => c[2]);
+  const events = (s: ReturnType<typeof setup>) => s.prisma.leadEvent.create.mock.calls.map((c: any[]) => c[0].data.type);
+
+  it('tries the same text again a minute later when Telnyx is down, before any later step', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(telnyx503);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentOk(s)).toEqual([]);
+    expect(events(s)).toContain('step_retry');
+
+    await vi.advanceTimersByTimeAsync(MIN);
+    expect(sentOk(s)).toEqual(['text s1']);
+    expect(s.activity.recordSms).not.toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, expect.anything());
+
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sentOk(s)).toEqual(['text s1', 'text s2']);
+  });
+
+  it('gives up after two tries, records the failure and goes on', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(telnyx503).mockRejectedValueOnce(telnyx503).mockRejectedValueOnce(telnyx503);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(MIN);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.activity.recordSms).toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, telnyx503.message);
+    expect(events(s).filter((t: string) => t === 'step_retry')).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sentOk(s)).toEqual(['text s2']);
+  });
+
+  it('does not try again after a failure that will not pass, such as an invalid number', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(new Error('Telnyx POST /messages failed 400: {"errors":[{"code":"40310"}]}'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events(s)).not.toContain('step_retry');
+    expect(s.activity.recordSms).toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, expect.stringContaining('40310'));
+  });
+
+  it('opts out a number Telnyx says replied STOP, and ends the strategy', async () => {
+    const s = setup([sms('s1', 0), voice('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(new OptedOutError('Telnyx refused the text: this number replied STOP to us (40300)'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, { source: 'sms_send', reason: expect.stringContaining('40300'), channel: 'sms' });
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,8 @@ import { LeadStateService } from '@/lead/lead-state.service';
 import { AFTER_TEXT_BACK_MS, OUTCOME_STATUSES, TEXT_BACK_RECHECK_MS } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from '@/telnyx/activity.service';
-import { SmsService } from '@/telnyx/sms.service';
+import { OptOutService } from '@/telnyx/opt-out.service';
+import { OptedOutError, SMS_RETRY_DELAYS_MS, SmsService, isTransientSmsError } from '@/telnyx/sms.service';
 import { CallQueue } from '@/telnyx/calls/call.queue';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
 import { fillTemplate } from '@/telnyx/template';
@@ -27,6 +28,9 @@ interface ClaimedEnrollment {
 }
 
 const MAX_ATTEMPTS = 6;
+
+/** What became of a step: done (sent, failed for good, or its call queued), due again at a time, or the enrolment ended with it. */
+type StepOutcome = { kind: 'done' } | { kind: 'retry'; at: Date } | { kind: 'stopped' };
 /** A step after a call that is still queued, ringing or live looks again this soon. */
 export const CALL_HOLD_RECHECK_MS = 30_000;
 /** A call still not over after this is a lost hangup or a stuck queue: the next step goes ahead. */
@@ -57,6 +61,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly activity: ActivityService,
     private readonly state: LeadStateService,
     private readonly conversations: SmsConversationService,
+    private readonly optOuts: OptOutService,
   ) {}
 
   onModuleInit(): void {
@@ -168,7 +173,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       // pause may have come in while the step was being decided.
       const fresh = await this.liveLead(row);
       if (!fresh || (await this.textBackWait(row, fresh, chatQuietMs)) || (await this.chatBusy(row, chatQuietMs))) return;
-      await this.fire(row, step, fresh);
+      const outcome = await this.fire(row, step, fresh);
+      if (outcome.kind === 'retry') return void (await this.deferTo(row, outcome.at));
+      if (outcome.kind === 'stopped') return;
       await this.advance(row, steps, closeOutMs);
     } catch (error) {
       await this.onFailure(row, (error as Error).message);
@@ -220,8 +227,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
+  /** A wait on purpose, not a failure: the count of failed tries in a row (attempts) starts again. */
   private deferTo(row: ClaimedEnrollment, at: Date) {
-    return this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: at, lockedBy: null, lockedAt: null } });
+    return this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: at, attempts: 0, lockedBy: null, lockedAt: null } });
   }
 
   /**
@@ -268,7 +276,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<void> {
+  /**
+   * Sends the step's text or queues its call. A text that failed for a passing
+   * reason (Telnyx busy or down) is due again a while later, twice at most; one
+   * to a number that replied STOP to us opts the number out and ends this.
+   */
+  private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<StepOutcome> {
     const event = {
       orgId: row.organization_id,
       leadId: row.lead_id,
@@ -282,7 +295,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         this.activity.leadVariables(row.organization_id, row.lead_id),
       ]);
       const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
-      if (!text) return;
+      if (!text) return { kind: 'done' };
       try {
         const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text, { outreach: true });
         await this.activity.recordSms(row.organization_id, row.lead_id, sent.text, true, sent.id);
@@ -291,10 +304,22 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
           .appendOurMessage(row.organization_id, lead.phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
-        this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
+        const reason = (error as Error).message;
+        if (error instanceof OptedOutError) {
+          this.state.quietly({ ...event, type: 'step_skipped', reason });
+          await this.optOuts.optOut(row.organization_id, { leadId: row.lead_id }, { source: 'sms_send', reason, channel: 'sms' });
+          return { kind: 'stopped' };
+        }
+        const tries = isTransientSmsError(error) ? await this.retriesOf(row) : SMS_RETRY_DELAYS_MS.length;
+        if (tries < SMS_RETRY_DELAYS_MS.length) {
+          const wait = SMS_RETRY_DELAYS_MS[tries];
+          await this.state.record({ ...event, type: 'step_retry', reason: `${reason} (trying again in ${wait / 60_000} min)` });
+          return { kind: 'retry', at: new Date(Date.now() + wait) };
+        }
+        await this.activity.recordSms(row.organization_id, row.lead_id, text, false, reason);
+        this.state.quietly({ ...event, type: 'step_failed', reason });
       }
-      return;
+      return { kind: 'done' };
     }
     try {
       await this.calls.enqueue(
@@ -313,6 +338,19 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
       this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
     }
+    return { kind: 'done' };
+  }
+
+  /** How often this enrolment's current step has already been tried again (its step_retry events). */
+  private retriesOf(row: ClaimedEnrollment): Promise<number> {
+    return this.prisma.leadEvent.count({
+      where: {
+        leadId: row.lead_id,
+        type: 'step_retry',
+        createdAt: { gte: new Date(row.enrolled_at) },
+        AND: [{ payload: { path: ['sequenceId'], equals: row.sequence_id } }, { payload: { path: ['step'], equals: row.current_step } }],
+      },
+    });
   }
 
   /**
@@ -328,6 +366,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         data: {
           currentStep: row.current_step + 1,
           nextActionAt: new Date(Date.now() + closeOutMs),
+          attempts: 0,
           lockedBy: null,
           lockedAt: null,
           lastError: null,
@@ -340,6 +379,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       data: {
         currentStep: row.current_step + 1,
         nextActionAt: await this.followup.dueAt(row.organization_id, next.delayMinutes),
+        attempts: 0,
         lockedBy: null,
         lockedAt: null,
         lastError: null,

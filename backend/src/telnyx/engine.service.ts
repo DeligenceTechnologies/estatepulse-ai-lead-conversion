@@ -10,7 +10,7 @@ import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPend
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
 import { OptOutService } from './opt-out.service';
-import { SmsService } from './sms.service';
+import { OptedOutError, SMS_RETRY_DELAYS_MS, SmsService, isTransientSmsError } from './sms.service';
 import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from './strategy-store.service';
 import { CallQueue } from './calls/call.queue';
 import { CONVERSATION_MIN_SECS } from './calls/call.types';
@@ -108,6 +108,8 @@ interface Enrollment {
   previousSkipped: boolean;
   /** Steps whose text or call has gone out (or was being sent): a retry after an error never sends one twice. */
   sent: Set<string>;
+  /** Times each step's text was tried again after a failure that may pass (SMS_RETRY_DELAYS_MS). */
+  smsRetries: Map<string, number>;
   /** Errors in a row; reset once a run gets through. */
   failures: number;
 }
@@ -175,6 +177,7 @@ export class EngineService implements OnModuleDestroy {
         held: new Set(),
         previousSkipped: false,
         sent: new Set(),
+        smsRetries: new Map(),
         failures: 0,
       };
       this.active.set(leadId, enrollment);
@@ -242,6 +245,7 @@ export class EngineService implements OnModuleDestroy {
       held: new Set(),
       previousSkipped: logged.at(-1)?.type === 'step_skipped',
       sent: new Set(),
+      smsRetries: new Map(),
       failures: 0,
     };
     this.active.set(leadId, enrollment);
@@ -498,8 +502,25 @@ export class EngineService implements OnModuleDestroy {
           .appendOurMessage(e.orgId, phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
-        await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
-        this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
+        const reason = (error as Error).message;
+        // The number replied STOP to us before: it is opted out like any STOP, and the strategy ends.
+        if (error instanceof OptedOutError) {
+          this.state.quietly({ ...event, type: 'step_skipped', reason });
+          await this.optOuts.optOut(e.orgId, { leadId: e.leadId }, { source: 'sms_send', reason, channel: 'sms' });
+          return this.stop(e);
+        }
+        // Telnyx busy or down: the same step again in a while, its checks made afresh, before anything after it.
+        const tries = e.smsRetries.get(step.id) ?? 0;
+        if (isTransientSmsError(error) && tries < SMS_RETRY_DELAYS_MS.length) {
+          const wait = SMS_RETRY_DELAYS_MS[tries];
+          e.smsRetries.set(step.id, tries + 1);
+          e.sent.delete(step.id);
+          this.state.quietly({ ...event, type: 'step_retry', reason: `${reason} (trying again in ${wait / 60_000} min)` });
+          this.later(e, () => this.fireStep(e, step, office, guardrails), wait);
+          return;
+        }
+        await this.activity.recordSms(e.orgId, e.leadId, text, false, reason);
+        this.state.quietly({ ...event, type: 'step_failed', reason });
       }
     } else if (step.channel === 'voice' && !capped) {
       e.voiceAttempts += 1;
