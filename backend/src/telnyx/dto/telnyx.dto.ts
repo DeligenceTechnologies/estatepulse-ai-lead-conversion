@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -14,10 +15,12 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { StepConditionsDto } from '@/followup/dto/sequence.dto';
 import { CALL_CONTEXT_MAX_CHARS, STEP_VOICEMAILS, type StepVoicemail } from '@/followup/journey';
+import { BUSINESS_DETAILS_MAX } from '../sms/sms-compliance';
 import { CONFIRM_MESSAGE_MAX_CHARS, RETRY_ATTEMPTS_MAX, RETRY_MINUTES_MAX, RETRY_MINUTES_MIN } from '../tools/call-tools';
 import { VOICEMAIL_MAX_CHARS } from '../voicemail/voicemail';
 
@@ -304,6 +307,36 @@ export class UpdateTakeoverGreetingDto {
   @IsString()
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   message?: string;
+}
+
+/** Who the organization is in its texts. Each field is optional; an empty one clears it. */
+export class UpdateBusinessDetailsDto {
+  /** The registered name, when it differs from the name leads know. */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(BUSINESS_DETAILS_MAX.legalName)
+  legalName?: string;
+
+  /** A street or PO box address leads can write to; CASL asks for it with Canadian texts. */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(BUSINESS_DETAILS_MAX.mailingAddress)
+  mailingAddress?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @ValidateIf((o: UpdateBusinessDetailsDto) => Boolean(o.email))
+  @IsEmail({}, { message: 'Enter a valid email address, or leave it empty.' })
+  @MaxLength(BUSINESS_DETAILS_MAX.email)
+  email?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(BUSINESS_DETAILS_MAX.website)
+  website?: string;
 }
 
 export class QualificationQuestionDto {

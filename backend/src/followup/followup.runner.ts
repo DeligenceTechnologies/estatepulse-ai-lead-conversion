@@ -284,11 +284,11 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
       if (!text) return;
       try {
-        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text, { outreach: true });
+        await this.activity.recordSms(row.organization_id, row.lead_id, sent.text, true, sent.id);
         this.state.quietly({ ...event, type: 'step_sent' });
         this.conversations
-          .appendOurMessage(row.organization_id, lead.phone, text)
+          .appendOurMessage(row.organization_id, lead.phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
         await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);

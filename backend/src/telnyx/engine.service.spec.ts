@@ -58,7 +58,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const strategy: Strategy = { name: 'Test', guardrails: { respectQuietHours: false, ...guardrails }, steps };
   const strategies = { getStrategy: vi.fn(async () => strategy) };
-  const smsService = { sendSms: vi.fn(async () => ({ id: 'msg-1' })) };
+  const smsService = { sendSms: vi.fn(async (_org: string, _to: string, text: string) => ({ id: 'msg-1', text })) };
   const queue = { enqueue: vi.fn(async () => 'job-1') };
   const activity = { recordSms: vi.fn(), recordCallFailed: vi.fn(), exitStrategy: vi.fn(), leadVariables: vi.fn(async () => ({ firstName: 'Ana' })) };
   const followup = {
@@ -377,6 +377,20 @@ describe('EngineService safety and recovery', () => {
     await s.engine.enroll(ORG, LEAD);
     await vi.advanceTimersByTimeAsync(0);
     expect(s.texts()).toEqual([]);
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+  });
+
+  it('a STOP after the first text ends the strategy: no call and no later text', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
+
+    // The lead replies STOP: OptOutService makes it do-not-contact and not interested.
+    Object.assign(s.lead, { dncStatus: true, automationPaused: true, status: 'not_interested' });
+    await vi.advanceTimersByTimeAsync(30 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.texts()).toEqual(['text s1']);
     expect(s.engine.isRunning(LEAD)).toBe(false);
   });
 

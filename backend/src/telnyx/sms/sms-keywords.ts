@@ -1,3 +1,5 @@
+import { displayNumber, type BusinessDetails } from './sms-compliance';
+
 /**
  * Texting-program keywords in a lead's text, read before anyone treats it as
  * a conversation: an opt-out, an opt-in or a request for help. The FCC counts
@@ -80,11 +82,24 @@ export function optOutConfirmation(brokerage: string, french: boolean): string {
     : `You're unsubscribed from ${brokerage} and won't get more messages from us. Reply START to resubscribe.`;
 }
 
-/** The answer to HELP, AIDE or INFO: who is texting, how to reach a person, and how to stop. */
-export function helpReply(brokerage: string, ourNumber: string, french: boolean): string {
-  return french
-    ? `${brokerage} : messages sur votre recherche immobilière. Fréquence variable; des frais de messagerie peuvent s'appliquer. Aide : ${ourNumber}. Répondez ARRET pour vous désabonner.`
-    : `${brokerage}: texts about your home search. Msg frequency varies; msg & data rates may apply. For help, call or text ${ourNumber}. Reply STOP to opt out.`;
+/**
+ * The answer to HELP, AIDE or INFO: who is texting, how to reach a person,
+ * and how to stop, with the mailing address, email and website the
+ * organization gave (CASL wants the address within reach of a Canadian lead).
+ */
+export function helpReply(brokerage: string, ourNumber: string, french: boolean, details?: BusinessDetails): string {
+  const d = details ?? { legalName: '', mailingAddress: '', email: '', website: '' };
+  const who = d.legalName && d.legalName.toLowerCase() !== brokerage.toLowerCase() ? `${brokerage} (${d.legalName})` : brokerage;
+  const online = d.email || d.website;
+  const number = displayNumber(ourNumber);
+  if (french) {
+    const reach = online ? `${number} ou ${online}` : number;
+    const mail = d.mailingAddress ? ` Adresse : ${d.mailingAddress}.` : '';
+    return `${who} : messages sur votre recherche immobilière. Fréquence variable; des frais de messagerie peuvent s'appliquer. Aide : ${reach}.${mail} Répondez ARRET pour vous désabonner.`;
+  }
+  const reach = online ? `${number} or ${online}` : number;
+  const mail = d.mailingAddress ? ` Mail: ${d.mailingAddress}.` : '';
+  return `${who}: texts about your home search. Msg frequency varies; msg & data rates may apply. For help, call or text ${reach}.${mail} Reply STOP to opt out.`;
 }
 
 /**

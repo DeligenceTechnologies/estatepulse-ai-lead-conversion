@@ -11,6 +11,7 @@ import { OptOutService } from './opt-out.service';
 import { normalizePhone } from './phone';
 import { SmsService } from './sms.service';
 import { SmsConversationService } from './sms/sms-conversation.service';
+import { businessDetails } from './sms/sms-compliance';
 import { SmsIntentService, type SmsIntentResult } from './sms/sms-intent.service';
 import { helpReply, optOutConfirmation, saidInFrench, smsKeyword, type KeywordMatch } from './sms/sms-keywords';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
@@ -321,7 +322,8 @@ export class InboundSmsService {
 
   /** HELP, AIDE or INFO: who is texting, how to reach a person, how to stop. Sent even to an opted-out number. */
   private async sendHelp(orgId: string, leadId: string | null, phone: string, ourNumber: string, french: boolean): Promise<void> {
-    await this.notify(orgId, leadId, phone, helpReply(await this.brokerage(orgId), ourNumber, french));
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { businessDetails: true } });
+    await this.notify(orgId, leadId, phone, helpReply(await this.brokerage(orgId), ourNumber, french, businessDetails(row?.businessDetails)));
   }
 
   /** A text the texting rules require (an opt-out confirmation, a HELP answer), stored with the lead's chat when there is a lead. */

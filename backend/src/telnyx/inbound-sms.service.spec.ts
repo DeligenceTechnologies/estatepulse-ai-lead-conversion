@@ -10,7 +10,7 @@ type TestLead = { id: string; orgId: string; status: string; dncStatus: boolean;
 
 function setup(
   start: { status: string; dncStatus: boolean; takenOverById?: string | null },
-  opts: { ai?: boolean; intent?: string; classify?: () => Promise<unknown>; siblings?: Partial<TestLead>[]; stranger?: boolean } = {},
+  opts: { ai?: boolean; intent?: string; classify?: () => Promise<unknown>; siblings?: Partial<TestLead>[]; stranger?: boolean; details?: Record<string, string> } = {},
 ) {
   const lead: TestLead = { id: 'lead-1', orgId: 'org-1', normalizedPhone: PHONE, firstResponseAt: null, takenOverById: null, reviewReasons: [], ...start };
   const leads: TestLead[] = [lead, ...(opts.siblings ?? []).map((l, i) => ({ ...lead, id: `lead-${i + 2}`, ...l }))];
@@ -51,6 +51,7 @@ function setup(
       deleteMany: vi.fn(async ({ where }: any) => suppressed.delete(where.normalizedPhone)),
     },
     organization: { findUnique: vi.fn(async () => ({ name: 'Skyline Realty' })) },
+    organizationSetting: { findUnique: vi.fn(async () => ({ businessDetails: opts.details ?? null })) },
     $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)),
   };
   const creds = { orgForNumber: vi.fn(async () => 'org-1') };
@@ -66,7 +67,7 @@ function setup(
   const callTools = { ensure: vi.fn(async () => undefined) };
   const bus = { publish: vi.fn() };
   const memory = { onLeadText: vi.fn() };
-  const sms = { sendSms: vi.fn(async () => ({ id: 'sent-1' })) };
+  const sms = { sendSms: vi.fn(async (_org: string, _to: string, text: string) => ({ id: 'sent-1', text })) };
   const state = new LeadStateService(prisma as any);
   const service = new InboundSmsService(
     prisma as any,
@@ -340,11 +341,23 @@ describe('InboundSmsService', () => {
       const s = setup({ status: 'contacting', dncStatus: false });
       await s.receive('HELP');
       expect(s.notices()).toEqual([
-        `Skyline Realty: texts about your home search. Msg frequency varies; msg & data rates may apply. For help, call or text ${OUR_NUMBER}. Reply STOP to opt out.`,
+        `Skyline Realty: texts about your home search. Msg frequency varies; msg & data rates may apply. For help, call or text (742) 724-5092. Reply STOP to opt out.`,
       ]);
       expect(s.prisma.message.create).toHaveBeenCalledWith({ data: expect.objectContaining({ direction: 'outbound', body: expect.stringContaining('Reply STOP') }) });
       expect(s.optedOut()).toEqual([]);
       expect(s.followup.pauseForLead).toHaveBeenCalled();
+    });
+
+    it('adds the mailing address and website the organization gave, and its legal name', async () => {
+      const s = setup(
+        { status: 'contacting', dncStatus: false },
+        { details: { legalName: 'Skyline Realty Group Inc.', mailingAddress: '100 King St W, Toronto ON M5X 1A9', website: 'skylinerealty.ca' } },
+      );
+      await s.receive('help');
+      expect(s.notices()[0]).toBe(
+        'Skyline Realty (Skyline Realty Group Inc.): texts about your home search. Msg frequency varies; msg & data rates may apply. ' +
+          'For help, call or text (742) 724-5092 or skylinerealty.ca. Mail: 100 King St W, Toronto ON M5X 1A9. Reply STOP to opt out.',
+      );
     });
 
     it('answers AIDE in French', async () => {

@@ -9,6 +9,7 @@ import { CallWorker } from './calls/call.worker';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
 import { OptOutService } from './opt-out.service';
+import { BusinessDetailsService } from './sms/business-details.service';
 import { LeadInsightsService } from './lead-insights.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { LeadScoringService } from './lead-scoring.service';
@@ -62,6 +63,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     EngineService,
     InboundSmsService,
     OptOutService,
+    BusinessDetailsService,
     LeadInsightsService,
     LeadMemoryService,
     LeadScoringService,

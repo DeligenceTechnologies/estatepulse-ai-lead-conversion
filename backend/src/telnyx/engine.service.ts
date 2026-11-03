@@ -491,11 +491,11 @@ export class EngineService implements OnModuleDestroy {
       const variables = await this.activity.leadVariables(e.orgId, e.leadId);
       const text = fillTemplate(step.message ?? '', { ...variables, brokerage: office.brokerage });
       try {
-        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text);
-        await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
+        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text, { outreach: true });
+        await this.activity.recordSms(e.orgId, e.leadId, sent.text, true, sent.id);
         this.state.quietly({ ...event, type: 'step_sent' });
         this.conversations
-          .appendOurMessage(e.orgId, phone, text)
+          .appendOurMessage(e.orgId, phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
         await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
