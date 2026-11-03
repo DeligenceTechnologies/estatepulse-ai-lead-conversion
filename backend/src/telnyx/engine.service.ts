@@ -422,6 +422,7 @@ export class EngineService implements OnModuleDestroy {
       this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), window.allowedAt.getTime() - now);
       return;
     }
+    this.logger.debug(gateLine(e.orgId, e.leadId, zone, window, 'allowed'));
 
     // A text the lead asked for comes first: the step waits for it, then goes on by the usual rules.
     if (textBackPending(lead)) {

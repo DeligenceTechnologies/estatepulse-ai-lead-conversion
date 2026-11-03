@@ -70,6 +70,26 @@ async function codeOf(p: Promise<unknown>): Promise<string | null> {
 }
 
 const hhmm = (d: Date) => d.toISOString().slice(11, 16);
+
+/**
+ * Outreach is timed on each LEAD's clock now, and the legal calling hours of their jurisdiction
+ * cannot be switched off. So the fixtures pin every lead to a zone where it is early afternoon
+ * while this suite runs, whatever the wall clock of the machine: the only thing under test here is
+ * the batch mechanics, not the window.
+ */
+const ZONES_BY_OFFSET = [
+  'Pacific/Honolulu', 'America/Anchorage', 'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
+  'America/Halifax', 'America/Sao_Paulo', 'Atlantic/Azores', 'UTC', 'Europe/Paris', 'Europe/Kyiv', 'Europe/Moscow',
+  'Asia/Dubai', 'Asia/Karachi', 'Asia/Dhaka', 'Asia/Bangkok', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Brisbane',
+  'Pacific/Noumea', 'Pacific/Auckland',
+];
+const hourIn = (zone: string, at: Date) =>
+  Number(new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', hourCycle: 'h23' }).format(at));
+const middayZone = (at = new Date()) => ZONES_BY_OFFSET.find((z) => hourIn(z, at) >= 11 && hourIn(z, at) <= 15) ?? 'UTC';
+const LEAD_ZONE = middayZone();
+/** HH:MM on the leads' clock, for a window the runner will measure against. */
+const hhmmLead = (d: Date) =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: LEAD_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
 const wall = (d: Date) => ({ date: d.toISOString().slice(0, 10), time: hhmm(d), timeZone: 'UTC' });
 /** A scheduled start whole minutes ahead, as the API takes it (UTC wall clock). */
 const ahead = (ms: number) => new Date(Math.ceil((Date.now() + ms) / 60_000) * 60_000);
@@ -114,6 +134,7 @@ async function imported(o: Org, n: number, over: { dncStatus?: boolean } = {}) {
         phone,
         normalizedPhone: phone,
         phoneValid: true,
+        timezone: LEAD_ZONE,
         automationPaused: true,
         needsReview: true,
         reviewReasons: [FILE_IMPORT_REVIEW_REASON],
@@ -356,7 +377,8 @@ describe('guardrails at release', () => {
 
   it('respects the contact window: nothing is released inside quiet hours', async () => {
     const now = new Date();
-    const o = await setupOrg({ quiet: { start: hhmm(new Date(now.getTime() - HOUR)), end: hhmm(new Date(now.getTime() + HOUR)) } });
+    // The quiet window is written on the leads' clock, which is what the runner measures against.
+    const o = await setupOrg({ quiet: { start: hhmmLead(new Date(now.getTime() - HOUR)), end: hhmmLead(new Date(now.getTime() + HOUR)) } });
     const { leadIds, rowIds } = await imported(o, 2);
     const r = await reviewsOn.approve(o.who, rowIds, { mode: 'now' });
     await runner.tick(new Date()); // the batch is due now, and now is inside the quiet window

@@ -45,7 +45,8 @@ export class LeadTimezoneService {
         payload: { timezone, candidates: zone.candidates },
       });
     }
-    this.logger.log(`contact gate org=${orgId} lead=${leadId} zone=${zone.zone ?? 'none'} status=${zone.status} jurisdiction=${jurisdictionCode(zone)} action=override`);
+    // Not a contact-gate decision: its own prefix, so "contact gate" stays one line per allowed/deferred/held call.
+    this.logger.log(`timezone override org=${orgId} lead=${leadId} zone=${zone.zone ?? 'none'} status=${zone.status} jurisdiction=${jurisdictionCode(zone)} source=agent`);
     await this.wake(leadId);
     return zone;
   }
