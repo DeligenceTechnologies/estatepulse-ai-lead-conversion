@@ -294,7 +294,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         this.prisma.organization.findUnique({ where: { id: row.organization_id }, select: { name: true } }),
         this.activity.leadVariables(row.organization_id, row.lead_id),
       ]);
-      const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
+      // The lead's name as leadVariables cleaned it, never the raw field: a form may hold anything there.
+      const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, brokerage: org?.name ?? 'our team' });
       if (!text) return { kind: 'done' };
       try {
         const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text, { outreach: true });

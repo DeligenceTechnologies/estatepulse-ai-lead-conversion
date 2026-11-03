@@ -194,6 +194,14 @@ describe('FollowupRunner journey rules', () => {
     expect(s.conversations.appendOurMessage).toHaveBeenCalledWith('org-1', '+12895550100', 'Hi Ana, still looking in Austin?');
   });
 
+  it("texts the lead's name as leadVariables cleaned it, never the raw field", async () => {
+    const s = setup([{ ...smsStep('Hi {{firstName}}!') }], 1);
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Visit bit.ly/x', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false });
+    s.activity.leadVariables.mockResolvedValue({ firstName: 'there', location: '' });
+    await s.execute();
+    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12895550100', 'Hi there!', { outreach: true });
+  });
+
   it('waits while a call of this sequence is still ringing or live', async () => {
     const s = setup([voiceStep(), smsStep('two')], 2);
     s.prisma.call.findFirst.mockResolvedValue({ status: 'in_progress', disposition: null, endedAt: null, createdAt: new Date(NOW.getTime() - 60_000) });
