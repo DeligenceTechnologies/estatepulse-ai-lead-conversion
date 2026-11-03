@@ -6,6 +6,7 @@ import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
+import { suppressedPhones } from '@/lead/contact-suppression';
 import type { OutreachRequest } from '@/outreach/schedule';
 import { approveTrackingRows } from './approval';
 import { GoogleConnectionsService } from './google-connections.service';
@@ -656,11 +657,12 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       });
     }
     const ownDnc = new Map(contacts.map((c) => [c.id, c.dncStatus]));
+    const optedOut = await suppressedPhones(this.prisma, orgId, phones);
     const assess = (l: LeadFields, self: string | null) => {
       const p = l.normalized_phone;
       const e = l.normalized_email;
       const others = contacts.filter((c) => c.id !== self && ((p && c.normalizedPhone === p) || (e && c.normalizedEmail === e)));
-      const dnc = others.some((c) => c.dncStatus) || Boolean(self && ownDnc.get(self));
+      const dnc = others.some((c) => c.dncStatus) || Boolean(self && ownDnc.get(self)) || Boolean(p && optedOut.has(p));
       const duplicate = others.length > 0 || Boolean((p && runPhones.has(p)) || (e && runEmails.has(e)));
       if (p) runPhones.add(p);
       if (e) runEmails.add(e);
@@ -899,6 +901,8 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
     for (const f of found) if (f.normalizedEmail) known.emails.set(f.normalizedEmail, (known.emails.get(f.normalizedEmail) ?? false) || f.dncStatus);
   }
 
+  const suppressed = await suppressedPhones(prisma, orgId, phones);
+
   const inFile = { phones: new Set<string>(), emails: new Set<string>() };
   const reasons = new Map<number, string[]>();
   let possible = 0;
@@ -906,7 +910,7 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
   for (const b of candidates) {
     const p = b.lead!.normalized_phone;
     const e = b.lead!.normalized_email;
-    const dnc = Boolean((p && known.phones.get(p)) || (e && known.emails.get(e)));
+    const dnc = Boolean((p && (known.phones.get(p) || suppressed.has(p))) || (e && known.emails.get(e)));
     const duplicate = Boolean((p && (known.phones.has(p) || inFile.phones.has(p))) || (e && (known.emails.has(e) || inFile.emails.has(e))));
     if (p) inFile.phones.add(p);
     if (e) inFile.emails.add(e);

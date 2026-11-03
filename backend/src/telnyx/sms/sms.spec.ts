@@ -8,10 +8,10 @@ describe('parseIntent', () => {
     expect(parseIntent('{"intent":"not_interested","reason":"already bought"}')).toEqual({ intent: 'not_interested', reason: 'already bought' });
   });
 
-  it('never ends a conversation on an unusable answer', () => {
-    expect(parseIntent('not json').intent).toBe('continue');
-    expect(parseIntent({ intent: 'hang_up', reason: 'x' }).intent).toBe('continue');
-    expect(parseIntent(undefined).intent).toBe('continue');
+  it('gives nothing for an unusable answer, which may have been an opt-out, rather than reading it as "continue"', () => {
+    expect(parseIntent('not json')).toBeNull();
+    expect(parseIntent({ intent: 'hang_up', reason: 'x' })).toBeNull();
+    expect(parseIntent(undefined)).toBeNull();
   });
 });
 

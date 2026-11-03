@@ -109,20 +109,24 @@ export class FollowupService {
    * last one on that channel has passed, or in the next day's contact window
    * when today's limit is used. Texts count the journey's own (strategy and
    * sequence steps), not the AI's chat replies; calls count every call placed.
+   * Both count per phone, across every lead with it: a person who filled in
+   * two forms still gets one day's worth.
    */
   async contactSlot(orgId: string, leadId: string, channel: 'sms' | 'voice', now = new Date()): Promise<{ at: Date; reason: string | null }> {
     const g = await this.guardrailsFor(orgId);
     if (!(channel === 'voice' ? g.limits.callsPerDay : g.limits.smsPerDay) && !g.limits.minGapMinutes) return { at: now, reason: null };
     const dayStart = new Date(now.getTime() - minutesOfDay(g.timeZone, now) * 60_000 - (now.getTime() % 60_000));
+    const phone = (await this.prisma.lead.findUnique({ where: { id: leadId }, select: { normalizedPhone: true } }))?.normalizedPhone;
+    const who = phone ? { lead: { orgId, normalizedPhone: phone } } : { leadId };
     const [sentToday, last] =
       channel === 'voice'
         ? await Promise.all([
-            this.prisma.call.count({ where: { leadId, providerCallId: { not: null }, createdAt: { gte: dayStart } } }),
-            this.prisma.call.findFirst({ where: { leadId, providerCallId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+            this.prisma.call.count({ where: { ...who, providerCallId: { not: null }, createdAt: { gte: dayStart } } }),
+            this.prisma.call.findFirst({ where: { ...who, providerCallId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
           ])
         : await Promise.all([
-            this.prisma.leadEvent.count({ where: { leadId, type: 'step_sent', channel: 'sms', createdAt: { gte: dayStart } } }),
-            this.prisma.leadEvent.findFirst({ where: { leadId, type: 'step_sent', channel: 'sms' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+            this.prisma.leadEvent.count({ where: { ...who, type: 'step_sent', channel: 'sms', createdAt: { gte: dayStart } } }),
+            this.prisma.leadEvent.findFirst({ where: { ...who, type: 'step_sent', channel: 'sms' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
           ]);
     const tomorrow = nextContactAt(g.timeZone, g.quiet, g.skipDays, nextLocalMidnight(g.timeZone, now));
     return limitSlot({ channel, now, limits: g.limits, sentToday, lastAt: last?.createdAt ?? null, tomorrow });

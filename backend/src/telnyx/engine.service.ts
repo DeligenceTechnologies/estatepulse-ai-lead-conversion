@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
-import { CallDisposition, CallStatus, ConsentStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
+import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { nextContactAt, type QuietHours } from '@/common/utils/quiet-hours';
@@ -9,6 +9,7 @@ import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
+import { OptOutService } from './opt-out.service';
 import { SmsService } from './sms.service';
 import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from './strategy-store.service';
 import { CallQueue } from './calls/call.queue';
@@ -136,6 +137,7 @@ export class EngineService implements OnModuleDestroy {
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
     private readonly state: LeadStateService,
     private readonly conversations: SmsConversationService,
+    private readonly optOuts: OptOutService,
   ) {}
 
   onModuleDestroy(): void {
@@ -327,7 +329,7 @@ export class EngineService implements OnModuleDestroy {
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { id: true } });
     if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
     const manual = opts.actor?.type === 'user';
-    // An opt-out sets DNC and stops the sequences together: never one without the other.
+    // An opt-out sets DNC and stops the sequences together, for the number (OptOutService): never one without the other.
     const moved = await this.prisma.$transaction(async (tx) => {
       const result = await this.state.move(
         leadId,
@@ -340,15 +342,19 @@ export class EngineService implements OnModuleDestroy {
           data: {
             ...(reason ? { aiSummary: reason.slice(0, 2000) } : {}),
             ...(status === LeadStatus.follow_up ? { followUpReason: opts.followUpReason ?? FollowUpReason.other } : {}),
-            ...(optOut ? { dncStatus: true, automationPaused: true, consentStatus: ConsentStatus.revoked } : {}),
             ...(INACTIVE_STATUSES.includes(status) && reason ? { lostReason: reason.slice(0, 255) } : {}),
           },
         },
         tx,
       );
+      // It holds for the number, every lead with it, and even when the status cannot move (a booked lead keeps its meeting).
+      if (optOut) {
+        const source = opts.source ?? (manual ? 'agent' : 'system');
+        await this.optOuts.optOut(orgId, { leadId }, { source, reason: reason ?? 'Asked not to be contacted', actor: opts.actor }, tx);
+        return true;
+      }
       if (!result.moved) return false;
-      if (optOut) await this.followup.stopForLead(orgId, leadId, 'opted_out', tx);
-      else if (INACTIVE_STATUSES.includes(status)) await this.followup.stopForLead(orgId, leadId, `lead_${status}`, tx);
+      if (INACTIVE_STATUSES.includes(status)) await this.followup.stopForLead(orgId, leadId, `lead_${status}`, tx);
       return true;
     });
     if (!moved) return false;

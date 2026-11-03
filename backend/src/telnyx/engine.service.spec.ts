@@ -69,7 +69,8 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const state = new LeadStateService(prisma as any);
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
-  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any);
+  const optOuts = { optOut: vi.fn(async () => [LEAD]) };
+  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any, optOuts as any);
   const text = (direction: 'inbound' | 'outbound') => texts.push({ direction, createdAt: new Date() });
   const dial = (status: string, durationSeconds: number | null = null, disposition?: string) => {
     const ended = !['ringing', 'in_progress', 'queued'].includes(status);
@@ -77,7 +78,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
     calls.push(row);
     return row;
   };
-  return { engine, lead, prisma, conversations, text, smsService, queue, activity, followup, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
+  return { engine, lead, prisma, conversations, text, smsService, queue, activity, followup, optOuts, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
 }
 
 describe('remainingSteps', () => {
@@ -461,6 +462,22 @@ describe('EngineService outcomes', () => {
     s.lead.status = 'contacting';
     expect(await s.engine.setStatus(ORG, LEAD, 'not_interested' as any, 'Said no on the call', { source: 'scoring' })).toBe(true);
     expect(s.followup.stopForLead).toHaveBeenCalledWith(ORG, LEAD, 'lead_not_interested', s.prisma);
+  });
+
+  it("puts an agent's do-not-contact on the number, through the same opt-out as a STOP", async () => {
+    const s = setup();
+    s.lead.status = 'contacting';
+    const actor = { type: 'user' as const, id: 'user-1' };
+    expect(await s.engine.setStatus(ORG, LEAD, 'not_interested' as any, 'Asked us to stop', { optOut: true, actor })).toBe(true);
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, { source: 'agent', reason: 'Asked us to stop', actor }, s.prisma);
+  });
+
+  it('opts out a lead whose status cannot move: a booked lead keeps its meeting, and is still not contacted', async () => {
+    const s = setup();
+    s.lead.status = 'appointment_booked';
+    expect(await s.engine.setStatus(ORG, LEAD, 'not_interested' as any, 'Said stop on the call', { optOut: true, source: 'call' })).toBe(true);
+    expect(s.lead.status).toBe('appointment_booked');
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, expect.objectContaining({ source: 'call' }), s.prisma);
   });
 
   it('refuses automation a move the rules do not allow, but lets a person make it', async () => {

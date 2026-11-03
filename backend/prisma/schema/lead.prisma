@@ -147,6 +147,23 @@ model Call {
   @@map("calls")
 }
 
+/// A phone that asked not to be contacted. Do-not-contact belongs to the number, not one lead record: every lead
+/// with it is do-not-contact, a lead created later with it starts that way, and nothing is texted to it. START by
+/// text deletes the row; each lead's lead_events keep the history.
+model ContactSuppression {
+  orgId           String   @map("organization_id") @db.Uuid
+  normalizedPhone String   @map("normalized_phone") @db.VarChar(50)
+  /// What decided it: sms_reply, call, sms_chat, agent, backfill.
+  source          String   @db.VarChar(30)
+  reason          String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, normalizedPhone])
+  @@map("contact_suppressions")
+}
+
 /// What the outreach decided about a lead, one row per decision and in order:
 /// status moves, steps sent, held or skipped, calls ended, replies received.
 model LeadEvent {

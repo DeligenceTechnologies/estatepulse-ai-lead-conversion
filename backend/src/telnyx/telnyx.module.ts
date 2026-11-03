@@ -8,6 +8,7 @@ import { CallQueue } from './calls/call.queue';
 import { CallWorker } from './calls/call.worker';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
+import { OptOutService } from './opt-out.service';
 import { LeadInsightsService } from './lead-insights.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { LeadScoringService } from './lead-scoring.service';
@@ -60,6 +61,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallWorker,
     EngineService,
     InboundSmsService,
+    OptOutService,
     LeadInsightsService,
     LeadMemoryService,
     LeadScoringService,
