@@ -47,7 +47,7 @@ import {
   setTools as saveTools,
   detachTool,
 } from '../../utils/assistantApi';
-import { disableSmsConversation, enableSmsConversation, getSmsConversation } from '../../utils/smsConversationApi';
+import { disableSmsConversation, enableSmsConversation, getSmsConversation, setSmsReplyEngine, type SmsReplyEngine } from '../../utils/smsConversationApi';
 import { StrategyEditor } from './StrategyEditor';
 import { PhoneNumberCard } from './PhoneNumberCard';
 import { CallPacingCard } from './CallPacingCard';
@@ -140,6 +140,7 @@ export const AISettingsView: React.FC = () => {
   const [dynamicVarsWebhook, setDynamicVarsWebhook] = useState('');
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [smsBusy, setSmsBusy] = useState(false);
+  const [smsEngine, setSmsEngine] = useState<SmsReplyEngine>('telnyx');
   const [dataRetention, setDataRetention] = useState(true);
 
   // Tools / Workflows
@@ -200,7 +201,10 @@ export const AISettingsView: React.FC = () => {
       .finally(() => setAgentLoading(false));
     listModels().then(setModels);
     getSmsConversation()
-      .then((s) => setSmsEnabled(s.enabled))
+      .then((s) => {
+        setSmsEnabled(s.enabled);
+        setSmsEngine(s.engine ?? 'telnyx');
+      })
       .catch(() => undefined);
   };
 
@@ -213,6 +217,25 @@ export const AISettingsView: React.FC = () => {
       toast.success(s.enabled ? 'The agent now answers texts from leads.' : 'Texts from leads now go to a person.');
     } catch (e: any) {
       toast.error(e?.message || 'Could not change who answers texts.');
+    } finally {
+      setSmsBusy(false);
+    }
+  };
+
+  // Saved at once too: it moves who answers the organization's texts, live.
+  const changeEngine = async (next: SmsReplyEngine) => {
+    if (next === smsEngine) return;
+    setSmsBusy(true);
+    try {
+      const s = await setSmsReplyEngine(next);
+      setSmsEngine(s.engine);
+      toast.success(
+        s.engine === 'estatepulse'
+          ? 'EstatePulse now writes the agent’s text replies.'
+          : 'The Telnyx assistant now answers texts by itself.',
+      );
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not change who writes the text replies.');
     } finally {
       setSmsBusy(false);
     }
@@ -930,6 +953,42 @@ export const AISettingsView: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            {smsEnabled && (
+              <div className="space-y-2">
+                <span className="block text-slate-300 font-semibold">Who writes the agent’s text replies</span>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(
+                    [
+                      {
+                        value: 'estatepulse',
+                        title: 'EstatePulse (new)',
+                        body: 'EstatePulse decides on each text: the agent answers active leads, while agents’ chats, booked or opted-out leads and unknown numbers go to a person. Same agent, prompt and tools; never answers our own numbers.',
+                      },
+                      {
+                        value: 'telnyx',
+                        title: 'Telnyx assistant',
+                        body: 'The assistant linked to your number answers every text the moment it arrives, before EstatePulse sees it.',
+                      },
+                    ] as const
+                  ).map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => void changeEngine(o.value)}
+                      disabled={smsBusy}
+                      aria-pressed={smsEngine === o.value}
+                      className={`text-left rounded-xl border px-3 py-2.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
+                        smsEngine === o.value ? 'border-emerald-600 bg-emerald-950/30' : 'border-slate-800 bg-slate-950 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="block font-semibold text-slate-200">{o.title}</span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5">{o.body}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-slate-300 font-semibold mb-1">

@@ -12,7 +12,19 @@ export interface SmsConversationStatus {
   enabledAt: string | null;
   /** In-call booking is on, so the AI can book a meeting in the chat too. */
   bookingInChat: boolean;
+  engine: SmsReplyEngine;
 }
+
+/**
+ * Who writes the AI's text replies. 'telnyx': the assistant linked to the
+ * number answers every text itself. 'estatepulse': EstatePulse decides per
+ * text whether the AI answers (not for agents' chats, booked or opted-out
+ * leads, unknown numbers) and writes the reply with the same assistant.
+ */
+export type SmsReplyEngine = 'telnyx' | 'estatepulse';
+
+export const setSmsReplyEngine = (engine: SmsReplyEngine) =>
+  apiFetch<SmsConversationStatus>('/sms-conversation/engine', { method: 'PUT', body: { engine }, auth: true });
 
 export const getSmsConversation = () => apiFetch<SmsConversationStatus>('/sms-conversation', { auth: true });
 
