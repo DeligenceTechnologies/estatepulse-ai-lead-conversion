@@ -295,8 +295,7 @@ export class ConnectService implements OnApplicationBootstrap {
     try {
       const fields = await adapter.describeForm(credential, externalFormId);
       if (fields.length === 0) return null;
-      const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } });
-      const result = prebuildMappings(fields, settings?.defaultRegion ?? 'US');
+      const result = prebuildMappings(fields);
       await this.prisma.$transaction(async (tx) => {
         await tx.leadSourceField.createMany({
           data: fields.map((f) => ({

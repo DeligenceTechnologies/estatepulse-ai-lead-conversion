@@ -239,10 +239,15 @@ export interface ReviewItem {
     firstName: string | null;
     lastName: string | null;
     phone: string | null;
+    /** False when the number cannot be dialled — usually because it carries no country code. */
+    phoneValid: boolean;
     email: string | null;
     location: string | null;
+    timeline: string | null;
     minBudget: number | null;
     maxBudget: number | null;
+    bedrooms: number | null;
+    motivation: string | null;
     dncStatus: boolean;
     reviewReasons: string[];
   } | null;

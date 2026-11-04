@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { CANONICAL_FIELDS } from '@/ingest/processing/canonical-fields';
-import { applyTransform, isValidEmail } from '@/ingest/processing/transforms';
+import { applyTransform, isDialable, isValidEmail } from '@/ingest/processing/transforms';
 import { validateCanonicalValues, type CanonicalValue } from '@/ingest/processing/validators';
-import { PHONE_UNPARSED_REASON, type BuiltRow, type LeadFields } from '@/google-sheets/sheet-rows';
+import { PHONE_UNPARSED_REASON, contactIssue, type BuiltRow, type LeadFields } from '@/google-sheets/sheet-rows';
 
 /**
  * Pure CRM logic shared by every provider: the field ownership policy, and
@@ -306,7 +306,7 @@ const str = (v: CanonicalValue | undefined): string | null => (typeof v === 'str
  * `key` is set even on a refusal, so a contact that is still in the CRM is
  * never mistaken for one that was deleted.
  */
-export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: CrmContact, region: string): BuiltRow {
+export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: CrmContact): BuiltRow {
   const key = crmRowKey(provider, 'contact', contact.externalId);
   const values: Record<string, CanonicalValue> = {};
   const custom: Record<string, string> = {};
@@ -314,14 +314,14 @@ export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: 
 
   const put = (target: string, raw: string | null, transform: Parameters<typeof applyTransform>[0]) => {
     if (!raw) return;
-    const { value, warning } = applyTransform(transform, [raw], raw, region);
+    const { value, warning } = applyTransform(transform, [raw], raw);
     if (value !== null && value !== '') values[target] = value;
     if (warning) warnings.push(`${CANONICAL_FIELDS[target]?.label ?? target}: ${warning}`);
   };
   put('first_name', clean(contact.firstName, 100), { kind: 'text', maxLen: 100 });
   put('last_name', clean(contact.lastName, 100), { kind: 'text', maxLen: 100 });
   put('email', clean(contact.email, 255), { kind: 'email' });
-  put('phone', clean(contact.phone, 50), { kind: 'phone_e164', defaultRegion: region });
+  put('phone', clean(contact.phone, 50), { kind: 'phone_e164' });
 
   for (const [k, v] of Object.entries(contact.extra)) {
     const value = clean(v, 500);
@@ -338,7 +338,7 @@ export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: 
   const v = validated.values;
 
   const phone = str(v.phone);
-  const normalizedPhone = phone && phone.startsWith('+') ? phone : null;
+  const normalizedPhone = isDialable(phone) ? phone : null;
   const email = str(v.email);
   const emailValid = email ? isValidEmail(email) : false;
   const normalizedEmail = emailValid ? email!.toLowerCase() : null;
@@ -346,7 +346,7 @@ export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: 
   const lastName = str(v.last_name);
 
   if (!normalizedPhone && !emailValid) {
-    return { rowNumber: CRM_ROW_NUMBER, blank: false, issue: 'NO_CONTACT', key, externalId: contact.externalId, reviewReasons: [] };
+    return { rowNumber: CRM_ROW_NUMBER, blank: false, issue: contactIssue(phone), key, externalId: contact.externalId, reviewReasons: [] };
   }
 
   const lead: LeadFields = {

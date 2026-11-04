@@ -27,6 +27,11 @@ export const PreviewRowsTable: React.FC<{
 }> = ({ rows, selected, onChange, note }) => {
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const cleanRows = rows.filter((r) => !flagged(r));
+  // A phone we could not read: its country code was the only thing that could have said where
+  // it is from. Counted here so the owner sees it before approving, not after a call never lands.
+  // Rows whose ONLY contact was such a number never reach this table — they are skipped as
+  // NO_CONTACT upstream, and the skipped counts above cover those.
+  const noCountryCode = rows.filter((r) => r.lead?.phone && !r.lead.normalized_phone).length;
   const shownRows = onlyFlagged ? rows.filter(flagged) : rows;
   const allCleanSelected = selected !== null && cleanRows.length > 0 && cleanRows.every((r) => selected.has(r.rowNumber));
   const toggleRow = (n: number) => {
@@ -54,6 +59,19 @@ export const PreviewRowsTable: React.FC<{
           Show only flagged ({rows.length - cleanRows.length})
         </label>
       </div>
+      {noCountryCode > 0 && (
+        <div className="px-3 py-2 bg-amber-500/5 border-t border-amber-500/20 text-2xs text-amber-200/80 leading-relaxed flex items-start gap-1.5">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-amber-400" />
+          <span>
+            <span className="font-semibold text-amber-100">
+              {noCountryCode} {noCountryCode === 1 ? 'row carries a phone number' : 'rows carry phone numbers'} with no country code
+            </span>
+            . We do not guess one — the same digits are a valid number in dozens of countries, and a wrong guess is a lead
+            nobody can reach. These rows are flagged and will never be dialled. Add the code in your sheet (+91 98765 43210)
+            and import again.
+          </span>
+        </div>
+      )}
       <div className="max-h-64 overflow-y-auto">
         <table className="w-full text-2xs">
           <thead className="text-slate-500 text-left">

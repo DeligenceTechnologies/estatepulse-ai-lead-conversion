@@ -47,10 +47,10 @@ function typeCompatible(target: CanonicalKey, providerType: string): boolean {
   return true;
 }
 
-function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer, defaultRegion: string): Transform {
+function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer): Transform {
   switch (target) {
     case 'phone':
-      return { kind: 'phone_e164', defaultRegion };
+      return { kind: 'phone_e164' };
     case 'email':
       return { kind: 'email' };
     case 'bedrooms':
@@ -102,7 +102,7 @@ function autoEnumMap(target: CanonicalKey, answer: NormalizedAnswer): Record<str
   return map;
 }
 
-export function suggestMappings(answers: NormalizedAnswer[], defaultRegion: string): Suggestion[] {
+export function suggestMappings(answers: NormalizedAnswer[]): Suggestion[] {
   const out: Suggestion[] = [];
   const claimed = new Set<CanonicalKey>();
 
@@ -151,7 +151,7 @@ export function suggestMappings(answers: NormalizedAnswer[], defaultRegion: stri
       sourceFieldLabel: answer.label,
       sourceFieldType: answer.type,
       targetField: target,
-      transform: defaultTransform(target, answer, defaultRegion),
+      transform: defaultTransform(target, answer),
       confidence: Number(score.toFixed(2)),
     });
 

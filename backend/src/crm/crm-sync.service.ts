@@ -112,7 +112,6 @@ interface Ctx {
   sourceId: string;
   credentialId: string;
   defaultConsent: ConsentStatus;
-  region: string;
   importReason: string;
   /** What the logs show: names and ids only. */
   logTag: string;
@@ -377,14 +376,12 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async slice(c: Claimed): Promise<void> {
     const adapter = this.registry.byProvider(c.provider);
-    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId: c.organization_id }, select: { defaultRegion: true } });
     const ctx: Ctx = {
       adapter: adapter!,
       organizationId: c.organization_id,
       sourceId: c.id,
       credentialId: c.integration_id,
       defaultConsent: c.default_consent_status,
-      region: settings?.defaultRegion ?? 'US',
       importReason: adapter ? crmImportReviewReason(adapter.label) : '',
       logTag: `${c.provider} source ${c.id}`,
     };
@@ -729,7 +726,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
     const prefix = adapter.label.customPrefix;
     const byKey = new Map<string, BuiltRow>();
     for (const contact of contacts) {
-      const row = buildCrmRow(adapter.provider, adapter.label, contact, ctx.region);
+      const row = buildCrmRow(adapter.provider, adapter.label, contact);
       byKey.set(row.key!, row);
     }
     const all = [...byKey.values()];
