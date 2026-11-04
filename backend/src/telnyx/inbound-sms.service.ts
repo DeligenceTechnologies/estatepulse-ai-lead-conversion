@@ -1,10 +1,15 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { DeliveryStatus, LeadStatus } from '@prisma/client';
+import type { Queue } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { isSuppressed } from '@/lead/contact-suppression';
 import { LeadStateService } from '@/lead/lead-state.service';
+import { SMS_REPLY_QUEUE, SmsReplyJob } from '@/queue/queue.constants';
+import { PERSON_REPLY_REVIEW, personReason } from '@/sms-agent/sms-agent';
+import type { SmsReplyJobData } from '@/sms-agent/sms-agent.service';
 import { EngineService } from './engine.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { OptOutService } from './opt-out.service';
@@ -23,6 +28,11 @@ const INTENT_CONTEXT = 6;
 /** The intent check is tried this many times before the text is left to a person. */
 const INTENT_TRIES = 2;
 export const INTENT_UNCHECKED_REVIEW = 'A text could not be checked for an opt-out: read it before contacting the lead again';
+/**
+ * How long a reply this server writes waits after the lead's text, so two or
+ * three texts sent in a row get one answer that reads them all.
+ */
+export const REPLY_DEBOUNCE_MS = 2_000;
 
 /** A webhook's timestamp, or null when it is missing or unreadable. */
 const providerTime = (value: unknown): Date | null => {
@@ -58,6 +68,7 @@ export class InboundSmsService {
     private readonly memory: LeadMemoryService,
     private readonly optOuts: OptOutService,
     private readonly sms: SmsService,
+    @InjectQueue(SMS_REPLY_QUEUE) private readonly replies: Queue<SmsReplyJobData>,
   ) {}
 
   async onMessageReceived(payload: any): Promise<void> {
@@ -82,12 +93,12 @@ export class InboundSmsService {
     const lead = await this.prisma.lead.findFirst({
       where: { orgId, normalizedPhone: from },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true },
+      select: { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true, status: true, reviewReasons: true },
     });
     const word = smsKeyword(text, payload?.autoresponse_type);
     if (!lead) return this.onStranger(orgId, from, to, word);
 
-    await this.prisma.message
+    const stored = await this.prisma.message
       .create({
         data: {
           orgId,
@@ -102,8 +113,12 @@ export class InboundSmsService {
           deliveredAt: receivedAt,
           createdAt: receivedAt,
         },
+        select: { id: true },
       })
-      .catch((error) => this.logger.error(`storeInbound: ${(error as Error).message}`));
+      .catch((error) => {
+        this.logger.error(`storeInbound: ${(error as Error).message}`);
+        return null;
+      });
     this.events.publish({ organizationId: orgId, type: 'conversation.updated', leadSourceId: null, leadId: lead.id });
     await this.textBacks.onLeadTexted(orgId, lead.id).catch((error) => this.logger.warn(`text back check: ${(error as Error).message}`));
 
@@ -121,7 +136,7 @@ export class InboundSmsService {
     // Whoever answers, the AI or a person, what the lead says is remembered once the chat goes quiet.
     this.memory.onLeadText(orgId, lead.id);
     if (lead.takenOverById) return this.onAgentChat(orgId, lead.id, from, text, isFirst, receivedAt);
-    if (aiOn) return this.onChatReply(orgId, lead.id, from, text, isFirst, receivedAt);
+    if (aiOn) return this.onChatReply(orgId, lead, from, text, isFirst, receivedAt, { inboundId: stored?.id ?? null, answered: word?.kind === 'help' });
     return this.onHumanReply(orgId, lead.id, from, text, isFirst, receivedAt);
   }
 
@@ -168,7 +183,8 @@ export class InboundSmsService {
       return;
     }
     const to = normalizePhone(recipient.phone_number);
-    if (!to || !(await this.conversations.isEnabled(orgId))) return;
+    // On this server's replies Telnyx writes none: every text from our number is one we stored when we sent it.
+    if (!to || !(await this.conversations.isEnabled(orgId)) || (await this.conversations.repliesHere(orgId))) return;
     const lead = await this.prisma.lead.findFirst({
       where: { orgId, normalizedPhone: to },
       orderBy: { createdAt: 'desc' },
@@ -229,11 +245,22 @@ export class InboundSmsService {
    * going (the strategy holds its call until the chat goes quiet). A reply that
    * ends the conversation in the lead's own words is recorded at once.
    */
-  private async onChatReply(orgId: string, leadId: string, from: string, text: string, isFirst: boolean, receivedAt: Date): Promise<void> {
+  private async onChatReply(
+    orgId: string,
+    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[] },
+    from: string,
+    text: string,
+    isFirst: boolean,
+    receivedAt: Date,
+    reply: { inboundId: string | null; answered: boolean },
+  ): Promise<void> {
+    const leadId = lead.id;
     // The AI may need a callback or a text later in this chat; a no-op when its tools are already on.
     void this.callTools.ensure(orgId);
     await this.prisma.lead.update({ where: { id: leadId }, data: { lastContactAt: new Date(), ...(isFirst ? { firstResponseAt: new Date() } : {}) } });
     await this.state.move(leadId, LeadStatus.engaged, { source: 'sms_reply', reason: 'Replied by SMS; the AI is answering', channel: 'sms' });
+    // This server writes the AI's replies: the AI answers this text, or a person must (judged on the lead as the text found it).
+    if (await this.conversations.repliesHere(orgId)) await this.routeReply(orgId, lead, receivedAt, reply);
 
     const result = await this.readIntent(orgId, leadId, text, receivedAt);
     if (!result) return this.unchecked(orgId, leadId);
@@ -241,8 +268,11 @@ export class InboundSmsService {
 
     this.state.quietly({ orgId, leadId, type: 'sms_intent', source: 'sms_reply', channel: 'sms', reason: result.reason, payload: { intent: result.intent } });
     const quoted = quote(text);
-    // The AI has already answered it, as its prompt asks: with the confirmation.
-    if (result.intent === 'opt_out') return this.onOptOut(orgId, leadId, from, `Asked by SMS to stop: ${quoted}`, { isFirst: false, confirm: false, french: false, aiOn: true });
+    // The Telnyx assistant has already answered it with the confirmation, as its prompt asks; this server's AI does not answer an opted-out lead, so the confirmation is ours.
+    if (result.intent === 'opt_out') {
+      const confirm = !(await this.aiAnswers(orgId, from, true));
+      return this.onOptOut(orgId, leadId, from, `Asked by SMS to stop: ${quoted}`, { isFirst: false, confirm, french: saidInFrench(text), aiOn: true });
+    }
     if (result.intent === 'wrong_number') {
       await this.engine.setStatus(orgId, leadId, LeadStatus.invalid, `Wrong number, said by SMS: ${quoted}`, { source: 'sms_reply' });
       return;
@@ -346,8 +376,45 @@ export class InboundSmsService {
    * chat of any lead with the number keeps the AI quiet for all of them.
    */
   private async aiAnswers(orgId: string, phone: string, aiOn: boolean): Promise<boolean> {
-    if (!aiOn) return false;
+    // This server's AI writes its replies only after these checks, and never to an opted-out lead: the confirmation is ours then.
+    if (!aiOn || (await this.conversations.replyEngine(orgId)) === 'estatepulse') return false;
     return (await this.prisma.lead.count({ where: { orgId, normalizedPhone: phone, takenOverById: { not: null } } })) === 0;
+  }
+
+  /**
+   * On this server's AI replies: queues the AI's answer to the text, or flags
+   * the lead for a person when the AI does not answer it (opted out, booked,
+   * closed, not interested, wrong number). A text already answered (HELP) gets
+   * nothing more. The reply waits a moment, so texts sent in a row get one
+   * answer; only the newest text's job writes it (SmsAgentService).
+   */
+  private async routeReply(
+    orgId: string,
+    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[] },
+    receivedAt: Date,
+    reply: { inboundId: string | null; answered: boolean },
+  ): Promise<void> {
+    const reason = personReason(lead);
+    if (reason) return this.forPerson(orgId, lead.id, lead.reviewReasons, reason);
+    if (reply.answered) return;
+    if (!reply.inboundId) return this.forPerson(orgId, lead.id, lead.reviewReasons, 'the text could not be stored');
+    try {
+      await this.replies.add(
+        SmsReplyJob.Reply,
+        { orgId, leadId: lead.id, inboundId: reply.inboundId, receivedAt: receivedAt.toISOString() },
+        { jobId: `reply-${reply.inboundId}`, delay: REPLY_DEBOUNCE_MS },
+      );
+    } catch (error) {
+      this.logger.error(`lead ${lead.id}: queueing the AI reply failed: ${(error as Error).message}`);
+      await this.forPerson(orgId, lead.id, lead.reviewReasons, 'the AI reply could not be queued');
+    }
+  }
+
+  /** The text waits for a person: the lead is flagged once, and its conversation is already lit up for the team. */
+  private async forPerson(orgId: string, leadId: string, reasons: string[], why: string): Promise<void> {
+    const flag = !reasons.includes(PERSON_REPLY_REVIEW);
+    await this.prisma.lead.update({ where: { id: leadId }, data: { needsReview: true, ...(flag ? { reviewReasons: { push: PERSON_REPLY_REVIEW } } : {}) } });
+    this.state.quietly({ orgId, leadId, type: 'needs_person', source: 'sms_reply', channel: 'sms', reason: `No AI reply: ${why}` });
   }
 
   private async brokerage(orgId: string): Promise<string> {

@@ -20,6 +20,7 @@ import { CrmModule } from './crm/crm.module';
 import { CustomWebhookModule } from './custom-webhook/custom-webhook.module';
 import { TelnyxModule } from './telnyx/telnyx.module';
 import { FollowupModule } from './followup/followup.module';
+import { SmsAgentModule } from './sms-agent/sms-agent.module';
 import { OutreachModule } from './outreach/outreach.module';
 import { HistoryModule } from './history/history.module';
 import { DailySummaryModule } from './daily-summary/daily-summary.module';
@@ -49,6 +50,7 @@ import {QueueModule} from "@/queue/queue.module";
     CrmModule,
     TelnyxModule,
     FollowupModule,
+    SmsAgentModule,
     OutreachModule,
     HistoryModule,
     DailySummaryModule,

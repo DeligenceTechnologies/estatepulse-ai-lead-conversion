@@ -3,7 +3,7 @@ import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
-import { UpdateBusinessDetailsDto, UpdateTakeoverGreetingDto } from '../dto/telnyx.dto';
+import { UpdateBusinessDetailsDto, UpdateSmsReplyEngineDto, UpdateTakeoverGreetingDto } from '../dto/telnyx.dto';
 import { BusinessDetailsService } from './business-details.service';
 import { ChatTakeoverService } from './chat-takeover.service';
 import { SmsConversationService } from './sms-conversation.service';
@@ -34,6 +34,13 @@ export class SmsConversationController {
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
   disable(@CurrentAuth() auth: AuthContext) {
     return this.conversations.disable(auth.organizationId);
+  }
+
+  /** 'estatepulse': this server decides per text whether the AI answers and writes its replies; 'telnyx': the linked assistant answers every text. */
+  @Put('engine')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  setEngine(@CurrentAuth() auth: AuthContext, @Body() body: UpdateSmsReplyEngineDto) {
+    return this.conversations.setEngine(auth.organizationId, body.engine);
   }
 
   @Get('takeover-greeting')

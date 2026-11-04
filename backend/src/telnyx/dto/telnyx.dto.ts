@@ -21,6 +21,7 @@ import {
 import { StepConditionsDto } from '@/followup/dto/sequence.dto';
 import { CALL_CONTEXT_MAX_CHARS, STEP_VOICEMAILS, type StepVoicemail } from '@/followup/journey';
 import { BUSINESS_DETAILS_MAX } from '../sms/sms-compliance';
+import { SMS_REPLY_ENGINES, type SmsReplyEngine } from '../sms/sms-conversation.service';
 import { CONFIRM_MESSAGE_MAX_CHARS, RETRY_ATTEMPTS_MAX, RETRY_MINUTES_MAX, RETRY_MINUTES_MIN } from '../tools/call-tools';
 import { VOICEMAIL_MAX_CHARS } from '../voicemail/voicemail';
 
@@ -307,6 +308,12 @@ export class UpdateTakeoverGreetingDto {
   @IsString()
   @MaxLength(CONFIRM_MESSAGE_MAX_CHARS)
   message?: string;
+}
+
+/** Who writes the AI's text replies: the Telnyx assistant, or this server. */
+export class UpdateSmsReplyEngineDto {
+  @IsIn([...SMS_REPLY_ENGINES])
+  engine!: SmsReplyEngine;
 }
 
 /** Who the organization is in its texts. Each field is optional; an empty one clears it. */

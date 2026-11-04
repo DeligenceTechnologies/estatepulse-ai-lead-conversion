@@ -40,5 +40,8 @@ export function safeText(raw: unknown, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3).trimEnd()}...` : text;
 }
 
+/** Every link in a text: "https://…", "www.…" or a bare domain such as bit.ly/x. */
+export const linksIn = (text: string): string[] => text.match(LINK) ?? [];
+
 /** Something texted, for the transcript the AI reads: the words as said, on one line, invisible characters out. Links stay: they are part of what was said. */
 export const safeTranscript = (raw: unknown): string => oneLine(raw);
