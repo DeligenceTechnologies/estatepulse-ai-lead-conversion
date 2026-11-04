@@ -47,9 +47,7 @@ export interface MemberAvailability extends MemberAvailabilitySource {
   externalId: string;
   name: string;
   email: string;
-  /** The timezone this member's row is in: their calendar's. */
   timezone: string;
-  /** The report's dates as this member's own days, midnight to midnight in `timezone`. */
   days: AvailabilityDay[];
   userId: string | null;
   userName: string | null;
@@ -59,7 +57,6 @@ export interface MemberAvailability extends MemberAvailabilitySource {
 export interface AvailabilityReport {
   provider: CalendarProvider;
   generatedAt: string;
-  /** The calendar dates shown; each member sees them in their own timezone. */
   dates: string[];
   range: { minDate: string; maxDate: string };
   members: MemberAvailability[];
@@ -76,11 +73,6 @@ interface StoredBlock {
   blockedEndsAt: Date;
 }
 
-/**
- * Who is free and who is busy, from synced calendar blocks. Every member is
- * shown in their own calendar timezone: a date is their day, midnight to
- * midnight where they are.
- */
 @Injectable()
 export class CalendarAvailabilityService {
   constructor(
