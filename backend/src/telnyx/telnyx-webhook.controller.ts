@@ -47,6 +47,7 @@ export class TelnyxWebhookController {
         else if (type === 'call.machine.premium.detection.ended') await this.activity.onMachineDetection(ccid, payload?.result, intent);
         else if (type === 'call.machine.premium.greeting.ended') await this.activity.onGreetingEnded(ccid, intent);
         else if (type === 'call.speak.ended') await this.activity.onSpeakEnded(ccid, payload?.status);
+        else if (type === 'call.conversation.created') await this.activity.onConversationStarted(ccid);
         else if (type === 'call.hangup') {
           await this.activity.onCallHangup(ccid, payload);
           await this.callbacks.onCallEnded(ccid);

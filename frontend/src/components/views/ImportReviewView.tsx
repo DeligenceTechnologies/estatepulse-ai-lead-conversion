@@ -21,7 +21,9 @@ import {
 } from '../../utils/googleSheetsApi';
 import { getOutreachConfig, type OutreachChoice, type OutreachConfig } from '../../utils/outreachApi';
 import { FIELD_LABEL, approveMessage, formatValue, rejectMessage } from '../../utils/sheetMapping';
+import { consentReviewCount } from '../../utils/consentReviewApi';
 import { ApproveOutreachModal } from '../imports/ApproveOutreachModal';
+import { ConsentReviewPanel } from '../imports/ConsentReviewPanel';
 import { FileImportModal } from '../imports/FileImportModal';
 import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
@@ -46,7 +48,7 @@ const DECISION_BATCH = 500;
 const clean = (i: ReviewItem): boolean =>
   !i.missing && !i.lead?.dncStatus && !!i.lead?.phone && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
-type Tab = 'pending' | 'rejected' | 'changes' | 'outreach';
+type Tab = 'pending' | 'rejected' | 'changes' | 'outreach' | 'consent';
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
 const btn =
@@ -109,6 +111,8 @@ export const ImportReviewView: React.FC = () => {
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [totals, setTotals] = useState<{ pending?: number; rejected?: number }>({});
+  /** Manual leads added without consent (the "Consent needed" tab). */
+  const [consentTotal, setConsentTotal] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +127,7 @@ export const ImportReviewView: React.FC = () => {
   const [outreachKey, setOutreachKey] = useState(0);
 
   const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
+  const importsOn = features.sheets || features.files || features.hubspot;
   // "Changed since review" is about one source that keeps syncing — a sheet or
   // the HubSpot account: the chosen one, or the only one.
   const sheetIds = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
@@ -134,14 +139,21 @@ export const ImportReviewView: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sheets, hist, hubspot, launch] = await Promise.all([
+      const [sheets, hist, hubspot, launch, awaitingConsent] = await Promise.all([
         listSheetSources().catch(unlessOff),
         importHistory().catch(unlessOff),
         getCrmStatus('hubspot').catch(unlessOff),
         getOutreachConfig(),
+        consentReviewCount(),
       ]);
+      setConsentTotal(awaitingConsent);
       setOutreach(launch);
       setFeatures({ sheets: sheets !== null, files: hist !== null, hubspot: hubspot !== null });
+      // With every import switched off, the page is only for manual leads awaiting consent.
+      if (sheets === null && hist === null && hubspot === null && tab !== 'consent') {
+        setTab('consent');
+        return;
+      }
       const list = sheets ?? [];
       setSources(list);
       const crmSource = hubspot?.sourceId ? { id: hubspot.sourceId, name: `HubSpot · ${hubspot.account?.name ?? hubspot.account?.id ?? 'account'}` } : null;
@@ -442,12 +454,13 @@ export const ImportReviewView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {(
             [
-              ['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`],
+              ...(importsOn ? ([['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`]] as const) : []),
               // Only a sheet or a CRM changes after review; an uploaded file is read once.
               ...(features.sheets || features.hubspot
                 ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet']] as const)
                 : []),
-              ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
+              ...(importsOn ? ([['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`]] as const) : []),
+              ['consent', `Consent needed${consentTotal !== undefined ? ` (${consentTotal})` : ''}`],
               ...(outreach ? ([['outreach', 'Outreach']] as const) : []),
             ] as const
           ).map(([id, label]) => (
@@ -471,7 +484,7 @@ export const ImportReviewView: React.FC = () => {
               {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
               {decisionButton('approve', 'Approve', 'bg-green-600 text-white hover:bg-green-500')}
             </>
-          ) : tab === 'rejected' || tab === 'outreach' ? null : (
+          ) : tab === 'rejected' || tab === 'outreach' || tab === 'consent' ? null : (
             <>
               {decisionButton('keep', 'Keep current', 'bg-slate-800 text-slate-200 hover:bg-slate-700')}
               {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
@@ -490,8 +503,9 @@ export const ImportReviewView: React.FC = () => {
         )}
 
         {tab === 'outreach' && <OutreachBatches refreshKey={outreachKey} />}
+        {tab === 'consent' && <ConsentReviewPanel onTotal={setConsentTotal} />}
 
-        {loading && tab !== 'outreach' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
+        {loading && tab !== 'outreach' && tab !== 'consent' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
           <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading…
           </div>

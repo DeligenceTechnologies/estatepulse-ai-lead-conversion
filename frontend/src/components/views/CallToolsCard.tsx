@@ -244,7 +244,8 @@ export const CallToolsCard: React.FC = () => {
             <label className="block text-slate-300 font-semibold">
               Text-back message{' '}
               <span className="text-slate-500 font-normal">
-                — {'{{firstName}}'} and {'{{brokerage}}'} are filled in for each lead; their answer goes on in the AI chat
+                — {'{{firstName}}'}, {'{{brokerage}}'} and {'{{nextQuestion}}'} (the next question they have not answered yet) are
+                filled in for each lead; their answer goes on in the AI chat
               </span>
             </label>
             <textarea

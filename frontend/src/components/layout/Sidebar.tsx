@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { useApp, isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { LEADS_CHANGED_EVENT } from '../../api/client';
+import { consentReviewCount } from '../../utils/consentReviewApi';
 import { importReviewEnabled } from '../../utils/fileImportApi';
 import type { NavGroup, NavItem } from './DashboardSidebar';
 
@@ -35,8 +37,13 @@ export function useOwnerNav(): NavGroup[] {
   const { role, agentProfileId, can } = useAuth();
   const isOwner = role === 'owner';
   const [sheetsOn, setSheetsOn] = useState(false);
+  // Import Review is open while an import is switched on, or while a lead added by hand waits there for its consent.
   useEffect(() => {
-    if (isOwner) void importReviewEnabled().then(setSheetsOn);
+    if (!isOwner) return;
+    const check = () => void Promise.all([importReviewEnabled(), consentReviewCount()]).then(([imports, awaiting]) => setSheetsOn(imports || awaiting > 0));
+    check();
+    window.addEventListener(LEADS_CHANGED_EVENT, check);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, check);
   }, [isOwner]);
 
   const canReadOrg = can('organization.read');

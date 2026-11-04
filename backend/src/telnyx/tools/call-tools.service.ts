@@ -134,6 +134,9 @@ export class CallToolsService {
     }
 
     if (s.telnyx) await this.removeFromTelnyx(c.apiKey, s.telnyx);
+    // Tools this server attached but never got to record (a save that failed) are still on the
+    // assistant, and Telnyx refuses a second tool with the same name.
+    await this.removeLeftovers(c.apiKey, c.assistantId);
     const identifier = `ep_calltools_${orgId.replace(/-/g, '')}`;
     const token = randomBytes(32).toString('base64url');
     const created: CallToolsTelnyx = {
@@ -214,6 +217,24 @@ export class CallToolsService {
     if (t.secretId) await quiet(telnyx(apiKey, `/integration_secrets/${t.secretId}`, { method: 'DELETE' }));
   }
 
+  /** Our webhook tools on the assistant that the stored provisioning does not know about: detached and deleted. */
+  private async removeLeftovers(apiKey: string, assistantId: string): Promise<void> {
+    const raw = await telnyx<{ data?: { tools?: unknown }; tools?: unknown }>(apiKey, `/ai/assistants/${assistantId}`);
+    // An assistant lists its tools by `tool_id`.
+    const tools = ((raw?.data ?? raw)?.tools ?? []) as { id?: string; tool_id?: string; type?: string; webhook?: { url?: string } }[];
+    const ours = tools
+      .filter((t) => t.type === 'webhook' && isOurToolUrl(t.webhook?.url))
+      .map((t) => t.tool_id ?? t.id)
+      .filter((id): id is string => !!id);
+    if (!ours.length) return;
+    const quiet = (p: Promise<unknown>) => p.catch((error) => this.logger.warn(`call tools cleanup: ${(error as Error).message}`));
+    for (const id of ours) {
+      await quiet(telnyx(apiKey, `/ai/assistants/${assistantId}/tools/${id}`, { method: 'DELETE' }));
+      await quiet(telnyx(apiKey, `/ai/tools/${id}`, { method: 'DELETE' }));
+    }
+    this.logger.log(`removed ${ours.length} leftover call tool(s) from assistant ${assistantId}`);
+  }
+
   /** Every setting, so saving what was provisioned never resets the rest; a default message is not stored. */
   private stored(s: CallToolsSettings): StoredCallTools {
     return {
@@ -231,4 +252,9 @@ export class CallToolsService {
     const callTools = value as unknown as Prisma.InputJsonObject;
     await this.prisma.organizationSetting.upsert({ where: { orgId }, create: { orgId, callTools }, update: { callTools } });
   }
+}
+
+/** A tool pointing at our outcome endpoints, on any host this server was ever reachable at (an old tunnel too). */
+function isOurToolUrl(url: string | undefined): boolean {
+  return !!url && /\/tools\/telnyx\/outcome\/(callback|text|record)$/.test(url);
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { leadsApi, type NewLeadInput } from '../../api/client';
+import { LEADS_CHANGED_EVENT, leadsApi, type NewLeadInput } from '../../api/client';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
 interface NewLeadModalProps {
@@ -84,7 +84,9 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
     try {
       const { id } = await leadsApi.create(body);
       // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
-      toast.success('Lead added.');
+      // Without consent it waits in Import Review, out of the Leads list, until the owner marks it.
+      toast.success(consent ? 'Lead added.' : 'Lead added. Without consent it waits in Import Review → Consent needed; it is not called or texted until you mark its consent there.');
+      if (!consent) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
       onCreated(id);
       onClose();
     } catch (err) {

@@ -5,6 +5,7 @@ import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
+import { CONSENT_REVIEW_REASON } from './consent';
 import type { CreateLeadDto } from './dto/create-lead.dto';
 
 const DNC_REASON = 'This phone or email is on the do-not-contact list from an earlier lead';
@@ -12,7 +13,9 @@ const DNC_REASON = 'This phone or email is on the do-not-contact list from an ea
 /**
  * A lead typed in by hand on the Leads screen. It has no lead source, and it
  * joins the same pipeline as a form submission: status `new`, so the lead
- * watcher enrolls it in the strategy unless it is paused.
+ * watcher enrolls it in the strategy unless it is paused. Without its consent
+ * box ticked it is held, paused, in Import Review until the owner records the
+ * consent or rejects it (ConsentReviewService).
  */
 @Injectable()
 export class ManualLeadService {
@@ -54,6 +57,8 @@ export class ManualLeadService {
         },
       })) > 0;
 
+    const awaitingConsent = !input.consent && !dnc;
+    const reviewReasons = [...(dnc ? [DNC_REASON] : []), ...(awaitingConsent ? [CONSENT_REVIEW_REASON] : [])];
     const lead = await this.prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({
         data: {
@@ -79,9 +84,10 @@ export class ManualLeadService {
           consentSource: input.consent ? 'manual_entry' : null,
           consentAt: input.consent ? new Date() : null,
           dncStatus: dnc,
-          automationPaused: dnc || !input.startOutreach,
-          needsReview: dnc,
-          reviewReasons: dnc ? [DNC_REASON] : [],
+          // Outreach needs the consent box: without it the lead is held for review, whatever startOutreach says.
+          automationPaused: dnc || !input.startOutreach || !input.consent,
+          needsReview: reviewReasons.length > 0,
+          reviewReasons,
           lastSubmissionAt: new Date(),
         },
         select: { id: true },
@@ -94,7 +100,7 @@ export class ManualLeadService {
           action: 'lead.created',
           entityType: 'lead',
           entityId: created.id,
-          payload: { source: 'manual', startOutreach: input.startOutreach && !dnc },
+          payload: { source: 'manual', startOutreach: input.startOutreach && input.consent && !dnc, awaitingConsent },
         },
         tx,
       );

@@ -45,7 +45,7 @@ export interface CallToolsTelnyx {
 }
 
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 4;
+export const CALL_TOOLS_VERSION = 5;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -82,7 +82,7 @@ export function callToolsSection(): string {
     CALL_TOOLS_PROMPT_START,
     '# Callbacks and outcomes',
     '- If the lead is busy or asks to be called at another time, call schedule_callback: with day and time for a clock time ("tomorrow at 5"), with in_minutes for a delay ("in 5 minutes", "after an hour"), or with nothing if they named no time ("try me later"). Read back the returned "spoken" time, then say goodbye. If the result is not ok, offer the time it suggests. Never promise a callback without it.',
-    '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
+    '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. If they want to continue over text now ("message me right away", "let\'s chat on text", "send it now"), call schedule_text with in_minutes 1: the text arrives as soon as this call ends, and you carry on the conversation there. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
     '- If the lead clearly says they are not interested or have already bought, call record_outcome with not_interested. If they ask us to stop calling or texting them, use do_not_contact. If this is not the person we wanted, or they never asked about buying a home, use wrong_number. Only on a clear statement, never on a guess. Then say one short, polite goodbye. Never argue or try to change their mind after do_not_contact.',
     '- If {{callback_due}} is yes, this call is the callback they asked for ({{callback_time}}). They have just heard that you are calling back, so go straight to helping them.',
     '- If {{call_context}} is not empty, it is why we are calling them this time. Let it guide the conversation, without reading it out.',
@@ -155,7 +155,8 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
         description:
           'Schedule a text message to the lead at the time they ask to be texted or messaged later ("message me in 2 ' +
           'minutes", "text me tomorrow at 10"). For a clock time pass `day` (YYYY-MM-DD, "today", "tomorrow" or a ' +
-          'weekday name) and `time` (24-hour HH:MM). For a delay pass only `in_minutes`. Pass nothing if they named no ' +
+          'weekday name) and `time` (24-hour HH:MM). For a delay pass only `in_minutes`. "Right away", "now" or "let\'s ' +
+          'continue on text" is `in_minutes` 1: the text goes out as soon as the call ends. Pass nothing if they named no ' +
           'time. Confirm the returned `spoken` time. If the result is not ok, do what its `say` tells you.',
         url: `${apiUrl}/tools/telnyx/outcome/text`,
         body_parameters: {

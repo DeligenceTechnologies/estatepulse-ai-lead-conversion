@@ -7,7 +7,7 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
-import { AssistantService } from './assistant.service';
+import { AssistantService, DEFAULT_GREETING } from './assistant.service';
 import { RECORDING_NOTICE } from './recording-notice';
 import { CallSlots } from './calls/call-slots';
 import { CONVERSATION_MIN_SECS, type CallIntent } from './calls/call.types';
@@ -25,12 +25,10 @@ interface AttachPlan {
   apiKey: string;
   assistantId: string | null;
   record: boolean;
-  /** The organization announces recording: the notice plays first, and the call records only after it. */
+  /** The organization announces recording: the assistant opens with the notice, and the call records from when it speaks. */
   announce: boolean;
-  /** The voice the notice is spoken in (the assistant's own); null for the stock voice. */
-  voice?: string | null;
   variables: Record<string, string>;
-  /** Replaces the assistant's own greeting (a callback the lead asked for). */
+  /** Replaces the assistant's own greeting: a callback the lead asked for, or any greeting with the notice in front. */
   greeting?: string;
 }
 
@@ -54,8 +52,8 @@ const OPEN_CALL_STATUSES: CallStatus[] = [CallStatus.queued, CallStatus.ringing,
 const BEEP_WAIT_MAX_MS = 35_000;
 /** The longest a voicemail message may play before the call is hung up regardless. */
 const VOICEMAIL_PLAY_MAX_MS = 60_000;
-/** A lost "speak ended" webhook must not hold the assistant back: the call goes on after this. */
-const NOTICE_PLAY_MAX_MS = 12_000;
+/** A lost "conversation created" webhook must not leave an announced call unrecorded: it records after this. */
+const RECORD_FALLBACK_MS = 10_000;
 /** For a voicemail when the assistant's own voice cannot be read or spoken. */
 const FALLBACK_TTS_VOICE = 'AWS.Polly.Joanna-Neural';
 
@@ -115,8 +113,8 @@ export class ActivityService {
   private readonly machines = new Map<string, MachineCall>();
   /** Calls whose machine greeting has ended, even before the verdict was handled. */
   private readonly greetingEnded = new Set<string>();
-  /** Calls playing the recording notice; the recording and the assistant start once it has played. */
-  private readonly notices = new Map<string, { plan: AttachPlan; timer: NodeJS.Timeout }>();
+  /** Announced calls whose recording starts once the assistant begins speaking (the notice comes first). */
+  private readonly pendingRecordings = new Map<string, { plan: AttachPlan; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -370,11 +368,15 @@ export class ActivityService {
       ]);
       if (c.assistantId) void this.insights.ensureProvisioned(orgId);
       const variables = intent.context ? { ...leadVars, call_context: intent.context } : leadVars;
-      const greeting = variables.callback_due === 'yes' ? fillTemplate(CALLBACK_GREETING, variables) : undefined;
       const record = settings?.callRecordingEnabled ?? true;
       const announce = record && (settings?.callRecordingAnnounce ?? true);
-      const voice = announce ? await this.assistants.voiceFor(orgId).catch(() => null) : null;
-      return { apiKey: c.apiKey, assistantId: c.assistantId || null, record, announce, voice, variables, greeting };
+      let greeting = variables.callback_due === 'yes' ? fillTemplate(CALLBACK_GREETING, variables) : undefined;
+      // Announced: the assistant says the notice itself, first thing, so the lead hears no gap before it.
+      if (announce && c.assistantId) {
+        const own = greeting ?? fillTemplate((await this.assistants.greetingOf(orgId).catch(() => null)) ?? DEFAULT_GREETING, variables);
+        greeting = `${RECORDING_NOTICE} ${own}`;
+      }
+      return { apiKey: c.apiKey, assistantId: c.assistantId || null, record, announce, variables, greeting };
     })().catch((error) => {
       this.logger.error(`prepare attach ${ccid}: ${(error as Error).message}`);
       return null;
@@ -386,9 +388,9 @@ export class ActivityService {
 
   /** `detection`: the call was dialed with answering-machine detection, so a verdict is coming. */
   private async attach(ccid: string, p: AttachPlan, detection = true): Promise<void> {
-    // Unannounced, the call records from the pick-up; announced, only once the lead has heard the notice.
+    // Unannounced, the call records from the pick-up; announced, from when the assistant starts saying the notice.
     if (p.record && !p.announce) await this.startRecording(ccid, p);
-    if (!p.assistantId) return p.announce ? this.open(ccid, p) : undefined;
+    if (!p.assistantId) return;
     const verdict = this.verdicts.get(ccid);
     if (verdict && !PERSON_VERDICTS.has(verdict)) return;
     const waitMs = this.config.get('AI_OPENING_WAIT_MS', { infer: true });
@@ -424,8 +426,12 @@ export class ActivityService {
     if (machine?.stage === 'waiting_beep') await this.leaveVoicemail(ccid, machine);
   }
 
+  /** The assistant has begun speaking (call.conversation.created): an announced call starts recording now. */
+  async onConversationStarted(ccid: string): Promise<void> {
+    await this.recordPending(ccid);
+  }
+
   async onSpeakEnded(ccid: string, status: string | undefined): Promise<void> {
-    if (this.notices.has(ccid)) return this.afterNotice(ccid, status === 'completed');
     if (this.machines.get(ccid)?.stage === 'speaking') await this.endVoicemail(ccid, status === 'completed');
   }
 
@@ -438,30 +444,26 @@ export class ActivityService {
     await this.open(ccid, waiting.plan);
   }
 
-  /** A person is on the line: the recording notice plays first when the organization announces, else the assistant starts. */
+  /**
+   * A person is on the line: the assistant starts. Announced, its greeting opens with the notice and
+   * the recording waits for it to begin speaking, so nothing before the notice is recorded.
+   */
   private async open(ccid: string, p: AttachPlan): Promise<void> {
-    if (!p.announce) return p.assistantId ? this.startAssistant(ccid, p) : undefined;
-    const timer = setTimeout(() => void this.afterNotice(ccid, true), NOTICE_PLAY_MAX_MS);
-    timer.unref();
-    this.notices.set(ccid, { plan: p, timer });
-    let spoken = await this.action(ccid, p.apiKey, 'speak', { payload: RECORDING_NOTICE, voice: p.voice ?? FALLBACK_TTS_VOICE });
-    if (!spoken && p.voice) spoken = await this.action(ccid, p.apiKey, 'speak', { payload: RECORDING_NOTICE, voice: FALLBACK_TTS_VOICE });
-    if (!spoken) await this.afterNotice(ccid, false);
+    if (p.announce && p.record) {
+      const timer = setTimeout(() => void this.recordPending(ccid), RECORD_FALLBACK_MS);
+      timer.unref();
+      this.pendingRecordings.set(ccid, { plan: p, timer });
+    }
+    await this.startAssistant(ccid, p);
   }
 
-  /**
-   * The notice is over: the recording starts only if it was heard in full (a lost webhook after an
-   * accepted speak counts as heard), then the assistant. Once per call.
-   */
-  private async afterNotice(ccid: string, heard: boolean): Promise<void> {
-    const notice = this.notices.get(ccid);
-    if (!notice) return;
-    this.notices.delete(ccid);
-    clearTimeout(notice.timer);
-    const p = notice.plan;
-    if (p.record && heard) await this.startRecording(ccid, p);
-    else if (p.record) this.logger.warn(`recording notice on ${ccid} was not played in full; the call is not recorded`);
-    if (p.assistantId) await this.startAssistant(ccid, p);
+  /** Starts an announced call's recording, once. */
+  private async recordPending(ccid: string): Promise<void> {
+    const pending = this.pendingRecordings.get(ccid);
+    if (!pending) return;
+    this.pendingRecordings.delete(ccid);
+    clearTimeout(pending.timer);
+    await this.startRecording(ccid, pending.plan);
   }
 
   private startRecording(ccid: string, p: AttachPlan): Promise<boolean> {
@@ -470,11 +472,16 @@ export class ActivityService {
 
   private async startAssistant(ccid: string, p: AttachPlan): Promise<void> {
     this.started.add(ccid);
-    await this.action(ccid, p.apiKey, 'ai_assistant_start', {
+    const started = await this.action(ccid, p.apiKey, 'ai_assistant_start', {
       assistant: { id: p.assistantId },
       dynamic_variables: p.variables,
       ...(p.greeting ? { greeting: p.greeting } : {}),
     });
+    // Telnyx refused to start the assistant: nothing would ever speak or hang up, so the lead is not left on a silent line.
+    if (!started) {
+      this.logger.error(`assistant did not start on ${ccid}; hanging up instead of leaving the lead in silence`);
+      await this.action(ccid, p.apiKey, 'hangup', {});
+    }
   }
 
   /**
@@ -488,11 +495,11 @@ export class ActivityService {
       clearTimeout(waiting.timer);
       this.awaitingVerdict.delete(ccid);
     }
-    // A machine the wait mistook for a person, still hearing the notice: neither the recording nor the assistant follows.
-    const notice = this.notices.get(ccid);
-    if (notice) {
-      clearTimeout(notice.timer);
-      this.notices.delete(ccid);
+    // A machine the wait mistook for a person: its recording, not started yet, never is.
+    const pending = this.pendingRecordings.get(ccid);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingRecordings.delete(ccid);
     }
     const call = await this.callByProvider(ccid);
     if (!call || call.endedAt) return;
@@ -564,9 +571,9 @@ export class ActivityService {
     this.verdicts.delete(ccid);
     this.greetingEnded.delete(ccid);
     this.started.delete(ccid);
-    const notice = this.notices.get(ccid);
-    if (notice) clearTimeout(notice.timer);
-    this.notices.delete(ccid);
+    const pending = this.pendingRecordings.get(ccid);
+    if (pending) clearTimeout(pending.timer);
+    this.pendingRecordings.delete(ccid);
   }
 
   /** A Call Control command; false (logged) when Telnyx refused it or could not be reached. */
