@@ -1,8 +1,9 @@
 /**
  * The assistant's call-outcome tools: schedule_callback (an exact time the
  * lead asked to be called back), schedule_text (a time they asked to be
- * texted) and record_outcome (a clear "no", "stop contacting me" or wrong
- * number). They work on a call and in a text chat.
+ * texted), record_outcome (a clear "no", "stop contacting me" or wrong
+ * number) and get_meeting (the meeting they already have, with the links to
+ * move or cancel it). They work on a call and in a text chat.
  */
 
 export interface CallToolsSettings {
@@ -45,7 +46,7 @@ export interface CallToolsTelnyx {
 }
 
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 4;
+export const CALL_TOOLS_VERSION = 5;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -83,6 +84,7 @@ export function callToolsSection(): string {
     '# Callbacks and outcomes',
     '- If the lead is busy or asks to be called at another time, call schedule_callback: with day and time for a clock time ("tomorrow at 5"), with in_minutes for a delay ("in 5 minutes", "after an hour"), or with nothing if they named no time ("try me later"). Read back the returned "spoken" time, then say goodbye. If the result is not ok, offer the time it suggests. Never promise a callback without it.',
     '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
+    '- If the lead mentions a meeting they have with us, or wants to move or cancel one, call get_meeting first and do what its "say" tells you. Never book a second meeting, and never say you moved or cancelled one yourself: the lead does that with the link it returns.',
     '- If the lead clearly says they are not interested or have already bought, call record_outcome with not_interested. If they ask us to stop calling or texting them, use do_not_contact. If this is not the person we wanted, or they never asked about buying a home, use wrong_number. Only on a clear statement, never on a guess. Then say one short, polite goodbye. Never argue or try to change their mind after do_not_contact.',
     '- If {{callback_due}} is yes, this call is the callback they asked for ({{callback_time}}). They have just heard that you are calling back, so go straight to helping them.',
     '- If {{call_context}} is not empty, it is why we are calling them this time. Let it guide the conversation, without reading it out.',
@@ -106,13 +108,13 @@ export function withCallToolsSection(instructions: string): string {
 }
 
 /** The names our call tools go by on the assistant; Telnyx allows one webhook tool per name. */
-export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome'];
+export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome', 'get_meeting'];
 
 export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
 /**
- * The three tools as Telnyx webhook tools. lead_id, call_control_id and
+ * The four tools as Telnyx webhook tools. lead_id, call_control_id and
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
@@ -192,6 +194,27 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
             note: { type: 'string', description: 'Their words, briefly.' },
           },
           required: ['outcome'],
+        },
+      },
+    },
+    {
+      type: 'webhook',
+      display_name: 'EstatePulse: look up their meeting',
+      timeout_ms: 10000,
+      webhook: {
+        ...shared,
+        name: 'get_meeting',
+        description:
+          'Look up the meeting the lead already has with us, when they mention it or want to move or cancel it. Returns ' +
+          '`meeting` (when, to read out), `with` (the agent), `reschedule_link` and `cancel_link`, or `meeting: null` when ' +
+          'they have none. Do what its `say` tells you.',
+        url: `${apiUrl}/tools/telnyx/outcome/meeting`,
+        body_parameters: {
+          type: 'object',
+          properties: {
+            wants: { type: 'string', enum: ['ask', 'move', 'cancel'], description: 'What the lead wants: to ask about it, move it or cancel it.' },
+          },
+          required: [],
         },
       },
     },

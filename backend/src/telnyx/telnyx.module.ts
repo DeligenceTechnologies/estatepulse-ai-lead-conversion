@@ -31,6 +31,7 @@ import { AssistantToolAuth } from './tools/assistant-tool-auth.service';
 import { CallOutcomeToolController, CallToolsSettingsController } from './tools/call-tools.controller';
 import { CallToolsService } from './tools/call-tools.service';
 import { CallbackService } from './tools/callback.service';
+import { MeetingToolService } from './tools/meeting-tool.service';
 import { OutcomeService } from './tools/outcome.service';
 import { TextBackService } from './tools/text-back.service';
 import { TextBackWorker } from './tools/text-back.worker';
@@ -80,6 +81,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantToolAuth,
     CallToolsService,
     CallbackService,
+    MeetingToolService,
     OutcomeService,
     TextBackService,
     TextBackWorker,

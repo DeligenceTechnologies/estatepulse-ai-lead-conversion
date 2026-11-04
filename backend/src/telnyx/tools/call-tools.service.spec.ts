@@ -33,7 +33,7 @@ describe('CallToolsService', () => {
       retryAttempts: 0,
       textBack: false,
       textBackMessage: 'Custom text',
-      telnyx: expect.objectContaining({ assistantId: 'assistant-1', version: CALL_TOOLS_VERSION, toolIds: ['tool-1', 'tool-1', 'tool-1'] }),
+      telnyx: expect.objectContaining({ assistantId: 'assistant-1', version: CALL_TOOLS_VERSION, toolIds: ['tool-1', 'tool-1', 'tool-1', 'tool-1'] }),
     });
   });
 
@@ -75,6 +75,6 @@ describe('CallToolsService', () => {
     expect(calls).toContain('DELETE /ai/assistants/assistant-1/tools/tool-stray');
     expect(calls).toContain('DELETE /ai/tools/tool-stray');
     expect(calls.filter((c) => c.startsWith('DELETE') && (c.includes('tool-hangup') || c.includes('tool-booking')))).toEqual([]);
-    expect(stored).toMatchObject({ telnyx: expect.objectContaining({ toolIds: ['tool-new', 'tool-new', 'tool-new'] }) });
+    expect(stored).toMatchObject({ telnyx: expect.objectContaining({ toolIds: ['tool-new', 'tool-new', 'tool-new', 'tool-new'] }) });
   });
 });
