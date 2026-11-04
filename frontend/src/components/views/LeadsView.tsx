@@ -271,7 +271,7 @@ const TAB_FILTER: Record<Tab, Pick<ListLeadsParams, 'status' | 'temperature'>> =
 
 export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
-  const { agentProfileId, role, can } = useAuth();
+  const { user, role, can } = useAuth();
   const isOwner = role === 'owner';
   // "Add leads" (owner only): one lead typed in by hand, or a file import where the server has it switched on.
   const [canImport, setCanImport] = useState(false);
@@ -382,17 +382,27 @@ export const LeadsView: React.FC = () => {
   // Source options come from what has actually arrived rather than a hardcoded
   // list: a source exists here only once it holds a lead. The server lists them
   // across every page, not just the one on screen.
-  const sourceOptions = stats?.sources ?? [];
+  //
+  // Two sources can carry the same name — only the code is unique — and a column of
+  // identical entries is a filter nobody can use. Where a name repeats, and only there,
+  // its code is shown beside it.
+  const sourceOptions = useMemo(() => {
+    const all = stats?.sources ?? [];
+    const seen = new Map<string, number>();
+    for (const s of all) seen.set(s.name, (seen.get(s.name) ?? 0) + 1);
+    return all.map((s) => ({ id: s.id, name: (seen.get(s.name) ?? 0) > 1 ? `${s.name} (${s.code})` : s.name }));
+  }, [stats]);
 
   // Agent options from real assignments, like the source options above: an
   // agent appears once they hold a lead. The reader's own entry, when they take
-  // leads, is first and reads "Mine".
+  // leads, is first and reads "Mine" — matched on the signed-in user id, which is what
+  // an assignment actually holds (`leads.assigned_to_id`), not an agent profile.
   const agentOptions = useMemo(
     () =>
       (stats?.agents ?? [])
-        .map((a) => ({ id: a.id, name: a.id === agentProfileId ? 'Mine' : a.name }))
-        .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name)),
-    [stats, agentProfileId],
+        .map((a) => ({ id: a.id, name: a.id === user?.id ? 'Mine' : a.name }))
+        .sort((a, b) => Number(b.id === user?.id) - Number(a.id === user?.id) || a.name.localeCompare(b.name)),
+    [stats, user?.id],
   );
 
   // Tab counts cover every lead, not the page on screen; hidden until the first answer arrives.
@@ -618,8 +628,11 @@ export const LeadsView: React.FC = () => {
               onChange={(e) => setAgentFilter(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
             >
-              <option value="all">All Assigned Agents</option>
-              <option value="unassigned">Unassigned</option>
+              {/* The no-filter option, like "All Lead Sources" above. It was called "All Assigned
+                  Agents", which reads as "only leads that have an agent" and sent people looking
+                  for a bug when unassigned leads showed up too. */}
+              <option value="all">All Agents</option>
+              <option value="unassigned">Unassigned only</option>
               {agentOptions.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -740,7 +753,7 @@ export const LeadsView: React.FC = () => {
                               {initialsOf(lead.assignedAgent.name)}
                             </div>
                             <span className="text-slate-200 font-medium">
-                              {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
+                              {lead.assignedAgent.id === user?.id ? 'You' : lead.assignedAgent.name}
                             </span>
                           </div>
                         ) : (

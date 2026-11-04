@@ -331,7 +331,9 @@ export interface LeadStats {
   byTemperature: Record<string, number>;
   total: number;
   /** Sources and agents that hold at least one lead: the Leads screen's filter options. */
-  sources: { id: string; name: string }[];
+  /** `code` is unique per organization; `name` is not, so it is what tells two alike apart. */
+  sources: { id: string; name: string; code: string }[];
+  /** Keyed by user id — the same id a lead's assignment holds. */
   agents: { id: string; name: string }[];
 }
 

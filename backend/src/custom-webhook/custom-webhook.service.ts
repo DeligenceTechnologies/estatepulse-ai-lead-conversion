@@ -63,6 +63,7 @@ export class CustomWebhookService {
 
   /** Creates the source listening. The token is shown again later; the secret only now. */
   async create(who: Identity, body: CreateBody) {
+    await this.leadSources.assertNameFree(who.organizationId, body.name);
     const id = randomUUID();
     const token = generateIngestToken('live');
     const secret = needsSecret(body.auth) ? generateSigningSecret() : null;

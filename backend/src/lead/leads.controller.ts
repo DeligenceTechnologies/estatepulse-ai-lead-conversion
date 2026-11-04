@@ -215,7 +215,13 @@ export class LeadsController {
       this.prisma.lead.groupBy({ by: ['status'], where, _count: { _all: true } }),
       this.prisma.lead.groupBy({ by: ['temperature'], where, _count: { _all: true } }),
       // A source or an agent is an option once it holds a lead, as before pagination.
-      this.prisma.leadSource.findMany({ where: { orgId, leads: { some: where } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      // `code` comes too: names are not unique, so two sources can read the same in a dropdown
+      // and only the code tells them apart.
+      this.prisma.leadSource.findMany({
+        where: { orgId, leads: { some: where } },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
       this.prisma.user.findMany({
         where: { orgId, assignedLeads: { some: where } },
         select: { id: true, firstName: true, lastName: true },
