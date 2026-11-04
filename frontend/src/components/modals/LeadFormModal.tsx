@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertTriangle, Loader2, Pencil, UserPlus } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { leadsApi, type LeadUpdateInput, type NewLeadInput } from '../../api/client';
+import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
 /**
@@ -73,6 +74,7 @@ export const LeadFormModal: React.FC<LeadFormModalProps> = ({ onClose, lead, onS
     maxBudget: number(lead?.maxBudget),
     bedrooms: number(lead?.bedrooms),
     notes: text(lead?.motivation),
+    timezone: '',
   });
   const [consent, setConsent] = useState(false);
   const [startOutreach, setStartOutreach] = useState(false);
@@ -129,6 +131,7 @@ export const LeadFormModal: React.FC<LeadFormModalProps> = ({ onClose, lead, onS
           maxBudget,
           bedrooms: optionalNumber(form.bedrooms),
           notes: optionalText(form.notes),
+          timezone: optionalText(form.timezone),
           consent,
           startOutreach: consent && startOutreach,
         };
@@ -203,6 +206,33 @@ export const LeadFormModal: React.FC<LeadFormModalProps> = ({ onClose, lead, onS
           A phone number or an email is required. Start a phone number with its country code, e.g. +91 98765 43210 —
           without one we cannot tell which country it belongs to, and the lead cannot be called.
         </p>
+
+        {!editing && (
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
+              {form.timezone && (
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
+                  className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Use phone&rsquo;s
+                </button>
+              )}
+            </div>
+            <TimezoneSelect
+              id="nl-timezone"
+              value={form.timezone}
+              placeholder="Work it out from the phone number"
+              onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
+              className={input}
+            />
+            <p className="text-2xs text-slate-500 mt-1">
+              Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>

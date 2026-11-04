@@ -406,6 +406,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         phone,
         normalizedPhone,
         phoneValid: Boolean(normalizedPhone),
+        timezone: text(values.timezone),
         emailValid,
         needsReview: input.reviewReasons.length > 0,
         reviewReasons: input.reviewReasons,

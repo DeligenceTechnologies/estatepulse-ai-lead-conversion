@@ -73,6 +73,7 @@ export class ManualLeadService {
           phone: input.phone ?? null,
           normalizedPhone,
           phoneValid: Boolean(normalizedPhone),
+          timezone: input.timezone ?? null,
           status: LeadStatus.new,
           temperature: LeadTemperature.cold,
           score: 0,

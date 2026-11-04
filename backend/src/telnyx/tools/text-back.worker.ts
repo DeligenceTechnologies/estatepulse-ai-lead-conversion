@@ -4,7 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
-import { nextAllowedAt } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
@@ -52,7 +53,7 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
     const { orgId, leadId, at } = job.data;
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+      select: { phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
     });
     if (!lead || lead.textBackAt?.toISOString() !== at) {
       this.logger.log(`Text back for lead ${leadId} at ${at} dropped: it was moved or cancelled since`);
@@ -69,11 +70,21 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
     if (!lead.phone) return drop('The lead has no phone number');
     if (await hasUpcomingMeeting(this.prisma, orgId, leadId)) return drop('A meeting with the lead is on the calendar');
 
-    // The time was checked against quiet hours when it was set; a delay can still run into them.
-    const { timeZone, quiet } = await this.followup.guardrailsFor(orgId);
-    const allowed = nextAllowedAt(timeZone, quiet, new Date());
-    if (allowed.getTime() > Date.now()) {
-      await job.moveToDelayed(allowed.getTime(), token);
+    // The time was checked when it was set; a delay, or a zone set since, can still put it outside the
+    // lead's hours. Measured on the LEAD's clock: quiet hours and their jurisdiction's legal hours (a text
+    // they asked for ignores the organization's days off). No zone, no text: looked at again every hour.
+    const { quiet } = await this.followup.guardrailsFor(orgId);
+    const zone = leadZone(lead);
+    const window = nextLeadContactAt(zone, { quiet, skipDays: [] }, new Date(), { callback: true });
+    if (!window.allowedAt) {
+      await this.followup.holdOnce(orgId, leadId, `Text held — ${window.reason}`, 'text_back', 'sms');
+      this.logger.log(gateLine(orgId, leadId, zone, window, 'held'));
+      await job.moveToDelayed(Date.now() + TZ_RECHECK_MS, token);
+      throw new DelayedError();
+    }
+    if (window.allowedAt.getTime() > Date.now()) {
+      this.logger.log(gateLine(orgId, leadId, zone, window, 'deferred'));
+      await job.moveToDelayed(window.allowedAt.getTime(), token);
       throw new DelayedError();
     }
 

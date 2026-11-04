@@ -25,3 +25,4 @@ dist-test/
 
 # local perf-measurement build (PERF_TIMING runs)
 backend/dist-perf/
+docs/qa/CALL01-test-cases.xlsx

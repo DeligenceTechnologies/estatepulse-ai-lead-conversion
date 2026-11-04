@@ -358,6 +358,8 @@ export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: 
     phone,
     normalized_phone: normalizedPhone,
     phone_valid: Boolean(normalizedPhone),
+    // Not read from the CRM yet (HubSpot has hs_timezone): the phone number decides until then.
+    timezone: null,
     // EstatePulse's — see ESTATEPULSE_OWNED_FIELDS. Never filled from a CRM.
     location: null,
     min_budget: null,

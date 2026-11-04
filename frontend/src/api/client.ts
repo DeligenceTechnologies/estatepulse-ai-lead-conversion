@@ -143,6 +143,8 @@ export interface LeadSourceConfig {
    * never becomes a lead, so the two numbers disagreeing is information.
    */
   leadCount?: number;
+  /** False: no field of this source fills the lead's time zone, so the phone's area code decides calling hours. */
+  timezoneMapped?: boolean;
 
   // --- set only on API-connected sources ---
   /** 'TALLY' | 'TYPEFORM'. Absent on sources created before providers existed. */
@@ -243,6 +245,26 @@ export type LeadOutreach =
   | { state: 'waiting' | 'released' | 'paused' }
   | { state: 'skipped'; reason: string | null };
 
+/**
+ * The lead's own time zone, worked out on every read: the zone their source
+ * provided or an agent set (`verified`), else their phone's area code
+ * (`inferred`); `needs_review` when the number sits in more than one zone or
+ * is toll-free, `unknown` without a usable number. Only verified and inferred
+ * leads are contacted. The jurisdiction is an estimate from the phone number,
+ * never proof of where they live; it picks the legal calling hours.
+ */
+export interface LeadTimezone {
+  zone: string | null;
+  status: 'verified' | 'inferred' | 'needs_review' | 'unknown';
+  source: 'provided' | 'phone' | null;
+  /** False: no usable phone number, so the lead cannot be called or texted whatever the zone. */
+  hasPhone: boolean;
+  candidates: string[];
+  jurisdiction: { country: string | null; region: string | null; status: 'estimated' | 'conflict' | 'unknown' };
+  /** Why, in a few words: "from area code 604", "toll-free or non-geographic number". */
+  reason: string;
+}
+
 export interface LiveLead {
   id: string;
   firstName: string | null;
@@ -272,6 +294,7 @@ export interface LiveLead {
   /** True: nothing automated contacts this lead until it is released. */
   automationPaused?: boolean;
   outreach?: LeadOutreach | null;
+  timezone: LeadTimezone;
   customFields: Record<string, string>;
   /** An answer we could not store, or a contact detail we could not use. */
   needsReview: boolean;
@@ -487,6 +510,8 @@ export interface NewLeadInput {
   maxBudget?: number;
   bedrooms?: number;
   notes?: string;
+  /** The lead's own IANA zone. Left out, their phone number decides. */
+  timezone?: string;
   /** The lead agreed to be called and texted. */
   consent: boolean;
   /** Let the AI start calling right away; otherwise the lead waits paused. */
@@ -540,5 +565,11 @@ export const leadsApi = {
     request<LeadAssignment>(`/v1/leads/${leadId}/assignment`, {
       method: 'PUT',
       body: JSON.stringify({ agentId }),
+    }),
+  /** The lead's own time zone, or null to let their phone number decide again. Answers the zone as the list shows it. */
+  setTimezone: (leadId: string, timezone: string | null) =>
+    request<{ timezone: LeadTimezone }>(`/v1/leads/${leadId}/timezone`, {
+      method: 'PUT',
+      body: JSON.stringify({ timezone }),
     }),
 };

@@ -138,12 +138,14 @@ export class LeadSourcesService {
     const rows = await this.prisma.leadSource.findMany({
       where: { orgId, archivedAt: null, ...WEBHOOK_SOURCES },
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { ingestEvents: true, leads: true } } },
+      include: { _count: { select: { ingestEvents: true, leads: true, mappings: { where: { targetField: 'timezone' } } } } },
     });
     return rows.map((row) => ({
       ...this.toSummary(row, this.decryptToken(row)),
       deliveryCount: row._count.ingestEvents,
       leadCount: row._count.leads,
+      /** False: no question of this source fills the lead's time zone, so the phone number decides calling hours. */
+      timezoneMapped: row._count.mappings > 0,
     }));
   }
 

@@ -21,6 +21,7 @@ const MAX_LEN: Partial<Record<CanonicalKey, number>> = {
   email: 255,
   phone: 50,
   location: 255,
+  timezone: 100,
   timeline: 100,
   buying_intent: 100,
   financing_status: 100,

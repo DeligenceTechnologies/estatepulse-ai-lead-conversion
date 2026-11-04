@@ -4,6 +4,7 @@ import { CallDisposition, CallStatus, FollowUpReason, LeadStatus } from '@prisma
 import { spoken } from '@/calendar/booking/booking-time';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
@@ -292,14 +293,23 @@ export class ActivityService {
     if (call) await this.prisma.call.update({ where: { id: call.id }, data: { recordingUrl: url } }).catch(() => undefined);
   }
 
+  /**
+   * A passage of the call, stitched onto the transcript. The same event can arrive
+   * twice — Telnyx retrying, or a captured delivery replayed inside the signature's
+   * five-minute window — and a transcript must not grow a second copy of itself.
+   */
   async onTranscriptionSaved(ccid: string, payload: any): Promise<void> {
     const text: string | null =
       payload?.transcription_text ?? payload?.transcription_data?.transcription_text ?? payload?.transcription?.text ?? null;
     if (!text) return;
     const call = await this.callByProvider(ccid);
     if (!call) return;
+    const transcript = call.transcript ?? '';
+    // ponytail: the passage's own text is the identity; two genuinely identical passages
+    // keep one. Store the event id if a transcript ever needs the repeat kept.
+    if (transcript.includes(text)) return;
     await this.prisma.call
-      .update({ where: { id: call.id }, data: { transcript: call.transcript ? `${call.transcript}\n${text}` : text } })
+      .update({ where: { id: call.id }, data: { transcript: transcript ? `${transcript}\n${text}` : text } })
       .catch((error) => this.logger.error(`onTranscriptionSaved: ${(error as Error).message}`));
   }
 
@@ -641,7 +651,8 @@ export class ActivityService {
       callback_due: callbackDue ? 'yes' : '',
       // Why this call is being made, set per call by the step that placed it.
       call_context: '',
-      callback_time: lead.callbackAt ? spoken(lead.callbackAt, settings?.timezone || 'UTC') : '',
+      // Spoken in the lead's own zone when it is known; the office's otherwise.
+      callback_time: lead.callbackAt ? spoken(lead.callbackAt, contactZone(leadZone(lead)) ?? settings?.timezone ?? 'UTC') : '',
       ...memoryVariables(questions, lead),
       conversationSummary: lead.memorySummary?.trim() || 'None yet.',
     };

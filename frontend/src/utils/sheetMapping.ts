@@ -15,6 +15,7 @@ export type ColumnChoice =
   | 'last_name'
   | 'phone'
   | 'email'
+  | 'timezone'
   | 'location'
   | 'budget_range'
   | 'min_budget'
@@ -30,6 +31,7 @@ export const CHOICES: { value: ColumnChoice; label: string }[] = [
   { value: 'last_name', label: 'Last name' },
   { value: 'phone', label: 'Phone' },
   { value: 'email', label: 'Email' },
+  { value: 'timezone', label: 'Time zone (e.g. America/Vancouver or “Pacific”)' },
   { value: 'location', label: 'Location' },
   { value: 'budget_range', label: 'Budget (range → min + max)' },
   { value: 'min_budget', label: 'Budget minimum' },

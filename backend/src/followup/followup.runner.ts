@@ -4,7 +4,8 @@ import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus, Prisma } fro
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
-import { nextContactAt } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt } from '@/common/utils/quiet-hours';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { AFTER_TEXT_BACK_MS, OUTCOME_STATUSES, TEXT_BACK_RECHECK_MS } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
@@ -132,14 +133,25 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       if (!sequence || !step) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
       const closeOutMs = sequence.closeOutHours * 3_600_000;
 
-      const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
+      const { quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
       const chatQuietMs = limits.chatQuietMinutes * 60_000;
       if (await this.textBackWait(row, lead, chatQuietMs)) return;
       if (await this.chatBusy(row, chatQuietMs)) return;
 
+      // On the LEAD's clock: quiet hours, days off and the legal calling hours of their jurisdiction.
+      // No zone, no step: the enrolment looks again every hour until someone sets one.
       const now = new Date();
-      const allowed = nextContactAt(timeZone, quiet, skipDays, now);
-      if (allowed > now) return void (await this.deferTo(row, allowed));
+      const zone = leadZone(lead);
+      const window = nextLeadContactAt(zone, { quiet, skipDays }, now);
+      if (!window.allowedAt) {
+        await this.followup.holdOnce(row.organization_id, row.lead_id, `Step held — ${window.reason}`, 'followup');
+        this.logger.log(gateLine(row.organization_id, row.lead_id, zone, window, 'held'));
+        return void (await this.deferTo(row, new Date(now.getTime() + TZ_RECHECK_MS)));
+      }
+      if (window.allowedAt > now) {
+        this.logger.log(gateLine(row.organization_id, row.lead_id, zone, window, 'deferred'));
+        return void (await this.deferTo(row, window.allowedAt));
+      }
 
       // As in the strategy: nothing over a call that is not over, and nothing canned after a conversation.
       const journey = await this.journeyState(row);
@@ -176,10 +188,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   }
 
   /** The lead when a step may go to it; otherwise the enrolment is stopped or paused, and null. */
-  private async liveLead(row: ClaimedEnrollment): Promise<{ firstName: string | null; phone: string | null; textBackAt: Date | null } | null> {
+  private async liveLead(
+    row: ClaimedEnrollment,
+  ): Promise<{ firstName: string | null; phone: string | null; normalizedPhone: string | null; timezone: string | null; textBackAt: Date | null } | null> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: row.lead_id },
-      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+      select: { firstName: true, phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
     });
     if (!lead) await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
     else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');

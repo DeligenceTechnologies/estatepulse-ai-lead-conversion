@@ -4,6 +4,7 @@ import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { leadZone } from '@/common/utils/lead-timezone';
 import { LeadOutcomeDto, LeadQualifiedDto, SetLeadStatusDto } from '@/lead/dto/lead-status.dto';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from '@/lead/lead-scope';
@@ -39,6 +40,8 @@ const PORTAL_LEAD_FIELDS = {
   lastName: true,
   email: true,
   phone: true,
+  normalizedPhone: true,
+  timezone: true,
   status: true,
   followUpReason: true,
   dncStatus: true,
@@ -93,6 +96,8 @@ function toPortalLead(r: PortalLeadRow) {
     consentStatus: r.consentStatus,
     dncStatus: r.dncStatus,
     automationPaused: r.automationPaused,
+    // Worked out on every read, as the Leads list does: the lead modal reads this copy first.
+    timezone: leadZone(r),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     lastContactedAt: r.lastContactAt?.toISOString(),

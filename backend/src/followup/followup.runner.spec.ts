@@ -17,7 +17,8 @@ function setup(steps: unknown[], currentStep: number) {
     leadEvent: { create: vi.fn(async () => ({})) },
   };
   const prisma = {
-    lead: { findUnique: vi.fn(async () => ({ firstName: 'Ana', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false })) },
+    // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way here.
+    lead: { findUnique: vi.fn(async () => ({ firstName: 'Ana', phone: '+12895550100', timezone: 'UTC', status: 'follow_up', dncStatus: false, automationPaused: false })) },
     leadEvent: { create: vi.fn(async () => ({})), findFirst: vi.fn(async () => null as { createdAt: Date } | null) },
     message: { findFirst: vi.fn(async (_args?: any): Promise<any> => null) },
     call: { findFirst: vi.fn(async () => null as Record<string, unknown> | null) },
@@ -29,6 +30,7 @@ function setup(steps: unknown[], currentStep: number) {
   };
   const followup = {
     guardrailsFor: vi.fn(async () => ({ timeZone: 'UTC', quiet: undefined, skipDays: [] as number[], limits: { ...DEFAULT_LIMITS } })),
+    holdOnce: vi.fn(async () => undefined),
     dueAt: vi.fn(async () => NOW),
     contactSlot: vi.fn(async () => ({ at: new Date(Date.now()), reason: null as string | null })),
   };
@@ -67,6 +69,31 @@ describe('FollowupRunner last step', () => {
       data: expect.objectContaining({ currentStep: 3, nextActionAt: new Date(NOW.getTime() + CLOSE_OUT_AFTER_MS) }),
     });
     expect(s.tx.lead.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("holds the step for an hour, and says why once, while the lead's time zone cannot be told", async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 2);
+    // No provided zone and a toll-free number: ambiguous, so nothing may go out until someone sets the zone.
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+18005550100', normalizedPhone: '+18005550100', timezone: null, status: 'follow_up', dncStatus: false, automationPaused: false } as any);
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(s.followup.holdOnce).toHaveBeenCalledWith('org-1', 'lead-1', expect.stringContaining('toll-free or non-geographic number'), 'followup');
+    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({
+      where: { id: 'enr-1' },
+      data: { nextActionAt: new Date(NOW.getTime() + 60 * 60_000), lockedBy: null, lockedAt: null },
+    });
+  });
+
+  it("waits for the lead's own window: a Toronto lead at 06:00 their time is texted at 09:00 their time", async () => {
+    const s = setup([smsStep('one'), smsStep('two')], 2);
+    // NOW is 10:00Z = 06:00 in Toronto on a Monday; the CRTC weekday window opens at 09:00 = 13:00Z.
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+12895550100', normalizedPhone: '+12895550100', timezone: null, status: 'follow_up', dncStatus: false, automationPaused: false } as any);
+    await s.execute();
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith({
+      where: { id: 'enr-1' },
+      data: { nextActionAt: new Date('2026-10-26T13:00:00.000Z'), lockedBy: null, lockedAt: null },
+    });
   });
 
   it('leaves the lead callable on a last-step call, so the worker does not drop it', async () => {
@@ -128,7 +155,7 @@ describe('FollowupRunner last step', () => {
 
   it('does not close out a lead who replied during the wait', async () => {
     const s = setup([smsStep('one')], 2);
-    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+1', status: 'contacting', dncStatus: false, automationPaused: true });
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+1', timezone: 'UTC', status: 'contacting', dncStatus: false, automationPaused: true });
     await s.execute();
     expect(s.tx.lead.updateMany).not.toHaveBeenCalled();
     expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'paused' }) }));
@@ -160,7 +187,7 @@ describe('FollowupRunner journey rules', () => {
     (s.prisma.leadEvent.create.mock.calls as any[]).some((c) => c[0].data.type === type);
 
   const withTextBack = (s: ReturnType<typeof setup>, textBackAt: Date) =>
-    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false, textBackAt } as any);
+    s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+12895550100', timezone: 'UTC', status: 'follow_up', dncStatus: false, automationPaused: false, textBackAt } as any);
 
   it('a text the lead asked for comes first: the step looks again every 5 minutes until then', async () => {
     const s = setup([smsStep('one'), smsStep('two')], 1);
@@ -227,7 +254,7 @@ describe('FollowupRunner journey rules', () => {
 
   it('looks at the lead once more right before sending: a pause that came in meanwhile holds the step', async () => {
     const s = setup([smsStep('one'), smsStep('two')], 2);
-    const lead = { firstName: 'Ana', phone: '+12895550100', status: 'follow_up', dncStatus: false, automationPaused: false };
+    const lead = { firstName: 'Ana', phone: '+12895550100', timezone: 'UTC', status: 'follow_up', dncStatus: false, automationPaused: false };
     s.prisma.lead.findUnique.mockResolvedValueOnce(lead).mockResolvedValueOnce({ ...lead, automationPaused: true });
     await s.execute();
     expect(s.sms.sendSms).not.toHaveBeenCalled();

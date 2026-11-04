@@ -86,6 +86,7 @@ export type MappingTarget =
   | 'full_name'
   | 'phone'
   | 'email'
+  | 'timezone'
   | 'location'
   | 'min_budget'
   | 'max_budget'
