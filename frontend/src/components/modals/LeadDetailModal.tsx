@@ -12,9 +12,12 @@ import {
   ShieldCheck,
   FileText,
   ChevronDown,
+  Globe,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { LEADS_CHANGED_EVENT, leadsApi, type LeadTimezone } from '../../api/client';
 import { useApp } from '../../context/AppContext';
+import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
@@ -143,10 +146,15 @@ export const LeadDetailModal: React.FC = () => {
   // the pipeline's refetch lands. Cleared when a different lead is opened.
   const [assigned, setAssigned] = useState<{ id: string; name: string } | null>(null);
 
+  // The time zone just set (or cleared) from this modal, shown at once; cleared when a different lead is opened.
+  const [zone, setZone] = useState<LeadTimezone | null>(null);
+  const [savingZone, setSavingZone] = useState(false);
+
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
   useEffect(() => {
     setAssigned(null);
+    setZone(null);
     setFlow(null);
     if (!selectedLeadId) return;
     let alive = true;
@@ -204,6 +212,24 @@ export const LeadDetailModal: React.FC = () => {
   // database lead can reach here through either of two loaders (see findLead),
   // and only a database row has a UUID — demo leads are `lead_<timestamp>`.
   const isLive = !!lead && UUID.test(lead.id);
+
+  // The zone as last set here, else as the list read it; blocked = nothing automated reaches the lead yet.
+  const tz = zone ?? lead?.timezone ?? null;
+  const tzBlocked = !!tz && (!tz.hasPhone || tz.status === 'needs_review' || tz.status === 'unknown');
+  const saveZone = async (next: string | null) => {
+    if (!lead || !next && next !== null) return;
+    setSavingZone(true);
+    try {
+      const { timezone } = await leadsApi.setTimezone(lead.id, next);
+      setZone(timezone);
+      toast.success(next ? `Time zone set to ${next}.` : "Time zone cleared; the lead's phone number decides again.");
+      window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setSavingZone(false);
+    }
+  };
   const liveAgent =
     assigned ?? (lead?.assignedAgentId && lead.assignedAgentName ? { id: lead.assignedAgentId, name: lead.assignedAgentName } : null);
 
@@ -429,6 +455,53 @@ export const LeadDetailModal: React.FC = () => {
                 {/* The rest of what the AI knows: the org's other questions and notes from earlier calls and texts. */}
                 {isLive && <LeadQualificationMemory leadId={lead.id} />}
               </div>
+
+              {/* The clock calls and texts keep to: the source's or an agent's zone, else the phone's area code. */}
+              {isLive && tz && (
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
+                      <Globe className="w-4 h-4 text-sky-400" />
+                      <span>Time zone</span>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-100 truncate">
+                      {!tz.hasPhone && !tz.zone ? 'No phone number' : (tz.zone ?? (tz.status === 'needs_review' ? 'Needs review' : 'Unknown'))}
+                    </div>
+                    <div className={`text-2xs ${tzBlocked ? 'text-amber-300' : 'text-slate-500'}`}>
+                      {!tz.hasPhone
+                        ? 'No usable phone number — this lead cannot be called or texted. Add a phone number first.'
+                        : tz.reason.charAt(0).toUpperCase() + tz.reason.slice(1)}
+                      {tz.hasPhone && tzBlocked && ' — not called or texted until it is set.'}
+                      {tz.hasPhone && tz.jurisdiction.country &&
+                        ` · Calling rules: ${tz.jurisdiction.country}${tz.jurisdiction.region ? `-${tz.jurisdiction.region}` : ''}, estimated from the phone number${
+                          tz.jurisdiction.status === 'conflict' ? ' (the zone set disagrees, so the strictest hours apply)' : ''
+                        }.`}
+                    </div>
+                  </div>
+                  {tz.hasPhone && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <TimezoneSelect
+                      id="lead-timezone"
+                      value={tz.zone ?? ''}
+                      placeholder={tz.candidates.length > 1 ? 'Choose the zone…' : 'Set the zone…'}
+                      onChange={(next) => void saveZone(next)}
+                      disabled={savingZone}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white max-w-[230px] focus:outline-none focus:border-emerald-600 disabled:opacity-40"
+                    />
+                    {tz.source === 'provided' && (
+                      <button
+                        type="button"
+                        onClick={() => void saveZone(null)}
+                        disabled={savingZone}
+                        className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer disabled:opacity-40"
+                      >
+                        Use phone's
+                      </button>
+                    )}
+                  </div>
+                  )}
+                </div>
+              )}
 
               {/* Everything the prospect said that has no field of its own.
                   Kept out of the pipeline table on purpose — that shows only

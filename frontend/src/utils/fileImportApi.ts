@@ -164,10 +164,14 @@ export function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** The sample file: the columns the import recognises on its own, with one example row. */
+/**
+ * The sample file: the columns the import recognises on its own, with one example row.
+ * Time Zone is optional (Eastern, Pacific or an IANA name such as America/Vancouver); without it the
+ * lead's phone number decides their calling hours.
+ */
 export const TEMPLATE_CSV =
-  'Full Name,Phone,Email,Location,Budget,Bedrooms,Notes\r\n' +
-  'Jane Doe,+1 512-555-0101,jane@example.com,Austin TX,"$300,000 - $450,000",3,Prefers mornings\r\n';
+  'Full Name,Phone,Email,Time Zone,Location,Budget,Bedrooms,Notes\r\n' +
+  'Jane Doe,+1 512-555-0101,jane@example.com,Central,Austin TX,"$300,000 - $450,000",3,Prefers mornings\r\n';
 
 export function downloadTemplate(): void {
   const url = URL.createObjectURL(new Blob([TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' }));

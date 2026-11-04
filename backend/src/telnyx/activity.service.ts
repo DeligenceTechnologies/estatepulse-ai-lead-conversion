@@ -4,6 +4,7 @@ import { CallDisposition, CallStatus, FollowUpReason, LeadStatus } from '@prisma
 import { spoken } from '@/calendar/booking/booking-time';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
@@ -641,7 +642,8 @@ export class ActivityService {
       callback_due: callbackDue ? 'yes' : '',
       // Why this call is being made, set per call by the step that placed it.
       call_context: '',
-      callback_time: lead.callbackAt ? spoken(lead.callbackAt, settings?.timezone || 'UTC') : '',
+      // Spoken in the lead's own zone when it is known; the office's otherwise.
+      callback_time: lead.callbackAt ? spoken(lead.callbackAt, contactZone(leadZone(lead)) ?? settings?.timezone ?? 'UTC') : '',
       ...memoryVariables(questions, lead),
       conversationSummary: lead.memorySummary?.trim() || 'None yet.',
     };

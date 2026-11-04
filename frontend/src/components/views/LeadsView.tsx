@@ -141,6 +141,12 @@ const attentionReasons = (l: LiveLead): string[] => [
     : []),
   // Such a lead must never be auto-dialed.
   ...(l.phone && !l.phoneValid ? ['Phone could not be parsed — excluded from dialing.'] : []),
+  // Nothing to call or text: no number at all (an unparseable one is reported just above).
+  ...(l.timezone && !l.timezone.hasPhone && !l.phone ? ['No phone number — this lead cannot be called or texted.'] : []),
+  // No clock to measure calling hours against: held until an agent sets the zone in the lead's details.
+  ...(l.timezone && l.timezone.hasPhone && (l.timezone.status === 'needs_review' || l.timezone.status === 'unknown')
+    ? [`Time zone ${l.timezone.status === 'needs_review' ? 'needs review' : 'unknown'} (${l.timezone.reason}) — not called or texted until an agent sets it in the lead's details.`]
+    : []),
   // Stored, but never used to match this lead to another — see the email_valid guard in createLead.
   ...(l.email && !l.emailValid ? ['Not a usable email address — excluded from matching and email outreach.'] : []),
 ];
@@ -198,6 +204,7 @@ const toLead = (l: LiveLead): Lead => ({
   updatedAt: l.updatedAt,
   notes: humanize(l.motivation) ?? undefined,
   customFields: l.customFields,
+  timezone: l.timezone,
 });
 
 const SKIP_TEXT: Record<string, string> = {

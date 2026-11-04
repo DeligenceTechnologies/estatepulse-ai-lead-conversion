@@ -26,18 +26,27 @@ function invalid(message: string): AppError {
 }
 
 export function telnyxReason(message: string): string | null {
-  const body = message.slice(Math.max(0, message.indexOf('{')));
-  try {
-    const errors = (JSON.parse(body) as { errors?: { detail?: string; title?: string }[] }).errors ?? [];
-    const words = errors.map((e) => e.detail || e.title).filter(Boolean);
-    if (words.length) return words.join(' ');
-  } catch {
-    for (const field of ['detail', 'title']) {
-      const match = body.match(new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
-      if (match) return JSON.parse(`"${match[1]}"`) as string;
+  const start = message.indexOf('{');
+  if (start >= 0) {
+    // An older message, or a log line, still carrying Telnyx's raw JSON.
+    const body = message.slice(start);
+    try {
+      const errors = (JSON.parse(body) as { errors?: { detail?: string; title?: string }[] }).errors ?? [];
+      const words = errors.map((e) => e.detail || e.title).filter(Boolean);
+      if (words.length) return words.join(' ');
+    } catch {
+      for (const field of ['detail', 'title']) {
+        const match = body.match(new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+        if (match) return JSON.parse(`"${match[1]}"`) as string;
+      }
     }
+    return null;
   }
-  return null;
+  // telnyx() answers "… failed 422: Title — detail (code)" (telnyxErrorText): the detail is the readable part.
+  const readable = message.match(/ failed \d{3}: (.+)$/s)?.[1]?.trim();
+  if (!readable) return null;
+  const detail = readable.replace(/ \(\w+\)$/, '').split(' — ').pop()?.trim();
+  return detail || null;
 }
 
 @Injectable()

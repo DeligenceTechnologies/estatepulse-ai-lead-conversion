@@ -744,13 +744,11 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
            SET first_name = v.first_name, last_name = v.last_name,
                email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-               location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+               timezone = v.timezone, location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                external_lead_id = v.external_lead_id, review_reasons = v.review_reasons,
                needs_review = true, dnc_status = l.dnc_status OR v.dnc, updated_at = now()
-          FROM (VALUES ${Prisma.join(refreshValues)}) AS v(id, first_name, last_name, email, normalized_email, email_valid,
-               phone, normalized_phone, phone_valid, location, min_budget, max_budget, bedrooms, motivation,
-               custom_fields, external_lead_id, review_reasons, dnc),
+          FROM (VALUES ${Prisma.join(refreshValues)}) AS v(${LEAD_VALUES_COLUMNS}),
                sheet_import_rows AS r
          WHERE l.id = v.id AND l.organization_id = ${orgId}::uuid
            AND r.lead_id = l.id AND r.organization_id = ${orgId}::uuid AND r.review_state = 'pending'`);
@@ -928,6 +926,7 @@ export function leadColumns(l: LeadFields, externalId: string | null) {
     phone: l.phone,
     normalizedPhone: l.normalized_phone,
     phoneValid: l.phone_valid,
+    timezone: l.timezone,
     location: l.location,
     minBudget: l.min_budget,
     maxBudget: l.max_budget,
@@ -941,12 +940,17 @@ export function leadColumns(l: LeadFields, externalId: string | null) {
 export function leadValuesRow(leadId: string, l: LeadFields, externalId: string | null, reviewReasons: string[], dnc: boolean): Prisma.Sql {
   return Prisma.sql`(${leadId}::uuid, ${l.first_name}::varchar, ${l.last_name}::varchar, ${l.email}::varchar,
     ${l.normalized_email}::varchar, ${l.email_valid}::boolean, ${l.phone}::varchar, ${l.normalized_phone}::varchar,
-    ${l.phone_valid}::boolean, ${l.location}::varchar, ${l.min_budget}::numeric, ${l.max_budget}::numeric,
+    ${l.phone_valid}::boolean, ${l.timezone}::varchar, ${l.location}::varchar, ${l.min_budget}::numeric, ${l.max_budget}::numeric,
     ${l.bedrooms}::int, ${l.motivation}::text, ${JSON.stringify(l.custom_fields)}::jsonb,
     ${externalId ? externalId.slice(0, 255) : null}::varchar, ${reviewReasons}::text[], ${dnc}::boolean)`;
 }
 
-const MATERIAL_FIELDS = ['first_name', 'last_name', 'phone', 'email', 'location', 'min_budget', 'max_budget', 'bedrooms', 'motivation'] as const;
+/** The columns of a `leadValuesRow`, for the UPDATE ... FROM (VALUES ...) AS v(...) statements that consume one. */
+export const LEAD_VALUES_COLUMNS = Prisma.raw(
+  'id, first_name, last_name, email, normalized_email, email_valid, phone, normalized_phone, phone_valid, timezone, location, min_budget, max_budget, bedrooms, motivation, custom_fields, external_lead_id, review_reasons, dnc',
+);
+
+const MATERIAL_FIELDS = ['first_name', 'last_name', 'phone', 'email', 'timezone', 'location', 'min_budget', 'max_budget', 'bedrooms', 'motivation'] as const;
 
 /** After a mapping change: does the sheet now say something different about a mapped field? */
 export function materialDiffers(lead: Record<string, unknown>, incoming: LeadFields, mappedTargets: Set<string>): boolean {

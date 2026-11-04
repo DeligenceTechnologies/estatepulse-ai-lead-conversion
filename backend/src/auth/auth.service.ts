@@ -16,6 +16,9 @@ import { DEFAULT_ROLES, effectivePermissions } from '@/role/permissions';
 
 const OMIT_PASSWORD = { password: true } as const;
 
+/** A new organization's (and its owner's) zone when sign-up sends none: North America, where the leads are called. */
+export const DEFAULT_TIMEZONE = 'America/New_York';
+
 const dummyPasswordHash = hashPassword(randomUUID());
 
 @Injectable()
@@ -32,16 +35,18 @@ export class AuthService {
    * does that. Otherwise the address is taken as verified and a session starts.
    */
   async register(dto: RegisterDto, meta: SessionMeta) {
-    const { organizationName, organizationType, password, ...owner } = dto;
+    const { organizationName, organizationType, password, timezone: chosenZone, ...owner } = dto;
     const verificationRequired = this.verification.required;
     const passwordHash = await hashPassword(password);
+    // The office zone the form offered (America/New_York unless changed); the owner's own zone starts the same.
+    const timezone = chosenZone ?? DEFAULT_TIMEZONE;
 
     let user: User;
     try {
       user = await this.prisma.$transaction(async (tx) => {
         const organization = await tx.organization.create({
-          // Settings start at their defaults (Asia/Kolkata, Mon-Fri 09:00-18:00).
-          data: { name: organizationName, settings: { create: {} } },
+          // The other settings start at their defaults (Mon-Fri 09:00-18:00, region US).
+          data: { name: organizationName, settings: { create: { timezone } } },
         });
         const ownerRole = await tx.role.create({
           data: { ...DEFAULT_ROLES.OWNER, orgId: organization.id },
@@ -54,6 +59,7 @@ export class AuthService {
         return tx.user.create({
           data: {
             ...owner,
+            timezone,
             orgId: organization.id,
             password: passwordHash,
             source: 'web',

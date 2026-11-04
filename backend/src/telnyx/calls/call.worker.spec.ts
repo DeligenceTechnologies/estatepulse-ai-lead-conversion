@@ -33,7 +33,7 @@ function setup(
   };
   const config = { get: vi.fn() };
   const limits = { ...DEFAULT_LIMITS, ...(overrides.redialGapMinutes === undefined ? {} : { redialGapMinutes: overrides.redialGapMinutes }) };
-  const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits }) };
+  const followup = { guardrailsFor: vi.fn().mockResolvedValue({ timeZone: 'UTC', quiet: undefined, skipDays: [], limits }), holdOnce: vi.fn() };
   const voice = { placeCall: vi.fn(overrides.placeCall ?? (() => Promise.resolve({ call_control_id: 'ccid-1' }))) };
   const activity = { startCall: vi.fn(), recordCallFailed: vi.fn(), markInvalid: vi.fn() };
   const slots = {
@@ -43,16 +43,45 @@ function setup(
   };
   const worker = new CallWorker(prisma as any, config as any, followup as any, voice as any, activity as any, slots as any);
   const job = { id: 'job-1', name: 'dial', data: { orgId: ORG, leadId: LEAD, source: 'strategy' } as Record<string, unknown>, moveToDelayed: vi.fn(), updateData: vi.fn() };
-  return { worker, job, prisma, voice, activity, slots };
+  return { worker, job, prisma, voice, activity, slots, followup };
 }
 
+/** The lead's contact window, as the gate helper would answer it; "now" unless a test says otherwise. */
+const gate = vi.hoisted(() => ({ verdict: null as null | { allowedAt: Date | null; reason: string | null } }));
+
 vi.mock('@/common/utils/quiet-hours', () => ({
-  nextAllowedAt: (_tz: string, _q: unknown, now: Date) => now,
-  nextContactAt: (_tz: string, _q: unknown, _skip: unknown, now: Date) => now,
+  TZ_RECHECK_MS: 60 * 60_000,
+  gateLine: () => '',
+  nextLeadContactAt: (_zone: unknown, _rules: unknown, now: Date) => gate.verdict ?? { allowedAt: now, reason: null },
 }));
 
 describe('CallWorker', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gate.verdict = null;
+  });
+
+  describe("the lead's contact window", () => {
+    it('holds the call for an hour, and says why once, while the lead has no usable time zone', async () => {
+      gate.verdict = { allowedAt: null, reason: 'no valid phone number' };
+      const { worker, job, voice, followup } = setup();
+      const before = Date.now();
+      await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+      expect(voice.placeCall).not.toHaveBeenCalled();
+      const [until] = job.moveToDelayed.mock.calls[0];
+      expect(until).toBeGreaterThanOrEqual(before + 60 * 60_000);
+      expect(followup.holdOnce).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('no valid phone number'), 'call_worker', 'voice');
+    });
+
+    it('waits for the window to open when it is closed', async () => {
+      const opens = new Date(Date.now() + 5 * 60 * 60_000);
+      gate.verdict = { allowedAt: opens, reason: 'Legal calling hours (CA)' };
+      const { worker, job, voice } = setup();
+      await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+      expect(job.moveToDelayed).toHaveBeenCalledWith(opens.getTime(), 'tok');
+      expect(voice.placeCall).not.toHaveBeenCalled();
+    });
+  });
 
   it('dials within a free slot, then keys the slot by the call id', async () => {
     const { worker, job, voice, slots, activity } = setup();

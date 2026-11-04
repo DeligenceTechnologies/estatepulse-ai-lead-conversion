@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { leadsApi, type NewLeadInput } from '../../api/client';
+import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
 interface NewLeadModalProps {
@@ -42,6 +43,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
     maxBudget: '',
     bedrooms: '',
     notes: '',
+    timezone: '',
   });
   const [consent, setConsent] = useState(false);
   const [startOutreach, setStartOutreach] = useState(false);
@@ -76,6 +78,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
       maxBudget,
       bedrooms: optionalNumber(form.bedrooms),
       notes: optionalText(form.notes),
+      timezone: optionalText(form.timezone),
       consent,
       startOutreach: consent && startOutreach,
     };
@@ -134,6 +137,31 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
           </div>
         </div>
         <p className="text-2xs text-slate-500 -mt-2">A phone number or an email is required.</p>
+
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
+            {form.timezone && (
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
+                className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
+              >
+                Use phone&rsquo;s
+              </button>
+            )}
+          </div>
+          <TimezoneSelect
+            id="nl-timezone"
+            value={form.timezone}
+            placeholder="Work it out from the phone number"
+            onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
+            className={input}
+          />
+          <p className="text-2xs text-slate-500 mt-1">
+            Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
+          </p>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
