@@ -105,6 +105,9 @@ export function withCallToolsSection(instructions: string): string {
   return base ? `${base}\n\n${callToolsSection()}` : callToolsSection();
 }
 
+/** The names our call tools go by on the assistant; Telnyx allows one webhook tool per name. */
+export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome'];
+
 export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
