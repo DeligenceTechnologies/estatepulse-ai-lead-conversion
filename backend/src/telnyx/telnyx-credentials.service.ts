@@ -6,6 +6,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad } from '@/common/utils/crypto';
+import { normalizePhone } from './phone';
 
 const TELNYX_API = 'https://api.telnyx.com/v2';
 
@@ -316,7 +317,8 @@ export class TelnyxCredentialsService {
       // A saved key starts clean; if it is refused too, the owners hear about it again.
       lastErrorCode: null,
       lastErrorAt: null,
-      phoneNumber: c.fromNumber || null,
+      // The webhooks look an org up by the normalized number, so that is the only shape stored.
+      phoneNumber: normalizePhone(c.fromNumber) || null,
       externalAccountId: c.assistantId || null,
       config: config as Prisma.InputJsonObject,
     };

@@ -292,14 +292,23 @@ export class ActivityService {
     if (call) await this.prisma.call.update({ where: { id: call.id }, data: { recordingUrl: url } }).catch(() => undefined);
   }
 
+  /**
+   * A passage of the call, stitched onto the transcript. The same event can arrive
+   * twice — Telnyx retrying, or a captured delivery replayed inside the signature's
+   * five-minute window — and a transcript must not grow a second copy of itself.
+   */
   async onTranscriptionSaved(ccid: string, payload: any): Promise<void> {
     const text: string | null =
       payload?.transcription_text ?? payload?.transcription_data?.transcription_text ?? payload?.transcription?.text ?? null;
     if (!text) return;
     const call = await this.callByProvider(ccid);
     if (!call) return;
+    const transcript = call.transcript ?? '';
+    // ponytail: the passage's own text is the identity; two genuinely identical passages
+    // keep one. Store the event id if a transcript ever needs the repeat kept.
+    if (transcript.includes(text)) return;
     await this.prisma.call
-      .update({ where: { id: call.id }, data: { transcript: call.transcript ? `${call.transcript}\n${text}` : text } })
+      .update({ where: { id: call.id }, data: { transcript: transcript ? `${transcript}\n${text}` : text } })
       .catch((error) => this.logger.error(`onTranscriptionSaved: ${(error as Error).message}`));
   }
 

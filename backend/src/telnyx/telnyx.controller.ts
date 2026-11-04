@@ -8,6 +8,7 @@ import { AssistantService } from './assistant.service';
 import { AttachAssistantDto, CallCapacityDto, CreateAssistantDto, NumbersLookupDto, PhoneNumberDto, ReconnectDto, RenameAccountDto, TelnyxCredentialsDto } from './dto/telnyx.dto';
 import { CallCapacityService } from './calls/call-capacity.service';
 import { NumbersService } from './numbers.service';
+import { normalizePhone } from './phone';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
 
 /** The organization's Telnyx accounts, phone numbers and AI assistant. */
@@ -195,9 +196,14 @@ export class TelnyxController {
         'A Telnyx public key is required to verify webhooks. Copy it from Telnyx → Account Settings → Keys & Credentials → Public Key.',
       );
     }
-    const fromNumber = body.fromNumber !== undefined ? body.fromNumber : current?.fromNumber || '';
-    if (!/^\+?[0-9]{7,15}$/.test(fromNumber.replace(/[\s()-]/g, ''))) {
+    // Stored the one way the webhooks look it up, so "+1 (202) 555-0123" still routes.
+    const fromNumber = normalizePhone(body.fromNumber !== undefined ? body.fromNumber : current?.fromNumber || '');
+    if (!/^\+[0-9]{7,15}$/.test(fromNumber)) {
       throw new AppError('VALIDATION_ERROR', 'A From Number in E.164 format (e.g. +12025550123) is required to place calls.');
+    }
+    // Otherwise an organization could claim someone else's number and collect their leads' replies.
+    if (!(await this.numbers.ownsNumber(apiKey, fromNumber))) {
+      throw new AppError('VALIDATION_ERROR', 'That number is not on the Telnyx account this API key belongs to. Pick one of your own numbers, or buy it in Telnyx first.');
     }
     const connectionId = body.connectionId || (await this.creds.findCallControlApp(apiKey));
     if (!connectionId) {
