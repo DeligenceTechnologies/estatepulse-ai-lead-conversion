@@ -68,9 +68,10 @@ export function searchWindow(
   return from < end ? { start: from, end } : null;
 }
 
+/** A time the lead hears or reads, always with its zone: "Tuesday, November 5 at 10:00 AM PST". */
 export function spoken(at: Date, timeZone: string): string {
   const day = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric' }).format(at);
-  const time = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit' }).format(at);
+  const time = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(at);
   return `${day} at ${time}`;
 }
 
