@@ -99,6 +99,26 @@ export interface ToolCall {
 const agentName = (u: NonNullable<StoredText['senderUser']>) => [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || u.email;
 
 /**
+ * Texts further apart than this start a new conversation, as an assistant's
+ * chat on Telnyx does after a quiet spell. What came before still reaches the
+ * AI through the lead's memory (conversationSummary, knownInfo) and our last
+ * text (last_outbound_sms), not as old turns it would take for the present: a
+ * meeting booked last month read as "still on for Saturday".
+ */
+export const CONVERSATION_GAP_MS = 24 * 3_600_000;
+
+/** Of the texts, newest first, those of the current conversation, oldest first. A text without a time is kept. */
+export function currentConversation<T extends { createdAt?: Date | null }>(newestFirst: T[]): T[] {
+  const kept: T[] = [];
+  for (const text of newestFirst) {
+    const newer = kept[kept.length - 1];
+    if (newer?.createdAt && text.createdAt && newer.createdAt.getTime() - text.createdAt.getTime() > CONVERSATION_GAP_MS) break;
+    kept.push(text);
+  }
+  return kept.reverse();
+}
+
+/**
  * The texts with the lead as the model reads them, oldest first: the lead's
  * as user turns, ours as assistant turns. A text an agent wrote is marked as
  * theirs, as in the Telnyx chat, so the AI never claims it.

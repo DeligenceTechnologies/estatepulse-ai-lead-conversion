@@ -36,8 +36,10 @@ function setup(opts: { replies?: Reply[]; lead?: Record<string, unknown>; fresh?
     message: {
       findFirst: vi.fn(async () => (newer.shift() ? { id: 'newer' } : null)),
       findMany: vi.fn(async () => [
-        { direction: 'inbound', senderType: 'lead', body: 'What areas do you cover?', senderUser: null },
-        { direction: 'outbound', senderType: 'ai', body: 'Hi Ana, thanks for reaching out!', senderUser: null },
+        { direction: 'inbound', senderType: 'lead', body: 'What areas do you cover?', senderUser: null, createdAt: new Date('2026-11-04T10:00:00Z') },
+        { direction: 'outbound', senderType: 'ai', body: 'Hi Ana, thanks for reaching out!', senderUser: null, createdAt: new Date('2026-11-04T09:00:00Z') },
+        // A month older: another conversation, left to the lead's memory.
+        { direction: 'outbound', senderType: 'ai', body: 'Your consultation is booked for Saturday.', senderUser: null, createdAt: new Date('2026-10-03T09:00:00Z') },
       ]),
       create: vi.fn(async () => ({})),
     },
@@ -292,9 +294,14 @@ describe('SmsAgentService.answer', () => {
       expect(await s.service.answer(JOB)).toBe('sent');
     });
 
-    it('flags the lead when the model says nothing', async () => {
-      const s = setup({ replies: [{ content: '   ' }] });
+    it('asks the model once more when it says nothing, and flags the lead when it says nothing again', async () => {
+      const again = setup({ replies: [{ content: '' }, { content: 'Hi Ana!' }] });
+      expect(await again.service.answer(JOB)).toBe('sent');
+      expect(again.completions).toHaveLength(2);
+
+      const s = setup({ replies: [{ content: '   ' }, { content: '' }] });
       expect(await s.service.answer(JOB)).toBe('failed');
+      expect(s.completions).toHaveLength(2);
     });
 
     it('tries a send that failed for a passing reason twice more, and flags the lead when it never goes', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REPLY_MAX_CHARS, chatHistory, fillVariables, guardReply, replyRoute, standingNote, toolFunctions } from './sms-agent';
+import { REPLY_MAX_CHARS, chatHistory, currentConversation, fillVariables, guardReply, replyRoute, standingNote, toolFunctions } from './sms-agent';
 
 const lead = (status: string, extra: Partial<{ dncStatus: boolean; takenOverById: string | null; agentCanReply: boolean }> = {}) =>
   ({ status, dncStatus: false, takenOverById: null, agentCanReply: false, ...extra }) as Parameters<typeof replyRoute>[0];
@@ -108,5 +108,25 @@ describe('guardReply', () => {
   it('is empty when nothing is left to send', () => {
     expect(guardReply('   ')).toBe('');
     expect(guardReply('https://evil.example')).toBe('');
+  });
+});
+
+describe('currentConversation', () => {
+  const at = (iso: string, body: string) => ({ body, createdAt: new Date(iso) });
+
+  it('keeps the texts since the last quiet spell of more than a day, oldest first', () => {
+    const newestFirst = [
+      at('2026-11-04T10:05:00Z', 'Budget 600k'),
+      at('2026-11-04T10:00:00Z', 'What areas?'),
+      at('2026-11-03T12:00:00Z', 'Hi Ana, thanks for reaching out!'),
+      at('2026-10-30T07:28:00Z', 'Booked for Saturday'),
+    ];
+    expect(currentConversation(newestFirst).map((t) => t.body)).toEqual(['Hi Ana, thanks for reaching out!', 'What areas?', 'Budget 600k']);
+  });
+
+  it('keeps everything when there is no such gap, or no time to tell', () => {
+    expect(currentConversation([at('2026-11-04T10:00:00Z', 'b'), at('2026-11-04T09:00:00Z', 'a')]).map((t) => t.body)).toEqual(['a', 'b']);
+    const untimed: { body: string; createdAt?: Date }[] = [{ body: 'b' }, { body: 'a' }];
+    expect(currentConversation(untimed).map((t) => t.body)).toEqual(['a', 'b']);
   });
 });

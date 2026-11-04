@@ -20,6 +20,7 @@ import {
   AI_REPLY_FAILED_REVIEW,
   STRANGER_REVIEW,
   chatHistory,
+  currentConversation,
   fillVariables,
   guardReply,
   linksFrom,
@@ -144,11 +145,18 @@ export class SmsAgentService {
       setup = await this.setup(orgId);
       const note = standingNote(job.status ?? lead.status, job.stranger ?? lead.reviewReasons.includes(STRANGER_REVIEW));
       const messages = await this.prompt(orgId, leadId, phone, setup, note);
+      let askedAgain = false;
       for (let round = 0; round < TOOL_ROUNDS && !text; round += 1) {
         const message = await this.complete(setup, messages, usage);
         const calls = message.tool_calls ?? [];
         if (!calls.length) {
           text = message.content ?? '';
+          // A reasoning model can spend its turn thinking and say nothing: it is asked once more.
+          if (!text.trim() && !askedAgain) {
+            askedAgain = true;
+            text = '';
+            continue;
+          }
           break;
         }
         messages.push({ role: 'assistant', content: message.content ?? '', tool_calls: calls });
@@ -311,9 +319,9 @@ export class SmsAgentService {
       },
       orderBy: { createdAt: 'desc' },
       take: HISTORY_TEXTS,
-      select: { direction: true, senderType: true, body: true, senderUser: { select: { firstName: true, lastName: true, email: true } } },
+      select: { direction: true, senderType: true, body: true, createdAt: true, senderUser: { select: { firstName: true, lastName: true, email: true } } },
     });
-    let history = chatHistory(texts.reverse());
+    let history = chatHistory(currentConversation(texts));
     while (history.length > 1 && history.reduce((n, m) => n + m.content.length, 0) > HISTORY_MAX_CHARS) history = history.slice(1);
     const standing = note ? `\n\nAbout this lead: ${note}` : '';
     return [{ role: 'system', content: `${instructions}\n\nIt is now ${now} (${setup.timeZone}).${standing}` }, ...history];
