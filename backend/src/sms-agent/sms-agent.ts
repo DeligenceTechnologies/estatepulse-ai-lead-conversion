@@ -8,39 +8,67 @@ import { AGENT_MESSAGE_PREFIX, agentMessageForAi } from '@/telnyx/sms/sms-prompt
  * the tools it may use, and the reply as it may be sent.
  */
 
-/** Statuses whose texts the AI answers; at any other a person answers (user's decision, 2026-11-04). */
-export const AI_ANSWERS: LeadStatus[] = [
-  LeadStatus.new,
-  LeadStatus.contacting,
-  LeadStatus.engaged,
-  LeadStatus.follow_up,
-  LeadStatus.unresponsive,
-  LeadStatus.interested,
-  LeadStatus.appointment_requested,
-];
+/**
+ * Statuses at which the lead's own agent, when it has one who can answer,
+ * replies instead of the AI (user's decision, 2026-11-04): agents are
+ * assigned at booking, and only the assigned agent may take a chat over.
+ */
+export const AGENT_ANSWERS: LeadStatus[] = [LeadStatus.appointment_booked, LeadStatus.closed, LeadStatus.not_interested, LeadStatus.invalid];
 
-/** On the lead's review flag while its text waits for a person. Cleared when an agent texts the lead. */
+/** On the lead's review flag while a text from it needs the owner's eye. Cleared when an agent texts the lead. */
 export const PERSON_REPLY_REVIEW = 'Texted us and needs a reply from a person: answer in Conversations';
 /** On the review flag when the AI could not answer a text. */
 export const AI_REPLY_FAILED_REVIEW = 'The AI could not answer a text: answer in Conversations';
 /** On the review flag when the AI stopped answering a lead that texts without end (another bot, a loop). */
 export const AI_REPLY_CAPPED_REVIEW = 'The AI stopped answering: too many texts in an hour. Answer in Conversations';
-/** On a lead made from a number that texted us without being one (user's decision, 2026-11-04). The AI leaves it to a person. */
+/** On a lead made from a number that texted us without being one: the owner looks at it, while the AI answers (user's decision, 2026-11-04). */
 export const STRANGER_REVIEW = 'Texted us from a number that was not a lead: answer in Conversations';
 /** The flags an agent's text to the lead answers, so they come off then. A capped AI stays capped: it may be a bot. */
 export const REPLY_NEEDED_REVIEWS = [PERSON_REPLY_REVIEW, AI_REPLY_FAILED_REVIEW, STRANGER_REVIEW];
 
+/** Who answers a lead's text, and whether the owner is flagged as well. */
+export type ReplyRoute = { by: 'ai'; flagOwner: boolean } | { by: 'person'; reason: string; flagOwner: boolean };
+
 /**
- * Why a person, not the AI, answers this lead's text, or null when the AI
- * does. Judged on the lead as the text found it: an outcome the same text
- * leads to (a "no thanks") still gets the AI's one polite reply.
+ * Who answers this lead's text, judged on the lead as the text found it (a
+ * "no thanks" in the same text still gets the AI's one polite reply):
+ * - an agent who took the chat over answers it;
+ * - nobody texts an opted-out lead, and the owner is flagged;
+ * - a booked, closed, not-interested or wrong-number lead whose agent can
+ *   reply is left to that agent, who sees it in their Conversations;
+ * - any other text the AI answers. A booked lead with no agent also flags the
+ *   owner, since someone should follow up on the meeting.
+ * `agentCanReply`: the lead's assigned agent is active and holds the Agent role.
  */
-export function personReason(lead: { status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons?: string[] }): string | null {
-  if (lead.takenOverById) return 'an agent has taken the chat over';
-  if (lead.dncStatus) return 'the lead opted out';
-  if (lead.reviewReasons?.includes(STRANGER_REVIEW)) return 'the number was not a lead, and no one has answered it yet';
-  if (!AI_ANSWERS.includes(lead.status)) return `the lead is ${lead.status.replace(/_/g, ' ')}`;
-  return null;
+export function replyRoute(lead: { status: LeadStatus; dncStatus: boolean; takenOverById: string | null; agentCanReply: boolean }): ReplyRoute {
+  if (lead.takenOverById) return { by: 'person', reason: 'an agent has taken the chat over', flagOwner: false };
+  if (lead.dncStatus) return { by: 'person', reason: 'the lead opted out', flagOwner: true };
+  if (AGENT_ANSWERS.includes(lead.status) && lead.agentCanReply) {
+    return { by: 'person', reason: `the lead is ${lead.status.replace(/_/g, ' ')} and its agent answers`, flagOwner: false };
+  }
+  return { by: 'ai', flagOwner: lead.status === LeadStatus.appointment_booked };
+}
+
+/**
+ * What the AI should know about where the lead stands before it answers, for
+ * the leads it answers outside the usual chat; '' for an active lead.
+ */
+export function standingNote(status: LeadStatus, stranger: boolean): string {
+  if (stranger) {
+    return 'This number is not one of our leads yet. Greet them, ask how we can help and their name, and do not assume they asked about buying a home.';
+  }
+  switch (status) {
+    case LeadStatus.not_interested:
+      return 'Earlier this lead told us they were not interested. Answer politely; ask about their search or offer a meeting only if they now say they are interested, and never pressure them.';
+    case LeadStatus.invalid:
+      return 'Earlier this number was marked as a wrong number. If they confirm it is not them, apologise once and ask nothing more.';
+    case LeadStatus.closed:
+      return "This lead's file is closed. Answer politely, and offer to have someone from the team follow up if they need anything.";
+    case LeadStatus.appointment_booked:
+      return 'This lead already has a meeting booked with us. Never book another; for any change to it, say someone from the team will get back to them.';
+    default:
+      return '';
+  }
 }
 
 /** The assistant's {{variables}} filled as Telnyx would; one without a value is left empty. Line breaks are kept. */

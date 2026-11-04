@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DeliveryStatus } from '@prisma/client';
+import { DeliveryStatus, type LeadStatus } from '@prisma/client';
 import { InCallBookingSettingsService } from '@/calendar/booking/in-call-booking-settings.service';
 import { InCallBookingService } from '@/calendar/booking/in-call-booking.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
@@ -18,10 +18,12 @@ import {
   ACTING_TOOLS,
   AI_REPLY_CAPPED_REVIEW,
   AI_REPLY_FAILED_REVIEW,
+  STRANGER_REVIEW,
   chatHistory,
   fillVariables,
   guardReply,
   linksFrom,
+  standingNote,
   toolFunctions,
   type AgentTool,
   type ChatMessage,
@@ -37,6 +39,10 @@ export interface SmsReplyJobData {
   inboundId: string;
   /** When Telnyx got it. A newer text from the number means a newer job answers both. */
   receivedAt: string;
+  /** The lead's status as the text found it; read from the lead when a job queued before it was added has none. */
+  status?: LeadStatus;
+  /** The lead was made from a number that was not a lead. */
+  stranger?: boolean;
 }
 
 /** What became of a reply, for the log and the tests. */
@@ -109,7 +115,7 @@ export class SmsAgentService {
     if (!(await this.conversations.repliesHere(orgId))) return 'engine_off';
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, orgId },
-      select: { id: true, phone: true, normalizedPhone: true, dncStatus: true, takenOverById: true, reviewReasons: true },
+      select: { id: true, phone: true, normalizedPhone: true, status: true, dncStatus: true, takenOverById: true, reviewReasons: true },
     });
     if (!lead?.phone || !lead.normalizedPhone) return 'no_lead';
     const phone = lead.normalizedPhone;
@@ -129,7 +135,8 @@ export class SmsAgentService {
     let text = '';
     try {
       setup = await this.setup(orgId);
-      const messages = await this.prompt(orgId, leadId, phone, setup);
+      const note = standingNote(job.status ?? lead.status, job.stranger ?? lead.reviewReasons.includes(STRANGER_REVIEW));
+      const messages = await this.prompt(orgId, leadId, phone, setup, note);
       for (let round = 0; round < TOOL_ROUNDS && !text; round += 1) {
         const message = await this.complete(setup, messages, usage);
         const calls = message.tool_calls ?? [];
@@ -270,7 +277,7 @@ export class SmsAgentService {
    * The assistant's instructions with the lead's details filled in, as Telnyx
    * fills them in a text chat, the time now, and the chat with the number.
    */
-  private async prompt(orgId: string, leadId: string, phone: string, setup: Setup): Promise<ChatMessage[]> {
+  private async prompt(orgId: string, leadId: string, phone: string, setup: Setup, note: string): Promise<ChatMessage[]> {
     const variables = await this.activity.leadVariables(orgId, leadId);
     const instructions = fillVariables(setup.instructions, {
       ...variables,
@@ -301,7 +308,8 @@ export class SmsAgentService {
     });
     let history = chatHistory(texts.reverse());
     while (history.length > 1 && history.reduce((n, m) => n + m.content.length, 0) > HISTORY_MAX_CHARS) history = history.slice(1);
-    return [{ role: 'system', content: `${instructions}\n\nIt is now ${now} (${setup.timeZone}).` }, ...history];
+    const standing = note ? `\n\nAbout this lead: ${note}` : '';
+    return [{ role: 'system', content: `${instructions}\n\nIt is now ${now} (${setup.timeZone}).${standing}` }, ...history];
   }
 
   /** One turn of the model; a passing Telnyx failure is tried once more. */

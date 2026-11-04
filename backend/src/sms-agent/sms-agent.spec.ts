@@ -1,31 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { REPLY_MAX_CHARS, STRANGER_REVIEW, chatHistory, fillVariables, guardReply, personReason, toolFunctions } from './sms-agent';
+import { REPLY_MAX_CHARS, chatHistory, fillVariables, guardReply, replyRoute, standingNote, toolFunctions } from './sms-agent';
 
-const lead = (status: string, extra: Partial<{ dncStatus: boolean; takenOverById: string | null }> = {}) =>
-  ({ status, dncStatus: false, takenOverById: null, ...extra }) as Parameters<typeof personReason>[0];
+const lead = (status: string, extra: Partial<{ dncStatus: boolean; takenOverById: string | null; agentCanReply: boolean }> = {}) =>
+  ({ status, dncStatus: false, takenOverById: null, agentCanReply: false, ...extra }) as Parameters<typeof replyRoute>[0];
 
-describe('personReason', () => {
-  it.each(['new', 'contacting', 'engaged', 'follow_up', 'unresponsive', 'interested', 'appointment_requested'])('lets the AI answer a lead that is %s', (status) => {
-    expect(personReason(lead(status))).toBeNull();
+describe('replyRoute', () => {
+  it.each(['new', 'contacting', 'engaged', 'follow_up', 'unresponsive', 'interested', 'appointment_requested'])(
+    'lets the AI answer a lead that is %s, agent or not',
+    (status) => {
+      expect(replyRoute(lead(status))).toEqual({ by: 'ai', flagOwner: false });
+      expect(replyRoute(lead(status, { agentCanReply: true }))).toEqual({ by: 'ai', flagOwner: false });
+    },
+  );
+
+  it.each(['appointment_booked', 'closed', 'not_interested', 'invalid'])('leaves a lead that is %s to its agent, unflagged, when it has one', (status) => {
+    expect(replyRoute(lead(status, { agentCanReply: true }))).toEqual({ by: 'person', reason: `the lead is ${status.replace(/_/g, ' ')} and its agent answers`, flagOwner: false });
   });
 
-  it.each([
-    ['appointment_booked', 'the lead is appointment booked'],
-    ['closed', 'the lead is closed'],
-    ['not_interested', 'the lead is not interested'],
-    ['invalid', 'the lead is invalid'],
-  ])('leaves a lead that is %s to a person', (status, why) => {
-    expect(personReason(lead(status))).toBe(why);
+  it.each(['closed', 'not_interested', 'invalid'])('lets the AI answer a lead that is %s when no agent can', (status) => {
+    expect(replyRoute(lead(status))).toEqual({ by: 'ai', flagOwner: false });
   });
 
-  it('leaves a chat an agent holds, and an opted-out lead, to a person whatever the status', () => {
-    expect(personReason(lead('engaged', { takenOverById: 'agent-1' }))).toBe('an agent has taken the chat over');
-    expect(personReason(lead('engaged', { dncStatus: true }))).toBe('the lead opted out');
+  it('lets the AI answer a booked lead with no agent, and flags the owner to follow up on the meeting', () => {
+    expect(replyRoute(lead('appointment_booked'))).toEqual({ by: 'ai', flagOwner: true });
   });
 
-  it('leaves a lead made from an unknown number to a person until one answers it', () => {
-    expect(personReason({ ...lead('new'), reviewReasons: [STRANGER_REVIEW] })).toBe('the number was not a lead, and no one has answered it yet');
-    expect(personReason({ ...lead('new'), reviewReasons: ['Imported from Google Sheets: review before outreach'] })).toBeNull();
+  it('leaves a chat an agent holds to them, and texts an opted-out lead nothing, flagging the owner', () => {
+    expect(replyRoute(lead('engaged', { takenOverById: 'agent-1' }))).toEqual({ by: 'person', reason: 'an agent has taken the chat over', flagOwner: false });
+    expect(replyRoute(lead('engaged', { dncStatus: true }))).toEqual({ by: 'person', reason: 'the lead opted out', flagOwner: true });
+  });
+});
+
+describe('standingNote', () => {
+  it('tells the AI where a lead outside the usual chat stands, and nothing for an active one', () => {
+    expect(standingNote('not_interested' as any, false)).toContain('not interested');
+    expect(standingNote('invalid' as any, false)).toContain('wrong number');
+    expect(standingNote('closed' as any, false)).toContain('closed');
+    expect(standingNote('appointment_booked' as any, false)).toContain('Never book another');
+    expect(standingNote('new' as any, true)).toContain('not one of our leads');
+    expect(standingNote('engaged' as any, false)).toBe('');
   });
 });
 

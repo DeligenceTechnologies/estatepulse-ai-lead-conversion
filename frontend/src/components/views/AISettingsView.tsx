@@ -963,7 +963,7 @@ export const AISettingsView: React.FC = () => {
                       {
                         value: 'estatepulse',
                         title: 'EstatePulse (new)',
-                        body: 'EstatePulse decides on each text: the agent answers active leads, while agents’ chats, booked or opted-out leads and unknown numbers go to a person. Same agent, prompt and tools; never answers our own numbers.',
+                        body: 'EstatePulse decides on each text: a chat an agent took over, or a booked, closed, not-interested or wrong-number lead with an assigned agent, is left to that agent; opted-out leads get nothing. Everyone else gets the agent’s reply, unknown numbers too (flagged for you). Same agent, prompt and tools; never answers our own numbers.',
                       },
                       {
                         value: 'telnyx',

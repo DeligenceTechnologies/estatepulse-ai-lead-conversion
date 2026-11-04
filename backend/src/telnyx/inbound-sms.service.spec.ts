@@ -8,10 +8,20 @@ import { OptOutService } from './opt-out.service';
 const PHONE = '+12899174129';
 const OUR_NUMBER = '+17427245092';
 
-type TestLead = { id: string; orgId: string; status: string; dncStatus: boolean; normalizedPhone: string; firstResponseAt: Date | null; takenOverById: string | null; reviewReasons: string[] };
+type TestLead = {
+  id: string;
+  orgId: string;
+  status: string;
+  dncStatus: boolean;
+  normalizedPhone: string;
+  firstResponseAt: Date | null;
+  takenOverById: string | null;
+  reviewReasons: string[];
+  assignedToId: string | null;
+};
 
 function setup(
-  start: { status: string; dncStatus: boolean; takenOverById?: string | null },
+  start: { status: string; dncStatus: boolean; takenOverById?: string | null; assignedToId?: string | null },
   opts: {
     ai?: boolean;
     engine?: 'telnyx' | 'estatepulse';
@@ -25,9 +35,11 @@ function setup(
     strangers?: number;
     /** Another text from the unknown number made its lead first. */
     strangerRace?: boolean;
+    /** The lead's assigned agent is active and holds the Agent role. */
+    agentActive?: boolean;
   } = {},
 ) {
-  const lead: TestLead = { id: 'lead-1', orgId: 'org-1', normalizedPhone: PHONE, firstResponseAt: null, takenOverById: null, reviewReasons: [], ...start };
+  const lead: TestLead = { id: 'lead-1', orgId: 'org-1', normalizedPhone: PHONE, firstResponseAt: null, takenOverById: null, reviewReasons: [], assignedToId: null, ...start };
   const leads: TestLead[] = [lead, ...(opts.siblings ?? []).map((l, i) => ({ ...lead, id: `lead-${i + 2}`, ...l }))];
   const byId = (id: string) => leads.find((l) => l.id === id);
   const suppressed = new Set<string>();
@@ -73,6 +85,7 @@ function setup(
     organization: { findUnique: vi.fn(async () => ({ name: 'Skyline Realty' })) },
     organizationSetting: { findUnique: vi.fn(async () => ({ businessDetails: opts.details ?? null })) },
     $executeRaw: vi.fn(async () => 0),
+    user: { count: vi.fn(async () => (opts.agentActive ? 1 : 0)) },
     $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)),
   };
   // Only our own numbers belong to an organization.
@@ -521,7 +534,7 @@ describe('InboundSmsService', () => {
       await s.receive('What areas do you cover?', { received_at: '2026-11-04T10:00:00.000Z' });
       expect(s.replies.add).toHaveBeenCalledWith(
         'reply',
-        { orgId: 'org-1', leadId: 'lead-1', inboundId: 'in-1', receivedAt: '2026-11-04T10:00:00.000Z' },
+        { orgId: 'org-1', leadId: 'lead-1', inboundId: 'in-1', receivedAt: '2026-11-04T10:00:00.000Z', status: 'contacting', stranger: false },
         { jobId: 'reply-in-1', delay: 2000 },
       );
       expect(s.flaggedForPerson()).toBe(false);
@@ -533,12 +546,36 @@ describe('InboundSmsService', () => {
       expect(s.replies.add).toHaveBeenCalledOnce();
     });
 
-    it.each(['appointment_booked', 'closed', 'not_interested', 'invalid'])('leaves a lead that is %s to a person, flagged once', async (status) => {
+    it.each(['appointment_booked', 'closed', 'not_interested', 'invalid'])(
+      'leaves a lead that is %s to its agent, with no flag and no AI reply',
+      async (status) => {
+        const s = setup({ status, dncStatus: false, assignedToId: 'agent-1' }, { ...D, agentActive: true });
+        await s.receive('Can we move the meeting to Friday?');
+        expect(s.replies.add).not.toHaveBeenCalled();
+        expect(s.prisma.user.count).toHaveBeenCalledWith({ where: expect.objectContaining({ id: 'agent-1', orgId: 'org-1', status: 'active' }) });
+        expect(s.flaggedForPerson()).toBe(false);
+        expect(s.events()).toContain('left_to_agent');
+      },
+    );
+
+    it.each(['closed', 'not_interested', 'invalid'])('lets the AI answer a lead that is %s when no agent can, unflagged', async (status) => {
       const s = setup({ status, dncStatus: false }, D);
-      await s.receive('Can we move the meeting to Friday?');
-      expect(s.replies.add).not.toHaveBeenCalled();
+      await s.receive('Actually we are looking again');
+      expect(s.replies.add).toHaveBeenCalledWith('reply', expect.objectContaining({ status }), expect.anything());
+      expect(s.flaggedForPerson()).toBe(false);
+    });
+
+    it("lets the AI answer when the lead's agent was deactivated or lost the Agent role", async () => {
+      const s = setup({ status: 'not_interested', dncStatus: false, assignedToId: 'agent-gone' }, { ...D, agentActive: false });
+      await s.receive('Hi again');
+      expect(s.replies.add).toHaveBeenCalledOnce();
+    });
+
+    it('lets the AI answer a booked lead with no agent, and flags the owner to follow up', async () => {
+      const s = setup({ status: 'appointment_booked', dncStatus: false }, D);
+      await s.receive('Can we move it to Friday?');
+      expect(s.replies.add).toHaveBeenCalledOnce();
       expect(s.prisma.lead.update).toHaveBeenCalledWith({ where: { id: 'lead-1' }, data: { needsReview: true, reviewReasons: { push: PERSON_REPLY_REVIEW } } });
-      expect(s.events()).toContain('needs_person');
     });
 
     it('does not flag twice for the same reason', async () => {
@@ -617,11 +654,10 @@ describe('InboundSmsService', () => {
       expect(s.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'lead.created' }));
     });
 
-    it('gets no AI reply on this server, and no second flag', async () => {
+    it('gets the AI\'s answer on this server, told it is a stranger, with only its own flag', async () => {
       const s = setup({ status: 'new', dncStatus: false }, { stranger: true, ai: true, engine: 'estatepulse' });
       await s.receive('Who is this?');
-      expect(s.replies.add).not.toHaveBeenCalled();
-      expect(s.events()).toContain('needs_person');
+      expect(s.replies.add).toHaveBeenCalledWith('reply', expect.objectContaining({ leadId: 'lead-new', stranger: true }), expect.anything());
       expect(s.prisma.lead.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewReasons: { push: PERSON_REPLY_REVIEW } }) }));
     });
 

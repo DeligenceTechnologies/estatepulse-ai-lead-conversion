@@ -6,9 +6,10 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { DNC_REVIEW_REASON, isSuppressed, startsDoNotContact } from '@/lead/contact-suppression';
+import { AGENT_ROLE_WHERE } from '@/lead/lead-scope';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { SMS_REPLY_QUEUE, SmsReplyJob } from '@/queue/queue.constants';
-import { PERSON_REPLY_REVIEW, STRANGER_REVIEW, personReason } from '@/sms-agent/sms-agent';
+import { AGENT_ANSWERS, PERSON_REPLY_REVIEW, STRANGER_REVIEW, replyRoute } from '@/sms-agent/sms-agent';
 import type { SmsReplyJobData } from '@/sms-agent/sms-agent.service';
 import { EngineService } from './engine.service';
 import { LeadMemoryService } from './lead-memory.service';
@@ -36,7 +37,7 @@ export const REPLY_DEBOUNCE_MS = 2_000;
 /** Leads made from unknown numbers per organization per hour: past it, a flood of strangers (spam) is dropped. */
 export const STRANGER_LEADS_PER_HOUR = 20;
 
-const LEAD_FIELDS = { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true, status: true, reviewReasons: true } as const;
+const LEAD_FIELDS = { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true, status: true, reviewReasons: true, assignedToId: true } as const;
 
 /** A webhook's timestamp, or null when it is missing or unreadable. */
 const providerTime = (value: unknown): Date | null => {
@@ -302,7 +303,7 @@ export class InboundSmsService {
    */
   private async onChatReply(
     orgId: string,
-    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[] },
+    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[]; assignedToId: string | null },
     from: string,
     text: string,
     isFirst: boolean,
@@ -437,32 +438,50 @@ export class InboundSmsService {
   }
 
   /**
-   * On this server's AI replies: queues the AI's answer to the text, or flags
-   * the lead for a person when the AI does not answer it (opted out, booked,
-   * closed, not interested, wrong number). A text already answered (HELP) gets
-   * nothing more. The reply waits a moment, so texts sent in a row get one
+   * On this server's AI replies: queues the AI's answer to the text, or leaves
+   * it to a person (replyRoute: an opted-out lead, or one whose agent answers),
+   * flagging the owner where the route says so. A text already answered (HELP)
+   * gets nothing more. The reply waits a moment, so texts sent in a row get one
    * answer; only the newest text's job writes it (SmsAgentService).
    */
   private async routeReply(
     orgId: string,
-    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[] },
+    lead: { id: string; status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons: string[]; assignedToId: string | null },
     receivedAt: Date,
     reply: { inboundId: string | null; answered: boolean },
   ): Promise<void> {
-    const reason = personReason(lead);
-    if (reason) return this.forPerson(orgId, lead.id, lead.reviewReasons, reason);
+    const agentCanReply = AGENT_ANSWERS.includes(lead.status) && !!lead.assignedToId && (await this.agentCanReply(orgId, lead.assignedToId));
+    const route = replyRoute({ ...lead, agentCanReply });
+    if (route.by === 'person') {
+      if (route.flagOwner) return this.forPerson(orgId, lead.id, lead.reviewReasons, route.reason);
+      this.state.quietly({ orgId, leadId: lead.id, type: 'left_to_agent', source: 'sms_reply', channel: 'sms', reason: `No AI reply: ${route.reason}` });
+      return;
+    }
+    if (route.flagOwner) await this.forPerson(orgId, lead.id, lead.reviewReasons, 'a booked lead with no agent texted us; the AI answered');
     if (reply.answered) return;
     if (!reply.inboundId) return this.forPerson(orgId, lead.id, lead.reviewReasons, 'the text could not be stored');
     try {
       await this.replies.add(
         SmsReplyJob.Reply,
-        { orgId, leadId: lead.id, inboundId: reply.inboundId, receivedAt: receivedAt.toISOString() },
+        {
+          orgId,
+          leadId: lead.id,
+          inboundId: reply.inboundId,
+          receivedAt: receivedAt.toISOString(),
+          status: lead.status,
+          stranger: lead.reviewReasons.includes(STRANGER_REVIEW),
+        },
         { jobId: `reply-${reply.inboundId}`, delay: REPLY_DEBOUNCE_MS },
       );
     } catch (error) {
       this.logger.error(`lead ${lead.id}: queueing the AI reply failed: ${(error as Error).message}`);
       await this.forPerson(orgId, lead.id, lead.reviewReasons, 'the AI reply could not be queued');
     }
+  }
+
+  /** The lead's assigned agent can take the chat over: an active user who still holds the Agent role. */
+  private async agentCanReply(orgId: string, userId: string): Promise<boolean> {
+    return (await this.prisma.user.count({ where: { id: userId, orgId, status: 'active', roles: { some: { role: AGENT_ROLE_WHERE } } } })) > 0;
   }
 
   /** The text waits for a person: the lead is flagged once, and its conversation is already lit up for the team. */

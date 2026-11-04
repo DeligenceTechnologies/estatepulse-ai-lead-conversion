@@ -123,6 +123,20 @@ describe('SmsAgentService.answer', () => {
       expect(s.events.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'conversation.updated', leadId: 'lead-1' }));
     });
 
+    it('tells the AI where the lead stands when it answers outside the usual chat', async () => {
+      const no = setup();
+      await no.service.answer({ ...JOB, status: 'not_interested' as any });
+      expect(no.completions[0].messages[0].content).toContain('About this lead: Earlier this lead told us they were not interested.');
+
+      const stranger = setup();
+      await stranger.service.answer({ ...JOB, status: 'new' as any, stranger: true });
+      expect(stranger.completions[0].messages[0].content).toContain('About this lead: This number is not one of our leads yet.');
+
+      const active = setup();
+      await active.service.answer({ ...JOB, status: 'engaged' as any });
+      expect(active.completions[0].messages[0].content).not.toContain('About this lead');
+    });
+
     it('reads the assistant once a minute, not on every text', async () => {
       const s = setup({ replies: [{ content: 'One.' }, { content: 'Two.' }] });
       await s.service.answer(JOB);
