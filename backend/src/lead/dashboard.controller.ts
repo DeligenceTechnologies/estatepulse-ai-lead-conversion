@@ -114,7 +114,9 @@ export class DashboardController {
       calls7Days: { total: Object.values(calls).reduce((a, b) => a + b, 0), byStatus: calls },
       upcomingAppointments: row.upcoming_appointments,
       sources30Days: (row.sources ?? []).map((s) => ({
-        name: s.source_id ? (s.name ?? 'Removed source') : 'No source',
+        // No lead source means the lead was typed in on the Leads screen (ManualLeadService);
+        // a source row is only ever hard-deleted while provisional, before it can own a lead.
+        name: s.source_id ? (s.name ?? 'Removed source') : 'Added manually',
         count: s.count,
       })),
     };
