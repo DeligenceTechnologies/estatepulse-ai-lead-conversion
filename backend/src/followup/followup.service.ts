@@ -12,6 +12,7 @@ import {
 import { lockOrganization } from '@/calendar/connection/calendar-access.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { minutesOfDay, nextContactAt, nextLocalMidnight, type QuietHours } from '@/common/utils/quiet-hours';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending, isLeadStatus } from '@/lead/lead-status';
@@ -121,11 +122,15 @@ export class FollowupService {
    * last one on that channel has passed, or in the next day's contact window
    * when today's limit is used. Texts count the journey's own (strategy and
    * sequence steps), not the AI's chat replies; calls count every call placed.
+   * The day a limit counts, and the day it rolls over to, are the LEAD's; the
+   * organization's only while the lead has no usable zone.
    */
   async contactSlot(orgId: string, leadId: string, channel: 'sms' | 'voice', now = new Date()): Promise<{ at: Date; reason: string | null }> {
     const g = await this.guardrailsFor(orgId);
     if (!(channel === 'voice' ? g.limits.callsPerDay : g.limits.smsPerDay) && !g.limits.minGapMinutes) return { at: now, reason: null };
-    const dayStart = new Date(now.getTime() - minutesOfDay(g.timeZone, now) * 60_000 - (now.getTime() % 60_000));
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { timezone: true, normalizedPhone: true } });
+    const timeZone = (lead && contactZone(leadZone(lead))) ?? g.timeZone;
+    const dayStart = new Date(now.getTime() - minutesOfDay(timeZone, now) * 60_000 - (now.getTime() % 60_000));
     const [sentToday, last] =
       channel === 'voice'
         ? await Promise.all([
@@ -136,7 +141,7 @@ export class FollowupService {
             this.prisma.leadEvent.count({ where: { leadId, type: 'step_sent', channel: 'sms', createdAt: { gte: dayStart } } }),
             this.prisma.leadEvent.findFirst({ where: { leadId, type: 'step_sent', channel: 'sms' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
           ]);
-    const tomorrow = nextContactAt(g.timeZone, g.quiet, g.skipDays, nextLocalMidnight(g.timeZone, now));
+    const tomorrow = nextContactAt(timeZone, g.quiet, g.skipDays, nextLocalMidnight(timeZone, now));
     return limitSlot({ channel, now, limits: g.limits, sentToday, lastAt: last?.createdAt ?? null, tomorrow });
   }
 
