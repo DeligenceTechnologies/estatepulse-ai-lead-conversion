@@ -1,22 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatTakeoverService, DEFAULT_TAKEOVER_GREETING } from './chat-takeover.service';
-import { AI_REPLY_CAPPED_REVIEW, AI_REPLY_FAILED_REVIEW, PERSON_REPLY_REVIEW, STRANGER_REVIEW } from '@/sms-agent/sms-agent';
 
 const auth = { userId: 'agent-1', organizationId: 'org-1', sessionId: 's-1', roleIds: [], permissions: [] };
 const PHONE = '+12895550100';
 
 function setup(
-  opts: {
-    locked?: object | null;
-    isAgent?: boolean;
-    telnyxDown?: boolean;
-    lead?: object | null;
-    smsDown?: boolean;
-    duplicate?: object | null;
-    greeting?: object | null;
-    reviewReasons?: string[];
-  } = {},
+  opts: { locked?: object | null; isAgent?: boolean; telnyxDown?: boolean; lead?: object | null; smsDown?: boolean; duplicate?: object | null; greeting?: object | null } = {},
 ) {
   const locked =
     opts.locked === undefined ? { phone: PHONE, dnc_status: false, taken_over_by_id: null, taken_over_at: null, assigned_to_id: 'agent-1' } : opts.locked;
@@ -31,7 +21,7 @@ function setup(
       findUnique: vi.fn(async () => ({ chatTakeover: opts.greeting ?? null })),
       upsert: vi.fn(async () => ({})),
     },
-    lead: { update: vi.fn(async () => ({})), findFirst: vi.fn(async () => lead), findUnique: vi.fn(async () => ({ reviewReasons: opts.reviewReasons ?? [] })) },
+    lead: { update: vi.fn(async () => ({})), findFirst: vi.fn(async () => lead) },
     message: {
       create: vi.fn(async ({ data }: any) => {
         if (opts.duplicate !== undefined) throw new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' });
@@ -165,25 +155,6 @@ describe('ChatTakeoverService.send', () => {
     expect(s.prisma.message.update).toHaveBeenCalledWith({ where: { id: input.id }, data: expect.objectContaining({ providerMessageId: 'tx-msg-1', deliveryStatus: 'sent' }) });
     expect(s.conversations.appendToChat).toHaveBeenCalledWith('org-1', PHONE, 'assistant', '[Agent Priya Shah] Friday at 5 works, see you then', expect.any(Date));
     expect(row.deliveryStatus).toBe('sent');
-  });
-
-  it("takes off the flags asking for a person, and the review flag when nothing else keeps it", async () => {
-    const s = setup({ reviewReasons: [PERSON_REPLY_REVIEW, STRANGER_REVIEW, AI_REPLY_FAILED_REVIEW] });
-    await s.svc.send(auth, 'lead-1', input);
-    expect(s.prisma.lead.update).toHaveBeenCalledWith({ where: { id: 'lead-1' }, data: { reviewReasons: [], needsReview: false } });
-
-    const imported = setup({ reviewReasons: [PERSON_REPLY_REVIEW, 'Imported from Google Sheets: review before outreach', AI_REPLY_CAPPED_REVIEW] });
-    await imported.svc.send(auth, 'lead-1', input);
-    expect(imported.prisma.lead.update).toHaveBeenCalledWith({
-      where: { id: 'lead-1' },
-      data: { reviewReasons: ['Imported from Google Sheets: review before outreach', AI_REPLY_CAPPED_REVIEW], needsReview: true },
-    });
-  });
-
-  it('leaves the flags alone when none of them asked for a reply', async () => {
-    const s = setup({ reviewReasons: ['Imported from Google Sheets: review before outreach'] });
-    await s.svc.send(auth, 'lead-1', input);
-    expect(s.prisma.lead.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewReasons: expect.anything() }) }));
   });
 
   it('a retried send returns the first one and texts nobody', async () => {

@@ -50,8 +50,6 @@ model OrganizationSetting {
   qualificationQuestions Json?  @map("qualification_questions")
   /// When set, the AI assistant answers a lead's texts (what was linked on Telnyx to do it).
   smsConversation       Json?   @map("sms_conversation")
-  /// Who writes the AI's text replies: 'telnyx', the assistant linked to the messaging profile, answering every text itself; or 'estatepulse', this server, deciding per text whether the AI answers and running its tools.
-  smsReplyEngine        String  @default("telnyx") @map("sms_reply_engine") @db.VarChar(20)
   /// What an AI call leaves on an answering machine ({ enabled, message }); unset means the default message.
   voicemail             Json?   @map("voicemail")
   /// The AI's call-outcome tools on Telnyx (callback, outcome), as provisioned there.

@@ -5,7 +5,7 @@ import { redisOptions } from '@/common/config/redis.config';
 import type { QueueEnv } from '@/common/utils/interface';
 import { EmailQueue } from './email/email.queue';
 import { EmailWorker } from './email/email.worker';
-import { CALL_QUEUE, EMAIL_QUEUE, SMS_REPLY_QUEUE, TEXT_QUEUE } from './queue.constants';
+import { CALL_QUEUE, EMAIL_QUEUE, TEXT_QUEUE } from './queue.constants';
 
 const DAY_SECONDS = 24 * 60 * 60;
 
@@ -26,11 +26,6 @@ const QUEUES: RegisterQueueOptions[] = [
   {
     name: TEXT_QUEUE,
     defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 30_000 }, ...RETENTION },
-  },
-  // Tried once: a turn may have booked a meeting or scheduled a callback before it failed, and must not do it twice.
-  {
-    name: SMS_REPLY_QUEUE,
-    defaultJobOptions: { attempts: 1, ...RETENTION },
   },
 ];
 

@@ -12,7 +12,6 @@ import { AGENT_ROLE_WHERE, fullName } from '@/lead/lead-scope';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { ActivityService } from '../activity.service';
 import { EngineService } from '../engine.service';
-import { REPLY_NEEDED_REVIEWS } from '@/sms-agent/sms-agent';
 import { SmsService } from '../sms.service';
 import { fillTemplate } from '../template';
 import { SmsConversationService } from './sms-conversation.service';
@@ -228,25 +227,11 @@ export class ChatTakeoverService {
     const sentAt = new Date();
     row = await this.prisma.message.update({ where: { id: row.id }, data: { providerMessageId: providerId, deliveryStatus: 'sent', sentAt } });
     await this.prisma.lead.update({ where: { id: leadId }, data: { lastContactAt: sentAt } });
-    await this.answered(leadId).catch((error) => this.logger.warn(`lead ${leadId}: clearing its reply flags failed: ${(error as Error).message}`));
     this.conversations
       .appendToChat(orgId, phone, 'assistant', agentMessageForAi(agent ? agentName(agent) : 'Agent', body), sentAt)
       .catch((error) => this.logger.warn(`lead ${leadId}: adding the agent's text to the AI chat failed: ${(error as Error).message}`));
     this.changed(orgId, leadId);
     return toMessageRow(row);
-  }
-
-  /**
-   * A person answered the lead: the flags asking for one come off (a text that
-   * waited for a person, a reply the AI could not write, an unknown number),
-   * and the review flag with them unless another reason keeps it.
-   */
-  private async answered(leadId: string): Promise<void> {
-    const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { reviewReasons: true } });
-    if (!lead) return;
-    const left = lead.reviewReasons.filter((r) => !REPLY_NEEDED_REVIEWS.includes(r));
-    if (left.length === lead.reviewReasons.length) return;
-    await this.prisma.lead.update({ where: { id: leadId }, data: { reviewReasons: left, needsReview: left.length > 0 } });
   }
 
   /** The lead row, locked, when it is in the organization and assigned to this agent; any other lead is not found. */

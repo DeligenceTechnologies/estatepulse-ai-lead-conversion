@@ -53,6 +53,6 @@ import { CalendarWebhookController } from './sync/calendar-webhook.controller';
     InCallBookingService,
     ToolAuthService,
   ],
-  exports: [AppointmentsService, InCallBookingService, InCallBookingSettingsService],
+  exports: [AppointmentsService],
 })
 export class CalendarModule {}

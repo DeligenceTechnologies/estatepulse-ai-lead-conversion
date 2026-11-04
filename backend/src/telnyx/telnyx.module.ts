@@ -87,9 +87,6 @@ import { VoicemailService } from './voicemail/voicemail.service';
   exports: [
     CallQueue,
     OptOutService,
-    OutcomeService,
-    CallbackService,
-    TextBackService,
     CallSlots,
     EngineService,
     TelnyxCredentialsService,

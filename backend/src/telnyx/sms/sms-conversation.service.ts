@@ -23,19 +23,6 @@ export interface SmsConversationConfig {
   enabledAt: string;
 }
 
-/**
- * Who writes the AI's text replies. 'telnyx': the assistant linked to the
- * messaging profile answers every text itself, and this server only records
- * it. 'estatepulse': the profile is not linked; this server decides per text
- * whether the AI answers, runs its tools and sends the reply (sms-agent).
- */
-export const SMS_REPLY_ENGINES = ['telnyx', 'estatepulse'] as const;
-export type SmsReplyEngine = (typeof SMS_REPLY_ENGINES)[number];
-const engineOf = (value: unknown): SmsReplyEngine => (value === 'estatepulse' ? 'estatepulse' : 'telnyx');
-
-/** At most this many paused chats are paused again on Telnyx when an organization goes back to Telnyx replies. */
-const REPAUSE_LIMIT = 500;
-
 export interface SmsConversationStatus {
   enabled: boolean;
   assistantId: string | null;
@@ -43,7 +30,6 @@ export interface SmsConversationStatus {
   enabledAt: string | null;
   /** In-call booking is on, so the AI can book a meeting in the chat too. */
   bookingInChat: boolean;
-  engine: SmsReplyEngine;
 }
 
 /**
@@ -58,7 +44,7 @@ export interface SmsConversationStatus {
 export class SmsConversationService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SmsConversationService.name);
   private readonly publicApiUrl: string;
-  private readonly statusCache = new Map<string, { value: { enabled: boolean; engine: SmsReplyEngine }; until: number }>();
+  private readonly enabledCache = new Map<string, { value: boolean; until: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -117,10 +103,7 @@ export class SmsConversationService implements OnApplicationBootstrap {
   }
 
   async status(orgId: string): Promise<SmsConversationStatus> {
-    const row = await this.prisma.organizationSetting.findUnique({
-      where: { orgId },
-      select: { smsConversation: true, inCallBooking: true, smsReplyEngine: true },
-    });
+    const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { smsConversation: true, inCallBooking: true } });
     const config = row?.smsConversation as SmsConversationConfig | null | undefined;
     return {
       enabled: Boolean(config?.enabled),
@@ -128,110 +111,16 @@ export class SmsConversationService implements OnApplicationBootstrap {
       messagingProfileId: config?.messagingProfileId ?? null,
       enabledAt: config?.enabledAt ?? null,
       bookingInChat: Boolean((row?.inCallBooking as { tokenHash?: string } | null)?.tokenHash),
-      engine: engineOf(row?.smsReplyEngine),
     };
   }
 
   /** Cached briefly: it is read on every inbound text and every strategy step. */
   async isEnabled(orgId: string): Promise<boolean> {
-    return (await this.cached(orgId)).enabled;
-  }
-
-  /** Who writes the AI's replies for the organization; cached like isEnabled. */
-  async replyEngine(orgId: string): Promise<SmsReplyEngine> {
-    return (await this.cached(orgId)).engine;
-  }
-
-  /** The AI answers texts, and this server writes its replies (the sms-agent), not the assistant linked on Telnyx. */
-  async repliesHere(orgId: string): Promise<boolean> {
-    const s = await this.cached(orgId);
-    return s.enabled && s.engine === 'estatepulse';
-  }
-
-  private async cached(orgId: string): Promise<{ enabled: boolean; engine: SmsReplyEngine }> {
-    const hit = this.statusCache.get(orgId);
+    const hit = this.enabledCache.get(orgId);
     if (hit && hit.until > Date.now()) return hit.value;
-    const { enabled, engine } = await this.status(orgId);
-    const value = { enabled, engine };
-    this.statusCache.set(orgId, { value, until: Date.now() + ENABLED_CACHE_MS });
+    const value = (await this.status(orgId)).enabled;
+    this.enabledCache.set(orgId, { value, until: Date.now() + ENABLED_CACHE_MS });
     return value;
-  }
-
-  /**
-   * Moves the organization's AI replies to this server or back to Telnyx.
-   * Never both at once and never neither for long: to this server, the
-   * profile is unlinked first (Telnyx stops) and then the engine is saved; back
-   * to Telnyx, the engine is saved first (this server stops) and then the
-   * profile is linked, and the chats agents hold or opted-out leads had are
-   * paused on Telnyx again. A profile another organization shares is refused,
-   * since one link answers for every organization on it.
-   */
-  async setEngine(orgId: string, engine: SmsReplyEngine): Promise<SmsConversationStatus> {
-    const current = await this.status(orgId);
-    if (current.engine === engine) return current;
-    const c = current.enabled ? await this.creds.getCreds(orgId) : null;
-    const profileId = current.messagingProfileId;
-    if (current.enabled && c?.apiKey && profileId) {
-      await this.assertProfileNotShared(orgId, profileId);
-      const link = (assistantId: string) =>
-        telnyx(c.apiKey, `/messaging_profiles/${profileId}`, { method: 'PATCH', body: JSON.stringify({ ai_assistant_id: assistantId }) });
-      if (engine === 'estatepulse') {
-        await link('');
-        try {
-          await this.saveEngine(orgId, engine);
-        } catch (error) {
-          await link(current.assistantId ?? '').catch(() => undefined);
-          throw error;
-        }
-      } else {
-        await this.saveEngine(orgId, engine);
-        try {
-          await link(current.assistantId ?? c.assistantId);
-        } catch (error) {
-          await this.saveEngine(orgId, current.engine).catch(() => undefined);
-          throw error;
-        }
-        await this.repauseHeldChats(orgId);
-      }
-    } else {
-      await this.saveEngine(orgId, engine);
-    }
-    this.logger.log(`AI text replies for ${orgId} now come from ${engine === 'estatepulse' ? 'this server' : 'the Telnyx assistant'}`);
-    return this.status(orgId);
-  }
-
-  /** Another organization with AI text replies on the same messaging profile: linking or unlinking it would change their replies too. */
-  private async assertProfileNotShared(orgId: string, profileId: string): Promise<void> {
-    const others = await this.prisma.organizationSetting.count({
-      where: {
-        NOT: { orgId },
-        AND: [{ smsConversation: { path: ['enabled'], equals: true } }, { smsConversation: { path: ['messagingProfileId'], equals: profileId } }],
-      },
-    });
-    if (others > 0) {
-      throw new AppError('CONFLICT', 'Another organization uses AI text replies on this messaging profile. Give this number its own messaging profile first.');
-    }
-  }
-
-  private async saveEngine(orgId: string, smsReplyEngine: SmsReplyEngine): Promise<void> {
-    await this.prisma.organizationSetting.upsert({ where: { orgId }, create: { orgId, smsReplyEngine }, update: { smsReplyEngine } });
-    this.statusCache.delete(orgId);
-  }
-
-  /**
-   * Back on Telnyx replies, the assistant answers every chat it has, so the
-   * chats of leads an agent holds or who opted out are paused there again:
-   * this server did not keep their Telnyx chats paused while it wrote replies.
-   */
-  private async repauseHeldChats(orgId: string): Promise<void> {
-    const leads = await this.prisma.lead.findMany({
-      where: { orgId, normalizedPhone: { not: null }, OR: [{ takenOverById: { not: null } }, { dncStatus: true }] },
-      select: { normalizedPhone: true },
-      take: REPAUSE_LIMIT,
-    });
-    for (const phone of new Set(leads.map((l) => l.normalizedPhone!))) {
-      await this.pauseAi(orgId, phone, true).catch((error) => this.logger.warn(`re-pausing the Telnyx chat with ${phone}: ${(error as Error).message}`));
-    }
   }
 
   async enable(orgId: string): Promise<SmsConversationStatus> {
@@ -252,14 +141,10 @@ export class SmsConversationService implements OnApplicationBootstrap {
         instructions: withSmsSection(String(assistant.instructions ?? '')),
       }),
     });
-    // On Telnyx replies the profile is linked, so the assistant answers texts; on this server's, it stays unlinked.
-    if ((await this.status(orgId)).engine === 'telnyx') {
-      await this.assertProfileFree(c.apiKey, c.messagingProfileId, c.assistantId);
-      await telnyx(c.apiKey, `/messaging_profiles/${c.messagingProfileId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ ai_assistant_id: c.assistantId }),
-      });
-    }
+    await telnyx(c.apiKey, `/messaging_profiles/${c.messagingProfileId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ai_assistant_id: c.assistantId }),
+    });
 
     const config: SmsConversationConfig = {
       enabled: true,
@@ -315,8 +200,7 @@ export class SmsConversationService implements OnApplicationBootstrap {
 
   /** Adds a turn to the lead's text conversation: ours as `assistant`, the lead's as `user`. */
   async appendToChat(orgId: string, leadPhone: string | null, role: 'assistant' | 'user', text: string, sentAt = new Date()): Promise<void> {
-    // On this server's replies the chat is read from our own messages: there is no Telnyx copy to keep.
-    if (!leadPhone || !(await this.isEnabled(orgId)) || (await this.replyEngine(orgId)) === 'estatepulse') return;
+    if (!leadPhone || !(await this.isEnabled(orgId))) return;
     const chat = await this.chatWith(orgId, leadPhone);
     if (!chat) return;
     await telnyx(chat.apiKey, `/ai/conversations/${chat.id}/message`, {
@@ -333,8 +217,7 @@ export class SmsConversationService implements OnApplicationBootstrap {
    * let go.
    */
   async pauseAi(orgId: string, leadPhone: string | null, paused: boolean): Promise<boolean> {
-    // On this server's replies Telnyx answers nothing, and the sms-agent itself skips a lead an agent holds.
-    if (!leadPhone || (await this.replyEngine(orgId)) === 'estatepulse') return false;
+    if (!leadPhone) return false;
     const chat = await this.chatWith(orgId, leadPhone);
     if (!chat) return false;
     // A real boolean: Telnyx ignores the string "true" its own docs show (live-tested 2026-10-30). PUT merges into the metadata.
@@ -358,18 +241,6 @@ export class SmsConversationService implements OnApplicationBootstrap {
     return id ? { apiKey: c.apiKey, id } : null;
   }
 
-  /**
-   * A profile already linked to another assistant answers for whoever linked
-   * it: linking ours would silently take over that organization's texts.
-   */
-  private async assertProfileFree(apiKey: string, profileId: string, assistantId: string): Promise<void> {
-    const raw = await telnyx<any>(apiKey, `/messaging_profiles/${profileId}`);
-    const linked = String((raw?.data ?? raw)?.ai_assistant_id ?? '');
-    if (linked && linked !== assistantId) {
-      throw new AppError('CONFLICT', 'This messaging profile already answers texts with another AI assistant. Give this number its own messaging profile first.');
-    }
-  }
-
   private async assistant(apiKey: string, assistantId: string): Promise<any> {
     const raw = await telnyx<any>(apiKey, `/ai/assistants/${assistantId}`);
     return raw?.data ?? raw ?? {};
@@ -381,6 +252,6 @@ export class SmsConversationService implements OnApplicationBootstrap {
       create: { orgId, smsConversation },
       update: { smsConversation },
     });
-    this.statusCache.delete(orgId);
+    this.enabledCache.delete(orgId);
   }
 }

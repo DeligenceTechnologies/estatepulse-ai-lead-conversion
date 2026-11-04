@@ -57,8 +57,7 @@ describe('pausing the AI for one chat', () => {
       init?.method ? {} : String(path).startsWith('/ai/conversations?') ? { data: found } : {}) as any);
     const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', fromNumber: '+17427245092' })) };
     const config = { get: vi.fn(() => 'https://api.example') };
-    const prisma = { organizationSetting: { findUnique: vi.fn(async () => null) } };
-    return new SmsConversationService(prisma as any, creds as any, config as any, { ensure: vi.fn() } as any);
+    return new SmsConversationService({} as any, creds as any, config as any, { ensure: vi.fn() } as any);
   };
 
   beforeEach(() => vi.mocked(telnyx).mockReset());
