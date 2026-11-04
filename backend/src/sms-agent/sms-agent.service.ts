@@ -55,7 +55,14 @@ const HISTORY_MAX_CHARS = 12_000;
 /** Tool calls in one reply before the AI must answer in words. */
 const TOOL_ROUNDS = 4;
 const MODEL_TIMEOUT_MS = 30_000;
-const MAX_REPLY_TOKENS = 600;
+/**
+ * Room for the reply after the model's reasoning: Kimi-K2.6, the assistants'
+ * model, thinks before it answers (370 tokens at low effort, 700+ at its
+ * default), and a smaller budget can end in thinking with no reply at all.
+ */
+const MAX_REPLY_TOKENS = 3_000;
+/** Low reasoning halves the time and the tokens of a reply on Kimi-K2.6 (live, 2026-11-04) at no loss for a text chat. */
+const REASONING_EFFORT = 'low';
 /** Waits before the second and third try of a send that failed for a passing reason. */
 const SEND_RETRY_MS = [2_000, 5_000];
 /** More AI replies than this to one number in an hour is another bot or a loop: the AI stops and a person takes over. */
@@ -314,19 +321,30 @@ export class SmsAgentService {
 
   /** One turn of the model; a passing Telnyx failure is tried once more. */
   private async complete(setup: Setup, messages: ChatMessage[], usage: { prompt_tokens: number; completion_tokens: number }) {
-    const body = JSON.stringify({
-      model: setup.model,
-      messages,
-      max_tokens: MAX_REPLY_TOKENS,
-      ...(setup.tools.length ? { tools: setup.tools, tool_choice: 'auto' } : {}),
-    });
+    const request = (reasoning: boolean) =>
+      telnyx<any>(setup.apiKey, '/ai/chat/completions', {
+        method: 'POST',
+        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+        body: JSON.stringify({
+          model: setup.model,
+          messages,
+          max_tokens: MAX_REPLY_TOKENS,
+          ...(reasoning ? { reasoning_effort: REASONING_EFFORT } : {}),
+          ...(setup.tools.length ? { tools: setup.tools, tool_choice: 'auto' } : {}),
+        }),
+      });
     let res: any;
     try {
-      res = await telnyx<any>(setup.apiKey, '/ai/chat/completions', { method: 'POST', body, signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
+      res = await request(true);
     } catch (error) {
-      if (!isTransientSmsError(error)) throw error;
-      await wait(1_000);
-      res = await telnyx<any>(setup.apiKey, '/ai/chat/completions', { method: 'POST', body, signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
+      const message = (error as Error).message;
+      // A model that takes no reasoning setting refuses the request: the same request without it.
+      if (/failed 4(00|22)/.test(message) && /reasoning/i.test(message)) res = await request(false);
+      else if (!isTransientSmsError(error)) throw error;
+      else {
+        await wait(1_000);
+        res = await request(true);
+      }
     }
     usage.prompt_tokens += Number(res?.usage?.prompt_tokens) || 0;
     usage.completion_tokens += Number(res?.usage?.completion_tokens) || 0;

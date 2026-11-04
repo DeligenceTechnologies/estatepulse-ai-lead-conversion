@@ -103,6 +103,9 @@ describe('SmsAgentService.answer', () => {
 
       const body = s.completions[0];
       expect(body.model).toBe('moonshotai/Kimi-K2.6');
+      // Room for the model's reasoning and the reply, with the reasoning kept low.
+      expect(body.max_tokens).toBe(3000);
+      expect(body.reasoning_effort).toBe('low');
       expect(body.messages[0].role).toBe('system');
       expect(body.messages[0].content).toContain('You text for Skyline Realty. Channel sms_chat.\nKnown: - Budget: 500k');
       expect(body.messages[0].content).toMatch(/It is now .+ \(America\/Toronto\)\.$/);
@@ -273,6 +276,15 @@ describe('SmsAgentService.answer', () => {
       expect(s.prisma.lead.update).toHaveBeenCalledWith({ where: { id: 'lead-1' }, data: { needsReview: true, reviewReasons: { push: AI_REPLY_FAILED_REVIEW } } });
       expect(s.events_()).toContainEqual(expect.objectContaining({ type: 'ai_reply_failed' }));
       expect(s.sms.sendSms).not.toHaveBeenCalled();
+    });
+
+    it('asks again without the reasoning setting when a model does not take it', async () => {
+      const s = setup({ replies: [{ content: 'Hello!' }] });
+      s.fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data: ASSISTANT }), { status: 200 }));
+      s.fetch.mockImplementationOnce(async () => new Response('{"errors":[{"detail":"reasoning_effort is not supported for this model"}]}', { status: 400 }));
+      expect(await s.service.answer(JOB)).toBe('sent');
+      const second = s.completions.at(-1);
+      expect(second.reasoning_effort).toBeUndefined();
     });
 
     it('gets over one failed model call', async () => {
