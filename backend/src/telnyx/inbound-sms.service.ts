@@ -1,14 +1,14 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
-import { DeliveryStatus, LeadStatus } from '@prisma/client';
+import { DeliveryStatus, LeadStatus, LeadTemperature } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
-import { isSuppressed } from '@/lead/contact-suppression';
+import { DNC_REVIEW_REASON, isSuppressed, startsDoNotContact } from '@/lead/contact-suppression';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { SMS_REPLY_QUEUE, SmsReplyJob } from '@/queue/queue.constants';
-import { PERSON_REPLY_REVIEW, personReason } from '@/sms-agent/sms-agent';
+import { PERSON_REPLY_REVIEW, STRANGER_REVIEW, personReason } from '@/sms-agent/sms-agent';
 import type { SmsReplyJobData } from '@/sms-agent/sms-agent.service';
 import { EngineService } from './engine.service';
 import { LeadMemoryService } from './lead-memory.service';
@@ -33,6 +33,10 @@ export const INTENT_UNCHECKED_REVIEW = 'A text could not be checked for an opt-o
  * three texts sent in a row get one answer that reads them all.
  */
 export const REPLY_DEBOUNCE_MS = 2_000;
+/** Leads made from unknown numbers per organization per hour: past it, a flood of strangers (spam) is dropped. */
+export const STRANGER_LEADS_PER_HOUR = 20;
+
+const LEAD_FIELDS = { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true, status: true, reviewReasons: true } as const;
 
 /** A webhook's timestamp, or null when it is missing or unreadable. */
 const providerTime = (value: unknown): Date | null => {
@@ -86,17 +90,22 @@ export class InboundSmsService {
       this.logger.warn(`message.received for ${to}, which no organization owns`);
       return;
     }
+    // One of our own numbers (another organization's, or a test line) is never a lead: answering it is how two AIs loop.
+    if (await this.creds.orgForNumber(from)) {
+      this.logger.warn(`message.received from ${from}, one of our own numbers: ignored`);
+      return;
+    }
     if (providerId) {
       const seen = await this.prisma.message.findFirst({ where: { providerMessageId: providerId, direction: 'inbound' }, select: { id: true } });
       if (seen) return;
     }
-    const lead = await this.prisma.lead.findFirst({
-      where: { orgId, normalizedPhone: from },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, firstResponseAt: true, dncStatus: true, takenOverById: true, status: true, reviewReasons: true },
-    });
+    let lead = await this.prisma.lead.findFirst({ where: { orgId, normalizedPhone: from }, orderBy: { createdAt: 'desc' }, select: LEAD_FIELDS });
     const word = smsKeyword(text, payload?.autoresponse_type);
-    if (!lead) return this.onStranger(orgId, from, to, word);
+    if (!lead) {
+      if (word) return this.onStranger(orgId, from, to, word);
+      lead = await this.strangerLead(orgId, from);
+      if (!lead) return;
+    }
 
     const stored = await this.prisma.message
       .create({
@@ -141,23 +150,69 @@ export class InboundSmsService {
   }
 
   /**
-   * A text from a number no lead has. An opt-out still counts: the number is
+   * A number no lead has texted us something other than a keyword: it becomes
+   * a lead a person looks at (user's decision, 2026-11-04). Outreach never
+   * starts on it and the AI leaves it to a person (STRANGER_REVIEW). Two texts
+   * at once make one lead, and past STRANGER_LEADS_PER_HOUR in an hour the
+   * organization gets no more (spam); null then.
+   */
+  private async strangerLead(orgId: string, phone: string) {
+    const since = new Date(Date.now() - 3_600_000);
+    const made = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`stranger:${orgId}:${phone}`}))`;
+      // Another text from the number got here first and made the lead.
+      const existing = await tx.lead.findFirst({ where: { orgId, normalizedPhone: phone }, orderBy: { createdAt: 'desc' }, select: LEAD_FIELDS });
+      if (existing) return { lead: existing, created: false };
+      const recent = await tx.lead.count({ where: { orgId, reviewReasons: { has: STRANGER_REVIEW }, createdAt: { gte: since } } });
+      if (recent >= STRANGER_LEADS_PER_HOUR) return null;
+      const dnc = await startsDoNotContact(tx, orgId, phone, null);
+      const lead = await tx.lead.create({
+        data: {
+          orgId,
+          phone,
+          normalizedPhone: phone,
+          phoneValid: true,
+          status: LeadStatus.new,
+          temperature: LeadTemperature.cold,
+          score: 0,
+          dncStatus: dnc,
+          automationPaused: true,
+          needsReview: true,
+          reviewReasons: dnc ? [STRANGER_REVIEW, DNC_REVIEW_REASON] : [STRANGER_REVIEW],
+          lastSubmissionAt: new Date(),
+        },
+        select: LEAD_FIELDS,
+      });
+      return { lead, created: true };
+    });
+    if (!made) {
+      this.logger.warn(`org ${orgId}: ${STRANGER_LEADS_PER_HOUR} leads from unknown numbers in the last hour; a text from ${phone} is dropped`);
+      return null;
+    }
+    if (made.created) {
+      this.state.quietly({ orgId, leadId: made.lead.id, type: 'created_from_sms', source: 'sms_reply', channel: 'sms', reason: 'A number that was not a lead texted us' });
+      this.events.publish({ organizationId: orgId, type: 'lead.created', leadSourceId: null });
+    }
+    return made.lead;
+  }
+
+  /**
+   * A keyword from a number no lead has. An opt-out still counts: the number is
    * suppressed, so a lead created with it later starts do-not-contact.
    */
-  private async onStranger(orgId: string, from: string, to: string, word: KeywordMatch | null): Promise<void> {
-    if (word?.kind === 'opt_out') {
+  private async onStranger(orgId: string, from: string, to: string, word: KeywordMatch): Promise<void> {
+    if (word.kind === 'opt_out') {
       await this.optOuts.optOut(orgId, { phone: from }, { source: 'sms_reply', reason: 'Opted out by SMS before becoming a lead', channel: 'sms' });
       if (!word.byTelnyx && !(await this.conversations.isEnabled(orgId))) {
         await this.notify(orgId, null, from, optOutConfirmation(await this.brokerage(orgId), word.french));
       }
       return;
     }
-    if (word?.kind === 'opt_in') {
+    if (word.kind === 'opt_in') {
       await this.optOuts.optIn(orgId, from, 'Opted back in by SMS (START)');
       return;
     }
-    if (word?.kind === 'help') return this.sendHelp(orgId, null, from, to, word.french);
-    this.logger.warn(`Inbound SMS matches no lead in org ${orgId}`);
+    return this.sendHelp(orgId, null, from, to, word.french);
   }
 
   /**
@@ -412,7 +467,8 @@ export class InboundSmsService {
 
   /** The text waits for a person: the lead is flagged once, and its conversation is already lit up for the team. */
   private async forPerson(orgId: string, leadId: string, reasons: string[], why: string): Promise<void> {
-    const flag = !reasons.includes(PERSON_REPLY_REVIEW);
+    // A lead made from an unknown number already says a person must answer it.
+    const flag = !reasons.includes(PERSON_REPLY_REVIEW) && !reasons.includes(STRANGER_REVIEW);
     await this.prisma.lead.update({ where: { id: leadId }, data: { needsReview: true, ...(flag ? { reviewReasons: { push: PERSON_REPLY_REVIEW } } : {}) } });
     this.state.quietly({ orgId, leadId, type: 'needs_person', source: 'sms_reply', channel: 'sms', reason: `No AI reply: ${why}` });
   }

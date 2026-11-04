@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { INTENT_UNCHECKED_REVIEW, InboundSmsService } from './inbound-sms.service';
-import { PERSON_REPLY_REVIEW } from '@/sms-agent/sms-agent';
+import { DNC_REVIEW_REASON } from '@/lead/contact-suppression';
+import { PERSON_REPLY_REVIEW, STRANGER_REVIEW } from '@/sms-agent/sms-agent';
 import { OptOutService } from './opt-out.service';
 
 const PHONE = '+12899174129';
@@ -20,6 +21,10 @@ function setup(
     stranger?: boolean;
     details?: Record<string, string>;
     queueDown?: boolean;
+    /** Leads already made from unknown numbers in the last hour. */
+    strangers?: number;
+    /** Another text from the unknown number made its lead first. */
+    strangerRace?: boolean;
   } = {},
 ) {
   const lead: TestLead = { id: 'lead-1', orgId: 'org-1', normalizedPhone: PHONE, firstResponseAt: null, takenOverById: null, reviewReasons: [], ...start };
@@ -35,6 +40,11 @@ function setup(
     },
     lead: {
       findFirst: vi.fn(async () => (opts.stranger ? null : { ...lead })),
+      create: vi.fn(async ({ data }: any) => {
+        const made = { id: 'lead-new', orgId: 'org-1', normalizedPhone: data.normalizedPhone, firstResponseAt: null, takenOverById: null, status: 'new', ...data };
+        leads.push(made);
+        return made;
+      }),
       findUnique: vi.fn(async ({ where }: any) => {
         const found = byId(where.id);
         return found ? { ...found } : null;
@@ -52,7 +62,7 @@ function setup(
         if (found && data?.status) found.status = data.status;
         return { count: found ? 1 : 0 };
       }),
-      count: vi.fn(async ({ where }: any) => leads.filter((l) => !where.takenOverById || l.takenOverById).length),
+      count: vi.fn(async ({ where }: any) => (where.reviewReasons ? (opts.strangers ?? 0) : leads.filter((l) => !where.takenOverById || l.takenOverById).length)),
     },
     leadEvent: { create: vi.fn(async () => ({})) },
     contactSuppression: {
@@ -62,9 +72,15 @@ function setup(
     },
     organization: { findUnique: vi.fn(async () => ({ name: 'Skyline Realty' })) },
     organizationSetting: { findUnique: vi.fn(async () => ({ businessDetails: opts.details ?? null })) },
+    $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)),
   };
-  const creds = { orgForNumber: vi.fn(async () => 'org-1') };
+  // Only our own numbers belong to an organization.
+  const creds = { orgForNumber: vi.fn(async (n: string) => (n === OUR_NUMBER ? 'org-1' : null)) };
+  if (opts.strangerRace) {
+    // The lookup outside the lock finds nothing; inside it, the lead the other text made.
+    prisma.lead.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...lead, reviewReasons: [STRANGER_REVIEW] } as any);
+  }
   const followup = { pauseForLead: vi.fn(), stopForLead: vi.fn() };
   const engineMock = { setStatus: vi.fn(async () => true) };
   const engine = opts.engine ?? 'telnyx';
@@ -585,5 +601,59 @@ describe('InboundSmsService', () => {
       await s.receive('What areas do you cover?');
       expect(s.replies.add).not.toHaveBeenCalled();
     });
+  });
+
+  describe('a number that is not a lead (SMS07)', () => {
+    it('becomes a lead a person looks at: outreach off, flagged, and its text kept', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      await s.receive('Hi, is the house on Elm St still available?');
+      expect(s.prisma.$executeRaw).toHaveBeenCalled();
+      expect(s.prisma.lead.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ phone: PHONE, normalizedPhone: PHONE, automationPaused: true, needsReview: true, reviewReasons: [STRANGER_REVIEW], dncStatus: false }),
+        select: expect.anything(),
+      });
+      expect(s.prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ leadId: 'lead-new', body: 'Hi, is the house on Elm St still available?' }) }));
+      expect(s.events()).toContain('created_from_sms');
+      expect(s.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'lead.created' }));
+    });
+
+    it('gets no AI reply on this server, and no second flag', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, ai: true, engine: 'estatepulse' });
+      await s.receive('Who is this?');
+      expect(s.replies.add).not.toHaveBeenCalled();
+      expect(s.events()).toContain('needs_person');
+      expect(s.prisma.lead.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewReasons: { push: PERSON_REPLY_REVIEW } }) }));
+    });
+
+    it('starts do-not-contact when the number opted out before', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      s.suppressed.add(PHONE);
+      await s.receive('hello');
+      expect(s.prisma.lead.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dncStatus: true, reviewReasons: [STRANGER_REVIEW, DNC_REVIEW_REASON] }) }));
+    });
+
+    it('makes one lead when two texts arrive at once', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, strangerRace: true });
+      await s.receive('hello again');
+      expect(s.prisma.lead.create).not.toHaveBeenCalled();
+      expect(s.events()).not.toContain('created_from_sms');
+      expect(s.prisma.message.create).toHaveBeenCalled();
+    });
+
+    it('drops a flood of unknown numbers past the hourly limit', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, strangers: 20 });
+      await s.receive('buy crypto now');
+      expect(s.prisma.lead.create).not.toHaveBeenCalled();
+      expect(s.prisma.message.create).not.toHaveBeenCalled();
+    });
+  });
+
+  it('ignores a text from one of our own numbers: answering it is how two AIs loop', async () => {
+    const s = setup({ status: 'contacting', dncStatus: false }, { ai: true, engine: 'estatepulse' });
+    s.prisma.lead.findFirst.mockClear();
+    await s.service.onMessageReceived({ id: 'm-9', text: 'Hi! How can I help?', from: { phone_number: OUR_NUMBER }, to: [{ phone_number: OUR_NUMBER }] });
+    expect(s.prisma.lead.findFirst).not.toHaveBeenCalled();
+    expect(s.prisma.message.create).not.toHaveBeenCalled();
+    expect(s.replies.add).not.toHaveBeenCalled();
   });
 });

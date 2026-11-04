@@ -25,15 +25,20 @@ export const PERSON_REPLY_REVIEW = 'Texted us and needs a reply from a person: a
 export const AI_REPLY_FAILED_REVIEW = 'The AI could not answer a text: answer in Conversations';
 /** On the review flag when the AI stopped answering a lead that texts without end (another bot, a loop). */
 export const AI_REPLY_CAPPED_REVIEW = 'The AI stopped answering: too many texts in an hour. Answer in Conversations';
+/** On a lead made from a number that texted us without being one (user's decision, 2026-11-04). The AI leaves it to a person. */
+export const STRANGER_REVIEW = 'Texted us from a number that was not a lead: answer in Conversations';
+/** The flags an agent's text to the lead answers, so they come off then. A capped AI stays capped: it may be a bot. */
+export const REPLY_NEEDED_REVIEWS = [PERSON_REPLY_REVIEW, AI_REPLY_FAILED_REVIEW, STRANGER_REVIEW];
 
 /**
  * Why a person, not the AI, answers this lead's text, or null when the AI
  * does. Judged on the lead as the text found it: an outcome the same text
  * leads to (a "no thanks") still gets the AI's one polite reply.
  */
-export function personReason(lead: { status: LeadStatus; dncStatus: boolean; takenOverById: string | null }): string | null {
+export function personReason(lead: { status: LeadStatus; dncStatus: boolean; takenOverById: string | null; reviewReasons?: string[] }): string | null {
   if (lead.takenOverById) return 'an agent has taken the chat over';
   if (lead.dncStatus) return 'the lead opted out';
+  if (lead.reviewReasons?.includes(STRANGER_REVIEW)) return 'the number was not a lead, and no one has answered it yet';
   if (!AI_ANSWERS.includes(lead.status)) return `the lead is ${lead.status.replace(/_/g, ' ')}`;
   return null;
 }

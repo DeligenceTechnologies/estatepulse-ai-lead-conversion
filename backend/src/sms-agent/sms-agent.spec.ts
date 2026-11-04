@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REPLY_MAX_CHARS, chatHistory, fillVariables, guardReply, personReason, toolFunctions } from './sms-agent';
+import { REPLY_MAX_CHARS, STRANGER_REVIEW, chatHistory, fillVariables, guardReply, personReason, toolFunctions } from './sms-agent';
 
 const lead = (status: string, extra: Partial<{ dncStatus: boolean; takenOverById: string | null }> = {}) =>
   ({ status, dncStatus: false, takenOverById: null, ...extra }) as Parameters<typeof personReason>[0];
@@ -21,6 +21,11 @@ describe('personReason', () => {
   it('leaves a chat an agent holds, and an opted-out lead, to a person whatever the status', () => {
     expect(personReason(lead('engaged', { takenOverById: 'agent-1' }))).toBe('an agent has taken the chat over');
     expect(personReason(lead('engaged', { dncStatus: true }))).toBe('the lead opted out');
+  });
+
+  it('leaves a lead made from an unknown number to a person until one answers it', () => {
+    expect(personReason({ ...lead('new'), reviewReasons: [STRANGER_REVIEW] })).toBe('the number was not a lead, and no one has answered it yet');
+    expect(personReason({ ...lead('new'), reviewReasons: ['Imported from Google Sheets: review before outreach'] })).toBeNull();
   });
 });
 
