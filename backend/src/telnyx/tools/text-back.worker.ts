@@ -52,7 +52,7 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
     const { orgId, leadId, at } = job.data;
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+      select: { phone: true, status: true, dncStatus: true, textBackAt: true },
     });
     if (!lead || lead.textBackAt?.toISOString() !== at) {
       this.logger.log(`Text back for lead ${leadId} at ${at} dropped: it was moved or cancelled since`);
@@ -64,7 +64,8 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
       this.logger.log(`Text back for lead ${leadId} dropped: ${reason}`);
     };
     if (lead.dncStatus) return drop('The lead opted out');
-    if (lead.automationPaused) return drop('Automation is paused for the lead');
+    // Paused automation is not a reason: the lead asked for this text (the AI promised it), and paused only stops
+    // outreach. A chat an agent takes over clears textBackAt, so the agent is never talked over.
     if (TEXT_BACK_BLOCKED.includes(lead.status)) return drop(`The lead is ${lead.status}`);
     if (!lead.phone) return drop('The lead has no phone number');
     if (await hasUpcomingMeeting(this.prisma, orgId, leadId)) return drop('A meeting with the lead is on the calendar');
