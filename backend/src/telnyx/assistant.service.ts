@@ -199,7 +199,7 @@ export class AssistantService {
   private async keepCallToolsSection(orgId: string, instructions: string): Promise<string> {
     const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
     const tools = callToolsSettings(row?.callTools);
-    return tools.enabled && tools.telnyx ? withCallToolsSection(instructions) : instructions;
+    return tools.telnyx ? withCallToolsSection(instructions, tools.enabled) : instructions;
   }
 
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {

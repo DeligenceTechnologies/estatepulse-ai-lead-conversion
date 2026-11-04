@@ -61,15 +61,14 @@ export class CallToolsService {
     return callToolsSettings(row?.callTools);
   }
 
-  /** The hash of the tools' bearer token while they are on; null when off. */
+  /** The hash of the tools' bearer token; the opt-out tool stays on the assistant with the switch off, so it is kept then too. */
   async tokenHash(orgId: string): Promise<string | null> {
-    const s = await this.settings(orgId);
-    return s.enabled ? (s.telnyx?.tokenHash ?? null) : null;
+    return (await this.settings(orgId)).telnyx?.tokenHash ?? null;
   }
 
   async status(orgId: string): Promise<CallToolsStatus> {
     const [s, c] = await Promise.all([this.settings(orgId), this.creds.getCreds(orgId).catch(() => null)]);
-    const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId);
+    const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId, s.enabled);
     const problem = !c?.apiKey || !c.assistantId ? 'Connect Telnyx and create your AI assistant first.' : null;
     const { telnyx: _telnyx, ...settings } = s;
     return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, defaultTextBackMessage: DEFAULT_TEXT_BACK_MESSAGE, active: s.enabled && active, problem };
@@ -94,8 +93,8 @@ export class CallToolsService {
       // Only switching the tools on or off touches Telnyx; the texts, the retry and the text-back switch live here.
       if (patch.enabled === undefined) return;
       this.ready.delete(orgId);
-      if (next.enabled) await this.provision(orgId, true);
-      else await this.teardown(orgId);
+      // Off keeps the opt-out tool: the assistant is provisioned again with it alone.
+      await this.provision(orgId, true);
     });
     return this.status(orgId);
   }
@@ -122,13 +121,14 @@ export class CallToolsService {
   /** Provisions afresh unless what is on Telnyx already matches the assistant and this server. */
   private async provision(orgId: string, rethrow: boolean): Promise<void> {
     const s = await this.settings(orgId);
-    if (!s.enabled || !this.publicApiUrl) return;
+    if (!this.publicApiUrl) return;
+    const full = s.enabled;
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) {
       if (rethrow) throw new AppError('CONFLICT', 'Connect Telnyx and create your AI assistant first.');
       return;
     }
-    if (s.telnyx && this.current(s.telnyx, c.assistantId)) {
+    if (s.telnyx && this.current(s.telnyx, c.assistantId, full)) {
       this.ready.set(orgId, Date.now() + READY_TTL_MS);
       return;
     }
@@ -147,16 +147,17 @@ export class CallToolsService {
       assistantId: c.assistantId,
       url: this.publicApiUrl,
       version: CALL_TOOLS_VERSION,
+      full,
     };
     try {
       created.secretId = await this.createSecret(c.apiKey, identifier, token);
-      for (const def of callToolDefinitions(this.publicApiUrl, identifier)) {
+      for (const def of callToolDefinitions(this.publicApiUrl, identifier, full)) {
         const tool = await telnyx<{ id?: string; data?: { id: string } }>(c.apiKey, '/ai/tools', { method: 'POST', body: JSON.stringify(def) });
         const toolId = tool.id ?? tool.data?.id ?? '';
         created.toolIds.push(toolId);
         await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}/tools/${toolId}`, { method: 'PUT' });
       }
-      await this.setPrompt(c.apiKey, c.assistantId, withCallToolsSection);
+      await this.setPrompt(c.apiKey, c.assistantId, (instructions) => withCallToolsSection(instructions, full));
     } catch (error) {
       await this.removeFromTelnyx(c.apiKey, created);
       await this.save(orgId, { ...this.stored(s), telnyx: null });
@@ -168,17 +169,9 @@ export class CallToolsService {
     this.logger.log(`call tools provisioned for org ${orgId} on assistant ${c.assistantId}`);
   }
 
-  /** What is on Telnyx is for this assistant, this server and these tool definitions. */
-  private current(t: CallToolsTelnyx, assistantId: string | undefined): boolean {
-    return t.assistantId === assistantId && t.url === this.publicApiUrl && t.version === CALL_TOOLS_VERSION;
-  }
-
-  private async teardown(orgId: string): Promise<void> {
-    const s = await this.settings(orgId);
-    if (!s.telnyx) return;
-    const c = await this.creds.getCreds(orgId).catch(() => null);
-    if (c?.apiKey) await this.removeFromTelnyx(c.apiKey, s.telnyx);
-    await this.save(orgId, { ...this.stored(s), telnyx: null });
+  /** What is on Telnyx is for this assistant, this server, these tool definitions and the switch's position. */
+  private current(t: CallToolsTelnyx, assistantId: string | undefined, full: boolean): boolean {
+    return t.assistantId === assistantId && t.url === this.publicApiUrl && t.version === CALL_TOOLS_VERSION && (t.full ?? true) === full;
   }
 
   /** A secret left behind by an interrupted provisioning has the same identifier; it is replaced. */

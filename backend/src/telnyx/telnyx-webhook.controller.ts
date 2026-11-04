@@ -56,6 +56,8 @@ export class TelnyxWebhookController {
         else if (type === 'call.recording.transcription.saved') {
           await this.activity.onTranscriptionSaved(ccid, payload);
           this.scoring.onTranscriptSaved(ccid);
+        } else if (type === 'call.conversation.ended') {
+          this.scoring.onConversationEnded(ccid, payload);
         } else if (type === 'call.conversation_insights.generated') {
           await this.scoring.onInsightsGenerated(ccid, payload, delivery);
         }

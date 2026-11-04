@@ -2,7 +2,9 @@
  * The assistant's call-outcome tools: schedule_callback (an exact time the
  * lead asked to be called back), schedule_text (a time they asked to be
  * texted) and record_outcome (a clear "no", "stop contacting me" or wrong
- * number). They work on a call and in a text chat.
+ * number). They work on a call and in a text chat. With the switch off the
+ * assistant still keeps record_outcome for "stop contacting me" alone: an
+ * opt-out is always honoured, whatever else is turned off.
  */
 
 export interface CallToolsSettings {
@@ -42,10 +44,12 @@ export interface CallToolsTelnyx {
   url: string;
   /** CALL_TOOLS_VERSION they were created with; an older one is provisioned again. */
   version?: number;
+  /** Every tool (the switch on), or only the opt-out (off); unset is from before the switch kept one. */
+  full?: boolean;
 }
 
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 5;
+export const CALL_TOOLS_VERSION = 6;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -77,7 +81,18 @@ export function callToolsSettings(raw: unknown): CallToolsSettings & { telnyx: C
 export const CALL_TOOLS_PROMPT_START = '[EstatePulse: callbacks and outcomes — added by "Callbacks and outcomes" in AI Settings; turn it off there to remove]';
 export const CALL_TOOLS_PROMPT_END = '[End of EstatePulse callbacks and outcomes]';
 
-export function callToolsSection(): string {
+/** With the switch off: only the opt-out, so "stop calling me" is recorded on the call whatever else is off. */
+function optOutSection(): string {
+  return [
+    CALL_TOOLS_PROMPT_START,
+    '# Opting out',
+    '- If the lead asks us to stop calling or texting them, or not to contact them again, call record_outcome with do_not_contact at once. Then apologise for the bother, confirm they will not be contacted again, and say goodbye. Never argue or try to change their mind.',
+    CALL_TOOLS_PROMPT_END,
+  ].join('\n');
+}
+
+export function callToolsSection(full = true): string {
+  if (!full) return optOutSection();
   return [
     CALL_TOOLS_PROMPT_START,
     '# Callbacks and outcomes',
@@ -100,9 +115,9 @@ export function withoutCallToolsSection(instructions: string): string {
   return after ? `${before}\n${after}` : before;
 }
 
-export function withCallToolsSection(instructions: string): string {
+export function withCallToolsSection(instructions: string, full = true): string {
   const base = withoutCallToolsSection(instructions ?? '').replace(/\s+$/, '');
-  return base ? `${base}\n\n${callToolsSection()}` : callToolsSection();
+  return base ? `${base}\n\n${callToolsSection(full)}` : callToolsSection(full);
 }
 
 export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as const;
@@ -113,12 +128,37 @@ export type Outcome = (typeof OUTCOMES)[number];
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
-export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
+export function callToolDefinitions(apiUrl: string, secretIdentifier: string, full = true) {
   const shared = {
     method: 'POST',
     headers: [{ name: 'Authorization', value: `Bearer {{#integration_secret}}${secretIdentifier}{{/integration_secret}}` }],
     preset_body_fields: { lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}', end_user: '{{telnyx_end_user_target}}' },
   };
+  if (!full) {
+    return [
+      {
+        type: 'webhook',
+        display_name: 'EstatePulse: opt-out',
+        timeout_ms: 10000,
+        webhook: {
+          ...shared,
+          name: 'record_outcome',
+          description:
+            'Record that the lead asked us to stop calling or texting them (`do_not_contact`), the moment they say it. ' +
+            'Then apologise, confirm they will not be contacted again, and say goodbye.',
+          url: `${apiUrl}/tools/telnyx/outcome/record`,
+          body_parameters: {
+            type: 'object',
+            properties: {
+              outcome: { type: 'string', enum: ['do_not_contact'], description: 'Always do_not_contact.' },
+              note: { type: 'string', description: 'Their words, briefly.' },
+            },
+            required: ['outcome'],
+          },
+        },
+      },
+    ];
+  }
   return [
     {
       type: 'webhook',

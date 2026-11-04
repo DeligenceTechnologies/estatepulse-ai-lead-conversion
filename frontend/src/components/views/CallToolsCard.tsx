@@ -81,7 +81,8 @@ export const CallToolsCard: React.FC = () => {
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
           This adds three tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
-          Turning it off removes just those; the rest of your prompt is never changed.
+          Turning it off removes the callbacks and texts but keeps &ldquo;don&apos;t contact me&rdquo;: an opt-out is always
+          recorded. The rest of your prompt is never changed.
         </p>
       </div>
 
