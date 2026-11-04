@@ -508,6 +508,8 @@ export interface NewLeadInput {
   maxBudget?: number;
   bedrooms?: number;
   notes?: string;
+  /** The lead's own IANA zone. Left out, their phone number decides. */
+  timezone?: string;
   /** The lead agreed to be called and texted. */
   consent: boolean;
   /** Let the AI start calling right away; otherwise the lead waits paused. */
