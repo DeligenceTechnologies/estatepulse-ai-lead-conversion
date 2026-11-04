@@ -135,6 +135,8 @@ export interface TelnyxStatus {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging?: boolean;
+  /** A webhook public key is on file; without one Telnyx's events are ignored. */
+  hasPublicKey?: boolean;
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
@@ -186,6 +188,7 @@ export interface TelnyxAccount {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging: boolean;
+  hasPublicKey: boolean;
   active: boolean;
   connectedAt: string | null;
 }

@@ -114,6 +114,9 @@ export const TelnyxAccounts: React.FC<{
                           credential fragment on screen. */}
                       {a.fromNumber || 'no number assigned'}
                     </div>
+                    {!a.hasPublicKey && (
+                      <div className="text-2xs text-amber-400 truncate">No public key — its webhooks are ignored</div>
+                    )}
                   </>
                 )}
               </div>

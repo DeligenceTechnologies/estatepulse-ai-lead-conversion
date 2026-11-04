@@ -6,6 +6,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad } from '@/common/utils/crypto';
+import { normalizePhone } from './phone';
 
 const TELNYX_API = 'https://api.telnyx.com/v2';
 
@@ -41,6 +42,7 @@ export interface TelnyxPublicStatus {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging: boolean;
+  hasPublicKey: boolean;
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
@@ -55,6 +57,7 @@ export interface TelnyxAccount {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging: boolean;
+  hasPublicKey: boolean;
   active: boolean;
   connectedAt: string | null;
 }
@@ -165,6 +168,7 @@ export class TelnyxCredentialsService {
           connectionId: c.connectionId,
           messagingProfileId: c.messagingProfileId,
           hasMessaging: Boolean(c.messagingProfileId),
+          hasPublicKey: Boolean(c.publicKey),
           active: row.status === IntegrationStatus.active,
           connectedAt: c.connectedAt,
         };
@@ -220,6 +224,7 @@ export class TelnyxCredentialsService {
       connectionId: c?.connectionId ?? '',
       messagingProfileId: c?.messagingProfileId ?? '',
       hasMessaging: Boolean(c && active && c.messagingProfileId),
+      hasPublicKey: Boolean(c?.publicKey),
       fromNumber: c?.fromNumber ?? '',
       assistantId: c && active ? c.assistantId : '',
       connectedAt: c?.connectedAt ?? null,
@@ -312,7 +317,8 @@ export class TelnyxCredentialsService {
       // A saved key starts clean; if it is refused too, the owners hear about it again.
       lastErrorCode: null,
       lastErrorAt: null,
-      phoneNumber: c.fromNumber || null,
+      // The webhooks look an org up by the normalized number, so that is the only shape stored.
+      phoneNumber: normalizePhone(c.fromNumber) || null,
       externalAccountId: c.assistantId || null,
       config: config as Prisma.InputJsonObject,
     };
