@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CANONICAL_FIELDS } from '@/ingest/processing/canonical-fields';
 import { suggestMappings } from '@/ingest/processing/heuristics';
-import { applyTransform, isValidEmail, type Transform } from '@/ingest/processing/transforms';
+import { applyTransform, isDialable, isValidEmail, type Transform } from '@/ingest/processing/transforms';
 import { validateCanonicalValues, type CanonicalValue } from '@/ingest/processing/validators';
 
 export const MAX_DATA_ROWS = 10_000;
@@ -28,7 +28,18 @@ export type SheetTarget = (typeof SHEET_TARGETS)[number];
 export const MAPPING_TARGETS = [...SHEET_TARGETS, FULL_NAME_TARGET, CUSTOM_TARGET] as const;
 export type MappingTarget = (typeof MAPPING_TARGETS)[number];
 
-export type RowIssue = 'NO_ROW_ID' | 'NO_NAME' | 'NO_CONTACT' | 'DUPLICATE_IN_SHEET' | 'DUPLICATE_IN_FILE';
+export type RowIssue =
+  | 'NO_ROW_ID'
+  | 'NO_NAME'
+  | 'NO_CONTACT'
+  /**
+   * The row has a phone and nothing else, and the phone has no country code. Kept apart from
+   * NO_CONTACT because the fix is different and the owner has to know which one it is: there is
+   * a number here, it just does not say which country it belongs to, and we will not guess.
+   */
+  | 'PHONE_NO_COUNTRY_CODE'
+  | 'DUPLICATE_IN_SHEET'
+  | 'DUPLICATE_IN_FILE';
 
 export const IMPORT_REVIEW_REASON = 'Imported from Google Sheets — awaiting owner approval';
 export const FILE_IMPORT_REVIEW_REASON = 'Imported from a file — awaiting owner approval';
@@ -104,6 +115,15 @@ export function analyzeHeaders(cells: string[]): SheetHeader[] {
   return headers;
 }
 
+/**
+ * Why a row with no reachable contact has none. A number we could not read is not the same as
+ * no number at all: without a country code we cannot tell an Indian number from a Canadian one,
+ * so the row waits for the code to be added at the source instead of being guessed at here.
+ */
+export function contactIssue(phone: string | null | undefined): RowIssue {
+  return phone && !phone.trim().startsWith('+') ? 'PHONE_NO_COUNTRY_CODE' : 'NO_CONTACT';
+}
+
 export function headerFingerprint(headers: SheetHeader[]): string {
   return sha256(
     headers
@@ -114,14 +134,14 @@ export function headerFingerprint(headers: SheetHeader[]): string {
   );
 }
 
-export function transformFor(target: SheetTarget | typeof CUSTOM_TARGET, region: string, fromFullName: boolean): Transform {
+export function transformFor(target: SheetTarget | typeof CUSTOM_TARGET, fromFullName: boolean): Transform {
   switch (target) {
     case 'first_name':
       return fromFullName ? { kind: 'name_split', part: 'first' } : { kind: 'text', maxLen: 100 };
     case 'last_name':
       return fromFullName ? { kind: 'name_split', part: 'last' } : { kind: 'text', maxLen: 100 };
     case 'phone':
-      return { kind: 'phone_e164', defaultRegion: region };
+      return { kind: 'phone_e164' };
     case 'email':
       return { kind: 'email' };
     case 'timezone':
@@ -141,14 +161,14 @@ export function transformFor(target: SheetTarget | typeof CUSTOM_TARGET, region:
   }
 }
 
-export function expandMapping(columns: ColumnMapping[], region: string): StoredMapping[] {
+export function expandMapping(columns: ColumnMapping[]): StoredMapping[] {
   const out: StoredMapping[] = [];
   for (const c of columns) {
     if (c.target === FULL_NAME_TARGET) {
-      out.push({ source_field_key: c.fieldKey, target_field: 'first_name', transform: transformFor('first_name', region, true) });
-      out.push({ source_field_key: c.fieldKey, target_field: 'last_name', transform: transformFor('last_name', region, true) });
+      out.push({ source_field_key: c.fieldKey, target_field: 'first_name', transform: transformFor('first_name', true) });
+      out.push({ source_field_key: c.fieldKey, target_field: 'last_name', transform: transformFor('last_name', true) });
     } else {
-      out.push({ source_field_key: c.fieldKey, target_field: c.target, transform: transformFor(c.target, region, false) });
+      out.push({ source_field_key: c.fieldKey, target_field: c.target, transform: transformFor(c.target, false) });
     }
   }
   return out;
@@ -220,7 +240,6 @@ export function buildRow(
     labels: Map<string, string>;
     mappings: StoredMapping[];
     identity: Identity;
-    region: string;
   },
 ): BuiltRow {
   const cell = (fieldKey: string): string => {
@@ -244,7 +263,7 @@ export function buildRow(
       custom[label] = raw.slice(0, 500);
       continue;
     }
-    const { value, warning } = applyTransform(m.transform, [raw], raw, ctx.region);
+    const { value, warning } = applyTransform(m.transform, [raw], raw);
     if (value !== null && value !== '') values[m.target_field] = value;
     if (warning) warnings.push(`${label}: ${warning}`);
   }
@@ -257,7 +276,7 @@ export function buildRow(
   const v = validated.values;
 
   const phone = str(v.phone);
-  const normalizedPhone = phone && phone.startsWith('+') ? phone : null;
+  const normalizedPhone = isDialable(phone) ? phone : null;
   const email = str(v.email);
   const emailValid = email ? isValidEmail(email) : false;
   const normalizedEmail = emailValid ? email!.toLowerCase() : null;
@@ -273,7 +292,9 @@ export function buildRow(
   }
 
   if (!firstName) return { rowNumber, blank: false, issue: 'NO_NAME', key: idKey, reviewReasons: [] };
-  if (!normalizedPhone && !emailValid) return { rowNumber, blank: false, issue: 'NO_CONTACT', key: idKey, reviewReasons: [] };
+  if (!normalizedPhone && !emailValid) {
+    return { rowNumber, blank: false, issue: contactIssue(phone), key: idKey, reviewReasons: [] };
+  }
 
   const nameKey = `${firstName} ${lastName ?? ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
   const key = idKey ?? sha256(`fb\u0000${normalizedPhone ?? ''}\u0000${normalizedEmail ?? ''}\u0000${nameKey}`);
@@ -310,13 +331,13 @@ export function buildRow(
   };
 }
 
-export function suggestColumns(headers: SheetHeader[], sampleRows: string[][], region: string): ColumnMapping[] {
+export function suggestColumns(headers: SheetHeader[], sampleRows: string[][]): ColumnMapping[] {
   const usable = headers.filter((h) => h.fieldKey && !h.duplicate);
   const answers = usable.map((h) => {
     const sample = sampleRows.map((r) => (r[h.index] ?? '').trim()).find(Boolean) ?? '';
     return { key: h.fieldKey, label: h.label, type: 'INPUT_TEXT', raw: sample, textValues: sample ? [sample] : [], scalarText: sample };
   });
-  const suggestions = suggestMappings(answers, region).filter((s) => (SHEET_TARGETS as readonly string[]).includes(s.targetField));
+  const suggestions = suggestMappings(answers).filter((s) => (SHEET_TARGETS as readonly string[]).includes(s.targetField));
 
   const out: ColumnMapping[] = [];
   for (const s of suggestions) {

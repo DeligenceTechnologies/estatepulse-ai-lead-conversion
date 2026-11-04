@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
+import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, Pencil, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { getCrmStatus } from '../../utils/crmApi';
 import { importHistory, type ImportBatch } from '../../utils/fileImportApi';
@@ -25,6 +26,7 @@ import { ApproveOutreachModal } from '../imports/ApproveOutreachModal';
 import { FileImportModal } from '../imports/FileImportModal';
 import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
+import { LeadFormModal } from '../modals/LeadFormModal';
 import { errorText } from '../sheets/SheetModal';
 
 /** The review reasons every import starts with; shown as the screen itself, not as badges. */
@@ -114,7 +116,11 @@ export const ImportReviewView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'more' | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
+  const canEditLead = useAuth().can('lead.update');
   const [upload, setUpload] = useState(false);
+  // The row being corrected in place. A queued lead is a real lead, so this is the ordinary
+  // lead form: fixing a phone here clears the flag that held the row and it can be approved.
+  const [editing, setEditing] = useState<ReviewItem['lead']>(null);
   const [history, setHistory] = useState(false);
   /** Outreach scheduling (OUTREACH_SCHEDULING_ENABLED): null when the server has it off, and approving works as before. */
   const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
@@ -562,7 +568,16 @@ export const ImportReviewView: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-2 py-2 text-slate-300">
-                        <span className="block truncate" title={i.lead?.phone ?? undefined}>
+                        {/* A number that cannot be rung is the reason most rows wait here, so the cell
+                            itself says so rather than hiding it behind the warning icon. */}
+                        <span
+                          className={`block truncate ${i.lead?.phone && !i.lead.phoneValid ? 'text-amber-300' : ''}`}
+                          title={
+                            i.lead?.phone && !i.lead.phoneValid
+                              ? `${i.lead.phone} — no country code, so this cannot be dialled. Edit it here, or add the code in the sheet and sync.`
+                              : (i.lead?.phone ?? undefined)
+                          }
+                        >
                           {i.lead?.phone ?? '—'}
                         </span>
                       </td>
@@ -633,6 +648,25 @@ export const ImportReviewView: React.FC = () => {
                               >
                                 <AlertTriangle className="w-3 h-3" />
                               </span>
+                            )}
+                            {i.lead && canEditLead && (
+                              <button
+                                type="button"
+                                onClick={() => setEditing(i.lead)}
+                                title={
+                                  i.lead.phone && !i.lead.phoneValid
+                                    ? 'Add the country code so this lead can be called, without going back to the source'
+                                    : 'Correct this lead before deciding'
+                                }
+                                aria-label="Edit this lead"
+                                className={`p-1 rounded border inline-flex transition-colors cursor-pointer ${
+                                  i.lead.phone && !i.lead.phoneValid
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700'
+                                }`}
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -731,6 +765,16 @@ export const ImportReviewView: React.FC = () => {
           onConfirm={(choice) => void decide('approve', choice)}
         />
       )}
+      {editing && (
+        <LeadFormModal
+          lead={editing}
+          onClose={() => setEditing(null)}
+          // Reload rather than patch the row in place: fixing the phone clears a review reason,
+          // which can turn a held row into one that is ticked and ready to approve.
+          onSaved={() => void load()}
+        />
+      )}
+
       {upload && (
         <FileImportModal
           onClose={() => setUpload(false)}

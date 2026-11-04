@@ -335,16 +335,12 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const [lastVersion, lastMapping] = (source.syncRemoteVersion ?? '').split(':');
     const rebaseline = lastMapping !== String(source.mappingVersion);
     stats.dbStatements += 2;
-    const [mappingRows, settings] = await Promise.all([
-      this.prisma.leadSourceFieldMapping.findMany({
-        where: { orgId, leadSourceId: sourceId, isActive: true },
-        select: { sourceFieldKey: true, targetField: true, transform: true },
-      }),
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } }),
-    ]);
+    const mappingRows = await this.prisma.leadSourceFieldMapping.findMany({
+      where: { orgId, leadSourceId: sourceId, isActive: true },
+      select: { sourceFieldKey: true, targetField: true, transform: true },
+    });
     const mappings = toStored(mappingRows);
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
-    const region = settings?.defaultRegion ?? 'US';
 
     let orphans = 0;
     if (this.config.get('SHEETS_VERSION_PROBE', { infer: true })) {
@@ -373,7 +369,6 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       labels: new Map(sheet.headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.label])),
       mappings,
       identity,
-      region,
     };
     const present = new Set<string>();
     const seen = new Set<string>();

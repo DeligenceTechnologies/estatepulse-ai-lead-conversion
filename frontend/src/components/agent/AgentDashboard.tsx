@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Panel } from '../common/Panel';
 import { AlertTriangle, Building2, CalendarClock, Flame, Loader2, MessageSquare, RefreshCw, Users } from 'lucide-react';
 import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -125,19 +126,19 @@ export const AgentDashboard: React.FC = () => {
 
       {/* The chats that brought leads to this agent, newest first: the AI's
           qualification and the booking, before the agent takes it from there. */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-emerald-400" />
-            Recent conversations
-          </h3>
+      <Panel
+        title="Recent conversations"
+        icon={<MessageSquare className="w-4 h-4 text-emerald-400" />}
+        aside={
           <button
             onClick={() => navigate('/conversations')}
-            className="text-xs text-emerald-400 font-semibold hover:text-emerald-300 cursor-pointer"
+            className="text-xs text-emerald-400 font-semibold hover:text-emerald-300 cursor-pointer shrink-0"
           >
             View all
           </button>
-        </div>
+        }
+        className="min-h-56 max-h-80"
+      >
         {threads === null ? (
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
@@ -168,7 +169,7 @@ export const AgentDashboard: React.FC = () => {
             ))}
           </ul>
         )}
-      </div>
+      </Panel>
 
       {/* Said plainly rather than left looking broken: the counts are real, and
           they are zero because nothing assigns leads to agents yet. */}

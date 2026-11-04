@@ -19,7 +19,7 @@ export interface FileImportLimits {
   accept: string[];
 }
 
-export type RowIssue = 'NO_NAME' | 'NO_CONTACT' | 'DUPLICATE_IN_FILE' | 'NO_ROW_ID' | 'DUPLICATE_IN_SHEET';
+export type RowIssue = 'NO_NAME' | 'NO_CONTACT' | 'PHONE_NO_COUNTRY_CODE' | 'DUPLICATE_IN_FILE' | 'NO_ROW_ID' | 'DUPLICATE_IN_SHEET';
 
 export interface FilePreview {
   file: {

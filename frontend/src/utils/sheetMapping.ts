@@ -112,6 +112,7 @@ export const ISSUE_TEXT: Record<string, string> = {
   NO_ROW_ID: 'No value in the ID column',
   NO_NAME: 'No name',
   NO_CONTACT: 'No usable phone or email',
+  PHONE_NO_COUNTRY_CODE: 'Phone has no country code — add it (e.g. +91) and import again',
   DUPLICATE_IN_SHEET: 'Same ID as an earlier row',
   DUPLICATE_IN_FILE: 'Same name, phone and email as an earlier row',
 };

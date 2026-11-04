@@ -33,9 +33,9 @@ export function toSyntheticAnswers(fields: DescribedField[]): NormalizedAnswer[]
   }));
 }
 
-export function prebuildMappings(fields: DescribedField[], defaultRegion: string): PrebuildResult {
+export function prebuildMappings(fields: DescribedField[]): PrebuildResult {
   const answers = toSyntheticAnswers(fields);
-  const suggested = suggestMappings(answers, defaultRegion);
+  const suggested = suggestMappings(answers);
 
   const withheld: string[] = [];
   const mappings: PrebuiltMapping[] = [];

@@ -354,7 +354,9 @@ export interface LeadStats {
   byTemperature: Record<string, number>;
   total: number;
   /** Sources and agents that hold at least one lead: the Leads screen's filter options. */
-  sources: { id: string; name: string }[];
+  /** `code` is unique per organization; `name` is not, so it is what tells two alike apart. */
+  sources: { id: string; name: string; code: string }[];
+  /** Keyed by user id — the same id a lead's assignment holds. */
   agents: { id: string; name: string }[];
 }
 
@@ -516,6 +518,24 @@ export interface NewLeadInput {
   startOutreach: boolean;
 }
 
+/**
+ * A correction to a lead that already exists. Only the keys sent change, and "" clears a text
+ * field. A phone must carry its country code: the server refuses one without, because the
+ * digits alone never say which country a number is from and a guessed one cannot be called.
+ */
+export interface LeadUpdateInput {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+  timeline?: string;
+  minBudget?: number | null;
+  maxBudget?: number | null;
+  bedrooms?: number | null;
+  notes?: string;
+}
+
 export const leadsApi = {
   /** One page of leads, newest first. Empty values are left out so the server's defaults apply. */
   list: (params: ListLeadsParams = {}) => {
@@ -531,6 +551,9 @@ export const leadsApi = {
   /** Owner-only. One lead typed in by hand; a phone or an email is required. */
   create: (input: NewLeadInput) =>
     request<{ id: string }>('/v1/leads', { method: 'POST', body: JSON.stringify(input) }),
+  /** Corrects an existing lead. Needs lead.update. Chiefly how an undialable phone is fixed. */
+  update: (leadId: string, input: LeadUpdateInput) =>
+    request<{ id: string }>(`/v1/leads/${leadId}`, { method: 'PATCH', body: JSON.stringify(input) }),
   /** Owner-only. Any of the 9 statuses; ends the strategy for an outcome. follow_up takes a reason. */
   setStatus: (leadId: string, status: string, reason?: string, followUpReason?: FollowUpReason) =>
     request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {

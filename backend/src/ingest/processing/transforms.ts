@@ -1,4 +1,4 @@
-import parsePhoneNumberFromString, { type CountryCode } from 'libphonenumber-js';
+import parsePhoneNumberFromString from 'libphonenumber-js';
 import { canonicalZone } from '@/common/utils/lead-timezone';
 import { isTimeZone } from '@/common/utils/zoned-time';
 
@@ -6,7 +6,7 @@ export type Transform =
   | { kind: 'passthrough' }
   | { kind: 'text'; maxLen?: number }
   | { kind: 'name_split'; part: 'first' | 'last' }
-  | { kind: 'phone_e164'; defaultRegion?: string }
+  | { kind: 'phone_e164' }
   | { kind: 'timezone' }
   | { kind: 'email' }
   | { kind: 'number' }
@@ -14,6 +14,14 @@ export type Transform =
   | { kind: 'enum_map'; byOptionText: Record<string, string>; fallback?: string | null }
   | { kind: 'boolean'; truthy?: string[] }
   | { kind: 'constant'; value: string };
+
+/**
+ * Whether a stored phone can actually be rung. A leading "+" is not enough: "+91 123" looks
+ * international and is nothing anyone can dial, and a number we keep but cannot dial is a lead
+ * nobody reaches. Only a number libphonenumber reads end to end counts.
+ */
+export const isDialable = (phone: string | null | undefined): boolean =>
+  Boolean(phone && parsePhoneNumberFromString(phone)?.isValid());
 
 export interface TransformResult {
   value: string | number | boolean | null;
@@ -108,7 +116,6 @@ export function applyTransform(
   transform: Transform,
   textValues: string[],
   scalarText: string,
-  defaultRegion: string,
 ): TransformResult {
   switch (transform.kind) {
     case 'constant':
@@ -132,10 +139,18 @@ export function applyTransform(
 
     case 'phone_e164': {
       if (!scalarText) return { value: null };
-      const region = (transform.defaultRegion ?? defaultRegion) as CountryCode;
-      const parsed = parsePhoneNumberFromString(scalarText, region);
+      // No country is ever assumed. A bare national number says nothing about where it is
+      // from — the same ten digits are valid in dozens of countries — so guessing one turns
+      // a reachable lead into an unreachable number that still looks right. Leaving it
+      // unparsed is what flags the row for review and keeps it out of the dialler.
+      const parsed = parsePhoneNumberFromString(scalarText);
       if (!parsed?.isValid()) {
-        return { value: scalarText, warning: `Could not parse "${scalarText}" as a phone number` };
+        return {
+          value: scalarText,
+          warning: scalarText.trim().startsWith('+')
+            ? `"${scalarText}" is not a phone number we can read`
+            : `"${scalarText}" has no country code, so we cannot tell which country it is from — add one, e.g. +91 98765 43210`,
+        };
       }
       return { value: parsed.number };
     }

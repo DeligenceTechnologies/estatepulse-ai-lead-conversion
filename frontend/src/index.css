@@ -33,10 +33,13 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --color-white: oklch(20.8% 0.042 265.755);
-  /* Heavy dark-mode shadows read as floating cards on white; keep them hairline. */
-  --shadow-lg: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
-  --shadow-xl: 0 1px 2px rgb(15 23 42 / 0.04), 0 2px 6px rgb(15 23 42 / 0.06);
-  --shadow-2xl: 0 8px 30px rgb(15 23 42 / 0.12);
+  /* Hairline, and tinted with the accent rather than neutral grey, so a card on
+     white sits in the same palette as everything on it. */
+  --shadow-lg: 0 1px 2px var(--tw-shadow-color, rgb(6 78 59 / 0.05)),
+    0 2px 8px var(--tw-shadow-color, rgb(6 78 59 / 0.07));
+  --shadow-xl: 0 1px 2px var(--tw-shadow-color, rgb(6 78 59 / 0.05)),
+    0 4px 14px var(--tw-shadow-color, rgb(6 78 59 / 0.08));
+  --shadow-2xl: 0 10px 34px var(--tw-shadow-color, rgb(6 78 59 / 0.14));
   --color-slate-50: oklch(12.9% 0.042 264.695);
   --color-slate-100: oklch(20.8% 0.042 265.755);
   --color-slate-200: oklch(27.9% 0.041 260.031);
@@ -172,6 +175,74 @@
 
 :root:not([data-theme="light"]) {
   color-scheme: dark;
+}
+
+/*
+ * Chart fills.
+ *
+ * A hard-coded hex cannot follow the theme, and these two themes are not each
+ * other's flip: the lead-stage ramp has to brighten as a lead advances on the
+ * dark card and darken on the white one. Each set was validated against its own
+ * card surface - the stage ramp as an ordinal ramp (monotone L, >= 0.06 between
+ * steps, light end clear of the surface), the call colours as a categorical set.
+ */
+:root {
+  /* Lead stages, New -> Booked: dimmest first, brightest last on the dark card. */
+  --chart-stage-1: #047857;
+  --chart-stage-2: #059669;
+  --chart-stage-3: #34d399;
+  --chart-stage-4: #6ee7b7;
+  /* Out of the pipeline, and anything this build has no name for. */
+  --chart-muted: #475569;
+  --chart-muted-soft: #64748b;
+  /* Call results. One set serves both themes: all four clear 3:1 on either card. */
+  --chart-good: #059669;
+  --chart-info: #0284c7;
+  --chart-warn: #d97706;
+  --chart-bad: #e11d48;
+}
+
+:root[data-theme="light"] {
+  /* On white the ramp runs the other way: palest at New, deepest at Booked. */
+  --chart-stage-1: #10b981;
+  --chart-stage-2: #059669;
+  --chart-stage-3: #047857;
+  --chart-stage-4: #064e3b;
+  --chart-muted: #64748b;
+  --chart-muted-soft: #94a3b8;
+}
+
+/*
+ * Card shadows.
+ *
+ * Tailwind inlines each utility's shadow into --tw-shadow, so the --shadow-*
+ * values above never reached .shadow-lg / .shadow-xl / .shadow-2xl: every card
+ * carried Tailwind's black in both themes - invisible on the near-black page,
+ * and colder than the rest of the UI on white. Pointing the three utilities back
+ * at the variables makes one definition per theme cover every card in the app.
+ *
+ * Dark gets a low accent glow for the lift a black shadow cannot give it there.
+ * Each layer keeps var(--tw-shadow-color) ahead of its default, so the places
+ * that pair a shadow utility with a colour (shadow-emerald-500/20 and friends)
+ * still tint their own shadow.
+ */
+:root {
+  --shadow-lg: 0 1px 2px var(--tw-shadow-color, rgb(2 6 23 / 0.5)),
+    0 4px 14px var(--tw-shadow-color, rgb(16 185 129 / 0.05));
+  --shadow-xl: 0 1px 2px var(--tw-shadow-color, rgb(2 6 23 / 0.5)),
+    0 8px 24px var(--tw-shadow-color, rgb(16 185 129 / 0.07));
+  --shadow-2xl: 0 2px 6px var(--tw-shadow-color, rgb(2 6 23 / 0.6)),
+    0 16px 44px var(--tw-shadow-color, rgb(16 185 129 / 0.12));
+}
+
+.shadow-lg {
+  --tw-shadow: var(--shadow-lg);
+}
+.shadow-xl {
+  --tw-shadow: var(--shadow-xl);
+}
+.shadow-2xl {
+  --tw-shadow: var(--shadow-2xl);
 }
 
 body {

@@ -1,14 +1,40 @@
 import React, { useState } from 'react';
-import { Loader2, UserPlus } from 'lucide-react';
+import { AlertTriangle, Loader2, Pencil, UserPlus } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { leadsApi, type NewLeadInput } from '../../api/client';
+import { leadsApi, type LeadUpdateInput, type NewLeadInput } from '../../api/client';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
-interface NewLeadModalProps {
+/**
+ * Only the fields this form edits. Narrower than a full lead on purpose: the leads table, the
+ * import review queue and anywhere else holding a lead can all open it without first having to
+ * own every field a lead has.
+ */
+export interface EditableLead {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  /** False when the number cannot be dialled — usually because it carries no country code. */
+  phoneValid: boolean;
+  email: string | null;
+  location: string | null;
+  timeline: string | null;
+  minBudget: number | null;
+  maxBudget: number | null;
+  bedrooms: number | null;
+  motivation: string | null;
+}
+
+interface LeadFormModalProps {
   onClose: () => void;
-  /** Called with the new lead's id once it is saved. */
-  onCreated: (leadId: string) => void;
+  /**
+   * The lead being corrected. Leave it out to add a new one: the fields are the same, so the
+   * two share a form rather than drifting apart.
+   */
+  lead?: EditableLead;
+  /** Called with the lead's id once it is saved, so the list behind can refresh. */
+  onSaved: (leadId: string) => void;
 }
 
 /** The backend stores budgets as Decimal(12, 2). */
@@ -27,22 +53,27 @@ const optionalNumber = (value: string): number | undefined => {
   return value.trim() && Number.isFinite(n) ? Math.round(n) : undefined;
 };
 
+const text = (v: string | null | undefined): string => v ?? '';
+const number = (v: number | null | undefined): string => (v === null || v === undefined ? '' : String(v));
+
 /**
- * Adds one lead by hand. It goes through the same pipeline as a form
- * submission: with outreach on, the AI picks it up like any new lead.
+ * One lead, typed in or corrected. A new lead goes through the same pipeline as a form
+ * submission: with outreach on, the AI picks it up like any other. Correcting an existing
+ * one is chiefly how a phone number that arrived without its country code is made dialable.
  */
-export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }) => {
+export const LeadFormModal: React.FC<LeadFormModalProps> = ({ onClose, lead, onSaved }) => {
+  const editing = lead !== undefined;
   const [form, setForm] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    email: '',
-    location: '',
-    timeline: '',
-    minBudget: '',
-    maxBudget: '',
-    bedrooms: '',
-    notes: '',
+    firstName: text(lead?.firstName),
+    lastName: text(lead?.lastName),
+    phone: text(lead?.phone),
+    email: text(lead?.email),
+    location: text(lead?.location),
+    timeline: text(lead?.timeline),
+    minBudget: number(lead?.minBudget),
+    maxBudget: number(lead?.maxBudget),
+    bedrooms: number(lead?.bedrooms),
+    notes: text(lead?.motivation),
     timezone: '',
   });
   const [consent, setConsent] = useState(false);
@@ -67,28 +98,48 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
       setError({ message: 'Budget is too large. Enter the amount in full, e.g. 650000.', details: [] });
       return;
     }
-    const body: NewLeadInput = {
-      firstName: form.firstName.trim(),
-      lastName: optionalText(form.lastName),
-      phone: optionalText(form.phone),
-      email: optionalText(form.email),
-      location: optionalText(form.location),
-      timeline: optionalText(form.timeline),
-      minBudget,
-      maxBudget,
-      bedrooms: optionalNumber(form.bedrooms),
-      notes: optionalText(form.notes),
-      timezone: optionalText(form.timezone),
-      consent,
-      startOutreach: consent && startOutreach,
-    };
     setSaving(true);
     setError(null);
     try {
-      const { id } = await leadsApi.create(body);
-      // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
-      toast.success('Lead added.');
-      onCreated(id);
+      if (editing) {
+        // Every field goes, "" and all: on a correction "" means clear, and the form already
+        // holds the whole lead, so sending it all keeps the request and the screen in step.
+        const body: LeadUpdateInput = {
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          phone: form.phone.trim(),
+          email: form.email.trim(),
+          location: form.location.trim(),
+          timeline: form.timeline.trim(),
+          minBudget: minBudget ?? null,
+          maxBudget: maxBudget ?? null,
+          bedrooms: optionalNumber(form.bedrooms) ?? null,
+          notes: form.notes.trim(),
+        };
+        await leadsApi.update(lead.id, body);
+        toast.success('Lead updated.');
+        onSaved(lead.id);
+      } else {
+        const body: NewLeadInput = {
+          firstName: form.firstName.trim(),
+          lastName: optionalText(form.lastName),
+          phone: optionalText(form.phone),
+          email: optionalText(form.email),
+          location: optionalText(form.location),
+          timeline: optionalText(form.timeline),
+          minBudget,
+          maxBudget,
+          bedrooms: optionalNumber(form.bedrooms),
+          notes: optionalText(form.notes),
+          timezone: optionalText(form.timezone),
+          consent,
+          startOutreach: consent && startOutreach,
+        };
+        const { id } = await leadsApi.create(body);
+        // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
+        toast.success('Lead added.');
+        onSaved(id);
+      }
       onClose();
     } catch (err) {
       setError({ message: errorText(err), details: errorDetails(err) });
@@ -98,16 +149,31 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
 
   return (
     <SheetModal
-      title="Add a lead"
-      subtitle="Type in a lead you got by phone, walk-in or referral."
+      title={editing ? 'Edit lead' : 'Add a lead'}
+      subtitle={
+        editing
+          ? 'Correct what you know. Clearing a field empties it.'
+          : 'Type in a lead you got by phone, walk-in or referral.'
+      }
       icon={
         <div className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-          <UserPlus className="w-4 h-4" />
+          {editing ? <Pencil className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
         </div>
       }
       onClose={onClose}
     >
       <form onSubmit={submit} className="space-y-4">
+        {/* The one correction this form exists for, said where the number is about to be typed. */}
+        {editing && lead.phone && !lead.phoneValid && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-2xs text-amber-200 leading-relaxed">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+            <span>
+              <span className="font-semibold text-amber-100">This number cannot be dialled.</span> It has no country code,
+              and the digits alone never say which country a number is from, so we will not guess one. Put the code in
+              below — or add it in the sheet this lead came from and sync again. Either way fixes it.
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="nl-first" className={label}>
@@ -136,32 +202,37 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
             <input id="nl-email" type="email" maxLength={255} value={form.email} onChange={set('email')} className={input} />
           </div>
         </div>
-        <p className="text-2xs text-slate-500 -mt-2">A phone number or an email is required.</p>
+        <p className="text-2xs text-slate-500 -mt-2">
+          A phone number or an email is required. Start a phone number with its country code, e.g. +91 98765 43210 —
+          without one we cannot tell which country it belongs to, and the lead cannot be called.
+        </p>
 
-        <div>
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
-            {form.timezone && (
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
-                className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
-              >
-                Use phone&rsquo;s
-              </button>
-            )}
+        {!editing && (
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
+              {form.timezone && (
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
+                  className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Use phone&rsquo;s
+                </button>
+              )}
+            </div>
+            <TimezoneSelect
+              id="nl-timezone"
+              value={form.timezone}
+              placeholder="Work it out from the phone number"
+              onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
+              className={input}
+            />
+            <p className="text-2xs text-slate-500 mt-1">
+              Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
+            </p>
           </div>
-          <TimezoneSelect
-            id="nl-timezone"
-            value={form.timezone}
-            placeholder="Work it out from the phone number"
-            onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
-            className={input}
-          />
-          <p className="text-2xs text-slate-500 mt-1">
-            Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
-          </p>
-        </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -206,6 +277,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
           />
         </div>
 
+        {!editing && (
         <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-3">
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input
@@ -240,6 +312,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
             </span>
           </label>
         </div>
+        )}
 
         {error && <SheetError message={error.message} details={error.details} />}
 
@@ -257,7 +330,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
             className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
           >
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Add lead
+            {editing ? 'Save changes' : 'Add lead'}
           </button>
         </div>
       </form>

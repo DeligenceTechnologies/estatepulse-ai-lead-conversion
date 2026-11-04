@@ -195,11 +195,7 @@ export class SheetSourcesService {
   async preview(orgId: string, sourceId: string) {
     const source = await this.mustFind(orgId, sourceId);
     const { spreadsheetId, sheetId } = parseExternal(source);
-    const [saved, settings] = await Promise.all([
-      this.savedMapping(orgId, sourceId),
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } }),
-    ]);
-    const region = settings?.defaultRegion ?? 'US';
+    const saved = await this.savedMapping(orgId, sourceId);
 
     const { tab, headerCells, data } = await this.connections.withAccessToken(orgId, source.integrationId ?? '', async (token) => {
       const meta = await this.google.spreadsheet(token, spreadsheetId);
@@ -222,17 +218,16 @@ export class SheetSourcesService {
 
     const headers = analyzeHeaders(headerCells);
     const sample = data.slice(0, SUGGEST_ROWS).map((r) => r.cells);
-    const columns: ColumnMapping[] = saved ? toColumns(saved) : suggestColumns(headers, sample, region);
+    const columns: ColumnMapping[] = saved ? toColumns(saved) : suggestColumns(headers, sample);
     const candidates = identityCandidates(headers, sample);
     const identity: Identity = sourceIdentity(source) ?? (candidates[0] ? { mode: 'column', fieldKey: candidates[0] } : { mode: 'fallback' });
     const problems = validateMapping(columns, identity, headers);
-    const mappings = expandMapping(columns.filter((c) => headers.some((h) => h.fieldKey === c.fieldKey)), region);
+    const mappings = expandMapping(columns.filter((c) => headers.some((h) => h.fieldKey === c.fieldKey)));
     const ctx = {
       headerIndex: new Map(headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.index])),
       labels: new Map(headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.label])),
       mappings,
       identity,
-      region,
     };
     const seen = new Set<string>();
     const verdicts = data
@@ -282,22 +277,19 @@ export class SheetSourcesService {
       if (imported > 0) throw httpError(409, 'IDENTITY_LOCKED', 'Rows were already imported with the current row identity, so it cannot change now.');
     }
 
-    const [headers, settings] = await Promise.all([
-      this.connections.withAccessToken(orgId, source.integrationId ?? '', async (token) => {
+    const headers = await this.connections.withAccessToken(orgId, source.integrationId ?? '', async (token) => {
         const meta = await this.google.spreadsheet(token, spreadsheetId);
         const t = (meta.sheets ?? []).map((s) => s.properties).find((p) => p.sheetId === sheetId);
         if (!t) throw httpError(404, 'TAB_MISSING', 'The connected tab no longer exists in the spreadsheet.');
         const columns = Math.min(t.gridProperties?.columnCount ?? MAX_COLUMNS, MAX_COLUMNS);
         const [row = []] = await this.google.readGrid(token, spreadsheetId, sheetId, 1, columns, 0);
         return analyzeHeaders(row);
-      }),
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } }),
-    ]);
+    });
     const columns = body.columns as ColumnMapping[];
     const errors = validateMapping(columns, identity, headers);
     if (errors.length > 0) throw new AppError('VALIDATION_ERROR', 'The mapping does not fit this sheet', errors);
 
-    const stored = expandMapping(columns, settings?.defaultRegion ?? 'US');
+    const stored = expandMapping(columns);
     const newAck = identity.mode === 'fallback' && !source.syncFallbackAckAt;
     await this.prisma.$transaction(async (tx) => {
       await tx.leadSourceFieldMapping.deleteMany({ where: { orgId, leadSourceId: sourceId } });
@@ -452,10 +444,14 @@ export class SheetSourcesService {
             firstName: true,
             lastName: true,
             phone: true,
+            phoneValid: true,
             email: true,
             location: true,
+            timeline: true,
             minBudget: true,
             maxBudget: true,
+            bedrooms: true,
+            motivation: true,
             dncStatus: true,
             reviewReasons: true,
           },
@@ -483,10 +479,14 @@ export class SheetSourcesService {
               firstName: r.lead.firstName,
               lastName: r.lead.lastName,
               phone: r.lead.phone,
+              phoneValid: r.lead.phoneValid,
               email: r.lead.email,
               location: r.lead.location,
+              timeline: r.lead.timeline,
               minBudget: r.lead.minBudget === null ? null : Number(r.lead.minBudget),
               maxBudget: r.lead.maxBudget === null ? null : Number(r.lead.maxBudget),
+              bedrooms: r.lead.bedrooms,
+              motivation: r.lead.motivation,
               dncStatus: r.lead.dncStatus,
               reviewReasons: r.lead.reviewReasons,
             }

@@ -1,9 +1,15 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { PanelClose } from '../leadsources/ManualWebhookPanel';
 
 /**
  * The overlay every Google Sheets dialog uses — the same shell as ConnectModal:
  * Escape and the backdrop close it, and the page behind does not scroll.
+ *
+ * It renders into document.body. A dialog opened from inside a card sits deep
+ * in that card's markup, where the overlay only covered the part of the screen
+ * its ancestors occupied; from the body it covers the whole screen the same way
+ * wherever it was opened from.
  */
 export const SheetModal: React.FC<{
   title: string;
@@ -24,13 +30,13 @@ export const SheetModal: React.FC<{
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div className={`w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} my-8`} onClick={(e) => e.stopPropagation()}>
-        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-2xl">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-2xl">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-2 min-w-0">
               {icon}
@@ -44,7 +50,8 @@ export const SheetModal: React.FC<{
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

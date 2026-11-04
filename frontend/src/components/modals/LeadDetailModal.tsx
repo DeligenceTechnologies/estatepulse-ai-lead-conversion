@@ -249,7 +249,7 @@ export const LeadDetailModal: React.FC = () => {
 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-slate-950/80 animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] text-slate-100">
         {/* Pinned to the corner, outside the header's wrapping rows, so it is
             always in the same place however the actions wrap. */}
