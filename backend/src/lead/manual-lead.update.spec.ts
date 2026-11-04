@@ -11,6 +11,8 @@ const LEAD = {
   normalizedEmail: null as string | null,
   dncStatus: false,
   reviewReasons: [PHONE_UNPARSED_REASON],
+  /** Rows still waiting in import review. Zero means the lead is in the pipeline and off limits. */
+  _count: { sheetImportRows: 1 },
 };
 
 /** The service with just enough Prisma to see what it would write. */
@@ -75,6 +77,12 @@ describe('correcting a lead by hand', () => {
     expect(data).toMatchObject({ location: 'Indore' });
     expect(data).not.toHaveProperty('phone');
     expect(data).not.toHaveProperty('email');
+  });
+
+  test('a lead already in the pipeline cannot be edited here', async () => {
+    const s = setup({ _count: { sheetImportRows: 0 } });
+    await expect(run(s, { phone: '+919024848980' })).rejects.toThrow(/import review/);
+    expect(s.update).not.toHaveBeenCalled();
   });
 
   test('the change is written to the audit log', async () => {

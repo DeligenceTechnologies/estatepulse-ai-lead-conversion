@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ConsentStatus, LeadStatus, LeadTemperature, Prisma } from '@prisma/client';
+import { ConsentStatus, LeadStatus, LeadTemperature, Prisma, ReviewState } from '@prisma/client';
 import parsePhoneNumberFromString from 'libphonenumber-js';
 import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
@@ -12,9 +12,10 @@ import type { UpdateLeadDto } from './dto/update-lead.dto';
 const DNC_REASON = 'This phone or email is on the do-not-contact list from an earlier lead';
 
 /**
- * Leads an owner works on by hand on the Leads screen: one typed in, and one corrected
- * afterwards. A lead typed in has no lead source and joins the same pipeline as a form
- * submission: status `new`, so the lead watcher enrolls it in the strategy unless paused.
+ * Leads an owner works on by hand: one typed in on the Leads screen, and one corrected while
+ * it still waits in import review. A lead typed in has no lead source and joins the same
+ * pipeline as a form submission: status `new`, so the lead watcher enrolls it in the strategy
+ * unless paused.
  */
 @Injectable()
 export class ManualLeadService {
@@ -114,10 +115,13 @@ export class ManualLeadService {
   }
 
   /**
-   * Corrects an existing lead, whatever it came from. The reason this exists: a lead imported
-   * with a phone number that carried no country code is kept but cannot be dialled, and the
-   * sheet it came from is not always the owner’s to edit. Putting the country code in here
-   * clears that flag and lets outreach reach them.
+   * Corrects a lead that is still waiting in import review, before anyone decides on it. The
+   * reason this exists: a row imported with a phone number that carried no country code is kept
+   * but cannot be dialled, and the sheet it came from is not always the owner’s to edit. Putting
+   * the country code in here clears that flag and lets the row be approved.
+   *
+   * A lead already in the pipeline is not editable: it has been approved, outreach may have run
+   * on it, and the source it came from stays the thing that owns its details.
    *
    * Only the keys sent are touched; "" clears a text field.
    */
@@ -132,9 +136,16 @@ export class ManualLeadService {
         normalizedEmail: true,
         dncStatus: true,
         reviewReasons: true,
+        _count: { select: { sheetImportRows: { where: { reviewState: ReviewState.pending } } } },
       },
     });
     if (!lead) throw new AppError('NOT_FOUND', 'That lead no longer exists.');
+    if (lead._count.sheetImportRows === 0) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Only a lead still waiting in import review can be edited here. Correct this one where it came from and sync again.',
+      );
+    }
 
     const data: Prisma.LeadUpdateInput = {};
     const changed: string[] = [];
