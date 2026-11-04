@@ -453,13 +453,13 @@ export class InboundSmsService {
     const agentCanReply = AGENT_ANSWERS.includes(lead.status) && !!lead.assignedToId && (await this.agentCanReply(orgId, lead.assignedToId));
     const route = replyRoute({ ...lead, agentCanReply });
     if (route.by === 'person') {
-      if (route.flagOwner) return this.forPerson(orgId, lead.id, lead.reviewReasons, route.reason);
+      if (route.flagOwner) return this.forPerson(orgId, lead.id, lead.reviewReasons, `No AI reply: ${route.reason}`);
       this.state.quietly({ orgId, leadId: lead.id, type: 'left_to_agent', source: 'sms_reply', channel: 'sms', reason: `No AI reply: ${route.reason}` });
       return;
     }
-    if (route.flagOwner) await this.forPerson(orgId, lead.id, lead.reviewReasons, 'a booked lead with no agent texted us; the AI answered');
+    if (route.flagOwner) await this.forPerson(orgId, lead.id, lead.reviewReasons, 'A booked lead with no agent texted us: the AI answers, and someone should follow up on the meeting');
     if (reply.answered) return;
-    if (!reply.inboundId) return this.forPerson(orgId, lead.id, lead.reviewReasons, 'the text could not be stored');
+    if (!reply.inboundId) return this.forPerson(orgId, lead.id, lead.reviewReasons, 'No AI reply: the text could not be stored');
     try {
       await this.replies.add(
         SmsReplyJob.Reply,
@@ -475,7 +475,7 @@ export class InboundSmsService {
       );
     } catch (error) {
       this.logger.error(`lead ${lead.id}: queueing the AI reply failed: ${(error as Error).message}`);
-      await this.forPerson(orgId, lead.id, lead.reviewReasons, 'the AI reply could not be queued');
+      await this.forPerson(orgId, lead.id, lead.reviewReasons, 'No AI reply: it could not be queued');
     }
   }
 
@@ -484,12 +484,12 @@ export class InboundSmsService {
     return (await this.prisma.user.count({ where: { id: userId, orgId, status: 'active', roles: { some: { role: AGENT_ROLE_WHERE } } } })) > 0;
   }
 
-  /** The text waits for a person: the lead is flagged once, and its conversation is already lit up for the team. */
+  /** A person must look at the text: the lead is flagged once, and its conversation is already lit up for the team. `why` is logged as it is. */
   private async forPerson(orgId: string, leadId: string, reasons: string[], why: string): Promise<void> {
     // A lead made from an unknown number already says a person must answer it.
     const flag = !reasons.includes(PERSON_REPLY_REVIEW) && !reasons.includes(STRANGER_REVIEW);
     await this.prisma.lead.update({ where: { id: leadId }, data: { needsReview: true, ...(flag ? { reviewReasons: { push: PERSON_REPLY_REVIEW } } : {}) } });
-    this.state.quietly({ orgId, leadId, type: 'needs_person', source: 'sms_reply', channel: 'sms', reason: `No AI reply: ${why}` });
+    this.state.quietly({ orgId, leadId, type: 'needs_person', source: 'sms_reply', channel: 'sms', reason: why });
   }
 
   private async brokerage(orgId: string): Promise<string> {
