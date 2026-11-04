@@ -165,6 +165,17 @@ export function toolFunctions(assistantTools: unknown[]): FunctionTool[] {
   return out;
 }
 
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+
+/** Typographic characters a model likes, as their GSM-7 forms: one em dash makes the whole text UCS-2, 70 characters a part instead of 160. */
+const gsm = (text: string) =>
+  text
+    .replace(/[\u2013\u2014\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u2033]/g, '"')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u00A0\u2009\u202F]/g, ' ');
+
 /** At most this long: three texts of GSM-7. */
 export const REPLY_MAX_CHARS = 459;
 
@@ -181,10 +192,17 @@ export function guardReply(text: string, allowedLinks: string[] = []): string {
     .trim();
   const prefix = new RegExp(`^${AGENT_MESSAGE_PREFIX.replace(/[[\]]/g, '\\$&').replace('<name>', '[^\\]]*')}\\s*`);
   reply = reply.replace(prefix, '');
+  // An email's domain is not a link: emails are set aside while links are taken out.
+  const emails: string[] = [];
+  reply = reply.replace(EMAIL, (email) => `\u0000${emails.push(email) - 1}\u0000`);
   for (const link of linksIn(reply)) {
     if (!allowedLinks.some((allowed) => allowed.includes(link) || link.includes(allowed))) reply = reply.split(link).join('');
   }
-  reply = reply.replace(/[ \t]+/g, ' ').replace(/ +([,.!?])/g, '$1').trim();
+  reply = reply.replace(/\u0000(\d+)\u0000/g, (_, i: string) => emails[Number(i)]);
+  reply = gsm(reply)
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ +([,.!?])/g, '$1')
+    .trim();
   if (reply.length <= REPLY_MAX_CHARS) return reply;
   const cut = reply.slice(0, REPLY_MAX_CHARS);
   const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));

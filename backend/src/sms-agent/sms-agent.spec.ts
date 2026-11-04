@@ -105,6 +105,15 @@ describe('guardReply', () => {
     expect(reply.endsWith('.')).toBe(true);
   });
 
+  it("keeps an email whole: its domain is not a link", () => {
+    expect(guardReply('A calendar invite is on its way to dee.four@example.com. See you then!')).toBe('A calendar invite is on its way to dee.four@example.com. See you then!');
+    expect(guardReply('Write to ana@x.co or see bit.ly/abc')).toBe('Write to ana@x.co or see');
+  });
+
+  it('turns the typographic characters a model likes into GSM-7 ones, so a text stays 160 characters a part', () => {
+    expect(guardReply('Got it \u2014 a 3-bed. You\u2019re \u201Cset\u201D\u2026')).toBe('Got it - a 3-bed. You\'re "set"...');
+  });
+
   it('is empty when nothing is left to send', () => {
     expect(guardReply('   ')).toBe('');
     expect(guardReply('https://evil.example')).toBe('');
