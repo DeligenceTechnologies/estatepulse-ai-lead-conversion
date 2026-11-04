@@ -183,10 +183,18 @@ export class TelnyxController {
     return { ...result, status: await this.creds.publicStatus(auth.organizationId) };
   }
 
-  /** Checks what calls need before saving: a key, an E.164 from-number and a Call Control application. */
+  /** Checks what calls need before saving: a key, the webhook public key, an E.164 from-number and a Call Control application. */
   private async validated(body: TelnyxCredentialsDto, current: TelnyxCreds | null): Promise<Partial<TelnyxCreds>> {
     const apiKey = body.apiKey || current?.apiKey || '';
     if (!apiKey) throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
+    // Without it every webhook that account sends is unverifiable, and unverified events are dropped.
+    const publicKey = body.publicKey || current?.publicKey || '';
+    if (!publicKey) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'A Telnyx public key is required to verify webhooks. Copy it from Telnyx → Account Settings → Keys & Credentials → Public Key.',
+      );
+    }
     const fromNumber = body.fromNumber !== undefined ? body.fromNumber : current?.fromNumber || '';
     if (!/^\+?[0-9]{7,15}$/.test(fromNumber.replace(/[\s()-]/g, ''))) {
       throw new AppError('VALIDATION_ERROR', 'A From Number in E.164 format (e.g. +12025550123) is required to place calls.');
@@ -203,7 +211,7 @@ export class TelnyxController {
       fromNumber,
       messagingProfileId: body.messagingProfileId || (await this.creds.findMessagingProfile(apiKey, fromNumber)),
       ...(body.apiKey ? { apiKey: body.apiKey } : {}),
-      ...(body.publicKey !== undefined ? { publicKey: body.publicKey } : {}),
+      publicKey,
       ...(body.label !== undefined ? { label: body.label } : {}),
     };
   }

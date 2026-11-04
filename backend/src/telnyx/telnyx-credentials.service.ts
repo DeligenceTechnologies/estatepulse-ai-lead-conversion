@@ -41,6 +41,7 @@ export interface TelnyxPublicStatus {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging: boolean;
+  hasPublicKey: boolean;
   fromNumber: string;
   assistantId: string;
   connectedAt: string | null;
@@ -55,6 +56,7 @@ export interface TelnyxAccount {
   connectionId: string;
   messagingProfileId: string;
   hasMessaging: boolean;
+  hasPublicKey: boolean;
   active: boolean;
   connectedAt: string | null;
 }
@@ -165,6 +167,7 @@ export class TelnyxCredentialsService {
           connectionId: c.connectionId,
           messagingProfileId: c.messagingProfileId,
           hasMessaging: Boolean(c.messagingProfileId),
+          hasPublicKey: Boolean(c.publicKey),
           active: row.status === IntegrationStatus.active,
           connectedAt: c.connectedAt,
         };
@@ -220,6 +223,7 @@ export class TelnyxCredentialsService {
       connectionId: c?.connectionId ?? '',
       messagingProfileId: c?.messagingProfileId ?? '',
       hasMessaging: Boolean(c && active && c.messagingProfileId),
+      hasPublicKey: Boolean(c?.publicKey),
       fromNumber: c?.fromNumber ?? '',
       assistantId: c && active ? c.assistantId : '',
       connectedAt: c?.connectedAt ?? null,
