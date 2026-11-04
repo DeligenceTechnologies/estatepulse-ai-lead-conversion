@@ -74,7 +74,11 @@ export class TelnyxWebhookController {
         // A received text is addressed to our number; a finalized one was sent from it.
         const ours = type === 'message.received' ? (payload?.to?.[0]?.phone_number ?? payload?.to?.phone_number) : payload?.from?.phone_number;
         const orgId = await this.creds.orgForNumber(normalizePhone(ours));
-        if (!orgId || !(await this.signedFor(orgId, delivery, () => this.weSent(payload?.id)))) return;
+        // A receipt for a text we sent can be placed without a signature. An inbound text never
+        // can: it is the lead speaking, and a forged one would set DNC, pause the outreach or
+        // put words in front of the AI classifier.
+        const receipt = type === 'message.finalized' ? () => this.weSent(payload?.id) : false;
+        if (!orgId || !(await this.signedFor(orgId, delivery, receipt))) return;
         if (type === 'message.received') await this.inbound.onMessageReceived(payload);
         else await this.inbound.onMessageFinalized(orgId, payload);
       })().catch((error) => this.logger.error(`messaging ${type}: ${(error as Error).message}`));
@@ -88,7 +92,8 @@ export class TelnyxWebhookController {
    * an unknown lead gets none, and the assistant goes on without them. A text
    * chat an agent has taken over is also marked AI-paused, which covers a
    * conversation Telnyx starts after the takeover (the lead's first text, or
-   * one after the inactivity limit).
+   * one after the inactivity limit). Only the chat context the channel's own
+   * prompt reads is sent, so a text chat is never handed the raw chat log.
    */
   @Post('assistant-variables')
   @HttpCode(HttpStatus.OK)
@@ -133,6 +138,11 @@ export class TelnyxWebhookController {
       const variables = await this.activity.leadVariables(orgId, leadId);
       // On a call, the call's own context was given when the assistant started; an empty one here must not replace it.
       if (ccid) delete variables.call_context;
+      // The prompt reads the chat log only on a call that follows texting, and the text being
+      // replied to only in a chat; each is blanked where its own channel never reads it, so the
+      // answer carries no conversation the asker could not already see.
+      if (!(ccid || channel === 'phone_call')) variables.recent_sms = '';
+      if (channel !== 'sms_chat') variables.last_outbound_sms = '';
       return { dynamic_variables: variables, ...(takenOver ? { conversation: { metadata: { ai_disabled: true as const } } } : {}) };
     } catch (error) {
       this.logger.error(`assistant variables (${p.telnyx_conversation_channel}): ${(error as Error).message}`);
