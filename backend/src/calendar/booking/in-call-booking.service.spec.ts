@@ -5,7 +5,16 @@ const LEAD = '01a17bc5-c10c-77d1-a25e-09e977f27406';
 const SANJAY = { id: 'user-sanjay', email: 'sanjay@example.com', firstName: 'Sanjay', lastName: 'K' };
 const START = '2026-10-29T04:30:00.000Z';
 
-function setup(opts: { hostEmail?: string; teammates?: (typeof SANJAY)[]; assignFails?: boolean } = {}) {
+/** A meeting the lead already has, as nextMeeting reads it. */
+const BOOKED = {
+  startsAt: new Date('2026-11-07T08:00:00.000Z'),
+  hosts: [{ name: 'Calendly Host' }],
+  rescheduleUrl: 'https://calendly.com/reschedulings/abc',
+  cancelUrl: 'https://calendly.com/cancellations/abc',
+  hostUser: { firstName: 'Sanjay', lastName: 'Kumar' },
+};
+
+function setup(opts: { hostEmail?: string; teammates?: (typeof SANJAY)[]; assignFails?: boolean; booked?: typeof BOOKED } = {}) {
   const prisma = {
     organizationSetting: { findUnique: vi.fn(async () => ({ timezone: 'Asia/Kolkata' })) },
     lead: {
@@ -13,7 +22,7 @@ function setup(opts: { hostEmail?: string; teammates?: (typeof SANJAY)[]; assign
       update: vi.fn(async () => ({})),
     },
     user: { findMany: vi.fn(async () => opts.teammates ?? [SANJAY]) },
-    calendarMeeting: { upsert: vi.fn(async () => ({})) },
+    calendarMeeting: { upsert: vi.fn(async () => ({})), findFirst: vi.fn(async () => opts.booked ?? null) },
   };
   const access = { useActive: vi.fn(async (_org: string, run: any) => run({ id: 'conn-1', provider: 'calendly' }, 'token')) };
   const calendly = {
@@ -43,7 +52,7 @@ function setup(opts: { hostEmail?: string; teammates?: (typeof SANJAY)[]; assign
     callId,
     config: { eventTypeUri: 'https://api.calendly.com/event_types/et', eventTypeName: 'Buyer Consultation' } as any,
   });
-  return { service, prisma, assignments, engine, audit, ctx };
+  return { service, prisma, assignments, engine, audit, ctx, calendly };
 }
 
 describe('InCallBookingService.book', () => {
@@ -96,6 +105,26 @@ describe('InCallBookingService.book', () => {
         action: 'lead.assignment_skipped',
         payload: expect.objectContaining({ reason: expect.stringContaining('during the AI text chat') }),
       }),
+    );
+  });
+
+  it('books no second meeting for a lead that has one, and gives the AI the links to move or cancel it', async () => {
+    const s = setup({ booked: BOOKED });
+    const result = await s.service.book(s.ctx(null), { start_time: START });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'already_booked',
+      meeting: 'Saturday, November 7 at 1:30 PM GMT+5:30',
+      with: 'Sanjay Kumar',
+      reschedule_link: BOOKED.rescheduleUrl,
+      cancel_link: BOOKED.cancelUrl,
+    });
+    expect((result as { say: string }).say).toContain('Never book another one');
+    expect(s.calendly.createInvitee).not.toHaveBeenCalled();
+    expect(s.engine.appointmentBooked).not.toHaveBeenCalled();
+    expect(s.prisma.calendarMeeting.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ orgId: 'org-1', leadId: LEAD, status: { in: ['scheduled', 'pending'] } }) }),
     );
   });
 });

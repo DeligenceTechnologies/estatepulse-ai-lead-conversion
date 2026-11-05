@@ -12,7 +12,6 @@ import {
   Hourglass,
   Pause,
   PenLine,
-  Pencil,
   Plus,
   Radio,
   RefreshCw,
@@ -34,7 +33,7 @@ import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { startLabel } from '../../utils/outreachApi';
 import { FileImportModal } from '../imports/FileImportModal';
-import { LeadFormModal } from '../modals/LeadFormModal';
+import { NewLeadModal } from '../modals/NewLeadModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
@@ -140,11 +139,10 @@ const attentionReasons = (l: LiveLead): string[] => [
   ...(l.contactLeadCount > 1
     ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`]
     : []),
-  // Such a lead must never be auto-dialed.
-  ...(l.phone && !l.phoneValid
-    ? [
-        'This number has no country code, so it cannot be dialled. Add the code with the pencil button, or put it in the sheet this lead came from and sync again.',
-      ]
+  // Such a lead must never be auto-dialed. Only said here when the lead carries no warning of
+  // its own about the number — otherwise this is the same news twice.
+  ...(l.phone && !l.phoneValid && !(l.needsReview && l.reviewReasons.some((r) => r.startsWith('Phone')))
+    ? ['Phone cannot be dialled — fix it where this lead came from and sync again']
     : []),
   // Nothing to call or text: no number at all (an unparseable one is reported just above).
   ...(l.timezone && !l.timezone.hasPhone && !l.phone ? ['No phone number — this lead cannot be called or texted.'] : []),
@@ -280,7 +278,7 @@ const TAB_FILTER: Record<Tab, Pick<ListLeadsParams, 'status' | 'temperature'>> =
 
 export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
-  const { user, role, can } = useAuth();
+  const { user, role } = useAuth();
   const isOwner = role === 'owner';
   // "Add leads" (owner only): one lead typed in by hand, or a file import where the server has it switched on.
   const [canImport, setCanImport] = useState(false);
@@ -418,8 +416,6 @@ export const LeadsView: React.FC = () => {
   const tabCount = (n: number | undefined): string => (stats ? ` (${n ?? 0})` : '');
 
   const openLead = (lead: LiveLead) => setSelectedLeadId(lead.id);
-  // The lead being corrected, or null. Held here because the list behind has to refresh after.
-  const [editLead, setEditLead] = useState<LiveLead | null>(null);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
@@ -525,10 +521,7 @@ export const LeadsView: React.FC = () => {
               )}
             </div>
           )}
-          {addOpen && <LeadFormModal onClose={() => setAddOpen(false)} onSaved={() => refresh()} />}
-          {editLead && (
-            <LeadFormModal lead={editLead} onClose={() => setEditLead(null)} onSaved={() => refresh()} />
-          )}
+          {addOpen && <NewLeadModal onClose={() => setAddOpen(false)} onCreated={() => refresh()} />}
           {importOpen && (
             <FileImportModal
               onClose={() => setImportOpen(false)}
@@ -810,26 +803,6 @@ export const LeadsView: React.FC = () => {
                             >
                               <Flame className="w-3.5 h-3.5 text-rose-400" />
                             </button>
-                          )}
-
-                          {/* A lead whose number cannot be dialled is the case this is here for, so it
-                              says so and stays visible rather than waiting for a hover. */}
-                          {can('lead.update') && (
-                          <button
-                            onClick={() => setEditLead(lead)}
-                            title={
-                              lead.phone && !lead.phoneValid
-                                ? 'This number has no country code and cannot be dialled — add it here, or fix it in the sheet and sync'
-                                : 'Edit this lead’s details'
-                            }
-                            className={`h-7 w-7 flex items-center justify-center rounded-lg transition cursor-pointer ${
-                              lead.phone && !lead.phoneValid
-                                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white opacity-60 group-hover:opacity-100 focus-visible:opacity-100'
-                            }`}
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
                           )}
 
                           <button

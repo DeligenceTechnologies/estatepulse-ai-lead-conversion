@@ -1,14 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { ConsentStatus, LeadStatus, LeadTemperature, Prisma } from '@prisma/client';
+import { ConsentStatus, LeadStatus, LeadTemperature } from '@prisma/client';
 import parsePhoneNumberFromString from 'libphonenumber-js';
 import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { CONSENT_REVIEW_REASON } from './consent';
-import { PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
+import { startsDoNotContact } from './contact-suppression';
 import type { CreateLeadDto } from './dto/create-lead.dto';
-import type { UpdateLeadDto } from './dto/update-lead.dto';
 
 const DNC_REASON = 'This phone or email is on the do-not-contact list from an earlier lead';
 

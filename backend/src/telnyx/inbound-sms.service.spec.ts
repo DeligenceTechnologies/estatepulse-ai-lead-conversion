@@ -1,29 +1,83 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { InboundSmsService } from './inbound-sms.service';
+import { DNC_REVIEW_REASON } from '@/lead/contact-suppression';
+import { INTENT_UNCHECKED_REVIEW, InboundSmsService, STRANGER_REVIEW } from './inbound-sms.service';
+import { OptOutService } from './opt-out.service';
 
-function setup(start: { status: string; dncStatus: boolean; takenOverById?: string | null }, opts: { ai?: boolean; intent?: string } = {}) {
-  const lead = { id: 'lead-1', orgId: 'org-1', firstResponseAt: null, takenOverById: null, ...start };
+const PHONE = '+12899174129';
+const OUR_NUMBER = '+17427245092';
+
+type TestLead = { id: string; orgId: string; status: string; dncStatus: boolean; normalizedPhone: string; firstResponseAt: Date | null; takenOverById: string | null; reviewReasons: string[] };
+
+function setup(
+  start: { status: string; dncStatus: boolean; takenOverById?: string | null },
+  opts: {
+    ai?: boolean;
+    intent?: string;
+    classify?: () => Promise<unknown>;
+    siblings?: Partial<TestLead>[];
+    stranger?: boolean;
+    details?: Record<string, string>;
+    /** Leads already made from unknown numbers in the last hour. */
+    strangers?: number;
+    /** Another text from the unknown number made its lead first. */
+    strangerRace?: boolean;
+  } = {},
+) {
+  const lead: TestLead = { id: 'lead-1', orgId: 'org-1', normalizedPhone: PHONE, firstResponseAt: null, takenOverById: null, reviewReasons: [], ...start };
+  const leads: TestLead[] = [lead, ...(opts.siblings ?? []).map((l, i) => ({ ...lead, id: `lead-${i + 2}`, ...l }))];
+  const byId = (id: string) => leads.find((l) => l.id === id);
+  const suppressed = new Set<string>();
   const prisma = {
     message: {
       findFirst: vi.fn(async () => null as unknown),
       findMany: vi.fn(async () => [{ direction: 'inbound', body: 'latest' }]),
-      create: vi.fn(async () => ({})),
+      create: vi.fn(async (_args?: any) => ({})),
       update: vi.fn(async () => ({})),
     },
     lead: {
-      findFirst: vi.fn(async () => ({ ...lead })),
-      findUnique: vi.fn(async () => ({ ...lead })),
-      update: vi.fn(async () => ({})),
-      updateMany: vi.fn(async ({ data }: any) => {
-        if (data?.status) lead.status = data.status;
-        return { count: 1 };
+      findFirst: vi.fn(async () => (opts.stranger ? null : { ...lead })),
+      create: vi.fn(async ({ data }: any) => {
+        const made = { id: 'lead-new', orgId: 'org-1', normalizedPhone: data.normalizedPhone, firstResponseAt: null, takenOverById: null, status: 'new', ...data };
+        leads.push(made);
+        return made;
       }),
+      findUnique: vi.fn(async ({ where }: any) => {
+        const found = byId(where.id);
+        return found ? { ...found } : null;
+      }),
+      findMany: vi.fn(async ({ where }: any) =>
+        leads.filter((l) => (where.dncStatus === undefined || l.dncStatus === where.dncStatus) && (opts.stranger ? false : true)).map((l) => ({ id: l.id })),
+      ),
+      update: vi.fn(async ({ where, data }: any) => {
+        const found = byId(where.id);
+        if (found && typeof data?.dncStatus === 'boolean') found.dncStatus = data.dncStatus;
+        return {};
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const found = byId(where.id);
+        if (found && data?.status) found.status = data.status;
+        return { count: found ? 1 : 0 };
+      }),
+      count: vi.fn(async ({ where }: any) => (where.reviewReasons ? (opts.strangers ?? 0) : leads.filter((l) => !where.takenOverById || l.takenOverById).length)),
     },
     leadEvent: { create: vi.fn(async () => ({})) },
+    contactSuppression: {
+      findMany: vi.fn(async ({ where }: any) => (where.normalizedPhone.in as string[]).filter((p) => suppressed.has(p)).map((normalizedPhone) => ({ normalizedPhone }))),
+      upsert: vi.fn(async ({ create }: any) => suppressed.add(create.normalizedPhone)),
+      deleteMany: vi.fn(async ({ where }: any) => suppressed.delete(where.normalizedPhone)),
+    },
+    organization: { findUnique: vi.fn(async () => ({ name: 'Skyline Realty' })) },
+    organizationSetting: { findUnique: vi.fn(async () => ({ businessDetails: opts.details ?? null })) },
+    $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)),
   };
-  const creds = { orgForNumber: vi.fn(async () => 'org-1') };
+  // Only our own numbers belong to an organization.
+  const creds = { orgForNumber: vi.fn(async (n: string) => (n === OUR_NUMBER ? 'org-1' : null)) };
+  if (opts.strangerRace) {
+    // The lookup outside the lock finds nothing; inside it, the lead the other text made.
+    prisma.lead.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...lead, reviewReasons: [STRANGER_REVIEW] } as any);
+  }
   const followup = { pauseForLead: vi.fn(), stopForLead: vi.fn() };
   const engine = { setStatus: vi.fn(async () => true) };
   const conversations = {
@@ -31,16 +85,18 @@ function setup(start: { status: string; dncStatus: boolean; takenOverById?: stri
     appendToChat: vi.fn(async () => undefined),
     pauseAi: vi.fn(async () => true),
   };
-  const intents = { classify: vi.fn(async () => ({ intent: opts.intent ?? 'continue', reason: 'test' })) };
+  const intents = { classify: vi.fn(opts.classify ?? (async () => ({ intent: opts.intent ?? 'continue', reason: 'test' }))) };
   const textBacks = { onLeadTexted: vi.fn(async () => undefined) };
   const callTools = { ensure: vi.fn(async () => undefined) };
   const bus = { publish: vi.fn() };
   const memory = { onLeadText: vi.fn() };
+  const sms = { sendSms: vi.fn(async (_org: string, _to: string, text: string) => ({ id: 'sent-1', text })) };
+  const state = new LeadStateService(prisma as any);
   const service = new InboundSmsService(
     prisma as any,
     creds as any,
     followup as any,
-    new LeadStateService(prisma as any),
+    state,
     engine as any,
     conversations as any,
     intents as any,
@@ -48,14 +104,19 @@ function setup(start: { status: string; dncStatus: boolean; takenOverById?: stri
     callTools as any,
     bus as any,
     memory as any,
+    new OptOutService(prisma as any, state, followup as any),
+    sms as any,
   );
-  const receive = (text: string) =>
-    service.onMessageReceived({ id: 'm-1', text, from: { phone_number: '+12899174129' }, to: [{ phone_number: '+17427245092' }] });
+  const receive = (text: string, extra: Record<string, unknown> = {}) =>
+    service.onMessageReceived({ id: 'm-1', text, from: { phone_number: PHONE }, to: [{ phone_number: OUR_NUMBER }], ...extra });
   const events = () => prisma.leadEvent.create.mock.calls.map((c: any[]) => c[0].data.type);
   const optedIn = () => prisma.lead.update.mock.calls.some((c: any[]) => c[0]?.data?.consentStatus === 'granted');
+  const optedOut = () => leads.filter((l) => l.dncStatus).map((l) => l.id);
+  /** The texts we sent that the rules require (a confirmation, a HELP answer). */
+  const notices = () => sms.sendSms.mock.calls.map((c: any[]) => c[2] as string);
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
-    service.onMessageFinalized('org-1', { id, text, from: { phone_number: '+17427245092' }, to: [{ phone_number: '+12899174129', status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, events, optedIn, textBacks, callTools, conversations, bus, memory };
+    service.onMessageFinalized('org-1', { id, text, from: { phone_number: OUR_NUMBER }, to: [{ phone_number: PHONE, status }] });
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, leads, events, optedIn, optedOut, notices, suppressed, sms, textBacks, callTools, conversations, bus, memory };
 }
 
 describe('InboundSmsService', () => {
@@ -134,6 +195,19 @@ describe('InboundSmsService', () => {
       await s.receive('please remove me from your list');
       expect(s.prisma.lead.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dncStatus: true }) }));
       expect(s.lead.status).toBe('not_interested');
+    });
+
+    it("leaves the confirmation of an opt-out in other words to the AI, which already answered", async () => {
+      const s = setup({ status: 'engaged', dncStatus: false }, { ai: true, intent: 'opt_out' });
+      await s.receive("I'd rather you didn't message me");
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.notices()).toEqual([]);
+    });
+
+    it('confirms an opt-out in other words itself when an agent holds a chat with the number, which pauses the AI', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false }, { ai: true, intent: 'opt_out', siblings: [{ takenOverById: 'agent-1' }] });
+      await s.receive("I'd rather you didn't message me");
+      expect(s.notices()).toHaveLength(1);
     });
 
     it('stores the AI\'s reply from its delivery report, once', async () => {
@@ -217,5 +291,281 @@ describe('InboundSmsService', () => {
     await start.receive('START');
     expect(stop.memory.onLeadText).not.toHaveBeenCalled();
     expect(start.memory.onLeadText).not.toHaveBeenCalled();
+  });
+
+  describe('opt-outs in other words (SMS02)', () => {
+    it('honours "Stop please" with the AI off: DNC at once, and our one confirmation', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('Stop please');
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.lead.status).toBe('not_interested');
+      expect(s.intents.classify).not.toHaveBeenCalled();
+      expect(s.notices()).toEqual(["You're unsubscribed from Skyline Realty and won't get more messages from us. Reply START to resubscribe."]);
+      expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', PHONE, expect.any(String), { evenIfOptedOut: true });
+    });
+
+    it.each(['STOP ALL', 'Opt out', 'opt-out.', 'stop texting me', 'Please remove me from your list', 'UNSUBSCRIBE!'])('honours "%s"', async (text) => {
+      const s = setup({ status: 'follow_up', dncStatus: false });
+      await s.receive(text);
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.followup.stopForLead).toHaveBeenCalledWith('org-1', 'lead-1', 'opted_out', s.prisma);
+    });
+
+    it('sends no confirmation of its own for a word Telnyx answered itself', async () => {
+      for (const text of ['STOP ALL', 'cancel', 'Quit']) {
+        const s = setup({ status: 'contacting', dncStatus: false });
+        await s.receive(text);
+        expect(s.optedOut()).toEqual(['lead-1']);
+        expect(s.notices()).toEqual([]);
+      }
+    });
+
+    it("trusts Telnyx's own verdict on a text it blocked", async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('please no more', { autoresponse_type: 'STOP' });
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.notices()).toEqual([]);
+    });
+
+    it('answers ARRÊT in French', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('ARRÊT');
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.notices()[0]).toContain('Vous êtes désabonné(e) des messages de Skyline Realty');
+    });
+
+    it('lets the AI confirm in a chat it holds, and stops it answering the number', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+      await s.receive('stop please');
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.notices()).toEqual([]);
+      expect(s.conversations.pauseAi).toHaveBeenCalledWith('org-1', PHONE, true);
+    });
+
+    it('confirms itself in a chat an agent holds, since the AI is paused there', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false, takenOverById: 'agent-1' }, { ai: true });
+      await s.receive('stop please');
+      expect(s.notices()).toHaveLength(1);
+    });
+
+    it("confirms itself when an agent holds an older lead's chat with the number: the AI is paused for the number", async () => {
+      const s = setup({ status: 'contacting', dncStatus: false }, { ai: true, siblings: [{ status: 'appointment_booked', takenOverById: 'agent-1' }] });
+      await s.receive('stop please');
+      expect(s.optedOut()).toEqual(['lead-1', 'lead-2']);
+      expect(s.notices()).toHaveLength(1);
+    });
+
+    it('reads a question about stopping by as an ordinary reply', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('Can I stop by the open house?');
+      expect(s.optedOut()).toEqual([]);
+      expect(s.followup.pauseForLead).toHaveBeenCalled();
+    });
+
+    it('lets START from an opted-out lead turn the AI back on for the number', async () => {
+      const s = setup({ status: 'not_interested', dncStatus: true }, { ai: true });
+      s.suppressed.add(PHONE);
+      await s.receive('START');
+      expect(s.optedIn()).toBe(true);
+      expect(s.suppressed.has(PHONE)).toBe(false);
+      expect(s.conversations.pauseAi).toHaveBeenCalledWith('org-1', PHONE, false);
+    });
+  });
+
+  describe('HELP (SMS02)', () => {
+    it('answers HELP with who we are, a way to reach a person and how to stop, then treats it as a reply', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('HELP');
+      expect(s.notices()).toEqual([
+        `Skyline Realty: texts about your home search. Msg frequency varies; msg & data rates may apply. For help, call or text (742) 724-5092. Reply STOP to opt out.`,
+      ]);
+      expect(s.prisma.message.create).toHaveBeenCalledWith({ data: expect.objectContaining({ direction: 'outbound', body: expect.stringContaining('Reply STOP') }) });
+      expect(s.optedOut()).toEqual([]);
+      expect(s.followup.pauseForLead).toHaveBeenCalled();
+    });
+
+    it('adds the mailing address and website the organization gave, and its legal name', async () => {
+      const s = setup(
+        { status: 'contacting', dncStatus: false },
+        { details: { legalName: 'Skyline Realty Group Inc.', mailingAddress: '100 King St W, Toronto ON M5X 1A9', website: 'skylinerealty.ca' } },
+      );
+      await s.receive('help');
+      expect(s.notices()[0]).toBe(
+        'Skyline Realty (Skyline Realty Group Inc.): texts about your home search. Msg frequency varies; msg & data rates may apply. ' +
+          'For help, call or text (742) 724-5092 or skylinerealty.ca. Mail: 100 King St W, Toronto ON M5X 1A9. Reply STOP to opt out.',
+      );
+    });
+
+    it('answers AIDE in French', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      await s.receive('aide');
+      expect(s.notices()[0]).toContain('Répondez ARRET pour vous désabonner');
+    });
+  });
+
+  describe('one phone, several leads (SMS04)', () => {
+    it('opts out every lead with the number, each logged, and suppresses the number', async () => {
+      const s = setup({ status: 'follow_up', dncStatus: false }, { siblings: [{ status: 'contacting' }, { status: 'appointment_booked' }] });
+      await s.receive('STOP');
+      expect(s.optedOut()).toEqual(['lead-1', 'lead-2', 'lead-3']);
+      expect(s.suppressed.has(PHONE)).toBe(true);
+      expect(s.leads.map((l) => l.status)).toEqual(['not_interested', 'not_interested', 'appointment_booked']);
+      for (const id of ['lead-1', 'lead-2', 'lead-3']) expect(s.followup.stopForLead).toHaveBeenCalledWith('org-1', id, 'opted_out', s.prisma);
+      expect(s.events().filter((t: string) => t === 'opted_out')).toHaveLength(3);
+    });
+
+    it('lets START back in every lead with the number', async () => {
+      const s = setup({ status: 'not_interested', dncStatus: true }, { siblings: [{ status: 'not_interested', dncStatus: true }] });
+      s.suppressed.add(PHONE);
+      await s.receive('start');
+      expect(s.optedOut()).toEqual([]);
+      expect(s.leads.map((l) => l.status)).toEqual(['follow_up', 'follow_up']);
+    });
+
+    it('treats START as an opt-in when only the number opted out, on another lead', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false });
+      s.suppressed.add(PHONE);
+      await s.receive('START');
+      expect(s.suppressed.has(PHONE)).toBe(false);
+      expect(s.followup.pauseForLead).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a number no lead has', () => {
+    it('still records an opt-out, so a lead created with the number later starts do-not-contact', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      await s.receive('STOP');
+      expect(s.suppressed.has(PHONE)).toBe(true);
+      expect(s.prisma.message.create).not.toHaveBeenCalled();
+      expect(s.notices()).toEqual([]);
+    });
+
+    it('confirms an opt-out in other words, and answers HELP', async () => {
+      const stop = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      await stop.receive('please stop texting me');
+      expect(stop.suppressed.has(PHONE)).toBe(true);
+      expect(stop.notices()).toHaveLength(1);
+      const help = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      await help.receive('HELP');
+      expect(help.notices()[0]).toContain('Reply STOP to opt out');
+    });
+  });
+
+  describe('the intent check (SMS03)', () => {
+    const failing = () => async () => {
+      throw new Error('Telnyx unreachable');
+    };
+
+    it('runs with the AI off too, and acts on an opt-out it finds', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false }, { intent: 'opt_out' });
+      await s.receive("I'd rather you didn't message me anymore");
+      expect(s.intents.classify).toHaveBeenCalledOnce();
+      expect(s.optedOut()).toEqual(['lead-1']);
+      expect(s.notices()).toHaveLength(1);
+    });
+
+    it('leaves a "no thanks" to the person reading it when the AI is off', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false }, { intent: 'not_interested' });
+      await s.receive('No thanks');
+      expect(s.engine.setStatus).not.toHaveBeenCalled();
+      expect(s.optedOut()).toEqual([]);
+    });
+
+    it('never fails open: two failed checks pause automation and flag the lead for a person', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false }, { ai: true, classify: failing() });
+      await s.receive('ugh enough already');
+      expect(s.intents.classify).toHaveBeenCalledTimes(2);
+      expect(s.prisma.lead.update).toHaveBeenCalledWith({
+        where: { id: 'lead-1' },
+        data: { automationPaused: true, needsReview: true, reviewReasons: { push: INTENT_UNCHECKED_REVIEW } },
+      });
+      expect(s.followup.pauseForLead).toHaveBeenCalledWith('org-1', 'lead-1');
+      expect(s.events()).toContain('sms_intent_failed');
+    });
+
+    it('flags the lead once, however many texts fail the check', async () => {
+      const s = setup({ status: 'engaged', dncStatus: false }, { ai: true, classify: failing() });
+      s.lead.reviewReasons = [INTENT_UNCHECKED_REVIEW];
+      await s.receive('ugh');
+      expect(s.prisma.lead.update).toHaveBeenCalledWith({ where: { id: 'lead-1' }, data: { automationPaused: true, needsReview: true } });
+    });
+
+    it('flags the lead with the AI off as well', async () => {
+      const s = setup({ status: 'contacting', dncStatus: false }, { classify: failing() });
+      await s.receive('hmm');
+      expect(s.events()).toContain('sms_intent_failed');
+    });
+
+    it('gets over one failed try', async () => {
+      let calls = 0;
+      const s = setup(
+        { status: 'engaged', dncStatus: false },
+        {
+          ai: true,
+          classify: async () => {
+            calls += 1;
+            if (calls === 1) throw new Error('Telnyx POST /ai/chat/completions failed 503');
+            return { intent: 'continue', reason: 'a question' };
+          },
+        },
+      );
+      await s.receive('What areas do you cover?');
+      expect(s.intents.classify).toHaveBeenCalledTimes(2);
+      expect(s.events()).not.toContain('sms_intent_failed');
+      expect(s.followup.pauseForLead).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a number that is not a lead (SMS07)', () => {
+    it('becomes a lead the owner looks at: outreach off, flagged, and its text kept', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      await s.receive('Hi, is the house on Elm St still available?');
+      expect(s.prisma.$executeRaw).toHaveBeenCalled();
+      expect(s.prisma.lead.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ phone: PHONE, normalizedPhone: PHONE, automationPaused: true, needsReview: true, reviewReasons: [STRANGER_REVIEW], dncStatus: false }),
+        select: expect.anything(),
+      });
+      expect(s.prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ leadId: 'lead-new', body: 'Hi, is the house on Elm St still available?' }) }));
+      expect(s.events()).toContain('created_from_sms');
+      expect(s.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'lead.created' }));
+    });
+
+    it("is in the AI's chat like any lead, its text still read for an opt-out", async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, ai: true });
+      await s.receive('Who is this?');
+      expect(s.intents.classify).toHaveBeenCalledOnce();
+      expect(s.memory.onLeadText).toHaveBeenCalledWith('org-1', 'lead-new');
+    });
+
+    it('starts do-not-contact when the number opted out before', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true });
+      s.suppressed.add(PHONE);
+      await s.receive('hello');
+      expect(s.prisma.lead.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dncStatus: true, reviewReasons: [STRANGER_REVIEW, DNC_REVIEW_REASON] }) }));
+    });
+
+    it('makes one lead when two texts arrive at once', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, strangerRace: true });
+      await s.receive('hello again');
+      expect(s.prisma.lead.create).not.toHaveBeenCalled();
+      expect(s.events()).not.toContain('created_from_sms');
+      expect(s.prisma.message.create).toHaveBeenCalled();
+    });
+
+    it('drops a flood of unknown numbers past the hourly limit', async () => {
+      const s = setup({ status: 'new', dncStatus: false }, { stranger: true, strangers: 20 });
+      await s.receive('buy crypto now');
+      expect(s.prisma.lead.create).not.toHaveBeenCalled();
+      expect(s.prisma.message.create).not.toHaveBeenCalled();
+    });
+  });
+
+  it('ignores a text from one of our own numbers: answering it is how two AIs loop', async () => {
+    const s = setup({ status: 'contacting', dncStatus: false }, { ai: true });
+    s.prisma.lead.findFirst.mockClear();
+    await s.service.onMessageReceived({ id: 'm-9', text: 'Hi! How can I help?', from: { phone_number: OUR_NUMBER }, to: [{ phone_number: OUR_NUMBER }] });
+    expect(s.prisma.lead.findFirst).not.toHaveBeenCalled();
+    expect(s.prisma.message.create).not.toHaveBeenCalled();
+    expect(s.intents.classify).not.toHaveBeenCalled();
   });
 });

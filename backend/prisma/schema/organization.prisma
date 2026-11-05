@@ -23,6 +23,7 @@ model Organization {
   auditLogs           AuditLog[]
   outreachBatches     OutreachBatch[]
   leadEvents          LeadEvent[]
+  contactSuppressions ContactSuppression[]
   dailySummaryRuns    DailySummaryRun[]
 
   @@map("organizations")
@@ -56,6 +57,8 @@ model OrganizationSetting {
   callTools             Json?   @map("call_tools")
   /// What is texted to a lead when an agent takes their chat over ({ enabled, message }); unset means on, with the default text.
   chatTakeover          Json?   @map("chat_takeover")
+  /// Who the organization is in its texts ({ legalName, mailingAddress, email, website }); CASL wants the address for Canadian leads. Unset is all empty.
+  businessDetails       Json?   @map("business_details")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots     Int     @default(1) @map("reserved_call_slots")
   /// The owners' end-of-day summary email.

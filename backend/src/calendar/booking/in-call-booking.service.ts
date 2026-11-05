@@ -4,6 +4,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { isValidEmail } from '@/ingest/processing/transforms';
 import { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import { fullName } from '@/lead/lead-scope';
+import { nextMeeting } from '@/lead/upcoming-meeting';
 import { EngineService } from '@/telnyx/engine.service';
 import type { BookedMeeting } from '../calendar.types';
 import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
@@ -11,6 +12,7 @@ import { CalendlyClient, type CalendlyBookedEvent, type CalendlyEventTypeDetail 
 import { ProviderHttpError } from '../providers/provider-http';
 import { meetingRow } from '../sync/calendar-sync.service';
 import { localDate, parseTime, pickSlots, resolveDay, searchWindow, spoken, zonedToUtc } from './booking-time';
+import { existingMeetingSay, meetingFacts, type MeetingFacts } from './existing-meeting';
 import type { ToolContext } from './tool-auth.service';
 
 /** Enough to choose from, few enough to say aloud. */
@@ -30,7 +32,8 @@ export type AvailabilityResult =
 
 export type BookingResult =
   | { ok: true; booked: true; agentName: string | null; spoken: string; say: string }
-  | { ok: false; reason: string; say: string; slots?: Slot[] };
+  | { ok: false; reason: string; say: string; slots?: Slot[] }
+  | ({ ok: false; reason: 'already_booked'; say: string } & MeetingFacts);
 
 /** Location kinds Calendly fills in itself, needing no answer from the caller. */
 const SELF_SERVED_KINDS = new Set(['physical', 'custom', 'inbound_call']);
@@ -120,6 +123,12 @@ export class InCallBookingService {
       select: { firstName: true, lastName: true, email: true },
     });
     if (!lead) return { ok: false, reason: 'lead_not_found', say: 'Apologise; an agent will follow up to schedule.' };
+    // "Can we move it to Sunday?" must not become a second meeting with the first still on the agent's calendar.
+    const existing = await nextMeeting(this.prisma, ctx.orgId, ctx.leadId);
+    if (existing) {
+      const facts = meetingFacts(existing, tz);
+      return { ok: false, reason: 'already_booked', say: existingMeetingSay(facts), ...facts };
+    }
 
     const given = input.email?.trim().toLowerCase();
     if (given && !isValidEmail(given)) {

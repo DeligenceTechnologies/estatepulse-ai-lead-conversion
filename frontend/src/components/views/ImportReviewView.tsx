@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, Pencil, PhoneOff } from 'lucide-react';
+import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { getCrmStatus } from '../../utils/crmApi';
 import { importHistory, type ImportBatch } from '../../utils/fileImportApi';
@@ -28,7 +27,7 @@ import { ConsentReviewPanel } from '../imports/ConsentReviewPanel';
 import { FileImportModal } from '../imports/FileImportModal';
 import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
-import { LeadFormModal } from '../modals/LeadFormModal';
+import { KIND_NAME, ReviewLeadDrawer } from '../imports/ReviewLeadDrawer';
 import { errorText } from '../sheets/SheetModal';
 
 /** The review reasons every import starts with; shown as the screen itself, not as badges. */
@@ -38,8 +37,6 @@ const IMPORT_REASONS = [
   'Imported from HubSpot — awaiting owner approval',
 ];
 
-/** What a row's source is called on hover, and whether it has a row number worth showing (a CRM record has none). */
-const KIND_NAME: Record<ImportKind, string> = { google_sheets: 'Google Sheet', file_upload: 'Uploaded file', hubspot: 'HubSpot' };
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
@@ -120,11 +117,10 @@ export const ImportReviewView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'more' | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
-  const canEditLead = useAuth().can('lead.update');
   const [upload, setUpload] = useState(false);
-  // The row being corrected in place. A queued lead is a real lead, so this is the ordinary
-  // lead form: fixing a phone here clears the flag that held the row and it can be approved.
-  const [editing, setEditing] = useState<ReviewItem['lead']>(null);
+  // The row whose details are open in the side panel, or null. Read-only: an imported lead is
+  // owned by the sheet, file or CRM it came from, and corrected there.
+  const [viewing, setViewing] = useState<ReviewItem | null>(null);
   const [history, setHistory] = useState(false);
   /** Outreach scheduling (OUTREACH_SCHEDULING_ENABLED): null when the server has it off, and approving works as before. */
   const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
@@ -588,7 +584,7 @@ export const ImportReviewView: React.FC = () => {
                           className={`block truncate ${i.lead?.phone && !i.lead.phoneValid ? 'text-amber-300' : ''}`}
                           title={
                             i.lead?.phone && !i.lead.phoneValid
-                              ? `${i.lead.phone} — no country code, so this cannot be dialled. Edit it here, or add the code in the sheet and sync.`
+                              ? `${i.lead.phone} — no country code, so this cannot be dialled. Add the code where this row came from and sync again.`
                               : (i.lead?.phone ?? undefined)
                           }
                         >
@@ -616,8 +612,21 @@ export const ImportReviewView: React.FC = () => {
                         />
                       </td>
                       {tab === 'rejected' ? (
-                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap text-center">
-                          {i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}
+                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span>{i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}</span>
+                            {i.lead && (
+                              <button
+                                type="button"
+                                onClick={() => setViewing(i)}
+                                title="See everything this row brought in"
+                                aria-label="View details"
+                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       ) : (
                         <td className="px-2 py-2">
@@ -663,23 +672,15 @@ export const ImportReviewView: React.FC = () => {
                                 <AlertTriangle className="w-3 h-3" />
                               </span>
                             )}
-                            {i.lead && canEditLead && (
+                            {i.lead && (
                               <button
                                 type="button"
-                                onClick={() => setEditing(i.lead)}
-                                title={
-                                  i.lead.phone && !i.lead.phoneValid
-                                    ? 'Add the country code so this lead can be called, without going back to the source'
-                                    : 'Correct this lead before deciding'
-                                }
-                                aria-label="Edit this lead"
-                                className={`p-1 rounded border inline-flex transition-colors cursor-pointer ${
-                                  i.lead.phone && !i.lead.phoneValid
-                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700'
-                                }`}
+                                onClick={() => setViewing(i)}
+                                title="See everything this row brought in"
+                                aria-label="View details"
+                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
                               >
-                                <Pencil className="w-3 h-3" />
+                                <Eye className="w-3 h-3" />
                               </button>
                             )}
                           </div>
@@ -779,13 +780,11 @@ export const ImportReviewView: React.FC = () => {
           onConfirm={(choice) => void decide('approve', choice)}
         />
       )}
-      {editing && (
-        <LeadFormModal
-          lead={editing}
-          onClose={() => setEditing(null)}
-          // Reload rather than patch the row in place: fixing the phone clears a review reason,
-          // which can turn a held row into one that is ticked and ready to approve.
-          onSaved={() => void load()}
+      {viewing && (
+        <ReviewLeadDrawer
+          item={viewing}
+          warnings={(viewing.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r))}
+          onClose={() => setViewing(null)}
         />
       )}
 

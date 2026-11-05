@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -10,7 +10,6 @@ import { RequirePermissions } from '@/role/decorators/require-permissions.decora
 import { PERMISSIONS } from '@/role/permissions';
 import { AssignLeadDto } from './dto/assign-lead.dto';
 import { CreateLeadDto } from './dto/create-lead.dto';
-import { UpdateLeadDto } from './dto/update-lead.dto';
 import { SetLeadTimezoneDto } from './dto/set-lead-timezone.dto';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { LeadReviewService } from './lead-review.service';
@@ -18,6 +17,7 @@ import { LeadTimezoneService } from './lead-timezone.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
+import { liveReviewReasons } from './review-reasons';
 
 interface OutreachEntry {
   lead_id: string;
@@ -94,8 +94,10 @@ const toLeadRow = (l: LeadListRow, contactLeadCount: number, outreach?: Outreach
   phone: l.phone,
   phoneValid: l.phoneValid,
   emailValid: l.emailValid,
-  needsReview: l.needsReview,
-  reviewReasons: l.reviewReasons,
+  // Filtered, not raw: a reason written at import stays on the lead even after the source was
+  // corrected, and a warning that is no longer true is worse than none.
+  needsReview: l.needsReview && liveReviewReasons(l).length > 0,
+  reviewReasons: liveReviewReasons(l),
   status: l.status,
   followUpReason: l.status === LeadStatus.follow_up ? (l.followUpReason ?? 'other') : null,
   statusReason: l.aiSummary,
@@ -154,17 +156,6 @@ export class LeadsController {
   @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
   create(@CurrentAuth() auth: AuthContext, @Body() body: CreateLeadDto) {
     return this.manualLeads.create(auth.organizationId, auth.userId, body);
-  }
-
-  /**
-   * Corrects the details of an existing lead, whatever it came from. Chiefly the phone: a lead
-   * imported without a country code is kept but undialable, and this is the way to fix it
-   * without going back to the sheet. Only the keys sent change; "" clears a text field.
-   */
-  @Patch(':leadId')
-  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
-  update(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string, @Body() body: UpdateLeadDto) {
-    return this.manualLeads.update(auth.organizationId, auth.userId, leadId, body);
   }
 
   @Get()

@@ -1,10 +1,9 @@
 /**
  * The assistant's call-outcome tools: schedule_callback (an exact time the
  * lead asked to be called back), schedule_text (a time they asked to be
- * texted) and record_outcome (a clear "no", "stop contacting me" or wrong
- * number). They work on a call and in a text chat. With the switch off the
- * assistant still keeps record_outcome for "stop contacting me" alone: an
- * opt-out is always honoured, whatever else is turned off.
+ * texted), record_outcome (a clear "no", "stop contacting me" or wrong
+ * number) and get_meeting (the meeting they already have, with the links to
+ * move or cancel it). They work on a call and in a text chat.
  */
 
 export interface CallToolsSettings {
@@ -120,11 +119,14 @@ export function withCallToolsSection(instructions: string, full = true): string 
   return base ? `${base}\n\n${callToolsSection(full)}` : callToolsSection(full);
 }
 
+/** The names our call tools go by on the assistant; Telnyx allows one webhook tool per name. */
+export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome', 'get_meeting'];
+
 export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
 /**
- * The three tools as Telnyx webhook tools. lead_id, call_control_id and
+ * The four tools as Telnyx webhook tools. lead_id, call_control_id and
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
@@ -230,6 +232,27 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string, fu
             note: { type: 'string', description: 'Their words, briefly.' },
           },
           required: ['outcome'],
+        },
+      },
+    },
+    {
+      type: 'webhook',
+      display_name: 'EstatePulse: look up their meeting',
+      timeout_ms: 10000,
+      webhook: {
+        ...shared,
+        name: 'get_meeting',
+        description:
+          'Look up the meeting the lead already has with us, when they mention it or want to move or cancel it. Returns ' +
+          '`meeting` (when, to read out), `with` (the agent), `reschedule_link` and `cancel_link`, or `meeting: null` when ' +
+          'they have none. Do what its `say` tells you.',
+        url: `${apiUrl}/tools/telnyx/outcome/meeting`,
+        body_parameters: {
+          type: 'object',
+          properties: {
+            wants: { type: 'string', enum: ['ask', 'move', 'cancel'], description: 'What the lead wants: to ask about it, move it or cancel it.' },
+          },
+          required: [],
         },
       },
     },
