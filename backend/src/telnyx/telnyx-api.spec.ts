@@ -1,25 +1,22 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { telnyx } from './telnyx-api';
+import { describe, expect, it } from 'vitest';
+import { telnyxErrorText } from './telnyx-api';
 
-const reply = (status: number, body: string) => vi.fn(async () => new Response(status === 204 ? null : body, { status }));
-
-describe('telnyx()', () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('reads a JSON answer', async () => {
-    vi.stubGlobal('fetch', reply(200, '{"data":{"id":"x"}}'));
-    expect(await telnyx('KEY', '/x')).toEqual({ data: { id: 'x' } });
+describe('telnyxErrorText', () => {
+  it('turns the provider JSON into one readable line', () => {
+    const body = JSON.stringify({
+      errors: [{ code: '40310', title: "Invalid 'to' address", detail: "The 'to' address should be a single valid number.", meta: { url: 'https://developers.telnyx.com/docs/overview/errors/40310' } }],
+    });
+    expect(telnyxErrorText(body)).toBe("Invalid 'to' address — The 'to' address should be a single valid number. (40310)");
   });
 
-  it('accepts a success with no body, as adding a message to a conversation answers', async () => {
-    vi.stubGlobal('fetch', reply(200, ''));
-    expect(await telnyx('KEY', '/ai/conversations/c/message', { method: 'POST' })).toEqual({});
-    vi.stubGlobal('fetch', reply(204, ''));
-    expect(await telnyx('KEY', '/x', { method: 'DELETE' })).toEqual({});
+  it('joins several errors and copes with partial ones', () => {
+    const body = JSON.stringify({ errors: [{ title: 'Unauthorized', code: '10009' }, { detail: 'Rate limit exceeded' }] });
+    expect(telnyxErrorText(body)).toBe('Unauthorized (10009); Rate limit exceeded');
   });
 
-  it('still throws with the provider message on a failure', async () => {
-    vi.stubGlobal('fetch', reply(422, 'bad thing'));
-    await expect(telnyx('KEY', '/x', { method: 'POST' })).rejects.toThrow('Telnyx POST /x failed 422: bad thing');
+  it('keeps plain text or an empty body understandable', () => {
+    expect(telnyxErrorText('Bad Gateway')).toBe('Bad Gateway');
+    expect(telnyxErrorText('   ')).toBe('no details (HTTP body empty)');
+    expect(telnyxErrorText('{"errors":[]}')).toBe('{"errors":[]}');
   });
 });

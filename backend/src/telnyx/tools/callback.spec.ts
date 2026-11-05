@@ -130,7 +130,7 @@ describe('CallbackService.schedule', () => {
     const r = await s.service.schedule(ON_CALL, { day: 'tomorrow', time: '17:00', note: 'driving' }, NOW);
     const at = new Date('2026-10-28T11:30:00.000Z');
 
-    expect(r).toMatchObject({ ok: true, scheduled: true, at: at.toISOString(), spoken: 'Wednesday, October 28 at 5:00 PM' });
+    expect(r).toMatchObject({ ok: true, scheduled: true, at: at.toISOString(), spoken: 'Wednesday, October 28 at 5:00 PM GMT+5:30' });
     expect(s.state.move).toHaveBeenCalledWith('lead-1', 'follow_up', expect.objectContaining({
       source: 'call',
       callId: 'call-1',
@@ -168,7 +168,7 @@ describe('CallbackService.schedule', () => {
   it('a refused time changes nothing and tells the AI what to offer', async () => {
     const s = setup();
     const r = await s.service.schedule(ON_CALL, { day: 'tomorrow', time: '22:00' }, NOW);
-    expect(r).toMatchObject({ ok: false, reason: 'outside_hours', suggested: { spoken: 'Thursday, October 29 at 8:00 AM' } });
+    expect(r).toMatchObject({ ok: false, reason: 'outside_hours', suggested: { spoken: 'Thursday, October 29 at 8:00 AM GMT+5:30' } });
     expect(r.say).toContain('between 08:00 and 21:00');
     expect(s.state.move).not.toHaveBeenCalled();
     expect(s.calls.schedule).not.toHaveBeenCalled();
@@ -188,7 +188,7 @@ describe('CallbackService.onCallEnded', () => {
   it('after the call that set it: the lead gets the time by SMS', async () => {
     const s = setup({ callbackAt: new Date('2026-10-28T11:30:00.000Z'), setHere: true });
     await s.service.onCallEnded('cc-1', NOW);
-    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12899174129', "Thanks Ana! I'll call you on Wednesday, October 28 at 5:00 PM.");
+    expect(s.sms.sendSms).toHaveBeenCalledWith('org-1', '+12899174129', "Thanks Ana! I'll call you on Wednesday, October 28 at 5:00 PM GMT+5:30.");
     expect(s.activity.recordSms).toHaveBeenCalledWith('org-1', 'lead-1', expect.any(String), true, 'msg-1');
     expect(s.calls.schedule).not.toHaveBeenCalled();
   });

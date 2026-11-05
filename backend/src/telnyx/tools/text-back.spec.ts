@@ -118,6 +118,8 @@ function worker(
     lead: {
       findUnique: vi.fn(async () => ({
         phone: '+12895550100',
+        // The lead's own clock is the test's clock, so the quiet-hours cases below read as before.
+        timezone: TZ,
         status: opts.status ?? 'engaged',
         dncStatus: opts.dnc ?? false,
         automationPaused: opts.paused ?? false,
@@ -129,7 +131,10 @@ function worker(
   };
   const config = { get: vi.fn(() => true) };
   // Quiet hours off unless the test puts "now" inside them: a window from a minute ago to an hour from now.
-  const followup = { guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })) };
+  const followup = {
+    guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })),
+    holdOnce: vi.fn(async () => undefined),
+  };
   const state = { quietly: vi.fn() };
   const tools = { settings: vi.fn(async () => ({ textBackMessage: DEFAULT_TEXT_BACK_MESSAGE })) };
   const sms = { sendSms: vi.fn(async () => (opts.sendFails ? Promise.reject(new Error('Telnyx unreachable')) : { id: 'msg-1' })) };
@@ -167,13 +172,19 @@ describe('TextBackWorker', () => {
     }
   });
 
-  it('nothing goes to an opted-out, paused, finished or booked lead', async () => {
-    for (const opts of [{ dnc: true }, { paused: true }, { status: 'not_interested' }, { meeting: 1 }]) {
+  it('nothing goes to an opted-out, finished or booked lead', async () => {
+    for (const opts of [{ dnc: true }, { status: 'not_interested' }, { meeting: 1 }]) {
       const s = worker(opts);
       await s.w.process(s.job as any);
       expect(s.sms.sendSms).not.toHaveBeenCalled();
       expect(s.events()).toEqual(['text_back_dropped']);
     }
+  });
+
+  it('still keeps the promise to a lead whose automation is paused (after an agent handed the chat back)', async () => {
+    const s = worker({ paused: true });
+    await s.w.process(s.job as any);
+    expect(s.sms.sendSms).toHaveBeenCalledOnce();
   });
 
   it('waits out quiet hours', async () => {

@@ -26,6 +26,7 @@ export type CustomTarget =
   | 'last_name'
   | 'phone'
   | 'email'
+  | 'timezone'
   | 'location'
   | 'budget_range'
   | 'min_budget'

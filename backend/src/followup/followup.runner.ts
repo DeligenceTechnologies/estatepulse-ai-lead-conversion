@@ -4,12 +4,14 @@ import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus, Prisma } fro
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
-import { nextContactAt } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt } from '@/common/utils/quiet-hours';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { AFTER_TEXT_BACK_MS, OUTCOME_STATUSES, TEXT_BACK_RECHECK_MS } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from '@/telnyx/activity.service';
-import { SmsService } from '@/telnyx/sms.service';
+import { OptOutService } from '@/telnyx/opt-out.service';
+import { OptedOutError, SMS_RETRY_DELAYS_MS, SmsService, isTransientSmsError } from '@/telnyx/sms.service';
 import { CallQueue } from '@/telnyx/calls/call.queue';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
 import { fillTemplate } from '@/telnyx/template';
@@ -27,6 +29,9 @@ interface ClaimedEnrollment {
 }
 
 const MAX_ATTEMPTS = 6;
+
+/** What became of a step: done (sent, failed for good, or its call queued), due again at a time, or the enrolment ended with it. */
+type StepOutcome = { kind: 'done' } | { kind: 'retry'; at: Date } | { kind: 'stopped' };
 /** A step after a call that is still queued, ringing or live looks again this soon. */
 export const CALL_HOLD_RECHECK_MS = 30_000;
 /** A call still not over after this is a lost hangup or a stuck queue: the next step goes ahead. */
@@ -57,6 +62,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     private readonly activity: ActivityService,
     private readonly state: LeadStateService,
     private readonly conversations: SmsConversationService,
+    private readonly optOuts: OptOutService,
   ) {}
 
   onModuleInit(): void {
@@ -132,14 +138,25 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       if (!sequence || !step) return void (await this.finish(row.id, EnrollmentStatus.completed, 'exhausted'));
       const closeOutMs = sequence.closeOutHours * 3_600_000;
 
-      const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
+      const { quiet, skipDays, limits } = await this.followup.guardrailsFor(row.organization_id);
       const chatQuietMs = limits.chatQuietMinutes * 60_000;
       if (await this.textBackWait(row, lead, chatQuietMs)) return;
       if (await this.chatBusy(row, chatQuietMs)) return;
 
+      // On the LEAD's clock: quiet hours, days off and the legal calling hours of their jurisdiction.
+      // No zone, no step: the enrolment looks again every hour until someone sets one.
       const now = new Date();
-      const allowed = nextContactAt(timeZone, quiet, skipDays, now);
-      if (allowed > now) return void (await this.deferTo(row, allowed));
+      const zone = leadZone(lead);
+      const window = nextLeadContactAt(zone, { quiet, skipDays }, now);
+      if (!window.allowedAt) {
+        await this.followup.holdOnce(row.organization_id, row.lead_id, `Step held — ${window.reason}`, 'followup');
+        this.logger.log(gateLine(row.organization_id, row.lead_id, zone, window, 'held'));
+        return void (await this.deferTo(row, new Date(now.getTime() + TZ_RECHECK_MS)));
+      }
+      if (window.allowedAt > now) {
+        this.logger.log(gateLine(row.organization_id, row.lead_id, zone, window, 'deferred'));
+        return void (await this.deferTo(row, window.allowedAt));
+      }
 
       // As in the strategy: nothing over a call that is not over, and nothing canned after a conversation.
       const journey = await this.journeyState(row);
@@ -168,7 +185,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       // pause may have come in while the step was being decided.
       const fresh = await this.liveLead(row);
       if (!fresh || (await this.textBackWait(row, fresh, chatQuietMs)) || (await this.chatBusy(row, chatQuietMs))) return;
-      await this.fire(row, step, fresh);
+      const outcome = await this.fire(row, step, fresh);
+      if (outcome.kind === 'retry') return void (await this.deferTo(row, outcome.at));
+      if (outcome.kind === 'stopped') return;
       await this.advance(row, steps, closeOutMs);
     } catch (error) {
       await this.onFailure(row, (error as Error).message);
@@ -176,10 +195,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   }
 
   /** The lead when a step may go to it; otherwise the enrolment is stopped or paused, and null. */
-  private async liveLead(row: ClaimedEnrollment): Promise<{ firstName: string | null; phone: string | null; textBackAt: Date | null } | null> {
+  private async liveLead(
+    row: ClaimedEnrollment,
+  ): Promise<{ firstName: string | null; phone: string | null; normalizedPhone: string | null; timezone: string | null; textBackAt: Date | null } | null> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: row.lead_id },
-      select: { firstName: true, phone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+      select: { firstName: true, phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
     });
     if (!lead) await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
     else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
@@ -220,8 +241,9 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
+  /** A wait on purpose, not a failure: the count of failed tries in a row (attempts) starts again. */
   private deferTo(row: ClaimedEnrollment, at: Date) {
-    return this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: at, lockedBy: null, lockedAt: null } });
+    return this.prisma.sequenceEnrollment.update({ where: { id: row.id }, data: { nextActionAt: at, attempts: 0, lockedBy: null, lockedAt: null } });
   }
 
   /**
@@ -268,7 +290,12 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<void> {
+  /**
+   * Sends the step's text or queues its call. A text that failed for a passing
+   * reason (Telnyx busy or down) is due again a while later, twice at most; one
+   * to a number that replied STOP to us opts the number out and ends this.
+   */
+  private async fire(row: ClaimedEnrollment, step: SequenceStep, lead: { firstName: string | null; phone: string | null }): Promise<StepOutcome> {
     const event = {
       orgId: row.organization_id,
       leadId: row.lead_id,
@@ -281,20 +308,33 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         this.prisma.organization.findUnique({ where: { id: row.organization_id }, select: { name: true } }),
         this.activity.leadVariables(row.organization_id, row.lead_id),
       ]);
-      const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, firstName: lead.firstName?.trim() || 'there', brokerage: org?.name ?? 'our team' });
-      if (!text) return;
+      // The lead's name as leadVariables cleaned it, never the raw field: a form may hold anything there.
+      const text = fillTemplate(String(step.messageTemplate ?? ''), { ...variables, brokerage: org?.name ?? 'our team' });
+      if (!text) return { kind: 'done' };
       try {
-        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text);
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, true, sent.id);
+        const sent = await this.sms.sendSms(row.organization_id, lead.phone ?? '', text, { outreach: true });
+        await this.activity.recordSms(row.organization_id, row.lead_id, sent.text, true, sent.id);
         this.state.quietly({ ...event, type: 'step_sent' });
         this.conversations
-          .appendOurMessage(row.organization_id, lead.phone, text)
+          .appendOurMessage(row.organization_id, lead.phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${row.lead_id}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
-        await this.activity.recordSms(row.organization_id, row.lead_id, text, false, (error as Error).message);
-        this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
+        const reason = (error as Error).message;
+        if (error instanceof OptedOutError) {
+          this.state.quietly({ ...event, type: 'step_skipped', reason });
+          await this.optOuts.optOut(row.organization_id, { leadId: row.lead_id }, { source: 'sms_send', reason, channel: 'sms' });
+          return { kind: 'stopped' };
+        }
+        const tries = isTransientSmsError(error) ? await this.retriesOf(row) : SMS_RETRY_DELAYS_MS.length;
+        if (tries < SMS_RETRY_DELAYS_MS.length) {
+          const wait = SMS_RETRY_DELAYS_MS[tries];
+          await this.state.record({ ...event, type: 'step_retry', reason: `${reason} (trying again in ${wait / 60_000} min)` });
+          return { kind: 'retry', at: new Date(Date.now() + wait) };
+        }
+        await this.activity.recordSms(row.organization_id, row.lead_id, text, false, reason);
+        this.state.quietly({ ...event, type: 'step_failed', reason });
       }
-      return;
+      return { kind: 'done' };
     }
     try {
       await this.calls.enqueue(
@@ -313,6 +353,19 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       await this.activity.recordCallFailed(row.organization_id, row.lead_id, (error as Error).message);
       this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
     }
+    return { kind: 'done' };
+  }
+
+  /** How often this enrolment's current step has already been tried again (its step_retry events). */
+  private retriesOf(row: ClaimedEnrollment): Promise<number> {
+    return this.prisma.leadEvent.count({
+      where: {
+        leadId: row.lead_id,
+        type: 'step_retry',
+        createdAt: { gte: new Date(row.enrolled_at) },
+        AND: [{ payload: { path: ['sequenceId'], equals: row.sequence_id } }, { payload: { path: ['step'], equals: row.current_step } }],
+      },
+    });
   }
 
   /**
@@ -328,6 +381,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
         data: {
           currentStep: row.current_step + 1,
           nextActionAt: new Date(Date.now() + closeOutMs),
+          attempts: 0,
           lockedBy: null,
           lockedAt: null,
           lastError: null,
@@ -340,6 +394,7 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       data: {
         currentStep: row.current_step + 1,
         nextActionAt: await this.followup.dueAt(row.organization_id, next.delayMinutes),
+        attempts: 0,
         lockedBy: null,
         lockedAt: null,
         lastError: null,

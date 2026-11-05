@@ -116,7 +116,7 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
         <span className="font-semibold text-slate-300">When calls can run</span>
         <span className="flex flex-wrap items-center gap-1.5">
           <Clock className="w-3 h-3 text-amber-400" />
-          {config.quietHours ? `${config.quietHours.end}–${config.quietHours.start} daily (${config.timeZone})` : 'Any time'}
+          {config.quietHours ? `${config.quietHours.end}–${config.quietHours.start} daily, each lead's local time` : "Any time, within each lead's legal calling hours"}
           {change('contact-window', 'Contact Window')}
           <span className="text-slate-600">·</span>
           up to {config.maxConcurrentCalls} at once

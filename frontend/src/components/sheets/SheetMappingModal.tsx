@@ -23,6 +23,7 @@ import {
 import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch } from '../imports/OutreachPicker';
 import { PreviewRowsTable, flagged } from '../imports/PreviewRowsTable';
 import { SheetError, SheetModal, errorDetails, errorText } from './SheetModal';
+import { TimezoneNotice } from '../common/TimezoneNotice';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
@@ -318,6 +319,8 @@ export const SheetMappingModal: React.FC<{
               </p>
             </div>
           )}
+
+          {!Object.values(choices).includes('timezone') && <TimezoneNotice source="sheet" />}
 
           {/* Save / switch on */}
           {problems.length > 0 && (

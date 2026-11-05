@@ -5,8 +5,10 @@ import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus } from '@pris
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
-import { nextAllowedAt, nextContactAt } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
+import { isSuppressed } from '@/lead/contact-suppression';
 import { IN_STRATEGY_STATUSES, OUTCOME_STATUSES, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { CALL_QUEUE, CallJob } from '@/queue/queue.constants';
@@ -81,9 +83,11 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { phone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true, textBackAt: true },
+      select: { phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true, textBackAt: true },
     });
-    if (!lead || lead.dncStatus || lead.automationPaused || (callback ? CALLBACK_BLOCKED : OUTCOME_STATUSES).includes(lead.status)) {
+    // The number itself may have opted out on another lead's record.
+    const optedOut = Boolean(lead && !lead.dncStatus && (await isSuppressed(this.prisma, orgId, lead.normalizedPhone)));
+    if (!lead || lead.dncStatus || optedOut || lead.automationPaused || (callback ? CALLBACK_BLOCKED : OUTCOME_STATUSES).includes(lead.status)) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead can no longer be called`);
       return;
     }
@@ -102,7 +106,7 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     }
     // A strategy or sequence call queued before the lead asked to be texted waits for that text; a callback they asked for does not.
     if (!callback && textBackPending(lead)) return this.delay(job, textBackRecheckAt(lead), token);
-    const { timeZone, quiet, skipDays, limits } = await this.followup.guardrailsFor(orgId);
+    const { quiet, skipDays, limits } = await this.followup.guardrailsFor(orgId);
     if (callback) {
       const live = await this.prisma.call.count({
         where: { leadId, status: { in: [CallStatus.ringing, CallStatus.in_progress] }, createdAt: { gte: new Date(Date.now() - LIVE_CALL_MAX_AGE_MS) } },
@@ -119,9 +123,22 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       }
     }
 
-    // A callback the lead asked for keeps to quiet hours only; everything else also skips the organization's days off.
-    const allowed = callback ? nextAllowedAt(timeZone, quiet, new Date()) : nextContactAt(timeZone, quiet, skipDays, new Date());
-    if (allowed.getTime() > Date.now()) return this.delay(job, allowed.getTime(), token);
+    // On the LEAD's clock, right before the dial: quiet hours and the legal calling hours of their
+    // jurisdiction; a callback they asked for also ignores the organization's days off. A lead whose
+    // zone is unknown or ambiguous is never dialed; the job looks again every hour until someone sets it.
+    const zone = leadZone(lead);
+    const window = nextLeadContactAt(zone, { quiet, skipDays }, new Date(), { callback });
+    if (!window.allowedAt) {
+      await this.followup.holdOnce(orgId, leadId, `Call held — ${window.reason}`, 'call_worker', 'voice');
+      this.logger.log(gateLine(orgId, leadId, zone, window, 'held'));
+      return this.delay(job, Date.now() + TZ_RECHECK_MS, token);
+    }
+    if (window.allowedAt.getTime() > Date.now()) {
+      await this.followup.holdOnce(orgId, leadId, `Call waits for the lead's contact window: ${window.reason}`, 'call_worker', 'voice');
+      this.logger.log(gateLine(orgId, leadId, zone, window, 'deferred'));
+      return this.delay(job, window.allowedAt.getTime(), token);
+    }
+    this.logger.debug(gateLine(orgId, leadId, zone, window, 'allowed'));
 
     const slotId = String(job.id);
     if (!(await this.slots.acquire(orgId, slotId, await this.limitFor(orgId)))) {
