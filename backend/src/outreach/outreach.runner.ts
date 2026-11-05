@@ -4,7 +4,7 @@ import { OutreachBatchStatus } from '@prisma/client';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
-import { leadZone } from '@/common/utils/lead-timezone';
+import { jurisdictionCode, leadZone } from '@/common/utils/lead-timezone';
 import { nextLeadContactAt, type ContactRules } from '@/common/utils/quiet-hours';
 import { skipDaysOf } from '@/followup/journey';
 import { RELEASABLE_LEAD } from '@/google-sheets/approval';
@@ -130,35 +130,47 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
            AND l.id = i.lead_id AND l.organization_id = ${orgId}::uuid AND NOT (${RELEASABLE_LEAD})`;
 
       let released = 0;
-      // Which queued leads may be contacted right now, each on their own clock (quiet hours, days off,
-      // their jurisdiction's legal hours). A lead whose zone is unknown stays queued until someone sets it.
-      // ponytail: every queued lead of the batch is looked at each tick (a lookup per lead, no I/O); page it if batches grow past the import cap.
-      const queued = await tx.$queryRaw<{ lead_id: string; timezone: string | null; normalized_phone: string | null }[]>`
-        SELECT i.lead_id, l.timezone, l.normalized_phone
-          FROM outreach_batch_leads AS i JOIN leads AS l ON l.id = i.lead_id
-         WHERE i.batch_id = ${batch.id}::uuid AND i.state = 'queued'`;
-      const ready = queued
-        .filter((q) => {
-          const window = nextLeadContactAt(leadZone({ timezone: q.timezone, normalizedPhone: q.normalized_phone }), rules.contact, now);
-          return window.allowedAt !== null && window.allowedAt.getTime() <= now.getTime();
-        })
-        .map((q) => q.lead_id);
-      if (ready.length > 0) {
-        const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps)).toISOString();
-        // Released leads whose first call is not on record yet: queued for a slot, or not yet enrolled.
-        const [load] = await tx.$queryRaw<{ awaiting: number }[]>`
-          SELECT count(*)::int AS awaiting FROM outreach_batch_leads AS i
-           WHERE i.organization_id = ${orgId}::uuid AND i.state = 'released' AND i.released_at > ${awaitingSince}::timestamptz
-             AND NOT EXISTS (SELECT 1 FROM calls AS c
-                              WHERE c.organization_id = i.organization_id AND c.lead_id = i.lead_id
-                                AND c.created_at >= i.released_at)`;
-        const capacity = releaseCapacity({
-          maxConcurrent: rules.maxConcurrent,
-          reserved: rules.reserved,
-          activeCalls: await this.slots.inUse(orgId),
-          awaitingCall: load.awaiting,
-        });
-        if (capacity > 0) {
+      const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps)).toISOString();
+      // Released leads whose first call is not on record yet: queued for a slot, or not yet enrolled.
+      const [load] = await tx.$queryRaw<{ awaiting: number }[]>`
+        SELECT count(*)::int AS awaiting FROM outreach_batch_leads AS i
+         WHERE i.organization_id = ${orgId}::uuid AND i.state = 'released' AND i.released_at > ${awaitingSince}::timestamptz
+           AND NOT EXISTS (SELECT 1 FROM calls AS c
+                            WHERE c.organization_id = i.organization_id AND c.lead_id = i.lead_id
+                              AND c.created_at >= i.released_at)`;
+      // How many may go out at all this tick: nothing below is worth working out when the answer is none.
+      const capacity = releaseCapacity({
+        maxConcurrent: rules.maxConcurrent,
+        reserved: rules.reserved,
+        activeCalls: await this.slots.inUse(orgId),
+        awaitingCall: load.awaiting,
+      });
+      if (capacity > 0) {
+        // Which queued leads may be contacted right now, each on their own clock (quiet hours, days off,
+        // their jurisdiction's legal hours). A lead whose zone is unknown stays queued until someone sets it.
+        // Read in the order the release below picks them in, so it stops at the first `capacity` that are ready.
+        // ponytail: still one row per queued lead; page the SELECT if a batch outgrows the import cap.
+        const queued = await tx.$queryRaw<{ lead_id: string; timezone: string | null; normalized_phone: string | null }[]>`
+          SELECT i.lead_id, l.timezone, l.normalized_phone
+            FROM outreach_batch_leads AS i JOIN leads AS l ON l.id = i.lead_id
+           WHERE i.batch_id = ${batch.id}::uuid AND i.state = 'queued'
+           ORDER BY i.created_at, i.lead_id`;
+        const ready: string[] = [];
+        // Leads of one batch share a handful of zones; the window maths depends on nothing else about them.
+        const seen = new Map<string, boolean>();
+        for (const q of queued) {
+          const z = leadZone({ timezone: q.timezone, normalizedPhone: q.normalized_phone });
+          const key = `${z.zone ?? ''}|${jurisdictionCode(z)}`;
+          let open = seen.get(key);
+          if (open === undefined) {
+            const window = nextLeadContactAt(z, rules.contact, now);
+            open = window.allowedAt !== null && window.allowedAt.getTime() <= now.getTime();
+            seen.set(key, open);
+          }
+          if (open) ready.push(q.lead_id);
+          if (ready.length === capacity) break;
+        }
+        if (ready.length > 0) {
           released = await tx.$executeRaw`
             WITH picked AS (
               SELECT lead_id FROM outreach_batch_leads

@@ -100,12 +100,19 @@ export interface LegalWindows {
 
 const NORTH_AMERICA = /^(America\/|Pacific\/Honolulu|Atlantic\/Bermuda|US\/|Canada\/)/;
 
-/** The jurisdiction codes whose rules apply; strictest North American set when the jurisdiction cannot be trusted. */
+/**
+ * The jurisdiction codes whose rules apply. A trusted estimate uses the phone
+ * number's own country and state; a disputed or unknown one NEVER drops those
+ * rules, it adds to them: the phone's codes plus both North American sets, so
+ * a lead whose stored zone disagrees with their number is only ever held to
+ * MORE hours, never fewer. The number decides whether North America applies;
+ * the zone only speaks when the number says nothing.
+ */
 function codesFor(j: Jurisdiction, zone: string): string[] {
-  if (j.status === 'estimated' && j.country) return [j.country, ...(j.region ? [`${j.country}-${j.region}`] : [])];
-  // ponytail: a disputed or unknown jurisdiction in (roughly) North America gets US and Canada's rules together; add a
-  // zone -> country table if this over-restricts real leads.
-  return NORTH_AMERICA.test(zone) ? ['US', 'CA'] : [];
+  const fromPhone = j.country ? [j.country, ...(j.region ? [`${j.country}-${j.region}`] : [])] : [];
+  if (j.status === 'estimated') return fromPhone;
+  const northAmerican = j.country ? j.country === 'US' || j.country === 'CA' : NORTH_AMERICA.test(zone);
+  return [...new Set([...fromPhone, ...(northAmerican ? ['US', 'CA'] : [])])];
 }
 
 /** The legal quiet windows for one local day of `zone` (`weekday` 0 = Sunday). */

@@ -332,7 +332,7 @@ export const CustomWebhookWizard: React.FC<{
 
       {step === 'setup' && (
         <div className="space-y-3">
-          <TimezoneNotice tone="hint" source="form" />
+          <TimezoneNotice tone="hint" />
           <div className="space-y-1">
             <div className="text-xs text-slate-400 font-medium">Name</div>
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. leads, Tally buyer form, Website" className={input} />
@@ -545,7 +545,7 @@ export const CustomWebhookWizard: React.FC<{
                 </div>
               </div>
 
-              {fields.length > 0 && !fields.some((f) => f.target === 'timezone') && <TimezoneNotice source="form" />}
+              {fields.length > 0 && !fields.some((f) => f.target === 'timezone') && <TimezoneNotice />}
               {problems.length > 0 && (
                 <ul className="text-2xs text-amber-300 list-disc pl-4 space-y-0.5">
                   {problems.map((p) => (

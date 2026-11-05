@@ -1,17 +1,20 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Queue } from 'bullmq';
+import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { jurisdictionCode, leadZone, type LeadZone } from '@/common/utils/lead-timezone';
 import { CALL_QUEUE, TEXT_QUEUE } from '@/queue/queue.constants';
+import { visibleLeads } from './lead-scope';
 import { LeadStateService } from './lead-state.service';
 
 /**
  * An agent's answer to "what time zone is this lead in". Stored on the lead, it
  * outranks the zone inferred from the phone number; null hands the decision
- * back to the number. Calls and texts already waiting for this lead's window
- * are woken, so the worker measures them against the new zone at once.
+ * back to the number. Queued calls and texts waiting for this lead's window are
+ * woken, so a worker measures them against the new zone at once; a strategy
+ * step held in the engine's own timer picks it up at its next hourly look.
  */
 @Injectable()
 export class LeadTimezoneService {
@@ -24,8 +27,10 @@ export class LeadTimezoneService {
     @InjectQueue(TEXT_QUEUE) private readonly texts: Queue<{ leadId: string }>,
   ) {}
 
-  async set(orgId: string, leadId: string, timezone: string | null, userId: string): Promise<LeadZone> {
-    const updated = await this.prisma.lead.updateMany({ where: { id: leadId, orgId }, data: { timezone } });
+  /** Only the leads the user may see: a zone is calling hours, so an assigned-only agent sets it for their own leads alone. */
+  async set(auth: AuthContext, leadId: string, timezone: string | null): Promise<LeadZone> {
+    const { organizationId: orgId, userId } = auth;
+    const updated = await this.prisma.lead.updateMany({ where: { id: leadId, ...visibleLeads(auth) }, data: { timezone } });
     if (updated.count === 0) throw new AppError('NOT_FOUND', 'No such lead');
 
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { normalizedPhone: true } });
