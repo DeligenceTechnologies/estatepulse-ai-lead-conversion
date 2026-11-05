@@ -254,7 +254,7 @@ export class LeadsController {
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Body() body: SetLeadTimezoneDto,
   ) {
-    return { timezone: await this.timezones.set(auth.organizationId, leadId, body.timezone, auth.userId) };
+    return { timezone: await this.timezones.set(auth, leadId, body.timezone) };
   }
 
   /** How many leads in the organization share each lead's phone (or email, when it has no phone). */

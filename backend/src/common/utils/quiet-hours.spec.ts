@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { leadZone } from './lead-timezone';
 import { nextAllowedAt, nextContactAt, nextLeadContactAt, nextLocalMidnight, weekdayOf } from './quiet-hours';
+import { minutesOf, zonedToInstant } from './zoned-time';
 
 const TZ = 'Asia/Kolkata';
 const QUIET = { start: '21:00', end: '08:00' };
@@ -43,7 +44,11 @@ describe('contact window', () => {
 });
 
 // Leads by phone: Vancouver (CA/BC), Austin (US/TX), Toronto (CA/ON), Miami (US/FL), Los Angeles (US/CA), Providence (US/RI).
-// tzdata 2026c keeps British Columbia on UTC-7 all year from November 2026, so Vancouver's clock is no longer Los Angeles's.
+// British Columbia's offset moved in tzdata 2026c, so the Vancouver cases below are written as wall-clock times
+// and read through the running tzdata: they test the rule, not the Node build's offset.
+/** The instant at which the clock in `zone` reads `date` at `time`. */
+const local = (zone: string, date: string, time: string) => new Date(zonedToInstant(date, minutesOf(time), zone));
+const VAN = 'America/Vancouver';
 const vancouver = leadZone({ timezone: null, normalizedPhone: '+16045550199' });
 const austin = leadZone({ timezone: null, normalizedPhone: '+15125550100' });
 const toronto = leadZone({ timezone: null, normalizedPhone: '+14165550100' });
@@ -55,16 +60,17 @@ const ORG = { quiet: QUIET, skipDays: [] as number[] };
 
 describe("the lead's contact window", () => {
   it('a Vancouver lead at 23:00 their time waits for the morning on their clock, whatever zone the organization is in', () => {
-    const late = new Date('2026-11-04T06:00:00.000Z'); // Tue 23:00 in Vancouver (UTC-7)
+    const wednesdayMorning = local(VAN, '2026-11-04', '09:00');
+    const late = local(VAN, '2026-11-03', '23:00'); // Tue 23:00 in Vancouver
     // The organization opens at 08:00, but a Canadian weekday opens at 09:00 under the CRTC rules.
-    expect(nextLeadContactAt(vancouver, ORG, late)).toEqual({ allowedAt: new Date('2026-11-04T16:00:00.000Z'), reason: 'Legal calling hours (CA)' });
+    expect(nextLeadContactAt(vancouver, ORG, late)).toEqual({ allowedAt: wednesdayMorning, reason: 'Legal calling hours (CA)' });
     // The organization's zone (Kolkata, Toronto) is not an input: only its quiet-hour settings are.
-    const morning = new Date('2026-11-03T17:00:00.000Z'); // Tue 10:00 Vancouver = 22:30 Kolkata = 12:00 Toronto
+    const morning = local(VAN, '2026-11-03', '10:00'); // Tue 10:00 Vancouver
     expect(nextLeadContactAt(vancouver, ORG, morning)).toEqual({ allowedAt: morning, reason: null });
-    const earlyEvening = new Date('2026-11-04T01:30:00.000Z'); // Tue 18:30 Vancouver = 20:30 Toronto: fine for the lead
+    const earlyEvening = local(VAN, '2026-11-03', '18:30'); // fine for the lead, whatever the clock says in Toronto
     expect(nextLeadContactAt(vancouver, ORG, earlyEvening)).toEqual({ allowedAt: earlyEvening, reason: null });
-    const lateEvening = new Date('2026-11-04T04:30:00.000Z'); // Tue 21:30 Vancouver: too late for the lead even if it were fine in Toronto
-    expect(nextLeadContactAt(vancouver, ORG, lateEvening).allowedAt).toEqual(new Date('2026-11-04T16:00:00.000Z'));
+    const lateEvening = local(VAN, '2026-11-03', '21:30'); // too late for the lead even if it were fine in Toronto
+    expect(nextLeadContactAt(vancouver, ORG, lateEvening).allowedAt).toEqual(wednesdayMorning);
   });
 
   it('Texas on a Sunday opens at noon; the legal window names itself', () => {
@@ -90,13 +96,14 @@ describe("the lead's contact window", () => {
   });
 
   it("skip days use the lead's weekday; a callback ignores them but not the law", () => {
-    const sunday = new Date('2026-11-08T17:00:00.000Z'); // Sun 10:00 Vancouver
+    const sunday = local(VAN, '2026-11-08', '10:00'); // Sun 10:00 Vancouver, when the Canadian weekend window opens
+    const mondayMorning = local(VAN, '2026-11-09', '09:00');
     const rules = { quiet: QUIET, skipDays: [0] };
-    expect(nextLeadContactAt(vancouver, rules, sunday)).toEqual({ allowedAt: new Date('2026-11-09T16:00:00.000Z'), reason: 'Legal calling hours (CA)' }); // Mon 09:00
+    expect(nextLeadContactAt(vancouver, rules, sunday)).toEqual({ allowedAt: mondayMorning, reason: 'Legal calling hours (CA)' });
     expect(nextLeadContactAt(vancouver, rules, sunday, { callback: true })).toEqual({ allowedAt: sunday, reason: null });
     // Sunday night: Sunday's window ends at 18:00, but Monday's own rules open the morning at 09:00, not at Sunday's 10:00.
-    const sundayNight = new Date('2026-11-09T04:30:00.000Z'); // Sun 21:30 Vancouver
-    expect(nextLeadContactAt(vancouver, rules, sundayNight, { callback: true })).toEqual({ allowedAt: new Date('2026-11-09T16:00:00.000Z'), reason: 'Legal calling hours (CA)' });
+    const sundayNight = local(VAN, '2026-11-08', '21:30');
+    expect(nextLeadContactAt(vancouver, rules, sundayNight, { callback: true })).toEqual({ allowedAt: mondayMorning, reason: 'Legal calling hours (CA)' });
     const sundayMorningAustin = new Date('2026-11-08T16:00:00.000Z'); // Sun 10:00 CST
     expect(nextLeadContactAt(austin, ORG, sundayMorningAustin, { callback: true }).allowedAt).toEqual(new Date('2026-11-08T18:00:00.000Z'));
   });

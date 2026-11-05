@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { EngineService, remainingSteps } from './engine.service';
+import { EngineService, ZONE_HELD_REVIEW, remainingSteps } from './engine.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
 
 const ORG = 'org-1';
@@ -24,7 +24,7 @@ interface CallRow {
 
 function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
   // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way of the step timing under test.
-  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false };
+  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false, reviewReasons: [] as string[] };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
   const since = (where: { createdAt?: { gte: Date } }) => calls.filter((c) => !where.createdAt || c.createdAt >= where.createdAt.gte);
@@ -129,6 +129,25 @@ describe('EngineService strategy', () => {
     s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: 'UTC', normalizedPhone: '+18005550100' });
     await vi.advanceTimersByTimeAsync(60 * MIN);
     expect(s.texts()).toEqual(['text s1']);
+  });
+
+  it('stops re-checking after three days without a zone: outreach is paused and the lead flagged for a person', async () => {
+    const s = setup();
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: null, normalizedPhone: '+18005550100' });
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(3 * 24 * 60 * MIN);
+    expect(s.texts()).toEqual([]);
+    expect(s.prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: LEAD },
+      data: expect.objectContaining({ automationPaused: true, needsReview: true, reviewReasons: { push: ZONE_HELD_REVIEW } }),
+    });
+    const stopped = (s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'strategy_stopped');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0][0].data.reason).toContain('No usable time zone after 3 days');
+    // And it is let go: no further looks.
+    s.prisma.lead.update.mockClear();
+    await vi.advanceTimersByTimeAsync(24 * 60 * MIN);
+    expect(s.prisma.lead.update).not.toHaveBeenCalled();
   });
 
   it('counts each wait from the step before, so the SMS after a call never goes out with it', async () => {

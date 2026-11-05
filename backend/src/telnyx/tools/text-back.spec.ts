@@ -181,6 +181,16 @@ describe('TextBackWorker', () => {
     }
   });
 
+  it('promoted before its time, it waits for the hour the lead asked for', async () => {
+    // Setting a lead's time zone promotes every delayed job they have; "text me tomorrow at 10" is still tomorrow at 10.
+    const at = new Date(Date.now() + 60 * 60_000);
+    const s = worker({ textBackAt: at });
+    s.job.data.at = at.toISOString();
+    await expect(s.w.process(s.job as any)).rejects.toBeInstanceOf(DelayedError);
+    expect(s.job.moveToDelayed).toHaveBeenCalledWith(at.getTime(), undefined);
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+  });
+
   it('waits out quiet hours', async () => {
     const s = worker({ quietNow: true });
     await expect(s.w.process(s.job as any)).rejects.toBeInstanceOf(DelayedError);

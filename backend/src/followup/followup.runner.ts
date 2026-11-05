@@ -144,8 +144,8 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
       const zone = leadZone(lead);
       const window = nextLeadContactAt(zone, { quiet, skipDays }, now);
       if (!window.allowedAt) {
-        await this.followup.holdOnce(row.organization_id, row.lead_id, `Step held — ${window.reason}`, 'followup');
-        this.logger.log(gateLine(row.organization_id, row.lead_id, zone, window, 'held'));
+        const first = await this.followup.holdOnce(row.organization_id, row.lead_id, `Step held — ${window.reason}`, 'followup');
+        this.logger[first ? 'log' : 'debug'](gateLine(row.organization_id, row.lead_id, zone, window, 'held'));
         return void (await this.deferTo(row, new Date(now.getTime() + TZ_RECHECK_MS)));
       }
       if (window.allowedAt > now) {

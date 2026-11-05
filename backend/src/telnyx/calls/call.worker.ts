@@ -92,6 +92,13 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
       this.logger.log(`Callback for lead ${leadId} at ${callbackAt} dropped: it was moved or cleared since`);
       return;
     }
+    // The job can run before its time: setting the lead's zone promotes every delayed job they have.
+    // The hour the lead asked for is theirs, so it waits for it again.
+    const due = callback && callbackAt ? Date.parse(callbackAt) : 0;
+    if (due > Date.now()) {
+      this.logger.log(`Callback for lead ${leadId} is not due until ${callbackAt}: waiting`);
+      return this.delay(job, due, token);
+    }
     // Queued by a strategy or sequence the lead has since left (it ended, was stopped or swapped).
     if (!(await this.stillEnrolled(job.data, lead.status))) {
       this.logger.log(`Call for lead ${leadId} dropped: the lead has left the ${job.data.source ?? 'journey'} that queued it`);
@@ -126,13 +133,13 @@ export class CallWorker extends WorkerHost implements OnApplicationBootstrap {
     const zone = leadZone(lead);
     const window = nextLeadContactAt(zone, { quiet, skipDays }, new Date(), { callback });
     if (!window.allowedAt) {
-      await this.followup.holdOnce(orgId, leadId, `Call held — ${window.reason}`, 'call_worker', 'voice');
-      this.logger.log(gateLine(orgId, leadId, zone, window, 'held'));
+      const first = await this.followup.holdOnce(orgId, leadId, `Call held — ${window.reason}`, 'call_worker', 'voice');
+      this.logger[first ? 'log' : 'debug'](gateLine(orgId, leadId, zone, window, 'held'));
       return this.delay(job, Date.now() + TZ_RECHECK_MS, token);
     }
     if (window.allowedAt.getTime() > Date.now()) {
-      await this.followup.holdOnce(orgId, leadId, `Call waits for the lead's contact window: ${window.reason}`, 'call_worker', 'voice');
-      this.logger.log(gateLine(orgId, leadId, zone, window, 'deferred'));
+      const first = await this.followup.holdOnce(orgId, leadId, `Call waits for the lead's contact window: ${window.reason}`, 'call_worker', 'voice');
+      this.logger[first ? 'log' : 'debug'](gateLine(orgId, leadId, zone, window, 'deferred'));
       return this.delay(job, window.allowedAt.getTime(), token);
     }
     this.logger.debug(gateLine(orgId, leadId, zone, window, 'allowed'));

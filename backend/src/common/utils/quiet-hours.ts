@@ -1,6 +1,6 @@
 import { legalWindows } from './call-windows';
 import { contactZone, jurisdictionCode, type LeadZone } from './lead-timezone';
-import { addDays, localDate, zonedToInstant } from './zoned-time';
+import { addDays, localDate, wallMinutes, weekday, zonedToInstant } from './zoned-time';
 
 export interface QuietHours {
   start: string;
@@ -13,13 +13,7 @@ const toMinutes = (hhmm: string): number => {
 };
 
 export function minutesOfDay(timeZone: string, at: Date): number {
-  const hhmm = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(at);
-  return toMinutes(hhmm) % 1440;
+  return wallMinutes(at.getTime(), timeZone);
 }
 
 /** Quiet hours may wrap midnight (21:00–08:00). */
@@ -39,11 +33,9 @@ export function nextAllowedAt(timeZone: string, quiet: QuietHours | undefined, a
   const today = localDate(at.getTime(), timeZone);
   return new Date(zonedToInstant(end > now ? today : addDays(today, 1), end, timeZone));
 }
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 /** 0 (Sunday) to 6 (Saturday), in `timeZone`. */
 export function weekdayOf(timeZone: string, at: Date): number {
-  return WEEKDAYS.indexOf(new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(at));
+  return weekday(localDate(at.getTime(), timeZone));
 }
 
 /** The first instant of the local day after the one `at` falls in. */

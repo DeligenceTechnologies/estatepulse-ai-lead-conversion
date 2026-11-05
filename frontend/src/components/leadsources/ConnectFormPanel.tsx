@@ -288,7 +288,7 @@ export const ConnectFormPanel: React.FC<{
       {/* --- 1. credential ---------------------------------------------- */}
       {step.k === 'credential' && (
         <div className="space-y-3">
-          <TimezoneNotice tone="hint" source="form" />
+          <TimezoneNotice tone="hint" />
           <CredentialField
             label={provider?.capabilities.credentialLabel ?? 'API key'}
             value={apiKey}
@@ -450,7 +450,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
           </div>
         )}
       </div>
-      <TimezoneNotice source="form" />
+      {p?.timezoneMapped === false && <TimezoneNotice />}
 
       {needsReview > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
