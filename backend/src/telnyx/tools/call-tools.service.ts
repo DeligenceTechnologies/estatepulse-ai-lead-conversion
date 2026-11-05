@@ -9,6 +9,7 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { telnyx } from '../telnyx-api';
 import { TelnyxCredentialsService } from '../telnyx-credentials.service';
 import {
+  CALL_TOOL_NAMES,
   CALL_TOOLS_VERSION,
   callToolDefinitions,
   callToolsSettings,
@@ -134,6 +135,7 @@ export class CallToolsService {
     }
 
     if (s.telnyx) await this.removeFromTelnyx(c.apiKey, s.telnyx);
+    await this.removeStrays(c.apiKey, c.assistantId);
     const identifier = `ep_calltools_${orgId.replace(/-/g, '')}`;
     const token = randomBytes(32).toString('base64url');
     const created: CallToolsTelnyx = {
@@ -202,6 +204,24 @@ export class CallToolsService {
     const next = edit(current);
     if (next === current) return;
     await telnyx(apiKey, `/ai/assistants/${assistantId}`, { method: 'PATCH', body: JSON.stringify({ instructions: next }) });
+  }
+
+  /**
+   * Our tools still on the assistant though nothing here records them (a
+   * provision that failed half way, a record lost): Telnyx refuses a second
+   * webhook tool of the same name, so every provision after would fail too.
+   * They come off before the tools are put on again.
+   */
+  private async removeStrays(apiKey: string, assistantId: string): Promise<void> {
+    const quiet = (p: Promise<unknown>) => p.catch((error) => this.logger.warn(`call tools, removing a stray: ${(error as Error).message}`));
+    const raw = await telnyx<any>(apiKey, `/ai/assistants/${assistantId}`);
+    const tools: any[] = (raw?.data ?? raw)?.tools ?? [];
+    for (const t of tools) {
+      if (t?.type !== 'webhook' || !t.tool_id || !CALL_TOOL_NAMES.includes(t.webhook?.name ?? t.name)) continue;
+      this.logger.warn(`assistant ${assistantId}: removing a stray ${t.webhook?.name ?? t.name} tool (${t.tool_id})`);
+      await quiet(telnyx(apiKey, `/ai/assistants/${assistantId}/tools/${t.tool_id}`, { method: 'DELETE' }));
+      await quiet(telnyx(apiKey, `/ai/tools/${t.tool_id}`, { method: 'DELETE' }));
+    }
   }
 
   private async removeFromTelnyx(apiKey: string, t: CallToolsTelnyx): Promise<void> {

@@ -121,7 +121,7 @@ export const STRATEGY_PRESETS: StrategyPreset[] = [
         channel: 'sms',
         action: 'send_sms',
         after: { value: 2, unit: 'minutes' },
-        message: 'Hi {{firstName}}, this is {{brokerage}} — just tried calling about your home search. Is now a good time, or should I try later?',
+        message: 'Hi {{firstName}}, this is {{brokerage}}. Just tried calling about your home search. Is now a good time, or should I try later?',
         onlyIf: { lastCallMissed: true },
       },
       {
@@ -160,7 +160,7 @@ export const STRATEGY_PRESETS: StrategyPreset[] = [
         channel: 'sms',
         action: 'send_sms',
         after: { value: 3, unit: 'days' },
-        message: "Hi {{firstName}}, I'll leave it here for now — just reply whenever you're ready to look.",
+        message: "Hi {{firstName}}, I'll leave it here for now. Just reply whenever you're ready to look.",
         onlyIf: { noReply: true },
       },
     ],
@@ -186,7 +186,7 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
       { actionType: 'voice', delayMinutes: DAY, voicePrompt: 'We have not reached them yet. Introduce yourself and ask about their home search.', maxAttempts: 1, voicemail: 'leave' },
       { actionType: 'sms', delayMinutes: 5, messageTemplate: 'Hi {{firstName}}, just tried calling from {{brokerage}}. Reply here whenever suits you.', maxAttempts: 1, onlyIf: { lastCallMissed: true } },
       { actionType: 'voice', delayMinutes: 3 * DAY, voicePrompt: 'Third attempt; keep it short.', maxAttempts: 1, onlyIf: { noReply: true }, voicemail: 'skip' },
-      { actionType: 'sms', delayMinutes: 5, messageTemplate: "Hi {{firstName}}, tried you once more. I'll stop reaching out for now — reply anytime if you want help finding a home.", maxAttempts: 1, onlyIf: { lastCallMissed: true } },
+      { actionType: 'sms', delayMinutes: 5, messageTemplate: "Hi {{firstName}}, tried you once more. I'll stop reaching out for now. Reply anytime if you want help finding a home.", maxAttempts: 1, onlyIf: { lastCallMissed: true } },
     ],
   },
   {

@@ -5,6 +5,7 @@ import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
+import { startsDoNotContact } from './contact-suppression';
 import type { CreateLeadDto } from './dto/create-lead.dto';
 
 const DNC_REASON = 'This phone or email is on the do-not-contact list from an earlier lead';
@@ -48,17 +49,7 @@ export class ManualLeadService {
     const normalizedEmail = input.email?.toLowerCase() ?? null;
 
     // Someone who asked not to be contacted stays that way, however they come back in.
-    const dnc =
-      (await this.prisma.lead.count({
-        where: {
-          orgId,
-          dncStatus: true,
-          OR: [
-            ...(normalizedPhone ? [{ normalizedPhone }] : []),
-            ...(normalizedEmail ? [{ normalizedEmail }] : []),
-          ],
-        },
-      })) > 0;
+    const dnc = await startsDoNotContact(this.prisma, orgId, normalizedPhone, normalizedEmail);
 
     const lead = await this.prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({

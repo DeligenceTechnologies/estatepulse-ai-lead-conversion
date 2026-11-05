@@ -20,6 +20,7 @@ import { parseCustomPayload } from '@/custom-webhook/extract';
 import { toStoredMapping } from '@/custom-webhook/mapping';
 import { EventsBus } from '@/events/events.bus';
 import { CUSTOM_TARGET, PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
+import { DNC_REVIEW_REASON, startsDoNotContact } from '@/lead/contact-suppression';
 import { adapterFor } from '../adapters/generic.adapter';
 import type { NormalizedAnswer, NormalizedDelivery } from '../adapters/types';
 import { CANONICAL_FIELDS, IGNORE_TARGET } from './canonical-fields';
@@ -394,7 +395,11 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     const { values, phone, email } = input;
     const normalizedPhone = isDialable(phone) ? phone : null;
     const emailValid = email ? isValidEmail(email) : false;
+    const normalizedEmail = emailValid ? email!.trim().toLowerCase() : null;
     const consentGranted = values.consent_status === true;
+    // Someone who asked not to be contacted stays that way, however often they fill in a form.
+    const dnc = await startsDoNotContact(this.prisma, input.orgId, normalizedPhone, normalizedEmail);
+    const reviewReasons = dnc ? [...input.reviewReasons, DNC_REVIEW_REASON] : input.reviewReasons;
     const lead = await this.prisma.lead.create({
       data: {
         orgId: input.orgId,
@@ -402,15 +407,16 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         firstName: text(values.first_name),
         lastName: text(values.last_name),
         email,
-        normalizedEmail: emailValid ? email!.trim().toLowerCase() : null,
+        normalizedEmail,
         phone,
         normalizedPhone,
         phoneValid: Boolean(normalizedPhone),
         timezone: text(values.timezone),
         emailValid,
-        needsReview: input.reviewReasons.length > 0,
-        reviewReasons: input.reviewReasons,
-        automationPaused: input.automationPaused ?? false,
+        needsReview: reviewReasons.length > 0,
+        reviewReasons,
+        dncStatus: dnc,
+        automationPaused: dnc || (input.automationPaused ?? false),
         status: normalizedPhone || emailValid ? LeadStatus.new : LeadStatus.invalid,
         temperature: LeadTemperature.cold,
         score: 0,

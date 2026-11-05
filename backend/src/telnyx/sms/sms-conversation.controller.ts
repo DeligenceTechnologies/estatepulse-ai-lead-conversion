@@ -3,16 +3,18 @@ import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
-import { UpdateTakeoverGreetingDto } from '../dto/telnyx.dto';
+import { UpdateBusinessDetailsDto, UpdateTakeoverGreetingDto } from '../dto/telnyx.dto';
+import { BusinessDetailsService } from './business-details.service';
 import { ChatTakeoverService } from './chat-takeover.service';
 import { SmsConversationService } from './sms-conversation.service';
 
-/** Whether the AI assistant answers a lead's texts, or a person does, and what the lead is told when an agent takes over. */
+/** Whether the AI assistant answers a lead's texts, or a person does, what the lead is told when an agent takes over, and who the organization is in its texts. */
 @Controller('sms-conversation')
 export class SmsConversationController {
   constructor(
     private readonly conversations: SmsConversationService,
     private readonly chats: ChatTakeoverService,
+    private readonly business: BusinessDetailsService,
   ) {}
 
   @Get()
@@ -44,5 +46,17 @@ export class SmsConversationController {
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
   updateTakeoverGreeting(@CurrentAuth() auth: AuthContext, @Body() body: UpdateTakeoverGreetingDto) {
     return this.chats.updateGreeting(auth.organizationId, body);
+  }
+
+  @Get('business-details')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  businessDetails(@CurrentAuth() auth: AuthContext) {
+    return this.business.view(auth.organizationId);
+  }
+
+  @Put('business-details')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  updateBusinessDetails(@CurrentAuth() auth: AuthContext, @Body() body: UpdateBusinessDetailsDto) {
+    return this.business.update(auth.organizationId, body);
   }
 }

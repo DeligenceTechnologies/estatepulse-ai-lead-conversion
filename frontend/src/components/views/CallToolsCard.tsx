@@ -9,8 +9,9 @@ const MAX_CHARS = 320;
 
 /**
  * Callbacks and outcomes: on a call or in a text chat, the AI can book a call
- * back or a text at the exact time the lead asks for, and record a clear "no",
- * "stop contacting me" or wrong number the moment it hears it.
+ * back or a text at the exact time the lead asks for, record a clear "no",
+ * "stop contacting me" or wrong number the moment it hears it, and look up a
+ * meeting the lead already has so it never books a second one.
  */
 export const CallToolsCard: React.FC = () => {
   const [status, setStatus] = useState<CallToolsStatus | null>(null);
@@ -77,10 +78,11 @@ export const CallToolsCard: React.FC = () => {
           minutes&rdquo;, the AI texts them at that time with your text-back message below; nothing else reaches them before
           it, and if they text again first it is cancelled. When a lead clearly says they are not interested,
           asks not to be contacted, or it is the wrong number, the AI records it straight away and all outreach to them
-          stops; &ldquo;don&apos;t contact me&rdquo; also sets do-not-contact.
+          stops; &ldquo;don&apos;t contact me&rdquo; also sets do-not-contact. When a lead with a meeting wants to move or
+          cancel it, the AI gives them the link from their booking to do it, and never books a second meeting.
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
-          This adds three tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
+          This adds four tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
           Turning it off removes just those; the rest of your prompt is never changed.
         </p>
       </div>

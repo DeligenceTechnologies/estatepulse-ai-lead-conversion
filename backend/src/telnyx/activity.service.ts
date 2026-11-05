@@ -16,6 +16,7 @@ import { LeadInsightsService } from './lead-insights.service';
 import { memoryVariables } from './qualification';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
+import { safeName, safeText, safeTranscript } from './lead-data';
 import { TELNYX_API } from './telnyx-api';
 import { fillTemplate } from './template';
 import { CALLBACK_GREETING } from './tools/call-tools';
@@ -621,7 +622,7 @@ export class ActivityService {
       ? texts
           .slice()
           .reverse()
-          .map((m) => `${m.direction === 'inbound' ? 'Lead' : 'Us'}: ${m.body ?? ''}`)
+          .map((m) => `${m.direction === 'inbound' ? 'Lead' : 'Us'}: ${safeTranscript(m.body)}`)
           .join(' | ')
           .slice(-1500)
       : '';
@@ -631,19 +632,22 @@ export class ActivityService {
       lead.minBudget != null && lead.maxBudget != null
         ? `${Number(lead.minBudget).toLocaleString()} to ${Number(lead.maxBudget).toLocaleString()}`
         : str(lead.maxBudget ?? lead.minBudget);
+    // What the lead or a form typed is cleaned before it is texted or read to the AI (lead-data.ts).
+    const firstName = safeName(lead.firstName);
+    const lastName = safeName(lead.lastName);
     return {
-      firstName: lead.firstName?.trim() || 'there',
-      lastName: str(lead.lastName),
-      fullName: fullName(lead.firstName, lead.lastName),
-      email: str(lead.email),
+      firstName: firstName || 'there',
+      lastName,
+      fullName: fullName(firstName || null, lastName || null),
+      email: safeText(lead.email, 120),
       phone: str(lead.phone),
-      location: str(lead.location),
+      location: safeText(lead.location, 80),
       budget,
       bedrooms: str(lead.bedrooms),
-      timeline: str(lead.timeline),
-      financingStatus: str(lead.financingStatus),
+      timeline: safeText(lead.timeline, 60),
+      financingStatus: safeText(lead.financingStatus, 60),
       temperature: str(lead.temperature),
-      motivation: str(lead.motivation),
+      motivation: safeText(lead.motivation, 300),
       brokerage: str(org?.name),
       leadId,
       last_outbound_sms: lastOutbound,
@@ -654,7 +658,7 @@ export class ActivityService {
       // Spoken in the lead's own zone when it is known; the office's otherwise.
       callback_time: lead.callbackAt ? spoken(lead.callbackAt, contactZone(leadZone(lead)) ?? settings?.timezone ?? 'UTC') : '',
       ...memoryVariables(questions, lead),
-      conversationSummary: lead.memorySummary?.trim() || 'None yet.',
+      conversationSummary: safeText(lead.memorySummary, 600) || 'None yet.',
     };
   }
 }

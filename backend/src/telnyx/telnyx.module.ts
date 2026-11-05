@@ -8,6 +8,8 @@ import { CallQueue } from './calls/call.queue';
 import { CallWorker } from './calls/call.worker';
 import { EngineService } from './engine.service';
 import { InboundSmsService } from './inbound-sms.service';
+import { OptOutService } from './opt-out.service';
+import { BusinessDetailsService } from './sms/business-details.service';
 import { LeadInsightsService } from './lead-insights.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { LeadScoringService } from './lead-scoring.service';
@@ -29,6 +31,7 @@ import { AssistantToolAuth } from './tools/assistant-tool-auth.service';
 import { CallOutcomeToolController, CallToolsSettingsController } from './tools/call-tools.controller';
 import { CallToolsService } from './tools/call-tools.service';
 import { CallbackService } from './tools/callback.service';
+import { MeetingToolService } from './tools/meeting-tool.service';
 import { OutcomeService } from './tools/outcome.service';
 import { TextBackService } from './tools/text-back.service';
 import { TextBackWorker } from './tools/text-back.worker';
@@ -60,6 +63,8 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallWorker,
     EngineService,
     InboundSmsService,
+    OptOutService,
+    BusinessDetailsService,
     LeadInsightsService,
     LeadMemoryService,
     LeadScoringService,
@@ -76,12 +81,14 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantToolAuth,
     CallToolsService,
     CallbackService,
+    MeetingToolService,
     OutcomeService,
     TextBackService,
     TextBackWorker,
   ],
   exports: [
     CallQueue,
+    OptOutService,
     CallSlots,
     EngineService,
     TelnyxCredentialsService,

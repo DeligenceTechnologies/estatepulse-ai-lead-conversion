@@ -5,6 +5,8 @@ import { TelnyxCredentialsService } from '../telnyx-credentials.service';
 import { telnyx } from '../telnyx-api';
 
 const MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
+/** The inbound text waits on it (it is tried twice), so it may not hang for Telnyx's usual 20 s. */
+const CHECK_TIMEOUT_MS = 10_000;
 
 export const SMS_INTENTS = ['continue', 'not_interested', 'wrong_number', 'opt_out'] as const;
 export type SmsIntent = (typeof SMS_INTENTS)[number];
@@ -21,7 +23,7 @@ const JSON_SCHEMA = {
       type: 'string',
       enum: [...SMS_INTENTS],
       description:
-        'opt_out: asks us to stop texting or contacting them in any words. not_interested: clearly declines (not buying, already bought, ' +
+        'opt_out: asks us to stop texting or contacting them, in any words or language. not_interested: clearly declines (not buying, already bought, ' +
         'no thanks). wrong_number: says they are not the person or never enquired. continue: anything else, including a bare "no" ' +
         'to a question, "not now", "later", questions, or answers.',
     },
@@ -32,7 +34,7 @@ const JSON_SCHEMA = {
 const INSTRUCTIONS = [
   'You classify the newest text a home-buying lead sent to a real estate brokerage: does it end our outreach to them?',
   'Read the earlier messages for context, but judge only the newest one, by what the lead says about themselves now.',
-  '- opt_out: they ask us to stop texting, calling or contacting them, in any words ("stop texting me", "remove me from your list").',
+  '- opt_out: they ask us to stop texting, calling or contacting them, in any words or language ("stop texting me", "remove me from your list", "leave me alone", "arrêtez de m\'écrire"). When it is unclear whether they want no more messages at all, choose opt_out.',
   '- not_interested: they are not buying or they decline ("not interested", "no thanks", "we already bought", "not looking anymore", "we decided to rent").',
   '- wrong_number: they are not the person we think or never asked about buying ("wrong number", "I never signed up for this").',
   '- continue: everything else. A bare "no" or "not right now" to a question, "maybe next year", "call me next week", questions such as "who is this?", and answers about their search are all continue.',
@@ -57,6 +59,7 @@ export class SmsIntentService {
     const chat = earlier.map((t) => `${t.from === 'lead' ? 'Lead' : 'Us'}: ${t.text}`).join('\n');
     const res = await telnyx(c.apiKey, '/ai/chat/completions', {
       method: 'POST',
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
       body: JSON.stringify({
         model: MODEL,
         temperature: 0,
@@ -67,20 +70,26 @@ export class SmsIntentService {
         response_format: { type: 'json_schema', json_schema: { name: 'sms_intent', schema: JSON_SCHEMA, strict: true } },
       }),
     });
-    return parseIntent(res.choices?.[0]?.message?.content);
+    const result = parseIntent(res.choices?.[0]?.message?.content);
+    if (!result) throw new AppError('UPSTREAM_ERROR', 'The intent check gave an unreadable answer');
+    return result;
   }
 }
 
-/** The model's answer, or `continue` when it is unusable: never end a conversation on a garbled reply. */
-export function parseIntent(raw: unknown): SmsIntentResult {
+/**
+ * The model's answer, or null when it is unusable. A garbled answer is not a
+ * "continue": it may have been an opt-out, so the caller treats it as a
+ * failed check.
+ */
+export function parseIntent(raw: unknown): SmsIntentResult | null {
   let value = raw;
   if (typeof raw === 'string') {
     try {
       value = JSON.parse(raw);
     } catch {
-      return { intent: 'continue', reason: 'unreadable classification' };
+      return null;
     }
   }
   const parsed = schema.safeParse(value);
-  return parsed.success ? parsed.data : { intent: 'continue', reason: 'unreadable classification' };
+  return parsed.success ? parsed.data : null;
 }
