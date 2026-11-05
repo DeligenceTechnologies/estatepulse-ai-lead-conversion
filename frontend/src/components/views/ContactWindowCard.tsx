@@ -144,8 +144,10 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                 />
               </div>
               <p className="text-2xs text-slate-500 mt-1">
-                In your organization's timezone. A step falling inside this window is sent when it
-                reopens, never dropped — and the rest of the cadence shifts with it.
+                In each lead's local time, from their phone's area code (a time zone field in your lead source is used
+                first). A lead whose time zone cannot be told is held until you set it. Legal calling hours for the
+                lead's country, state or province apply on top and cannot be switched off. A step falling inside this
+                window is sent when it reopens, never dropped — and the rest of the cadence shifts with it.
               </p>
             </div>
 

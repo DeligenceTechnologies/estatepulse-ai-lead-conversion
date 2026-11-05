@@ -131,6 +131,8 @@ export interface RegisterInput {
   email: string;
   phone: string;
   password: string;
+  /** The office's IANA time zone (reports, calendars). Outreach follows each lead's own zone. */
+  timezone?: string;
 }
 
 export interface ChangePasswordInput {

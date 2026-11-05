@@ -1,15 +1,19 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { paginate } from '@/common/pagination/paginate';
 import type { ListQuery } from '@/common/pagination/pagination.types';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { leadZone } from '@/common/utils/lead-timezone';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssignLeadDto } from './dto/assign-lead.dto';
 import { CreateLeadDto } from './dto/create-lead.dto';
+import { UpdateLeadDto } from './dto/update-lead.dto';
+import { SetLeadTimezoneDto } from './dto/set-lead-timezone.dto';
 import { LeadAssignmentService } from './lead-assignment.service';
+import { LeadTimezoneService } from './lead-timezone.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
@@ -69,6 +73,7 @@ const LEAD_FIELDS = {
   submissionCount: true,
   normalizedPhone: true,
   normalizedEmail: true,
+  timezone: true,
   assignmentType: true,
   assignedAt: true,
   createdAt: true,
@@ -107,6 +112,8 @@ const toLeadRow = (l: LeadListRow, contactLeadCount: number, outreach?: Outreach
   dncStatus: l.dncStatus,
   automationPaused: l.automationPaused,
   outreach: outreachOf(l, outreach),
+  /** Worked out on every read: the provided zone, else the phone number's; see common/utils/lead-timezone.ts. */
+  timezone: leadZone(l),
   customFields: l.customFields,
   submissionCount: l.submissionCount,
   contactLeadCount,
@@ -137,6 +144,7 @@ export class LeadsController {
     private readonly prisma: PrismaService,
     private readonly assignments: LeadAssignmentService,
     private readonly manualLeads: ManualLeadService,
+    private readonly timezones: LeadTimezoneService,
   ) {}
 
   /** One lead added by hand. Same pipeline as a form submission, without a lead source. */
@@ -144,6 +152,17 @@ export class LeadsController {
   @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
   create(@CurrentAuth() auth: AuthContext, @Body() body: CreateLeadDto) {
     return this.manualLeads.create(auth.organizationId, auth.userId, body);
+  }
+
+  /**
+   * Corrects the details of an existing lead, whatever it came from. Chiefly the phone: a lead
+   * imported without a country code is kept but undialable, and this is the way to fix it
+   * without going back to the sheet. Only the keys sent change; "" clears a text field.
+   */
+  @Patch(':leadId')
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  update(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string, @Body() body: UpdateLeadDto) {
+    return this.manualLeads.update(auth.organizationId, auth.userId, leadId, body);
   }
 
   @Get()
@@ -203,7 +222,13 @@ export class LeadsController {
       this.prisma.lead.groupBy({ by: ['status'], where, _count: { _all: true } }),
       this.prisma.lead.groupBy({ by: ['temperature'], where, _count: { _all: true } }),
       // A source or an agent is an option once it holds a lead, as before pagination.
-      this.prisma.leadSource.findMany({ where: { orgId, leads: { some: where } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      // `code` comes too: names are not unique, so two sources can read the same in a dropdown
+      // and only the code tells them apart.
+      this.prisma.leadSource.findMany({
+        where: { orgId, leads: { some: where } },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
       this.prisma.user.findMany({
         where: { orgId, assignedLeads: { some: where } },
         select: { id: true, firstName: true, lastName: true },
@@ -237,6 +262,17 @@ export class LeadsController {
       assignmentType: AssignmentType.manual,
       reason: 'Assigned manually',
     });
+  }
+
+  /** PUT: the lead's own time zone, or null to let their phone number decide again. Answers the zone as the list shows it. */
+  @Put(':leadId/timezone')
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  async setTimezone(
+    @CurrentAuth() auth: AuthContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Body() body: SetLeadTimezoneDto,
+  ) {
+    return { timezone: await this.timezones.set(auth.organizationId, leadId, body.timezone, auth.userId) };
   }
 
   /** How many leads in the organization share each lead's phone (or email, when it has no phone). */

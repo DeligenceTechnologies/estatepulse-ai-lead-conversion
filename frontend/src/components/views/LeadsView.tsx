@@ -12,6 +12,7 @@ import {
   Hourglass,
   Pause,
   PenLine,
+  Pencil,
   Plus,
   Radio,
   RefreshCw,
@@ -33,7 +34,7 @@ import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { startLabel } from '../../utils/outreachApi';
 import { FileImportModal } from '../imports/FileImportModal';
-import { NewLeadModal } from '../modals/NewLeadModal';
+import { LeadFormModal } from '../modals/LeadFormModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
@@ -140,7 +141,17 @@ const attentionReasons = (l: LiveLead): string[] => [
     ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`]
     : []),
   // Such a lead must never be auto-dialed.
-  ...(l.phone && !l.phoneValid ? ['Phone could not be parsed — excluded from dialing.'] : []),
+  ...(l.phone && !l.phoneValid
+    ? [
+        'This number has no country code, so it cannot be dialled. Add the code with the pencil button, or put it in the sheet this lead came from and sync again.',
+      ]
+    : []),
+  // Nothing to call or text: no number at all (an unparseable one is reported just above).
+  ...(l.timezone && !l.timezone.hasPhone && !l.phone ? ['No phone number — this lead cannot be called or texted.'] : []),
+  // No clock to measure calling hours against: held until an agent sets the zone in the lead's details.
+  ...(l.timezone && l.timezone.hasPhone && (l.timezone.status === 'needs_review' || l.timezone.status === 'unknown')
+    ? [`Time zone ${l.timezone.status === 'needs_review' ? 'needs review' : 'unknown'} (${l.timezone.reason}) — not called or texted until an agent sets it in the lead's details.`]
+    : []),
   // Stored, but never used to match this lead to another — see the email_valid guard in createLead.
   ...(l.email && !l.emailValid ? ['Not a usable email address — excluded from matching and email outreach.'] : []),
 ];
@@ -198,6 +209,7 @@ const toLead = (l: LiveLead): Lead => ({
   updatedAt: l.updatedAt,
   notes: humanize(l.motivation) ?? undefined,
   customFields: l.customFields,
+  timezone: l.timezone,
 });
 
 const SKIP_TEXT: Record<string, string> = {
@@ -266,7 +278,7 @@ const TAB_FILTER: Record<Tab, Pick<ListLeadsParams, 'status' | 'temperature'>> =
 
 export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
-  const { agentProfileId, role } = useAuth();
+  const { user, role, can } = useAuth();
   const isOwner = role === 'owner';
   // "Add leads" (owner only): one lead typed in by hand, or a file import where the server has it switched on.
   const [canImport, setCanImport] = useState(false);
@@ -377,23 +389,35 @@ export const LeadsView: React.FC = () => {
   // Source options come from what has actually arrived rather than a hardcoded
   // list: a source exists here only once it holds a lead. The server lists them
   // across every page, not just the one on screen.
-  const sourceOptions = stats?.sources ?? [];
+  //
+  // Two sources can carry the same name — only the code is unique — and a column of
+  // identical entries is a filter nobody can use. Where a name repeats, and only there,
+  // its code is shown beside it.
+  const sourceOptions = useMemo(() => {
+    const all = stats?.sources ?? [];
+    const seen = new Map<string, number>();
+    for (const s of all) seen.set(s.name, (seen.get(s.name) ?? 0) + 1);
+    return all.map((s) => ({ id: s.id, name: (seen.get(s.name) ?? 0) > 1 ? `${s.name} (${s.code})` : s.name }));
+  }, [stats]);
 
   // Agent options from real assignments, like the source options above: an
   // agent appears once they hold a lead. The reader's own entry, when they take
-  // leads, is first and reads "Mine".
+  // leads, is first and reads "Mine" — matched on the signed-in user id, which is what
+  // an assignment actually holds (`leads.assigned_to_id`), not an agent profile.
   const agentOptions = useMemo(
     () =>
       (stats?.agents ?? [])
-        .map((a) => ({ id: a.id, name: a.id === agentProfileId ? 'Mine' : a.name }))
-        .sort((a, b) => Number(b.id === agentProfileId) - Number(a.id === agentProfileId) || a.name.localeCompare(b.name)),
-    [stats, agentProfileId],
+        .map((a) => ({ id: a.id, name: a.id === user?.id ? 'Mine' : a.name }))
+        .sort((a, b) => Number(b.id === user?.id) - Number(a.id === user?.id) || a.name.localeCompare(b.name)),
+    [stats, user?.id],
   );
 
   // Tab counts cover every lead, not the page on screen; hidden until the first answer arrives.
   const tabCount = (n: number | undefined): string => (stats ? ` (${n ?? 0})` : '');
 
   const openLead = (lead: LiveLead) => setSelectedLeadId(lead.id);
+  // The lead being corrected, or null. Held here because the list behind has to refresh after.
+  const [editLead, setEditLead] = useState<LiveLead | null>(null);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
@@ -499,7 +523,10 @@ export const LeadsView: React.FC = () => {
               )}
             </div>
           )}
-          {addOpen && <NewLeadModal onClose={() => setAddOpen(false)} onCreated={() => refresh()} />}
+          {addOpen && <LeadFormModal onClose={() => setAddOpen(false)} onSaved={() => refresh()} />}
+          {editLead && (
+            <LeadFormModal lead={editLead} onClose={() => setEditLead(null)} onSaved={() => refresh()} />
+          )}
           {importOpen && (
             <FileImportModal
               onClose={() => setImportOpen(false)}
@@ -608,8 +635,11 @@ export const LeadsView: React.FC = () => {
               onChange={(e) => setAgentFilter(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
             >
-              <option value="all">All Assigned Agents</option>
-              <option value="unassigned">Unassigned</option>
+              {/* The no-filter option, like "All Lead Sources" above. It was called "All Assigned
+                  Agents", which reads as "only leads that have an agent" and sent people looking
+                  for a bug when unassigned leads showed up too. */}
+              <option value="all">All Agents</option>
+              <option value="unassigned">Unassigned only</option>
               {agentOptions.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -730,7 +760,7 @@ export const LeadsView: React.FC = () => {
                               {initialsOf(lead.assignedAgent.name)}
                             </div>
                             <span className="text-slate-200 font-medium">
-                              {lead.assignedAgent.id === agentProfileId ? 'You' : lead.assignedAgent.name}
+                              {lead.assignedAgent.id === user?.id ? 'You' : lead.assignedAgent.name}
                             </span>
                           </div>
                         ) : (
@@ -778,6 +808,26 @@ export const LeadsView: React.FC = () => {
                             >
                               <Flame className="w-3.5 h-3.5 text-rose-400" />
                             </button>
+                          )}
+
+                          {/* A lead whose number cannot be dialled is the case this is here for, so it
+                              says so and stays visible rather than waiting for a hover. */}
+                          {can('lead.update') && (
+                          <button
+                            onClick={() => setEditLead(lead)}
+                            title={
+                              lead.phone && !lead.phoneValid
+                                ? 'This number has no country code and cannot be dialled — add it here, or fix it in the sheet and sync'
+                                : 'Edit this lead’s details'
+                            }
+                            className={`h-7 w-7 flex items-center justify-center rounded-lg transition cursor-pointer ${
+                              lead.phone && !lead.phoneValid
+                                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white opacity-60 group-hover:opacity-100 focus-visible:opacity-100'
+                            }`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                           )}
 
                           <button

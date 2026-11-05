@@ -115,7 +115,7 @@ describe('InCallBookingService.book', () => {
     expect(result).toMatchObject({
       ok: false,
       reason: 'already_booked',
-      meeting: 'Saturday, November 7 at 1:30 PM',
+      meeting: 'Saturday, November 7 at 1:30 PM GMT+5:30',
       with: 'Sanjay Kumar',
       reschedule_link: BOOKED.rescheduleUrl,
       cancel_link: BOOKED.cancelUrl,

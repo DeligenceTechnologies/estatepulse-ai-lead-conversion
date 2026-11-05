@@ -239,7 +239,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
     // so `sticky bottom-0` pinned it to the bottom of the SCREEN and it floated
     // across the middle of the steps. A flex column with one scrolling child is
     // what actually keeps a footer at the bottom of a tall dialog.
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-3 md:p-6">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-3 md:p-6">
       <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col max-h-full">
         {/* Header */}
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-800">

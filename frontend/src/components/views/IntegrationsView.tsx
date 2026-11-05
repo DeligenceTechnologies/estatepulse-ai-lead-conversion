@@ -1,4 +1,5 @@
 import React from 'react';
+import { TimezoneNotice } from '../common/TimezoneNotice';
 import { ConnectionCards } from '../integrations/ConnectionCards';
 
 /**
@@ -15,6 +16,9 @@ export const IntegrationsView: React.FC = () => (
         <span className="text-slate-300">Lead Sources</span>.
       </p>
     </div>
+
+    {/* Before any source is connected: calling hours follow each lead's own time zone, so a field for it helps. */}
+    <TimezoneNotice tone="hint" />
 
     <ConnectionCards />
   </div>

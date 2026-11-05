@@ -24,7 +24,8 @@ interface CallRow {
 }
 
 function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
-  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', status: 'new', dncStatus: false, automationPaused: false };
+  // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way of the step timing under test.
+  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
   const since = (where: { createdAt?: { gte: Date } }) => calls.filter((c) => !where.createdAt || c.createdAt >= where.createdAt.gte);
@@ -109,6 +110,28 @@ describe('EngineService strategy', () => {
     vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
   });
   afterEach(() => vi.useRealTimers());
+
+  it("holds every step while the lead's time zone cannot be told, logs it once, and goes on the hour after an agent sets it", async () => {
+    const s = setup();
+    // A toll-free number and no provided zone: nothing may go out until someone says where the lead is.
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: null, normalizedPhone: '+18005550100' });
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual([]);
+    const held = (s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'step_held');
+    expect(held).toHaveLength(1);
+    expect(held[0][0].data.reason).toContain("Waiting for the lead's time zone to be set");
+
+    // An hour later, still unknown: looked at again, nothing sent, nothing logged twice.
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(s.texts()).toEqual([]);
+    expect((s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'step_held')).toHaveLength(1);
+
+    // An agent sets the zone: the next look sends the step.
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: 'UTC', normalizedPhone: '+18005550100' });
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
+  });
 
   it('counts each wait from the step before, so the SMS after a call never goes out with it', async () => {
     const s = setup();

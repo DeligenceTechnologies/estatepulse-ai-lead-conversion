@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs
 import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { nextContactAt, type QuietHours } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
@@ -402,21 +403,36 @@ export class EngineService implements OnModuleDestroy {
       return this.appointmentBooked(e.orgId, e.leadId, 'calendar');
     }
 
-    const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
-    const now = Date.now();
-    const allowedAt = nextContactAt(office.timeZone, quiet, skipDaysOf(guardrails?.skipDays), new Date(now)).getTime();
-    if (allowedAt > now) {
-      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), allowedAt - now);
-      return;
-    }
-
     const event = { orgId: e.orgId, leadId: e.leadId, source: 'strategy', channel: step.channel, payload: { stepId: step.id } };
-    const hold = (reason: string) => {
+    /** Logs the hold once per step and reason; true the first time. */
+    const hold = (reason: string): boolean => {
       const key = `${step.id}:${reason}`;
-      if (e.held.has(key)) return;
+      if (e.held.has(key)) return false;
       e.held.add(key);
       this.state.quietly({ ...event, type: 'step_held', reason });
+      return true;
     };
+
+    // On the LEAD's clock: the organization's quiet hours and days off, plus the legal calling
+    // hours of the lead's jurisdiction. Checked again every time the step fires, so a timer that
+    // waited overnight sees a zone an agent set meanwhile.
+    const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
+    const now = Date.now();
+    const zone = leadZone(lead);
+    const window = nextLeadContactAt(zone, { quiet, skipDays: skipDaysOf(guardrails?.skipDays) }, new Date(now));
+    if (!window.allowedAt) {
+      const first = hold(window.reason);
+      this.logger[first ? 'log' : 'debug'](gateLine(e.orgId, e.leadId, zone, window, 'held'));
+      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), TZ_RECHECK_MS);
+      return;
+    }
+    if (window.allowedAt.getTime() > now) {
+      hold(`Waiting for the lead's contact window: ${window.reason}`);
+      this.logger.log(gateLine(e.orgId, e.leadId, zone, window, 'deferred'));
+      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), window.allowedAt.getTime() - now);
+      return;
+    }
+    this.logger.debug(gateLine(e.orgId, e.leadId, zone, window, 'allowed'));
 
     // A text the lead asked for comes first: the step waits for it, then goes on by the usual rules.
     if (textBackPending(lead)) {
@@ -687,12 +703,12 @@ export class EngineService implements OnModuleDestroy {
   }
 
   private async office(orgId: string): Promise<Office> {
-    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, settings: { select: { timezone: true } } } });
-    return { brokerage: org?.name ?? 'our team', timeZone: org?.settings?.timezone ?? 'UTC' };
+    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
+    return { brokerage: org?.name ?? 'our team' };
   }
 }
 
+/** What the steps say about the organization. Timing is the lead's own (their zone), not the office's. */
 interface Office {
   brokerage: string;
-  timeZone: string;
 }

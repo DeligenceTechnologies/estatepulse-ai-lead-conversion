@@ -12,6 +12,8 @@ model Lead {
   emailValid      Boolean @default(false) @map("email_valid")
   phoneValid      Boolean @default(false) @map("phone_valid")
   externalLeadId  String? @map("external_lead_id") @db.VarChar(255)
+  /// IANA zone the lead source provided or an agent set. Null = worked out from the phone number on every read (common/utils/lead-timezone.ts).
+  timezone        String? @db.VarChar(100)
 
   status          LeadStatus       @default(new)
   followUpReason  FollowUpReason?  @map("follow_up_reason")

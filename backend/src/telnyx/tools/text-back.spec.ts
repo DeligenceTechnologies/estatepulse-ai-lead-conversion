@@ -118,6 +118,8 @@ function worker(
     lead: {
       findUnique: vi.fn(async () => ({
         phone: '+12895550100',
+        // The lead's own clock is the test's clock, so the quiet-hours cases below read as before.
+        timezone: TZ,
         status: opts.status ?? 'engaged',
         dncStatus: opts.dnc ?? false,
         automationPaused: opts.paused ?? false,
@@ -129,7 +131,10 @@ function worker(
   };
   const config = { get: vi.fn(() => true) };
   // Quiet hours off unless the test puts "now" inside them: a window from a minute ago to an hour from now.
-  const followup = { guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })) };
+  const followup = {
+    guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })),
+    holdOnce: vi.fn(async () => undefined),
+  };
   const state = { quietly: vi.fn() };
   const tools = { settings: vi.fn(async () => ({ textBackMessage: DEFAULT_TEXT_BACK_MESSAGE })) };
   const sms = { sendSms: vi.fn(async () => (opts.sendFails ? Promise.reject(new Error('Telnyx unreachable')) : { id: 'msg-1' })) };

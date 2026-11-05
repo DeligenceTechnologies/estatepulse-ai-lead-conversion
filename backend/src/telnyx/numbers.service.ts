@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '@/common/errors/app-error';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
+import { normalizePhone } from './phone';
 import { telnyx } from './telnyx-api';
 
 interface SearchOptions {
@@ -69,6 +70,22 @@ export class NumbersService {
     }));
   }
 
+  /**
+   * Is this number on the account the API key belongs to? Only Telnyx can say,
+   * and a failure to ask is not an answer — it is reported, not read as a no.
+   */
+  async ownsNumber(apiKey: string, phoneNumber: string): Promise<boolean> {
+    try {
+      const res = await telnyx<{ data?: unknown[] }>(apiKey, `/phone_numbers?filter[phone_number]=${encodeURIComponent(phoneNumber)}`);
+      return (res.data?.length ?? 0) > 0;
+    } catch (error) {
+      if (/failed 40[13]:/.test((error as Error).message)) {
+        throw new AppError('VALIDATION_ERROR', 'Telnyx rejected this API key — check it and try again.');
+      }
+      throw error;
+    }
+  }
+
   async buyNumber(orgId: string, phoneNumber: string) {
     const c = await this.requireCreds(orgId);
     const res = await telnyx<{ data?: unknown }>(c.apiKey, '/number_orders', {
@@ -101,7 +118,7 @@ export class NumbersService {
     const c = await this.requireCreds(orgId);
     const id = await this.findNumberId(c.apiKey, phoneNumber);
     if (id) await telnyx(c.apiKey, `/phone_numbers/${id}`, { method: 'PATCH', body: JSON.stringify({ connection_id: null }) }).catch(() => undefined);
-    if (c.fromNumber === phoneNumber) await this.creds.saveCreds(orgId, { fromNumber: '' });
+    if (c.fromNumber === normalizePhone(phoneNumber)) await this.creds.saveCreds(orgId, { fromNumber: '' });
     return { phone_number: phoneNumber };
   }
 

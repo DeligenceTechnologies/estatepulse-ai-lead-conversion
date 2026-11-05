@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Loader2, PhoneCall, Plus, Settings2 } from 'lucide-react';
 import { getTelnyxStatus, type TelnyxStatus } from '../../utils/assistantApi';
 import { PanelClose } from '../leadsources/ManualWebhookPanel';
@@ -37,9 +38,11 @@ const TelnyxConnectModal: React.FC<{
     };
   }, [onClose]);
 
-  return (
+  // Into document.body: this dialog is opened from inside the card, and from
+  // there the overlay would only cover the card's own corner of the screen.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div className="w-full max-w-2xl my-8" onClick={(e) => e.stopPropagation()}>
@@ -48,7 +51,8 @@ const TelnyxConnectModal: React.FC<{
         </div>
         <ProviderConnect status={status} onChange={onChange} />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

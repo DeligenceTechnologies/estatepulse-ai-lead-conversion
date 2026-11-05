@@ -21,6 +21,7 @@ import { useApp } from '../../context/AppContext';
 import { useLiveEvents } from '../../lib/liveEvents';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { ConnectionPill, SourceStatusPill } from '../leadsources/StatusPills';
+import { NO_TIMEZONE_FIELD_NOTICE } from '../common/TimezoneNotice';
 import { formatDateTime } from '../../lib/datetime';
 import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
 import { isCustomSource } from '../../utils/customWebhookApi';
@@ -420,6 +421,11 @@ export const LeadSourcesView: React.FC = () => {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <SourceStatusPill source={s} />
                   <ConnectionPill source={s} />
+                  {s.timezoneMapped === false && (
+                    <span title={NO_TIMEZONE_FIELD_NOTICE} className="text-2xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                      no time zone field
+                    </span>
+                  )}
                   {s.externalFormName && (
                     <span className="text-2xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[60%]">
                       {s.externalFormName}

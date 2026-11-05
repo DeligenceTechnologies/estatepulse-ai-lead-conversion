@@ -26,7 +26,7 @@ describe('get_meeting', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      meeting: 'Saturday, November 7 at 1:00 PM',
+      meeting: 'Saturday, November 7 at 1:00 PM EST',
       with: 'Priya S',
       reschedule_link: MEETING.rescheduleUrl,
       cancel_link: MEETING.cancelUrl,

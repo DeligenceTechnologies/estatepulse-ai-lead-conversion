@@ -153,7 +153,6 @@ export class FileImportService {
     const select = { id: true, defaultConsentStatus: true, lastSuccessAt: true } as const;
     let source = await this.prisma.leadSource.findFirst({ where: { orgId, code }, select });
     if (!source) {
-      const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } });
       const name = a.sheets.length > 1 ? `${file!.originalname} › ${a.sheet}` : file!.originalname;
       try {
         await this.prisma.$transaction(async (tx) => {
@@ -174,7 +173,7 @@ export class FileImportService {
             select: { id: true },
           });
           await tx.leadSourceFieldMapping.createMany({
-            data: expandMapping(a.columns, settings?.defaultRegion ?? 'US').map((m) => ({
+            data: expandMapping(a.columns).map((m) => ({
               orgId,
               leadSourceId: created.id,
               sourceFieldKey: m.source_field_key,
@@ -368,18 +367,15 @@ export class FileImportService {
       throw httpError(400, 'FILE_TOO_MANY_ROWS', `This file has more than ${MAX_DATA_ROWS.toLocaleString('en-US')} rows. Split it and upload the parts.`);
     }
 
-    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } });
-    const region = settings?.defaultRegion ?? 'US';
-    const mapping = columns ?? suggestColumns(headers, data.slice(0, 20), region);
+    const mapping = columns ?? suggestColumns(headers, data.slice(0, 20));
     const identity: Identity = { mode: 'fallback' };
     const problems = validateMapping(mapping, identity, headers);
     const usable = mapping.filter((c) => headers.some((h) => h.fieldKey === c.fieldKey && !h.duplicate));
     const ctx = {
       headerIndex: new Map(headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.index])),
       labels: new Map(headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.label])),
-      mappings: expandMapping(usable, region),
+      mappings: expandMapping(usable),
       identity,
-      region,
     };
 
     const seen = new Set<string>();

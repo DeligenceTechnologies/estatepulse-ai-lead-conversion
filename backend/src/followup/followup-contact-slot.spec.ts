@@ -6,7 +6,8 @@ const NOW = new Date('2026-11-03T15:00:00Z');
 function setup(lead: { normalizedPhone: string | null }, sentToday: number) {
   const prisma = {
     organizationSetting: { findUnique: vi.fn(async () => ({ timezone: 'UTC' })) },
-    lead: { findUnique: vi.fn(async () => lead) },
+    // timezone UTC: the lead's clock is the test clock.
+    lead: { findFirst: vi.fn(async () => ({ ...lead, timezone: 'UTC' })) },
     leadEvent: {
       count: vi.fn(async () => sentToday),
       findFirst: vi.fn(async () => ({ createdAt: new Date(NOW.getTime() - 60 * 60_000) })),

@@ -86,6 +86,7 @@ describe('when Telnyx refuses a text (SMS08)', () => {
     ['a 503', 'Telnyx POST /messages failed 503: {}', true],
     ['a 429', 'Telnyx POST /messages failed 429: {}', true],
     ['a full sending queue', 'Telnyx POST /messages failed 400: {"errors":[{"code":"40318"}]}', true],
+    ['a full sending queue, as telnyxErrorText words it', 'Telnyx POST /messages failed 400: Message queue full (40318)', true],
     ['no connection', 'Telnyx unreachable: fetch failed', true],
     ['a timeout', 'Telnyx unreachable: The operation was aborted due to timeout', false],
     ['an invalid number', 'Telnyx POST /messages failed 400: {"errors":[{"code":"40310"}]}', false],

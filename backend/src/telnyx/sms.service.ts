@@ -19,6 +19,13 @@ export class OptedOutError extends AppError {
 export const SMS_RETRY_DELAYS_MS = [60_000, 5 * 60_000];
 
 /**
+ * Whether a failed request's message carries this Telnyx error code: "(40300)"
+ * as telnyxErrorText words it, or raw JSON where the body could not be read.
+ */
+export const hasTelnyxCode = (message: string, code: string): boolean =>
+  new RegExp(`\\(${code}\\)|"code"\\s*:\\s*"${code}"`).test(message);
+
+/**
  * Whether a failed send may get through if tried again: Telnyx was busy or
  * failing (429, a 5xx, its sending queue full: 40318) or could not be reached.
  * Not for anything about the text or the number (invalid, landline, blocked),
@@ -29,7 +36,7 @@ export function isTransientSmsError(error: unknown): boolean {
   if (error instanceof OptedOutError) return false;
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith('Telnyx unreachable')) return !/abort|timeout|timed out/i.test(message);
-  if (/"code"\s*:\s*"40318"/.test(message)) return true;
+  if (hasTelnyxCode(message, '40318')) return true;
   const status = Number(/ failed (\d{3}):/.exec(message)?.[1]);
   return status === 429 || status >= 500;
 }
@@ -70,7 +77,7 @@ export class SmsService {
       });
     } catch (error) {
       if (isTelnyxKeyRejected(error)) await this.creds.keyRejected(orgId).catch(() => undefined);
-      if (/"code"\s*:\s*"40300"/.test((error as Error).message)) {
+      if (hasTelnyxCode((error as Error).message, '40300')) {
         throw new OptedOutError('Telnyx refused the text: this number replied STOP to us (40300)');
       }
       throw error;

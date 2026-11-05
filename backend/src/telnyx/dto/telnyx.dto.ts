@@ -33,10 +33,10 @@ export class TelnyxCredentialsDto {
   @MaxLength(500)
   apiKey?: string;
 
+  /** The account's Ed25519 webhook key as the Telnyx portal shows it: 32 raw bytes, base64. */
   @IsOptional()
   @Transform(trim)
-  @IsString()
-  @MaxLength(200)
+  @Matches(/^[A-Za-z0-9+/]{43}=$/, { message: 'A Telnyx public key is the 44-character value from Telnyx → Keys & Credentials → Public Key.' })
   publicKey?: string;
 
   @IsOptional()

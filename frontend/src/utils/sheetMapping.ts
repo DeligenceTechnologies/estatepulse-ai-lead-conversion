@@ -15,6 +15,7 @@ export type ColumnChoice =
   | 'last_name'
   | 'phone'
   | 'email'
+  | 'timezone'
   | 'location'
   | 'budget_range'
   | 'min_budget'
@@ -30,6 +31,7 @@ export const CHOICES: { value: ColumnChoice; label: string }[] = [
   { value: 'last_name', label: 'Last name' },
   { value: 'phone', label: 'Phone' },
   { value: 'email', label: 'Email' },
+  { value: 'timezone', label: 'Time zone (e.g. America/Vancouver or “Pacific”)' },
   { value: 'location', label: 'Location' },
   { value: 'budget_range', label: 'Budget (range → min + max)' },
   { value: 'min_budget', label: 'Budget minimum' },
@@ -110,6 +112,7 @@ export const ISSUE_TEXT: Record<string, string> = {
   NO_ROW_ID: 'No value in the ID column',
   NO_NAME: 'No name',
   NO_CONTACT: 'No usable phone or email',
+  PHONE_NO_COUNTRY_CODE: 'Phone has no country code — add it (e.g. +91) and import again',
   DUPLICATE_IN_SHEET: 'Same ID as an earlier row',
   DUPLICATE_IN_FILE: 'Same name, phone and email as an earlier row',
 };

@@ -4,7 +4,9 @@ import { OutreachBatchStatus } from '@prisma/client';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
-import { inQuietHours, type QuietHours } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { nextLeadContactAt, type ContactRules } from '@/common/utils/quiet-hours';
+import { skipDaysOf } from '@/followup/journey';
 import { RELEASABLE_LEAD } from '@/google-sheets/approval';
 import { CallSlots } from '@/telnyx/calls/call-slots';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
@@ -16,8 +18,8 @@ const BATCHES_PER_TICK = 50;
 const RELEASE_TX = { maxWait: 10_000, timeout: 15_000 };
 
 interface OrgRules {
-  timeZone: string;
-  quiet?: QuietHours;
+  /** The organization's quiet hours and days off, applied on each lead's own clock. */
+  contact: ContactRules;
   maxConcurrent: number;
   reserved: number;
   steps: Strategy['steps'];
@@ -91,13 +93,12 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
   /** Read before the batch's transaction opens, so it never holds a second pool connection. */
   private async rulesFor(orgId: string): Promise<OrgRules> {
     const [settings, strategy] = await Promise.all([
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true, maxConcurrentCalls: true, reservedCallSlots: true } }),
+      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { maxConcurrentCalls: true, reservedCallSlots: true } }),
       this.strategies.getStrategy(orgId),
     ]);
-    const guard = (strategy.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours };
+    const guard = (strategy.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: ContactRules['quiet']; skipDays?: unknown };
     return {
-      timeZone: settings?.timezone ?? 'UTC',
-      quiet: guard.respectQuietHours === false ? undefined : guard.quietHours,
+      contact: { quiet: guard.respectQuietHours === false ? undefined : guard.quietHours, skipDays: skipDaysOf(guard.skipDays) },
       maxConcurrent: settings?.maxConcurrentCalls ?? DEFAULT_CALL_LIMIT,
       reserved: settings?.reservedCallSlots ?? 1,
       steps: strategy.steps,
@@ -129,7 +130,20 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
            AND l.id = i.lead_id AND l.organization_id = ${orgId}::uuid AND NOT (${RELEASABLE_LEAD})`;
 
       let released = 0;
-      if (!inQuietHours(rules.timeZone, rules.quiet, now)) {
+      // Which queued leads may be contacted right now, each on their own clock (quiet hours, days off,
+      // their jurisdiction's legal hours). A lead whose zone is unknown stays queued until someone sets it.
+      // ponytail: every queued lead of the batch is looked at each tick (a lookup per lead, no I/O); page it if batches grow past the import cap.
+      const queued = await tx.$queryRaw<{ lead_id: string; timezone: string | null; normalized_phone: string | null }[]>`
+        SELECT i.lead_id, l.timezone, l.normalized_phone
+          FROM outreach_batch_leads AS i JOIN leads AS l ON l.id = i.lead_id
+         WHERE i.batch_id = ${batch.id}::uuid AND i.state = 'queued'`;
+      const ready = queued
+        .filter((q) => {
+          const window = nextLeadContactAt(leadZone({ timezone: q.timezone, normalizedPhone: q.normalized_phone }), rules.contact, now);
+          return window.allowedAt !== null && window.allowedAt.getTime() <= now.getTime();
+        })
+        .map((q) => q.lead_id);
+      if (ready.length > 0) {
         const awaitingSince = new Date(now.getTime() - awaitingWindowMs(rules.steps)).toISOString();
         // Released leads whose first call is not on record yet: queued for a slot, or not yet enrolled.
         const [load] = await tx.$queryRaw<{ awaiting: number }[]>`
@@ -148,7 +162,7 @@ export class OutreachRunner implements OnModuleInit, OnModuleDestroy {
           released = await tx.$executeRaw`
             WITH picked AS (
               SELECT lead_id FROM outreach_batch_leads
-               WHERE batch_id = ${batch.id}::uuid AND state = 'queued'
+               WHERE batch_id = ${batch.id}::uuid AND state = 'queued' AND lead_id = ANY(${ready}::uuid[])
                ORDER BY created_at, lead_id
                LIMIT ${capacity}
             ), freed AS (
