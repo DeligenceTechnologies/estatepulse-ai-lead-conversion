@@ -33,7 +33,7 @@ import { useLiveEvents } from '../../lib/liveEvents';
 import { fileImportEnabled } from '../../utils/fileImportApi';
 import { startLabel } from '../../utils/outreachApi';
 import { FileImportModal } from '../imports/FileImportModal';
-import { LeadFormModal } from '../modals/LeadFormModal';
+import { NewLeadModal } from '../modals/NewLeadModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
@@ -139,11 +139,10 @@ const attentionReasons = (l: LiveLead): string[] => [
   ...(l.contactLeadCount > 1
     ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`]
     : []),
-  // Such a lead must never be auto-dialed.
-  ...(l.phone && !l.phoneValid
-    ? [
-        'This number has no country code, so it cannot be dialled. Add the code where this lead came from and sync again.',
-      ]
+  // Such a lead must never be auto-dialed. Only said here when the lead carries no warning of
+  // its own about the number — otherwise this is the same news twice.
+  ...(l.phone && !l.phoneValid && !(l.needsReview && l.reviewReasons.some((r) => r.startsWith('Phone')))
+    ? ['Phone cannot be dialled — fix it where this lead came from and sync again']
     : []),
   // Nothing to call or text: no number at all (an unparseable one is reported just above).
   ...(l.timezone && !l.timezone.hasPhone && !l.phone ? ['No phone number — this lead cannot be called or texted.'] : []),
@@ -520,7 +519,7 @@ export const LeadsView: React.FC = () => {
               )}
             </div>
           )}
-          {addOpen && <LeadFormModal onClose={() => setAddOpen(false)} onSaved={() => refresh()} />}
+          {addOpen && <NewLeadModal onClose={() => setAddOpen(false)} onCreated={() => refresh()} />}
           {importOpen && (
             <FileImportModal
               onClose={() => setImportOpen(false)}

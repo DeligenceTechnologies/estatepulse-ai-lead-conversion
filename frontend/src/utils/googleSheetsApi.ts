@@ -243,12 +243,18 @@ export interface ReviewItem {
     /** False when the number cannot be dialled — usually because it carries no country code. */
     phoneValid: boolean;
     email: string | null;
+    /** False when the address cannot be used for matching or email outreach. */
+    emailValid: boolean;
+    /** The zone the import carried, or null: then it is worked out from the phone number. */
+    timezone: string | null;
     location: string | null;
     timeline: string | null;
     minBudget: number | null;
     maxBudget: number | null;
     bedrooms: number | null;
     motivation: string | null;
+    /** Columns the mapping kept as extra fields, by their own names. */
+    customFields: Record<string, unknown>;
     dncStatus: boolean;
     reviewReasons: string[];
   } | null;
