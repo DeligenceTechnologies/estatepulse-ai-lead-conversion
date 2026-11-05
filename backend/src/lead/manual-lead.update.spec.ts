@@ -14,10 +14,19 @@ const LEAD = {
 };
 
 /** The service with just enough Prisma to see what it would write. */
-const setup = (lead: Partial<typeof LEAD> = {}) => {
+const setup = (lead: Partial<typeof LEAD> = {}, optedOut: { phones?: string[]; dncEmailLeads?: number } = {}) => {
   const update = vi.fn().mockResolvedValue({});
   const prisma = {
-    lead: { findFirst: vi.fn().mockResolvedValue({ ...LEAD, ...lead }), update },
+    lead: {
+      findFirst: vi.fn().mockResolvedValue({ ...LEAD, ...lead }),
+      update,
+      count: vi.fn().mockResolvedValue(optedOut.dncEmailLeads ?? 0),
+    },
+    contactSuppression: {
+      findMany: vi.fn(async ({ where }: { where: { normalizedPhone: { in: string[] } } }) =>
+        where.normalizedPhone.in.filter((p) => optedOut.phones?.includes(p)).map((normalizedPhone) => ({ normalizedPhone })),
+      ),
+    },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ lead: { update } })),
   };
   const audit = { record: vi.fn() };
@@ -85,5 +94,40 @@ describe('correcting a lead by hand', () => {
       entityId: 'lead-1',
       payload: { fields: ['phone', 'location'] },
     });
+  });
+});
+
+describe('editing a lead onto a number or email that opted out', () => {
+  const DNC = 'This phone or email is on the do-not-contact list from an earlier lead';
+
+  test('a phone that opted out turns the lead do-not-contact, paused and flagged', async () => {
+    const s = setup({}, { phones: ['+919024848980'] });
+    await run(s, { phone: '+919024848980' });
+    expect(s.update.mock.calls[0][0].data).toMatchObject({
+      dncStatus: true,
+      automationPaused: true,
+      needsReview: true,
+      reviewReasons: [DNC],
+    });
+    expect(s.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { fields: ['phone'], becameDoNotContact: true } }),
+      expect.anything(),
+    );
+  });
+
+  test('so does an email an opted-out lead has', async () => {
+    const s = setup({ normalizedPhone: '+919024848980', reviewReasons: [] }, { dncEmailLeads: 1 });
+    await run(s, { email: 'Ana@Example.com' });
+    expect(s.update.mock.calls[0][0].data).toMatchObject({ dncStatus: true, reviewReasons: [DNC] });
+  });
+
+  test('a clean number does not, and editing only the name looks nothing up', async () => {
+    const clean = setup();
+    await run(clean, { phone: '+919024848980' });
+    expect(clean.update.mock.calls[0][0].data).not.toHaveProperty('dncStatus');
+
+    const named = setup({ normalizedPhone: '+919024848980', reviewReasons: [] }, { phones: ['+919024848980'] });
+    await run(named, { firstName: 'Ana' });
+    expect(named.update.mock.calls[0][0].data).not.toHaveProperty('dncStatus');
   });
 });

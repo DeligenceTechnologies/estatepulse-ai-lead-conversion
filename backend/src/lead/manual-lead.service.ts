@@ -183,9 +183,20 @@ export class ManualLeadService {
 
     // Fixing the number is the whole point, so the flag it raised goes with it. Any other
     // reason the lead was held for stays: this corrected one field, not the whole review.
-    if (normalizedPhone && lead.reviewReasons.includes(PHONE_UNPARSED_REASON)) {
-      const left = lead.reviewReasons.filter((r) => r !== PHONE_UNPARSED_REASON);
-      Object.assign(data, { reviewReasons: left, needsReview: left.length > 0 });
+    let reasons = lead.reviewReasons;
+    if (normalizedPhone && reasons.includes(PHONE_UNPARSED_REASON)) {
+      reasons = reasons.filter((r) => r !== PHONE_UNPARSED_REASON);
+      Object.assign(data, { reviewReasons: reasons, needsReview: reasons.length > 0 });
+    }
+
+    // A number or email that asked not to be contacted stays that way, however it comes back
+    // in, an edit included: the lead turns do-not-contact, as a new lead with it would start.
+    const contactChanged = input.phone !== undefined || input.email !== undefined;
+    const becameDnc =
+      contactChanged && !lead.dncStatus && (await startsDoNotContact(this.prisma, orgId, normalizedPhone, normalizedEmail));
+    if (becameDnc) {
+      if (!reasons.includes(DNC_REASON)) reasons = [...reasons, DNC_REASON];
+      Object.assign(data, { dncStatus: true, automationPaused: true, reviewReasons: reasons, needsReview: true });
     }
 
     if (changed.length === 0) return { id: lead.id };
@@ -200,7 +211,7 @@ export class ManualLeadService {
           action: 'lead.updated',
           entityType: 'lead',
           entityId: lead.id,
-          payload: { fields: changed },
+          payload: { fields: changed, ...(becameDnc ? { becameDoNotContact: true } : {}) },
         },
         tx,
       );
