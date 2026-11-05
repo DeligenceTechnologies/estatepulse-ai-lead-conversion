@@ -41,6 +41,7 @@ const ROOT_ROUTES = [
   'tools/telnyx/outcome/callback',
   'tools/telnyx/outcome/text',
   'tools/telnyx/outcome/record',
+  'tools/telnyx/outcome/meeting',
   'org-settings/calendar/calendly/callback',
 ];
 
@@ -66,7 +67,11 @@ async function bootstrap() {
   const port = config.get<number>('PORT', 4000);
   const testing = config.get<string>('NODE_ENV') === 'test';
 
-  app.set('trust proxy', 1);
+  // X-Forwarded-For is a header anyone can write, so it is read only from hops we run:
+  // TRUST_PROXY names them by address, subnet or keyword ('loopback' for a proxy on this
+  // box). Unset, nothing is in front and the socket's own address is the client — which is
+  // what rate limits are counted per, so a spoofed header cannot buy a fresh bucket.
+  app.set('trust proxy', config.get<string>('TRUST_PROXY')?.trim() || false);
   app.disable('x-powered-by');
   app.use(helmet());
   app.useBodyParser('json', { limit: config.get<number>('INGEST_MAX_BODY_BYTES') ?? 1_048_576 });

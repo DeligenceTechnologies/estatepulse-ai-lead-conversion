@@ -172,8 +172,8 @@ describe('TextBackWorker', () => {
     }
   });
 
-  it('nothing goes to an opted-out, paused, finished or booked lead', async () => {
-    for (const opts of [{ dnc: true }, { paused: true }, { status: 'not_interested' }, { meeting: 1 }]) {
+  it('nothing goes to an opted-out, finished or booked lead', async () => {
+    for (const opts of [{ dnc: true }, { status: 'not_interested' }, { meeting: 1 }]) {
       const s = worker(opts);
       await s.w.process(s.job as any);
       expect(s.sms.sendSms).not.toHaveBeenCalled();
@@ -189,6 +189,12 @@ describe('TextBackWorker', () => {
     await expect(s.w.process(s.job as any)).rejects.toBeInstanceOf(DelayedError);
     expect(s.job.moveToDelayed).toHaveBeenCalledWith(at.getTime(), undefined);
     expect(s.sms.sendSms).not.toHaveBeenCalled();
+  });
+
+  it('still keeps the promise to a lead whose automation is paused (after an agent handed the chat back)', async () => {
+    const s = worker({ paused: true });
+    await s.w.process(s.job as any);
+    expect(s.sms.sendSms).toHaveBeenCalledOnce();
   });
 
   it('waits out quiet hours', async () => {

@@ -17,6 +17,7 @@ interface SummaryRow {
   temp_cold: number;
   temp_unrated: number;
   last7: number;
+  prev7: number;
   hot_unassigned: number;
   never_contacted: number;
   needs_review: number;
@@ -39,6 +40,7 @@ export class DashboardController {
     const org = auth.organizationId;
     const now = Date.now();
     const since7 = new Date(now - 7 * DAY_MS);
+    const since14 = new Date(now - 14 * DAY_MS);
     const since30 = new Date(now - 30 * DAY_MS);
     const closed = CLOSED_STATUSES as string[];
 
@@ -65,6 +67,8 @@ export class DashboardController {
         count(*) FILTER (WHERE temperature = 'cold' AND status <> ALL(${closed}::lead_status[]))::int AS temp_cold,
         count(*) FILTER (WHERE temperature IS NULL  AND status <> ALL(${closed}::lead_status[]))::int AS temp_unrated,
         count(*) FILTER (WHERE created_at >= ${since7})::int AS last7,
+        -- The week before last7, so the tile can say which way the week went.
+        count(*) FILTER (WHERE created_at >= ${since14} AND created_at < ${since7})::int AS prev7,
         count(*) FILTER (WHERE temperature = 'hot' AND status <> ALL(${closed}::lead_status[]) AND assigned_to_id IS NULL)::int AS hot_unassigned,
         count(*) FILTER (WHERE status = 'new' AND first_contact_at IS NULL AND NOT dnc_status)::int AS never_contacted,
         count(*) FILTER (WHERE needs_review)::int AS needs_review,
@@ -93,6 +97,7 @@ export class DashboardController {
       leads: {
         total: row.by_status.reduce((sum, g) => sum + g.n, 0),
         last7Days: row.last7,
+        previous7Days: row.prev7,
         byStatus,
         byTemperature: { hot: row.temp_hot, warm: row.temp_warm, cold: row.temp_cold, unrated: row.temp_unrated },
       },
@@ -109,7 +114,9 @@ export class DashboardController {
       calls7Days: { total: Object.values(calls).reduce((a, b) => a + b, 0), byStatus: calls },
       upcomingAppointments: row.upcoming_appointments,
       sources30Days: (row.sources ?? []).map((s) => ({
-        name: s.source_id ? (s.name ?? 'Removed source') : 'No source',
+        // No lead source means the lead was typed in on the Leads screen (ManualLeadService);
+        // a source row is only ever hard-deleted while provisional, before it can own a lead.
+        name: s.source_id ? (s.name ?? 'Removed source') : 'Added manually',
         count: s.count,
       })),
     };

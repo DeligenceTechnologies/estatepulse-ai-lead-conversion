@@ -33,3 +33,32 @@ export const getTakeoverGreeting = () => apiFetch<TakeoverGreeting>('/sms-conver
 /** An empty message restores the default. */
 export const updateTakeoverGreeting = (patch: { enabled?: boolean; message?: string }) =>
   apiFetch<TakeoverGreeting>('/sms-conversation/takeover-greeting', { method: 'PUT', body: patch, auth: true });
+
+/**
+ * Who the organization is in its texts. Outreach texts to Canadian numbers
+ * name the brokerage and our number; the HELP answer adds the mailing address
+ * and the email or website. '' when a field is not set.
+ */
+export interface BusinessDetails {
+  legalName: string;
+  mailingAddress: string;
+  email: string;
+  website: string;
+}
+
+export interface BusinessDetailsView extends BusinessDetails {
+  /** The mailing address is there: Canada's anti-spam law (CASL) wants it within reach of the lead. */
+  complete: boolean;
+  /** What {{brokerage}} becomes, and the number texts go out from: for the editors' preview. */
+  brokerage: string;
+  ourNumber: string | null;
+}
+
+export const getBusinessDetails = () => apiFetch<BusinessDetailsView>('/sms-conversation/business-details', { auth: true });
+
+/** Only the fields given change; an empty one clears it. */
+export const updateBusinessDetails = (patch: Partial<BusinessDetails>) =>
+  apiFetch<BusinessDetailsView>('/sms-conversation/business-details', { method: 'PUT', body: patch, auth: true });
+
+/** Sent on window when the details are saved, so an editor on the same page drops its "address missing" warning. */
+export const BUSINESS_DETAILS_SAVED = 'business-details-saved';

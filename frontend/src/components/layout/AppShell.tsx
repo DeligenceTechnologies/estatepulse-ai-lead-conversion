@@ -54,7 +54,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-on-accent">
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />
+        <div className="fixed inset-0 z-40 bg-slate-950/80 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
       <DashboardSidebar
         groups={groups}

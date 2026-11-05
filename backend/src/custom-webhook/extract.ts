@@ -2,7 +2,7 @@ import type { NormalizedAnswer, NormalizedDelivery } from '@/ingest/adapters/typ
 import { CUSTOM_TARGET, PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
 import { CANONICAL_FIELDS } from '@/ingest/processing/canonical-fields';
 import { IGNORE_TARGET } from '@/ingest/processing/canonical-fields';
-import { applyTransform, isValidEmail, type Transform } from '@/ingest/processing/transforms';
+import { applyTransform, isDialable, isValidEmail, type Transform } from '@/ingest/processing/transforms';
 import { validateCanonicalValues, type CanonicalValue } from '@/ingest/processing/validators';
 import { CUSTOM_EVENT_TYPE, CUSTOM_KEY_PREFIX } from './constants';
 import { detectAdapter } from './detect';
@@ -130,7 +130,7 @@ export interface LeadPreview {
  * anything. Drives the mapper's live preview and the "re-run on last payload"
  * button.
  */
-export function previewLead(payload: unknown, mappings: StoredMapping[], region: string): LeadPreview {
+export function previewLead(payload: unknown, mappings: StoredMapping[]): LeadPreview {
   const { delivery } = parseCustomPayload(payload, mappings);
   const values: Record<string, CanonicalValue> = {};
   const customFields: Record<string, string> = {};
@@ -152,7 +152,7 @@ export function previewLead(payload: unknown, mappings: StoredMapping[], region:
     }
     for (const m of targets) {
       try {
-        const { value, warning } = applyTransform(m.transform as Transform, a.textValues, a.scalarText, region);
+        const { value, warning } = applyTransform(m.transform as Transform, a.textValues, a.scalarText);
         if (value !== null && value !== '') values[m.target_field] = value;
         if (warning) warnings.push(`${a.label}: ${warning}`);
         trace.push({ path: a.key, target: m.target_field, value, ...(warning ? { warning } : {}) });
@@ -174,10 +174,10 @@ export function previewLead(payload: unknown, mappings: StoredMapping[], region:
   const phone = typeof validated.values.phone === 'string' ? validated.values.phone : null;
   const email = typeof validated.values.email === 'string' ? validated.values.email : null;
   const reviewReasons = [...validated.warnings];
-  if (phone && !phone.startsWith('+')) reviewReasons.push(PHONE_UNPARSED_REASON);
+  if (phone && !isDialable(phone)) reviewReasons.push(PHONE_UNPARSED_REASON);
 
   const wouldCreate = Boolean(phone || email);
-  const status = !wouldCreate ? null : (phone && phone.startsWith('+')) || (email && isValidEmail(email)) ? 'new' : 'invalid';
+  const status = !wouldCreate ? null : isDialable(phone) || (email && isValidEmail(email)) ? 'new' : 'invalid';
 
   return { wouldCreate, status, values: validated.values, customFields, warnings, reviewReasons, trace };
 }

@@ -63,6 +63,7 @@ export class CustomWebhookService {
 
   /** Creates the source listening. The token is shown again later; the secret only now. */
   async create(who: Identity, body: CreateBody) {
+    await this.leadSources.assertNameFree(who.organizationId, body.name);
     const id = randomUUID();
     const token = generateIngestToken('live');
     const secret = needsSecret(body.auth) ? generateSigningSecret() : null;
@@ -110,7 +111,6 @@ export class CustomWebhookService {
     const base = await this.dto(row);
     const latest = await this.latestDelivery(row);
     if (!latest) return { ...base, delivery: null, format: null, paths: [], truncated: false, suggested: [] };
-    const region = await this.region(organizationId);
     const delivery = { id: latest.id, receivedAt: latest.receivedAt, held: latest.outcomeReason === AWAITING_MAPPING };
 
     // A form provider's payload: its questions, by their stable keys, with the
@@ -124,7 +124,7 @@ export class CustomWebhookService {
         format: adapter.provider,
         paths: parsed.answers.map((a) => ({ path: a.key, label: a.label, value: a.scalarText, type: a.type })),
         truncated: false,
-        suggested: suggestFromAnswers(parsed.answers, region),
+        suggested: suggestFromAnswers(parsed.answers),
       };
     }
 
@@ -135,7 +135,7 @@ export class CustomWebhookService {
       format: null,
       paths: leaves.map((l) => ({ ...l, label: l.path })),
       truncated,
-      suggested: suggestFields(leaves, region),
+      suggested: suggestFields(leaves),
     };
   }
 
@@ -143,7 +143,7 @@ export class CustomWebhookService {
     const row = await this.source(who.organizationId, id);
     const errors = validateFields(body.fields);
     if (errors.length) throw new AppError('VALIDATION_ERROR', 'The mapping needs a change before it can be saved', errors);
-    const rows = expandFields(body.fields, await this.region(who.organizationId));
+    const rows = expandFields(body.fields);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.leadSourceFieldMapping.deleteMany({ where: { orgId: who.organizationId, leadSourceId: row.id } });
@@ -175,18 +175,17 @@ export class CustomWebhookService {
     const row = await this.source(organizationId, id);
     const latest = await this.latestDelivery(row);
     if (!latest) throw new AppError('CONFLICT', 'No payload has arrived yet — send one to the webhook URL first');
-    const region = await this.region(organizationId);
 
     let mappings: StoredMapping[];
     if (body.fields) {
       const errors = validateFields(body.fields);
       if (errors.length) throw new AppError('VALIDATION_ERROR', 'The mapping needs a change before it can be tried', errors);
-      mappings = expandFields(body.fields, region);
+      mappings = expandFields(body.fields);
     } else {
       mappings = await this.storedMappings(row);
       if (mappings.length === 0) throw new AppError('CONFLICT', 'Save a mapping first');
     }
-    return { delivery: { id: latest.id, receivedAt: latest.receivedAt }, preview: previewLead(latest.payload, mappings, region) };
+    return { delivery: { id: latest.id, receivedAt: latest.receivedAt }, preview: previewLead(latest.payload, mappings) };
   }
 
   /**
@@ -260,11 +259,6 @@ export class CustomWebhookService {
     });
     if (!row) throw new AppError('NOT_FOUND', 'No such custom webhook');
     return row;
-  }
-
-  private async region(organizationId: string): Promise<string> {
-    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId: organizationId }, select: { defaultRegion: true } });
-    return settings?.defaultRegion ?? 'US';
   }
 
   /** The newest delivery that carries a readable payload: pending, held or processed; never quarantined or malformed. */

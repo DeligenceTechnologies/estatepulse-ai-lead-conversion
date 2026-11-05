@@ -9,6 +9,7 @@ import {
   type Prisma,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad, generateIngestToken, generateSigningSecret, secretPreview } from '@/common/utils/crypto';
@@ -92,7 +93,31 @@ export class LeadSourcesService {
     };
   }
 
+  /**
+   * The name is how an owner picks this source out of a dropdown later, so two sources cannot
+   * share one. Only the code was ever kept unique, which let the same name be created over and
+   * over until the Leads filter listed eight indistinguishable entries.
+   */
+  async assertNameFree(orgId: string, name: string, exceptId?: string): Promise<void> {
+    const taken = await this.prisma.leadSource.findFirst({
+      where: {
+        orgId,
+        archivedAt: null,
+        name: { equals: name.trim(), mode: 'insensitive' },
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `You already have a lead source called "${name.trim()}". Give this one a different name so you can tell them apart.`,
+      );
+    }
+  }
+
   async create(orgId: string, input: { name: string; requireSignature?: boolean; provider?: LeadSourceProvider }) {
+    await this.assertNameFree(orgId, input.name);
     const provider = input.provider ?? LeadSourceProvider.TALLY;
     const fresh = this.newSourceSecrets(orgId);
     const created = await this.prisma.leadSource.create({

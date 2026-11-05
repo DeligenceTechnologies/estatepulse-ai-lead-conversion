@@ -113,7 +113,7 @@ export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolle
     });
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center overflow-y-auto p-6">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center overflow-y-auto p-6">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl my-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>

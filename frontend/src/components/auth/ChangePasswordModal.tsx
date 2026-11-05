@@ -66,7 +66,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="change-password-title"

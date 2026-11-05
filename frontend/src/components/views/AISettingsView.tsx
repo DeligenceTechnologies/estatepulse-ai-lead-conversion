@@ -59,6 +59,7 @@ import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
+import { BusinessDetailsCard } from './BusinessDetailsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
 
@@ -1198,6 +1199,8 @@ export const AISettingsView: React.FC = () => {
 
         <TakeoverGreetingCard />
 
+        <BusinessDetailsCard />
+
         {/* Statements of behaviour, not settings — nothing here is editable. */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1205,10 +1208,12 @@ export const AISettingsView: React.FC = () => {
             Compliance
           </h3>
           <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-300 space-y-1">
-            <div className="text-emerald-400 font-semibold">Strict TCPA STOP enforcement: active</div>
+            <div className="text-emerald-400 font-semibold">Opt-outs are honoured at once: active</div>
             <p className="text-slate-400">
-              A reply of "STOP", "UNSUBSCRIBE" or similar sets do-not-contact and cancels every
-              scheduled step, in the strategy and in every sequence.
+              A text asking to stop, in any clear words ("STOP", "stop texting me", "opt out", "ARRÊT"), makes the number
+              do-not-contact on every lead that has it and cancels every scheduled step, in the strategy and in every sequence.
+              HELP gets who you are and how to stop. The first text to a number, and every outreach text to a Canadian
+              number, says who you are and "Reply STOP to opt out".
             </p>
           </div>
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">

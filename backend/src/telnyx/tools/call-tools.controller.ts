@@ -9,6 +9,7 @@ import { UpdateCallToolsDto } from '../dto/telnyx.dto';
 import { AssistantToolAuth, toolRequest } from './assistant-tool-auth.service';
 import { CallToolsService } from './call-tools.service';
 import { CallbackService } from './callback.service';
+import { MeetingToolService } from './meeting-tool.service';
 import { OutcomeService } from './outcome.service';
 import { TextBackService } from './text-back.service';
 
@@ -29,6 +30,7 @@ export class CallOutcomeToolController {
     private readonly callbacks: CallbackService,
     private readonly outcomes: OutcomeService,
     private readonly textBacks: TextBackService,
+    private readonly meetings: MeetingToolService,
   ) {}
 
   @Post('callback')
@@ -60,6 +62,12 @@ export class CallOutcomeToolController {
   async record(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
     const caller = await this.verify(req, body);
     return this.outcomes.record(caller, { outcome: str(body?.outcome, 40), note: str(body?.note, 300) });
+  }
+
+  @Post('meeting')
+  @HttpCode(HttpStatus.OK)
+  async meeting(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
+    return this.meetings.lookup(await this.verify(req, body));
   }
 
   private verify(req: RawBodyRequest<Request>, body: any) {

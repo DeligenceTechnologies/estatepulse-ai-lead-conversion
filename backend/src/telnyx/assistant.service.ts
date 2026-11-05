@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { memoryVariables, QUALIFICATION_PROMPT_START, withQualificationSection } from './qualification';
+import { memoryVariables, qualificationSection, withQualificationSection } from './qualification';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { SmsConversationService } from './sms/sms-conversation.service';
 import { RECORDING_NOTICE } from './recording-notice';
@@ -431,7 +431,8 @@ export class AssistantService {
     const cur = current ?? (await this.fetchRaw(orgId));
     const body: any = {};
     const instructions = String(cur.instructions ?? '');
-    if (!instructions.includes(QUALIFICATION_PROMPT_START)) body.instructions = withQualificationSection(instructions);
+    // Missing, or written by an older release: a newer wording reaches every assistant at its next call.
+    if (!instructions.includes(qualificationSection())) body.instructions = withQualificationSection(instructions);
     const defaults = await this.memoryDefaults(orgId);
     const vars = cur.dynamic_variables ?? {};
     if (Object.entries(defaults).some(([k, v]) => vars[k] !== v)) body.dynamic_variables = { ...vars, ...defaults };

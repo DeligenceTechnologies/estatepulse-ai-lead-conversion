@@ -75,7 +75,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
   }, [leadId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 animate-in fade-in duration-150">
       <div className="relative w-full max-w-2xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden text-slate-100 h-[100dvh] sm:h-auto sm:max-h-[90vh] flex flex-col">
         <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">

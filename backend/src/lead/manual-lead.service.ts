@@ -1,18 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { ConsentStatus, LeadStatus, LeadTemperature } from '@prisma/client';
-import parsePhoneNumberFromString, { type CountryCode } from 'libphonenumber-js';
+import parsePhoneNumberFromString from 'libphonenumber-js';
 import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
+import { startsDoNotContact } from './contact-suppression';
 import type { CreateLeadDto } from './dto/create-lead.dto';
 
 const DNC_REASON = 'This phone or email is on the do-not-contact list from an earlier lead';
 
 /**
- * A lead typed in by hand on the Leads screen. It has no lead source, and it
- * joins the same pipeline as a form submission: status `new`, so the lead
- * watcher enrolls it in the strategy unless it is paused.
+ * One lead an owner types in by hand on the Leads screen. It has no lead source and joins the
+ * same pipeline as a form submission: status `new`, so the lead watcher enrolls it in the
+ * strategy unless paused. Nothing here edits a lead that already exists — an imported one is
+ * corrected where it came from and synced again.
  */
 @Injectable()
 export class ManualLeadService {
@@ -30,29 +32,24 @@ export class ManualLeadService {
       throw new AppError('VALIDATION_ERROR', 'Budget min cannot be more than budget max.');
     }
 
-    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } });
     let normalizedPhone: string | null = null;
     if (input.phone) {
-      const parsed = parsePhoneNumberFromString(input.phone, (settings?.defaultRegion ?? 'US') as CountryCode);
+      // No country is assumed from the digits: the same ten digits are a valid number in
+      // dozens of countries, and a wrong guess is a lead nobody can reach. Here there is a
+      // person at the form, so ask them for the code instead of flagging it for later.
+      const parsed = parsePhoneNumberFromString(input.phone);
       if (!parsed?.isValid()) {
-        throw new AppError('VALIDATION_ERROR', `"${input.phone}" is not a valid phone number. Include the country code, e.g. +1 512 555 0188.`);
+        throw new AppError(
+          'VALIDATION_ERROR',
+          `"${input.phone}" is not a phone number we can dial. Start with the country code, e.g. +91 98765 43210.`,
+        );
       }
       normalizedPhone = parsed.number;
     }
     const normalizedEmail = input.email?.toLowerCase() ?? null;
 
     // Someone who asked not to be contacted stays that way, however they come back in.
-    const dnc =
-      (await this.prisma.lead.count({
-        where: {
-          orgId,
-          dncStatus: true,
-          OR: [
-            ...(normalizedPhone ? [{ normalizedPhone }] : []),
-            ...(normalizedEmail ? [{ normalizedEmail }] : []),
-          ],
-        },
-      })) > 0;
+    const dnc = await startsDoNotContact(this.prisma, orgId, normalizedPhone, normalizedEmail);
 
     const lead = await this.prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({

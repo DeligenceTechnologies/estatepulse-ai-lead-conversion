@@ -136,7 +136,10 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
             <input id="nl-email" type="email" maxLength={255} value={form.email} onChange={set('email')} className={input} />
           </div>
         </div>
-        <p className="text-2xs text-slate-500 -mt-2">A phone number or an email is required.</p>
+        <p className="text-2xs text-slate-500 -mt-2">
+          A phone number or an email is required. Start a phone number with its country code, e.g. +91 98765 43210 —
+          without one we cannot tell which country it belongs to, and the lead cannot be called.
+        </p>
 
         <div>
           <div className="flex items-center justify-between gap-2 mb-1">

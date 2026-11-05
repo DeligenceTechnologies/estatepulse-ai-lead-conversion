@@ -16,6 +16,7 @@ import { LeadTimezoneService } from './lead-timezone.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
+import { liveReviewReasons } from './review-reasons';
 
 interface OutreachEntry {
   lead_id: string;
@@ -92,8 +93,10 @@ const toLeadRow = (l: LeadListRow, contactLeadCount: number, outreach?: Outreach
   phone: l.phone,
   phoneValid: l.phoneValid,
   emailValid: l.emailValid,
-  needsReview: l.needsReview,
-  reviewReasons: l.reviewReasons,
+  // Filtered, not raw: a reason written at import stays on the lead even after the source was
+  // corrected, and a warning that is no longer true is worse than none.
+  needsReview: l.needsReview && liveReviewReasons(l).length > 0,
+  reviewReasons: liveReviewReasons(l),
   status: l.status,
   followUpReason: l.status === LeadStatus.follow_up ? (l.followUpReason ?? 'other') : null,
   statusReason: l.aiSummary,
@@ -210,7 +213,13 @@ export class LeadsController {
       this.prisma.lead.groupBy({ by: ['status'], where, _count: { _all: true } }),
       this.prisma.lead.groupBy({ by: ['temperature'], where, _count: { _all: true } }),
       // A source or an agent is an option once it holds a lead, as before pagination.
-      this.prisma.leadSource.findMany({ where: { orgId, leads: { some: where } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      // `code` comes too: names are not unique, so two sources can read the same in a dropdown
+      // and only the code tells them apart.
+      this.prisma.leadSource.findMany({
+        where: { orgId, leads: { some: where } },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
       this.prisma.user.findMany({
         where: { orgId, assignedLeads: { some: where } },
         select: { id: true, firstName: true, lastName: true },

@@ -4,6 +4,8 @@ import { toast } from 'react-toastify';
 import { CALL_CONTEXT_MAX_CHARS, STRATEGY_PRESETS, fitSteps } from '../../utils/journey';
 import { Strategy, StrategyStep, getStrategy, saveStrategy, emptyStep } from '../../utils/strategiesApi';
 import { AlwaysOnRules, StepRules } from '../journey/StepRules';
+import { SmsPreview } from '../journey/SmsPreview';
+import { BUSINESS_DETAILS_SAVED, getBusinessDetails, type BusinessDetailsView } from '../../utils/smsConversationApi';
 
 /** A step's condition depends on the step before it, so every change refits them all. */
 const fit = (steps: StrategyStep[]) => fitSteps(steps, (s) => s.channel);
@@ -15,6 +17,7 @@ export const StrategyEditor: React.FC = () => {
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [details, setDetails] = useState<BusinessDetailsView | null>(null);
   const setSteps = (next: (ss: StrategyStep[]) => StrategyStep[]) => setStepsRaw((ss) => fit(next(ss)));
 
   useEffect(() => {
@@ -22,6 +25,15 @@ export const StrategyEditor: React.FC = () => {
       .then((s: Strategy) => setStepsRaw(fit(s.steps || [])))
       .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    getBusinessDetails()
+      .then(setDetails)
+      .catch(() => undefined);
+    const saved = (e: Event) => setDetails((e as CustomEvent<BusinessDetailsView>).detail);
+    window.addEventListener(BUSINESS_DETAILS_SAVED, saved);
+    return () => window.removeEventListener(BUSINESS_DETAILS_SAVED, saved);
   }, []);
 
   const setStep = (i: number, patch: Partial<StrategyStep>) =>
@@ -86,6 +98,9 @@ export const StrategyEditor: React.FC = () => {
     );
   }
 
+  // The strategy's first text is normally the first text a new lead gets.
+  const firstSms = steps.findIndex((s) => s.channel === 'sms');
+
   return (
     <div className="space-y-2 pt-1">
       {error && (
@@ -109,6 +124,16 @@ export const StrategyEditor: React.FC = () => {
         </select>
         <span className="text-2xs text-slate-500 truncate">Templates fill the steps below; edit anything before saving.</span>
       </div>
+
+      {details && !details.complete && steps.some((s) => s.channel === 'sms') && (
+        <div className="flex items-start gap-1.5 text-2xs text-amber-200 bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+          <span>
+            Your mailing address is missing. Canada's anti-spam law wants texts to say who sends them; add it under{' '}
+            <a href="#business-details" className="underline hover:text-amber-100">Business details for texts</a>. Texts still go out.
+          </span>
+        </div>
+      )}
 
       {steps.length === 0 && <p className="text-xs text-slate-500">No steps yet — add at least one call or SMS below.</p>}
 
@@ -161,13 +186,16 @@ export const StrategyEditor: React.FC = () => {
           />
 
           {step.channel === 'sms' ? (
-            <textarea
-              value={step.message || ''}
-              onChange={(e) => setStep(i, { message: e.target.value })}
-              rows={2}
-              placeholder="Message text… use {{firstName}}, {{brokerage}}, {{location}}"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
-            />
+            <div className="space-y-2">
+              <textarea
+                value={step.message || ''}
+                onChange={(e) => setStep(i, { message: e.target.value })}
+                rows={2}
+                placeholder="Message text… use {{firstName}}, {{brokerage}}, {{location}}"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 resize-y"
+              />
+              <SmsPreview template={step.message || ''} first={i === firstSms} details={details} />
+            </div>
           ) : (
             <div className="space-y-1">
               <textarea
