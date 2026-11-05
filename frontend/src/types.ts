@@ -127,6 +127,9 @@ export interface Lead {
   updatedAt: string;
   notes?: string;
   automationPaused?: boolean;
+  /** Live leads only: why the lead is held for a person to look at; nothing automated contacts it until approved. */
+  needsReview?: boolean;
+  reviewReasons?: string[];
   /** Live leads only: the lead's own time zone as the API worked it out; calls and texts keep to it. */
   timezone?: LeadTimezone;
   /**

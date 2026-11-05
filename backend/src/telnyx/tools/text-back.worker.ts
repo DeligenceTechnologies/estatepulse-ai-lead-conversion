@@ -1,6 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CallDisposition, CallStatus } from '@prisma/client';
 import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { QueueEnv } from '@/common/utils/interface';
@@ -16,6 +17,11 @@ import { SmsConversationService } from '../sms/sms-conversation.service';
 import { fillTemplate } from '../template';
 import { CallToolsService } from './call-tools.service';
 import { TEXT_BACK_BLOCKED, type TextBackJobData } from './text-back.service';
+
+/** How often a text asked for on a call looks again while that call's answers are still being saved. */
+const MEMORY_RECHECK_MS = 15_000;
+/** The longest it waits for them after the call ends: a call whose insights never come does not hold the text forever. */
+const MEMORY_WAIT_MAX_MS = 3 * 60_000;
 
 /**
  * Sends the text a lead asked for, at their time: the organization's message,
@@ -89,6 +95,14 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
       throw new DelayedError();
     }
 
+    // Asked for on a call ("let's continue on text"): the answers from that call are saved once Telnyx's
+    // insights arrive, a little after it ends. The text waits for them, so {{nextQuestion}} and the chat
+    // that follows know what the lead already said.
+    if (await this.callAnswersPending(leadId)) {
+      await job.moveToDelayed(Date.now() + MEMORY_RECHECK_MS, token);
+      throw new DelayedError();
+    }
+
     const { textBackMessage } = await this.tools.settings(orgId);
     const text = fillTemplate(textBackMessage, await this.activity.leadVariables(orgId, leadId));
     let sent: { id?: string };
@@ -110,6 +124,20 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
     } catch (error) {
       this.logger.warn(`text back for lead ${leadId} was sent, but recording it failed: ${(error as Error).message}`);
     }
+  }
+
+  /** The lead's latest call is still live, or ended moments ago and its answers are not saved yet. */
+  private async callAnswersPending(leadId: string): Promise<boolean> {
+    const call = await this.prisma.call.findFirst({
+      where: { leadId },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true, disposition: true, endedAt: true, extractedIntel: true },
+    });
+    if (!call) return false;
+    if (call.status === CallStatus.ringing || call.status === CallStatus.in_progress) return true;
+    if (call.status !== CallStatus.completed || call.disposition === CallDisposition.voicemail || !call.endedAt) return false;
+    if (Date.now() - call.endedAt.getTime() > MEMORY_WAIT_MAX_MS) return false;
+    return !(call.extractedIntel as { qualification?: unknown } | null)?.qualification;
   }
 
   private clear(leadId: string, at: string) {

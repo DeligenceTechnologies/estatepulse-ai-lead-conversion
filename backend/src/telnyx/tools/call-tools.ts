@@ -43,10 +43,12 @@ export interface CallToolsTelnyx {
   url: string;
   /** CALL_TOOLS_VERSION they were created with; an older one is provisioned again. */
   version?: number;
+  /** Every tool (the switch on), or only the opt-out (off); unset is from before the switch kept one. */
+  full?: boolean;
 }
 
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 5;
+export const CALL_TOOLS_VERSION = 6;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -78,13 +80,23 @@ export function callToolsSettings(raw: unknown): CallToolsSettings & { telnyx: C
 export const CALL_TOOLS_PROMPT_START = '[EstatePulse: callbacks and outcomes — added by "Callbacks and outcomes" in AI Settings; turn it off there to remove]';
 export const CALL_TOOLS_PROMPT_END = '[End of EstatePulse callbacks and outcomes]';
 
-export function callToolsSection(): string {
+/** With the switch off: only the opt-out, so "stop calling me" is recorded on the call whatever else is off. */
+function optOutSection(): string {
+  return [
+    CALL_TOOLS_PROMPT_START,
+    '# Opting out',
+    '- If the lead asks us to stop calling or texting them, or not to contact them again, call record_outcome with do_not_contact at once. Then apologise for the bother, confirm they will not be contacted again, and say goodbye. Never argue or try to change their mind.',
+    CALL_TOOLS_PROMPT_END,
+  ].join('\n');
+}
+
+export function callToolsSection(full = true): string {
+  if (!full) return optOutSection();
   return [
     CALL_TOOLS_PROMPT_START,
     '# Callbacks and outcomes',
     '- If the lead is busy or asks to be called at another time, call schedule_callback: with day and time for a clock time ("tomorrow at 5"), with in_minutes for a delay ("in 5 minutes", "after an hour"), or with nothing if they named no time ("try me later"). Read back the returned "spoken" time, then say goodbye. If the result is not ok, offer the time it suggests. Never promise a callback without it.',
-    '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
-    '- If the lead mentions a meeting they have with us, or wants to move or cancel one, call get_meeting first and do what its "say" tells you. Never book a second meeting, and never say you moved or cancelled one yourself: the lead does that with the link it returns.',
+    '- If the lead asks to be texted or messaged later ("message me in 2 minutes", "text me tomorrow at 10"), call schedule_text the same way: day and time, in_minutes, or nothing. If they want to continue over text now ("message me right away", "let\'s chat on text", "send it now"), call schedule_text with in_minutes 1: the text arrives as soon as this call ends, and you carry on the conversation there. Confirm the returned "spoken" time in your reply. If the result is not ok, do what its "say" tells you. Never promise a text without it. A call later is schedule_callback and a text later is schedule_text; if a lead texting you only says "later", ask whether a text or a call suits them.',
     '- If the lead clearly says they are not interested or have already bought, call record_outcome with not_interested. If they ask us to stop calling or texting them, use do_not_contact. If this is not the person we wanted, or they never asked about buying a home, use wrong_number. Only on a clear statement, never on a guess. Then say one short, polite goodbye. Never argue or try to change their mind after do_not_contact.',
     '- If {{callback_due}} is yes, this call is the callback they asked for ({{callback_time}}). They have just heard that you are calling back, so go straight to helping them.',
     '- If {{call_context}} is not empty, it is why we are calling them this time. Let it guide the conversation, without reading it out.',
@@ -102,9 +114,9 @@ export function withoutCallToolsSection(instructions: string): string {
   return after ? `${before}\n${after}` : before;
 }
 
-export function withCallToolsSection(instructions: string): string {
+export function withCallToolsSection(instructions: string, full = true): string {
   const base = withoutCallToolsSection(instructions ?? '').replace(/\s+$/, '');
-  return base ? `${base}\n\n${callToolsSection()}` : callToolsSection();
+  return base ? `${base}\n\n${callToolsSection(full)}` : callToolsSection(full);
 }
 
 /** The names our call tools go by on the assistant; Telnyx allows one webhook tool per name. */
@@ -118,12 +130,37 @@ export type Outcome = (typeof OUTCOMES)[number];
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
-export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
+export function callToolDefinitions(apiUrl: string, secretIdentifier: string, full = true) {
   const shared = {
     method: 'POST',
     headers: [{ name: 'Authorization', value: `Bearer {{#integration_secret}}${secretIdentifier}{{/integration_secret}}` }],
     preset_body_fields: { lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}', end_user: '{{telnyx_end_user_target}}' },
   };
+  if (!full) {
+    return [
+      {
+        type: 'webhook',
+        display_name: 'EstatePulse: opt-out',
+        timeout_ms: 10000,
+        webhook: {
+          ...shared,
+          name: 'record_outcome',
+          description:
+            'Record that the lead asked us to stop calling or texting them (`do_not_contact`), the moment they say it. ' +
+            'Then apologise, confirm they will not be contacted again, and say goodbye.',
+          url: `${apiUrl}/tools/telnyx/outcome/record`,
+          body_parameters: {
+            type: 'object',
+            properties: {
+              outcome: { type: 'string', enum: ['do_not_contact'], description: 'Always do_not_contact.' },
+              note: { type: 'string', description: 'Their words, briefly.' },
+            },
+            required: ['outcome'],
+          },
+        },
+      },
+    ];
+  }
   return [
     {
       type: 'webhook',
@@ -160,7 +197,8 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string) {
         description:
           'Schedule a text message to the lead at the time they ask to be texted or messaged later ("message me in 2 ' +
           'minutes", "text me tomorrow at 10"). For a clock time pass `day` (YYYY-MM-DD, "today", "tomorrow" or a ' +
-          'weekday name) and `time` (24-hour HH:MM). For a delay pass only `in_minutes`. Pass nothing if they named no ' +
+          'weekday name) and `time` (24-hour HH:MM). For a delay pass only `in_minutes`. "Right away", "now" or "let\'s ' +
+          'continue on text" is `in_minutes` 1: the text goes out as soon as the call ends. Pass nothing if they named no ' +
           'time. Confirm the returned `spoken` time. If the result is not ok, do what its `say` tells you.',
         url: `${apiUrl}/tools/telnyx/outcome/text`,
         body_parameters: {

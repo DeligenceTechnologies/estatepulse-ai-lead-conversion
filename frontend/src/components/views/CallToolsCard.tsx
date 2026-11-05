@@ -83,7 +83,8 @@ export const CallToolsCard: React.FC = () => {
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
           This adds four tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
-          Turning it off removes just those; the rest of your prompt is never changed.
+          Turning it off removes the callbacks and texts but keeps &ldquo;don&apos;t contact me&rdquo;: an opt-out is always
+          recorded. The rest of your prompt is never changed.
         </p>
       </div>
 
@@ -246,7 +247,8 @@ export const CallToolsCard: React.FC = () => {
             <label className="block text-slate-300 font-semibold">
               Text-back message{' '}
               <span className="text-slate-500 font-normal">
-                — {'{{firstName}}'} and {'{{brokerage}}'} are filled in for each lead; their answer goes on in the AI chat
+                — {'{{firstName}}'}, {'{{brokerage}}'} and {'{{nextQuestion}}'} (the next question they have not answered yet) are
+                filled in for each lead; their answer goes on in the AI chat
               </span>
             </label>
             <textarea

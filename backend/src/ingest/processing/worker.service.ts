@@ -242,7 +242,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         phone,
         email,
         reviewReasons,
-        automationPaused: capturedDuringSetup,
+        // Any reason to look at it holds it: nobody calls or texts a flagged lead
+        // until a person approves it (LeadReviewService) or fixes its phone.
+        automationPaused: reviewReasons.length > 0,
         submittedAt: parsed.submittedAt ?? new Date(),
       });
 
