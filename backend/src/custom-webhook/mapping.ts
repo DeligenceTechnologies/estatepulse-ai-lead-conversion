@@ -26,6 +26,7 @@ export const CUSTOM_TARGETS = [
   'last_name',
   'phone',
   'email',
+  'timezone',
   'location',
   'budget_range',
   'min_budget',
@@ -150,7 +151,7 @@ export function validateFields(fields: MappingField[]): { path: string; message:
   return errors;
 }
 
-function transformForTarget(target: CustomTarget, region: string, fromFullName: boolean): Transform {
+function transformForTarget(target: CustomTarget, fromFullName: boolean): Transform {
   switch (target) {
     case 'consent_status':
       return { kind: 'boolean' };
@@ -165,24 +166,24 @@ function transformForTarget(target: CustomTarget, region: string, fromFullName: 
       // Expanded by the caller; never stored as such.
       return { kind: 'text' };
     case CUSTOM_TARGET:
-      return transformFor(CUSTOM_TARGET, region, false);
+      return transformFor(CUSTOM_TARGET, false);
     case 'timeline':
     case 'buying_intent':
     case 'financing_status':
       // Only reachable with the owner's map, which expandFields uses instead.
       return { kind: 'enum_map', byOptionText: {}, fallback: null };
     default:
-      return transformFor(target, region, fromFullName);
+      return transformFor(target, fromFullName);
   }
 }
 
 /** Saved fields -> stored rows. */
-export function expandFields(fields: MappingField[], region: string): StoredMapping[] {
+export function expandFields(fields: MappingField[]): StoredMapping[] {
   const out: StoredMapping[] = [];
   for (const f of fields) {
     if (f.target === FULL_NAME_TARGET) {
-      out.push({ source_field_key: f.path, target_field: 'first_name', transform: transformFor('first_name', region, true) });
-      out.push({ source_field_key: f.path, target_field: 'last_name', transform: transformFor('last_name', region, true) });
+      out.push({ source_field_key: f.path, target_field: 'first_name', transform: transformFor('first_name', true) });
+      out.push({ source_field_key: f.path, target_field: 'last_name', transform: transformFor('last_name', true) });
     } else if (f.target === BUDGET_RANGE_TARGET) {
       out.push({ source_field_key: f.path, target_field: 'min_budget', transform: { kind: 'currency_range', part: 'min' } });
       out.push({ source_field_key: f.path, target_field: 'max_budget', transform: { kind: 'currency_range', part: 'max' } });
@@ -190,7 +191,7 @@ export function expandFields(fields: MappingField[], region: string): StoredMapp
       out.push({
         source_field_key: f.path,
         target_field: CUSTOM_TARGET,
-        transform: { ...transformForTarget(CUSTOM_TARGET, region, false), label: (f.customName ?? '').trim() },
+        transform: { ...transformForTarget(CUSTOM_TARGET, false), label: (f.customName ?? '').trim() },
       });
     } else if (isEnumTarget(f.target) && f.transform) {
       out.push({
@@ -199,7 +200,7 @@ export function expandFields(fields: MappingField[], region: string): StoredMapp
         transform: { kind: 'enum_map', byOptionText: f.transform.byOptionText, fallback: f.transform.fallback ?? null },
       });
     } else {
-      out.push({ source_field_key: f.path, target_field: f.target, transform: transformForTarget(f.target, region, false) });
+      out.push({ source_field_key: f.path, target_field: f.target, transform: transformForTarget(f.target, false) });
     }
   }
   return out;
@@ -282,17 +283,17 @@ function fieldsFromSuggestions(suggestions: Suggestion[], allowEnums: boolean): 
 }
 
 /** A first guess for a plain-JSON payload, from its paths and values. Only a prefill. */
-export function suggestFields(leaves: Leaf[], region: string): MappingField[] {
+export function suggestFields(leaves: Leaf[]): MappingField[] {
   const answers: NormalizedAnswer[] = leaves
     .filter((l) => l.type !== 'object' && l.type !== 'empty')
     .map((l) => ({ key: l.path, label: labelOf(l.path), type: 'TEXT', raw: l.value, textValues: l.value ? [l.value] : [], scalarText: l.value }));
-  return fieldsFromSuggestions(suggestMappings(answers, region), false);
+  return fieldsFromSuggestions(suggestMappings(answers), false);
 }
 
 /**
  * A first guess for a form provider's payload, from its questions — the same
  * heuristics the provider's own route applies, option maps included.
  */
-export function suggestFromAnswers(answers: NormalizedAnswer[], region: string): MappingField[] {
-  return fieldsFromSuggestions(suggestMappings(answers, region), true);
+export function suggestFromAnswers(answers: NormalizedAnswer[]): MappingField[] {
+  return fieldsFromSuggestions(suggestMappings(answers), true);
 }

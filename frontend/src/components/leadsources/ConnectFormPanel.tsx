@@ -20,6 +20,7 @@ import {
 import { CopyField } from './CopyField';
 import { CredentialField } from './CredentialField';
 import { FormPicker } from './FormPicker';
+import { TimezoneNotice } from '../common/TimezoneNotice';
 
 /**
  * Connect a form through the provider's API.
@@ -287,6 +288,7 @@ export const ConnectFormPanel: React.FC<{
       {/* --- 1. credential ---------------------------------------------- */}
       {step.k === 'credential' && (
         <div className="space-y-3">
+          <TimezoneNotice tone="hint" source="form" />
           <CredentialField
             label={provider?.capabilities.credentialLabel ?? 'API key'}
             value={apiKey}
@@ -448,6 +450,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
           </div>
         )}
       </div>
+      <TimezoneNotice source="form" />
 
       {needsReview > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">

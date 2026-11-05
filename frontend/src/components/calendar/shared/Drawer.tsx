@@ -36,7 +36,7 @@ export const Drawer: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-950/80 animate-fade-in" onClick={onClose} />
 
       <aside
         className={`relative w-full ${WIDTH[width]} h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col animate-slide-in-right text-slate-100`}

@@ -60,6 +60,16 @@ const FIELDS = {
       'contact number', 'number we can reach you on', 'whatsapp', 'how can we reach you',
     ],
   },
+  // The lead's own time zone, when a source asks for it. Optional everywhere: without it the
+  // phone number's area code decides (common/utils/lead-timezone.ts); with it, calls follow it.
+  timezone: {
+    column: 'timezone',
+    label: 'Time zone',
+    group: 'Contact',
+    dataType: 'string',
+    merge: 'latest_wins',
+    synonyms: ['time zone', 'timezone', 'tz', 'local time zone', 'your time zone', 'time zone you are in'],
+  },
   location: {
     column: 'location',
     label: 'Preferred location',

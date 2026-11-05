@@ -30,6 +30,8 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   // A stored key is encrypted and can never be shown again, so the field reports
   // what is on file and only turns back into an input when you ask to replace it.
   const [replacingKey, setReplacingKey] = useState(false);
+  // Not a secret — it is what Telnyx signs its webhooks with, so it is shown plainly.
+  const [publicKey, setPublicKey] = useState('');
   const [fromNumber, setFromNumber] = useState(status.fromNumber || '');
   const [label, setLabel] = useState(status.label || '');
   // Both ids are detected from the API key, so they are an override, not a
@@ -47,6 +49,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
+  const [newPublicKey, setNewPublicKey] = useState('');
   const [newFrom, setNewFrom] = useState('');
 
   const loadAccounts = useCallback(() => {
@@ -82,6 +85,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
     setFromNumber(status.fromNumber || '');
     setLabel(status.label || '');
     setApiKey('');
+    setPublicKey('');
     setReplacingKey(false);
   }, [status.accountId, status.fromNumber, status.label]);
 
@@ -190,6 +194,22 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
           </div>
 
           <div>
+            <label className="block text-slate-300 font-semibold mb-1">
+              Public Key {!status.hasPublicKey && <span className="text-rose-400 font-normal">* required</span>}
+            </label>
+            <input
+              value={publicKey}
+              onChange={(e) => setPublicKey(e.target.value)}
+              placeholder={status.hasPublicKey ? 'Saved — paste a new one to replace it' : 'e.g. AbCd…='}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+            />
+            <p className="text-2xs text-slate-500 mt-1">
+              Telnyx signs every webhook with this key, and we ignore events that are not signed. Copy it from
+              Telnyx &rarr; Account Settings &rarr; Keys &amp; Credentials &rarr; Public Key.
+            </p>
+          </div>
+
+          <div>
             <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-rose-400 font-normal">* required</span></label>
             <FromNumberSelect
               apiKey={apiKey}
@@ -270,11 +290,12 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
         <div className="pl-7">
           <button
             type="button"
-            disabled={busy !== null || (!apiKey && !status.connected) || !fromNumber.trim()}
+            disabled={busy !== null || (!apiKey && !status.connected) || !fromNumber.trim() || (!status.hasPublicKey && !publicKey.trim())}
             onClick={() =>
               run('save', () => {
                 const payload: TelnyxCredentials = { fromNumber, label };
                 if (apiKey) payload.apiKey = apiKey;
+                if (publicKey.trim()) payload.publicKey = publicKey.trim();
                 // Overrides only travel when Advanced is open and filled in. Echoing
                 // the stored ids back would pin the connection to them and stop the
                 // server re-detecting — which is how a stale id survives a re-save.
@@ -283,6 +304,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                 return saveTelnyxCredentials(payload).then((r) => {
                   toast.success('Telnyx settings saved.');
                   setApiKey('');
+                  setPublicKey('');
                   setReplacingKey(false);
                   return r;
                 });
@@ -294,6 +316,9 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
             {status.connected ? 'Save changes' : 'Connect'}
           </button>
           {!fromNumber.trim() && <p className="text-2xs text-rose-400 mt-1.5">A From Number is required before you can save.</p>}
+          {!status.hasPublicKey && !publicKey.trim() && (
+            <p className="text-2xs text-rose-400 mt-1.5">A Public Key is required before you can save — without it Telnyx's events are ignored.</p>
+          )}
         </div>
       </div>
 
@@ -342,18 +367,27 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                 />
               </div>
 
+              <input
+                value={newPublicKey}
+                onChange={(e) => setNewPublicKey(e.target.value)}
+                placeholder="Public key — Telnyx → Keys & Credentials → Public Key"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
+              />
+
               <button
                 type="button"
-                disabled={busy !== null || !newApiKey.trim() || !newFrom.trim()}
+                disabled={busy !== null || !newApiKey.trim() || !newFrom.trim() || !newPublicKey.trim()}
                 onClick={() =>
                   run('add', () =>
                     addTelnyxAccount({
                       label: newLabel.trim(),
                       apiKey: newApiKey.trim(),
+                      publicKey: newPublicKey.trim(),
                       fromNumber: newFrom.trim(),
                     }).then((r) => {
                       setNewLabel('');
                       setNewApiKey('');
+                      setNewPublicKey('');
                       setNewFrom('');
                       setAdding(false);
                       toast.success('Telnyx account added.');

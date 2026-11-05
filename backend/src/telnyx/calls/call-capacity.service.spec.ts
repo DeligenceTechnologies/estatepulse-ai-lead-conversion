@@ -98,6 +98,11 @@ describe('telnyxReason', () => {
     expect(telnyxReason('Telnyx unreachable: timeout')).toBeNull();
   });
 
+  it('reads the detail from the readable form telnyx() now produces', () => {
+    expect(telnyxReason('Telnyx PATCH /outbound_voice_profiles failed 422: Invalid value — Must be at most 10 (10015)')).toBe('Must be at most 10');
+    expect(telnyxReason('Telnyx PATCH /outbound_voice_profiles failed 422: exceeds account channel limit')).toBe('exceeds account channel limit');
+  });
+
   it('reads the detail from a body cut off mid-JSON', () => {
     const cut =
       'Telnyx PATCH /outbound_voice_profiles/3060236055115466666 failed 422: {"errors":[{"code":"10015","title":"Account not level 2 verified",' +

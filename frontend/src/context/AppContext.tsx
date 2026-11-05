@@ -677,7 +677,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const stored = leads.find(l => l.id === id);
     const piped = externalLeads[id];
     if (stored && piped) {
-      return { ...stored, assignedAgentId: piped.assignedAgentId, assignedAgentName: piped.assignedAgentName };
+      // The pipeline's copy is the fresher read of the assignment and of the lead's time zone.
+      return { ...stored, assignedAgentId: piped.assignedAgentId, assignedAgentName: piped.assignedAgentName, timezone: piped.timezone ?? stored.timezone };
     }
     return stored ?? piped;
   };

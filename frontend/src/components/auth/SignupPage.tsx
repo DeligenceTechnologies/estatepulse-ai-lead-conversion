@@ -5,7 +5,11 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor, type OrganizationType } from '../../lib/api';
 import type { CheckEmailState } from './CheckEmailPage';
-import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton } from './AuthLayout';
+import { TimezoneSelect } from '../common/TimezoneSelect';
+import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton, inputClass } from './AuthLayout';
+
+/** Offered first: the leads EstatePulse calls are in North America. The owner changes it here or later in Settings. */
+const DEFAULT_TIMEZONE = 'America/New_York';
 
 const ACCOUNT_TYPES: {
   value: OrganizationType;
@@ -40,6 +44,7 @@ export const SignupPage: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [organizationName, setOrganizationName] = useState('');
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -77,6 +82,7 @@ export const SignupPage: React.FC = () => {
         email: email.trim(),
         phone: phone.trim(),
         password,
+        timezone,
       });
       if (verificationRequired) {
         navigate('/check-email', { replace: true, state: { email: email.trim(), from: 'signup' } satisfies CheckEmailState });
@@ -238,8 +244,15 @@ export const SignupPage: React.FC = () => {
             disabled={busy}
             required
             maxLength={50}
-            placeholder="+91 98765 43210"
+            placeholder="+1 416 555 0123"
           />
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-300 mb-1.5">Office time zone</span>
+            <TimezoneSelect id="timezone" value={timezone} onChange={setTimezone} disabled={busy} className={inputClass} />
+            <span className="block text-2xs text-slate-500 mt-1.5">
+              For your reports and calendar. Calls and texts to leads follow each lead's own time zone.
+            </span>
+          </label>
           <PasswordField
             label="Password"
             name="password"

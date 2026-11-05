@@ -19,12 +19,12 @@ import { CAPTURED_DURING_SETUP, CUSTOM_KEY_PREFIX, CUSTOM_PROVIDER, SETUP_REVIEW
 import { parseCustomPayload } from '@/custom-webhook/extract';
 import { toStoredMapping } from '@/custom-webhook/mapping';
 import { EventsBus } from '@/events/events.bus';
-import { CUSTOM_TARGET } from '@/google-sheets/sheet-rows';
+import { CUSTOM_TARGET, PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
 import { adapterFor } from '../adapters/generic.adapter';
 import type { NormalizedAnswer, NormalizedDelivery } from '../adapters/types';
 import { CANONICAL_FIELDS, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
-import { applyTransform, isValidEmail, type Transform } from './transforms';
+import { applyTransform, isDialable, isValidEmail, type Transform } from './transforms';
 import { validateCanonicalValues } from './validators';
 
 interface ClaimedEvent {
@@ -56,8 +56,6 @@ interface MappedResult {
 }
 
 const MAX_ATTEMPTS = 6;
-const PHONE_UNPARSED = 'Phone number could not be parsed — this lead must not be auto-dialled';
-
 /**
  * Turns stored deliveries into leads. Claims a batch with FOR UPDATE SKIP
  * LOCKED so several API instances can run it side by side, backs off when
@@ -166,10 +164,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
   private async process(event: ClaimedEvent): Promise<void> {
     const startedAt = Date.now();
     try {
-      const [source, settings] = await Promise.all([
-        this.prisma.leadSource.findUnique({ where: { id: event.lead_source_id } }),
-        this.prisma.organizationSetting.findUnique({ where: { orgId: event.organization_id }, select: { defaultRegion: true } }),
-      ]);
+      const source = await this.prisma.leadSource.findUnique({ where: { id: event.lead_source_id } });
       if (!source) {
         await this.finish(event, QueueState.DONE, DeliveryOutcome.ERROR, 'source_missing', startedAt);
         return;
@@ -180,7 +175,6 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const region = settings?.defaultRegion ?? 'US';
       let parsed: NormalizedDelivery;
       let mappings: LeadSourceFieldMapping[];
       // A delivery held while a custom webhook was being set up: its lead is
@@ -203,7 +197,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
             parsed.answers.filter((a) => !a.key.startsWith(CUSTOM_KEY_PREFIX)),
           );
           mappings = (
-            await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers, region)
+            await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers)
           ).filter((m) => m.targetField !== CUSTOM_TARGET);
         } else {
           // Extra-field rows are consumed by the extractor; the engine sees only lead columns.
@@ -214,9 +208,9 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       } else {
         parsed = adapterFor(event.provider).parse(event.payload);
         await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);
-        mappings = await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers, region);
+        mappings = await this.ensureMappings(event.organization_id, source.id, source.mappingStatus, parsed.answers);
       }
-      const mapped = this.applyMappings(parsed.answers, mappings, region);
+      const mapped = this.applyMappings(parsed.answers, mappings);
 
       const validated = validateCanonicalValues(mapped.values);
       for (const rejected of validated.rejected) {
@@ -234,7 +228,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       }
 
       const reviewReasons = [...validated.warnings];
-      if (phone && !phone.startsWith('+')) reviewReasons.push(PHONE_UNPARSED);
+      if (phone && !isDialable(phone)) reviewReasons.push(PHONE_UNPARSED_REASON);
       // Captured while a custom webhook was still being set up: the owner looks
       // at it before anyone contacts it (see CustomWebhookService.activate).
       if (capturedDuringSetup) reviewReasons.push(SETUP_REVIEW_REASON);
@@ -324,17 +318,13 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     leadSourceId: string,
     mappingStatus: MappingStatus | null,
     answers: NormalizedAnswer[],
-    region: string,
   ): Promise<LeadSourceFieldMapping[]> {
     const existing = await this.prisma.leadSourceFieldMapping.findMany({ where: { leadSourceId, isActive: true } });
     if (mappingStatus === MappingStatus.CONFIGURED && existing.length > 0) return existing;
 
     const covered = new Set(existing.map((m) => m.sourceFieldKey));
     const claimed = new Set(existing.map((m) => m.targetField));
-    const additions = suggestMappings(
-      answers.filter((a) => !covered.has(a.key)),
-      region,
-    ).filter((s) => !claimed.has(s.targetField));
+    const additions = suggestMappings(answers.filter((a) => !covered.has(a.key))).filter((s) => !claimed.has(s.targetField));
     if (additions.length === 0) return existing;
 
     await this.prisma.leadSourceFieldMapping.createMany({
@@ -358,7 +348,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     return this.prisma.leadSourceFieldMapping.findMany({ where: { leadSourceId, isActive: true } });
   }
 
-  private applyMappings(answers: NormalizedAnswer[], mappings: LeadSourceFieldMapping[], region: string): MappedResult {
+  private applyMappings(answers: NormalizedAnswer[], mappings: LeadSourceFieldMapping[]): MappedResult {
     const result: MappedResult = { values: {}, customFields: {}, trace: [], warnings: [] };
     const byKey = new Map<string, LeadSourceFieldMapping[]>();
     for (const m of mappings) byKey.set(m.sourceFieldKey, [...(byKey.get(m.sourceFieldKey) ?? []), m]);
@@ -374,7 +364,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       for (const m of targets) {
         if (m.targetField === IGNORE_TARGET) continue;
         try {
-          const { value, warning } = applyTransform(m.transform as unknown as Transform, a.textValues, a.scalarText, region);
+          const { value, warning } = applyTransform(m.transform as unknown as Transform, a.textValues, a.scalarText);
           if (value !== null && value !== '') result.values[m.targetField] = value;
           if (warning) result.warnings.push(`${a.label}: ${warning}`);
           result.trace.push({ ...base, targetField: m.targetField, transformedValue: value, outcome: 'mapped', ...(warning ? { warning } : {}) });
@@ -402,7 +392,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     submittedAt: Date;
   }): Promise<string> {
     const { values, phone, email } = input;
-    const normalizedPhone = phone?.startsWith('+') ? phone : null;
+    const normalizedPhone = isDialable(phone) ? phone : null;
     const emailValid = email ? isValidEmail(email) : false;
     const consentGranted = values.consent_status === true;
     const lead = await this.prisma.lead.create({
@@ -416,6 +406,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         phone,
         normalizedPhone,
         phoneValid: Boolean(normalizedPhone),
+        timezone: text(values.timezone),
         emailValid,
         needsReview: input.reviewReasons.length > 0,
         reviewReasons: input.reviewReasons,

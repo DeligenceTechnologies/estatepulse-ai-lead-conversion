@@ -8,6 +8,7 @@ import {
   type SpreadsheetInspection,
 } from '../../utils/googleSheetsApi';
 import { SheetError, SheetModal, errorText } from './SheetModal';
+import { TimezoneNotice } from '../common/TimezoneNotice';
 
 /**
  * Step two of adding a sheet: the owner picked a spreadsheet in Google's
@@ -89,6 +90,7 @@ export const SheetTabPickerModal: React.FC<{
           <p className="text-2xs text-slate-500">
             The first row must be the column headings. Nothing is imported until you map the columns and switch it on.
           </p>
+          <TimezoneNotice tone="hint" source="sheet" />
           <button
             type="button"
             onClick={create}

@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { CallDisposition, FollowUpReason, LeadStatus, SequenceTrigger } from '@prisma/client';
 import { localDate, parseTime, resolveDay, spoken, zonedToUtc } from '@/calendar/booking/booking-time';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { inQuietHours, nextAllowedAt } from '@/common/utils/quiet-hours';
+import { contactZone, leadZone, type LeadZone } from '@/common/utils/lead-timezone';
+import { inQuietHours, nextAllowedAt, nextLeadContactAt } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { ActivityService } from '../activity.service';
@@ -61,6 +62,26 @@ export function resolveCallback(
   return { ok: true, at };
 }
 
+/**
+ * A time that fits the organization's hours may still fall outside the legal
+ * calling hours of the lead's jurisdiction (a Sunday morning in Texas): then
+ * it is "outside hours" with the first legal moment suggested. A lead with no
+ * usable zone keeps the time; the worker holds the call until a zone is set.
+ */
+export function withinLeadHours(
+  resolved: ReturnType<typeof resolveCallback>,
+  zone: LeadZone,
+  quiet?: { start: string; end: string },
+): ReturnType<typeof resolveCallback> {
+  if (!resolved.ok) return resolved;
+  const legal = nextLeadContactAt(zone, { quiet, skipDays: [] }, resolved.at, { callback: true });
+  if (legal.allowedAt && legal.allowedAt.getTime() > resolved.at.getTime()) return { ok: false, reason: 'outside_hours', suggested: legal.allowedAt };
+  return resolved;
+}
+
+/** "between 08:00 and 21:00", or the law's hours when the organization switched its own off. */
+export const hoursSay = (quiet?: { start: string; end: string }): string => (quiet ? `between ${quiet.end} and ${quiet.start}` : 'within legal calling hours');
+
 /** What the AI is told when the time it passed cannot be used, for schedule_callback or schedule_text. */
 export function retrySay(reason: string, tool: 'schedule_callback' | 'schedule_text'): string {
   const say: Record<string, string> = {
@@ -98,7 +119,10 @@ export class CallbackService {
   ) {}
 
   async schedule(ctx: AssistantToolCaller, input: { day?: string; time?: string; inMinutes?: number; note?: string }, now = new Date()): Promise<CallbackResult> {
-    const lead = await this.prisma.lead.findFirst({ where: { id: ctx.leadId, orgId: ctx.orgId }, select: { status: true, dncStatus: true } });
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: ctx.leadId, orgId: ctx.orgId },
+      select: { status: true, dncStatus: true, normalizedPhone: true, timezone: true },
+    });
     if (!lead) return { ok: false, reason: 'lead_not_found', say: 'Say someone from the team will be in touch.' };
     if (lead.status === LeadStatus.appointment_booked) {
       return { ok: false, reason: 'already_booked', say: 'Their appointment is already booked; say the agent will be in touch before it.' };
@@ -107,15 +131,19 @@ export class CallbackService {
       return { ok: false, reason: 'not_callable', say: 'Do not offer a callback. Say someone from the team will be in touch if needed.' };
     }
 
-    const { timeZone, quiet } = await this.followup.guardrailsFor(ctx.orgId);
-    const resolved = resolveCallback(input, now, timeZone, quiet);
+    // "Their time" is the lead's own zone when it is known; the office's only to read "tomorrow at 3"
+    // when it is not (the call worker still refuses to dial until someone sets it).
+    const { timeZone: officeZone, quiet } = await this.followup.guardrailsFor(ctx.orgId);
+    const zone = leadZone(lead);
+    const timeZone = contactZone(zone) ?? officeZone;
+    const resolved = withinLeadHours(resolveCallback(input, now, timeZone, quiet), zone, quiet);
     if (!resolved.ok) {
       if (resolved.reason === 'outside_hours' && resolved.suggested) {
         const when = spoken(resolved.suggested, timeZone);
         return {
           ok: false,
           reason: 'outside_hours',
-          say: `We only call between ${quiet!.end} and ${quiet!.start} their time. Offer ${when} instead, or ask for another time in those hours.`,
+          say: `We only call ${hoursSay(quiet)} their time. Offer ${when} instead, or ask for another time in those hours.`,
           suggested: { at: resolved.suggested.toISOString(), spoken: when },
         };
       }
@@ -174,12 +202,15 @@ export class CallbackService {
       select: { id: true, orgId: true, leadId: true, disposition: true },
     });
     if (!call) return;
-    const lead = await this.prisma.lead.findUnique({ where: { id: call.leadId }, select: { callbackAt: true, phone: true, dncStatus: true } });
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: call.leadId },
+      select: { callbackAt: true, phone: true, normalizedPhone: true, timezone: true, dncStatus: true },
+    });
     if (!lead?.callbackAt) return;
 
     const setHere = await this.prisma.leadEvent.findFirst({ where: { leadId: call.leadId, callId: call.id, type: 'callback_scheduled' }, select: { id: true } });
     if (setHere) {
-      if (!lead.dncStatus) await this.confirm(call.orgId, call.leadId, lead.phone, lead.callbackAt);
+      if (!lead.dncStatus) await this.confirm(call.orgId, call.leadId, lead, lead.callbackAt);
       return;
     }
     // Placed before the callback was due (a call already ringing when it was set): not the callback.
@@ -223,11 +254,17 @@ export class CallbackService {
     if (code) await this.followup.enroll(call.orgId, call.leadId, code);
   }
 
-  private async confirm(orgId: string, leadId: string, phone: string | null, at: Date): Promise<void> {
+  /**
+   * The confirmation of a callback the lead just asked for on the call: a reply
+   * to their own request, so it is not gated like an outbound step. The time
+   * is spoken in the lead's zone when it is known.
+   */
+  private async confirm(orgId: string, leadId: string, lead: { phone: string | null; normalizedPhone: string | null; timezone: string | null }, at: Date): Promise<void> {
     const settings = await this.tools.settings(orgId);
+    const phone = lead.phone;
     if (!settings.confirmSms || !phone) return;
-    const [{ timeZone }, variables] = await Promise.all([this.followup.guardrailsFor(orgId), this.activity.leadVariables(orgId, leadId)]);
-    const text = fillTemplate(settings.confirmMessage, { ...variables, callbackTime: spoken(at, timeZone) });
+    const [{ timeZone: officeZone }, variables] = await Promise.all([this.followup.guardrailsFor(orgId), this.activity.leadVariables(orgId, leadId)]);
+    const text = fillTemplate(settings.confirmMessage, { ...variables, callbackTime: spoken(at, contactZone(leadZone(lead)) ?? officeZone) });
     try {
       const sent = await this.sms.sendSms(orgId, phone, text);
       await this.activity.recordSms(orgId, leadId, text, true, sent.id);

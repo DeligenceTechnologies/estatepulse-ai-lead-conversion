@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, IsTimeZone, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 /** leads.min_budget / max_budget are Decimal(12, 2): ten whole digits. */
 const MAX_BUDGET = 9_999_999_999;
@@ -67,6 +67,13 @@ export class CreateLeadDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  /** The lead's own IANA time zone, when known; otherwise it is worked out from the phone number. */
+  @Transform(trim)
+  @IsOptional()
+  @IsTimeZone({ message: 'timezone must be an IANA time zone such as America/Vancouver' })
+  @MaxLength(100)
+  timezone?: string;
 
   /** The lead agreed to be called and texted. */
   @IsBoolean()

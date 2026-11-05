@@ -40,17 +40,17 @@ function typeCompatible(target: CanonicalKey, providerType: string): boolean {
   ].includes(providerType);
   if (choice) {
     return ['timeline', 'buying_intent', 'financing_status', 'consent_status', 'location', 'bedrooms',
-            'min_budget', 'max_budget', 'motivation'].includes(target);
+            'min_budget', 'max_budget', 'motivation', 'timezone'].includes(target);
   }
   if (providerType === 'INPUT_EMAIL' || providerType === 'email') return target === 'email';
   if (providerType === 'INPUT_PHONE_NUMBER' || providerType === 'phone_number') return target === 'phone';
   return true;
 }
 
-function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer, defaultRegion: string): Transform {
+function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer): Transform {
   switch (target) {
     case 'phone':
-      return { kind: 'phone_e164', defaultRegion };
+      return { kind: 'phone_e164' };
     case 'email':
       return { kind: 'email' };
     case 'bedrooms':
@@ -61,6 +61,8 @@ function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer, defaul
       return { kind: 'currency_range', part: 'max' };
     case 'consent_status':
       return { kind: 'boolean' };
+    case 'timezone':
+      return { kind: 'timezone' };
     case 'timeline':
     case 'buying_intent':
     case 'financing_status':
@@ -102,7 +104,7 @@ function autoEnumMap(target: CanonicalKey, answer: NormalizedAnswer): Record<str
   return map;
 }
 
-export function suggestMappings(answers: NormalizedAnswer[], defaultRegion: string): Suggestion[] {
+export function suggestMappings(answers: NormalizedAnswer[]): Suggestion[] {
   const out: Suggestion[] = [];
   const claimed = new Set<CanonicalKey>();
 
@@ -151,7 +153,7 @@ export function suggestMappings(answers: NormalizedAnswer[], defaultRegion: stri
       sourceFieldLabel: answer.label,
       sourceFieldType: answer.type,
       targetField: target,
-      transform: defaultTransform(target, answer, defaultRegion),
+      transform: defaultTransform(target, answer),
       confidence: Number(score.toFixed(2)),
     });
 

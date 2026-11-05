@@ -267,11 +267,9 @@ export class CustomWebhookIngestService {
     const existing = await this.prisma.leadSourceFieldMapping.count({ where: { leadSourceId: source.id } });
     if (existing > 0) return false;
 
-    const settings = await this.prisma.organizationSetting.findUnique({ where: { orgId: source.orgId }, select: { defaultRegion: true } });
-    const region = settings?.defaultRegion ?? 'US';
-    const fields = suggestFromAnswers(known.answers, region);
+    const fields = suggestFromAnswers(known.answers);
     if (fields.length === 0 || validateFields(fields).length > 0) return false;
-    const rows = expandFields(fields, region);
+    const rows = expandFields(fields);
 
     try {
       await this.prisma.$transaction(async (tx) => {
