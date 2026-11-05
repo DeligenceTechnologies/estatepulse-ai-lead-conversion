@@ -6,6 +6,7 @@ import { AuditService } from '@/audit/audit.service';
 import { AppError, httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { liveReviewReasons } from '@/lead/review-reasons';
 import { outreachRequest } from '@/outreach/batches';
 import { summaryOf, type OutreachSummary } from '@/outreach/schedule';
 import type { SaveMappingDto, CreateSheetSourceDto, EnableSheetDto, ReviewQueryDto } from './dto/sheets.dto';
@@ -446,12 +447,17 @@ export class SheetSourcesService {
             phone: true,
             phoneValid: true,
             email: true,
+            emailValid: true,
+            timezone: true,
             location: true,
             timeline: true,
             minBudget: true,
             maxBudget: true,
             bedrooms: true,
             motivation: true,
+            // Whatever the mapping kept as an extra field, so the details panel can show every
+            // mapped column and not just the ones a lead has a column of its own for.
+            customFields: true,
             dncStatus: true,
             reviewReasons: true,
           },
@@ -481,6 +487,9 @@ export class SheetSourcesService {
               phone: r.lead.phone,
               phoneValid: r.lead.phoneValid,
               email: r.lead.email,
+              emailValid: r.lead.emailValid,
+              timezone: r.lead.timezone,
+              customFields: (r.lead.customFields ?? {}) as Record<string, unknown>,
               location: r.lead.location,
               timeline: r.lead.timeline,
               minBudget: r.lead.minBudget === null ? null : Number(r.lead.minBudget),
@@ -488,7 +497,9 @@ export class SheetSourcesService {
               bedrooms: r.lead.bedrooms,
               motivation: r.lead.motivation,
               dncStatus: r.lead.dncStatus,
-              reviewReasons: r.lead.reviewReasons,
+              // A reason the lead has outgrown — a phone since corrected at the source — would
+              // otherwise hold a row back with a warning that is no longer true.
+              reviewReasons: liveReviewReasons(r.lead),
             }
           : null,
       })),
