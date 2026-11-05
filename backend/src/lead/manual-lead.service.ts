@@ -138,6 +138,10 @@ export class ManualLeadService {
         normalizedEmail: true,
         dncStatus: true,
         reviewReasons: true,
+        automationPaused: true,
+        status: true,
+        firstContactAt: true,
+        takenOverById: true,
       },
     });
     if (!lead) throw new AppError('NOT_FOUND', 'That lead no longer exists.');
@@ -201,6 +205,10 @@ export class ManualLeadService {
     if (normalizedPhone && lead.reviewReasons.includes(PHONE_UNPARSED_REASON)) {
       const left = lead.reviewReasons.filter((r) => r !== PHONE_UNPARSED_REASON);
       Object.assign(data, { reviewReasons: left, needsReview: left.length > 0 });
+      // The phone was the only thing it was held for (WorkerService starts flagged leads
+      // paused): fixing it is the review, so a lead never contacted goes out like any new one.
+      const heldOnlyForPhone = left.length === 0 && lead.automationPaused && lead.status === LeadStatus.new && !lead.firstContactAt;
+      if (heldOnlyForPhone && !lead.dncStatus && !lead.takenOverById) Object.assign(data, { automationPaused: false });
     }
 
     if (changed.length === 0) return { id: lead.id };

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -13,6 +13,7 @@ import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { SetLeadTimezoneDto } from './dto/set-lead-timezone.dto';
 import { LeadAssignmentService } from './lead-assignment.service';
+import { LeadReviewService } from './lead-review.service';
 import { LeadTimezoneService } from './lead-timezone.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
@@ -145,6 +146,7 @@ export class LeadsController {
     private readonly assignments: LeadAssignmentService,
     private readonly manualLeads: ManualLeadService,
     private readonly timezones: LeadTimezoneService,
+    private readonly reviews: LeadReviewService,
   ) {}
 
   /** One lead added by hand. Same pipeline as a form submission, without a lead source. */
@@ -262,6 +264,14 @@ export class LeadsController {
       assignmentType: AssignmentType.manual,
       reason: 'Assigned manually',
     });
+  }
+
+  /** A person has looked at a lead flagged for review: its reasons clear and, if it can be contacted, outreach starts. */
+  @Post(':leadId/review/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  approveReview(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.reviews.approve(auth.organizationId, auth.userId, leadId);
   }
 
   /** PUT: the lead's own time zone, or null to let their phone number decide again. Answers the zone as the list shows it. */

@@ -11,6 +11,10 @@ const LEAD = {
   normalizedEmail: null as string | null,
   dncStatus: false,
   reviewReasons: [PHONE_UNPARSED_REASON],
+  automationPaused: true,
+  status: 'new',
+  firstContactAt: null as Date | null,
+  takenOverById: null as string | null,
 };
 
 /** The service with just enough Prisma to see what it would write. */
@@ -49,6 +53,25 @@ describe('correcting a lead by hand', () => {
     const s = setup({ reviewReasons: [PHONE_UNPARSED_REASON, other] });
     await run(s, { phone: '+919024848980' });
     expect(s.update.mock.calls[0][0].data).toMatchObject({ reviewReasons: [other], needsReview: true });
+  });
+
+  test('a new lead held only for its phone is unpaused once the phone is fixed', async () => {
+    const s = setup();
+    await run(s, { phone: '+919024848980' });
+    expect(s.update.mock.calls[0][0].data).toMatchObject({ automationPaused: false });
+  });
+
+  test('it stays paused while another reason is left, or when it is do-not-contact or already contacted', async () => {
+    for (const lead of [
+      { reviewReasons: [PHONE_UNPARSED_REASON, 'Possible duplicate'] },
+      { dncStatus: true },
+      { firstContactAt: new Date() },
+      { takenOverById: 'agent-1' },
+    ]) {
+      const s = setup(lead);
+      await run(s, { phone: '+919024848980' });
+      expect(s.update.mock.calls[0][0].data).not.toHaveProperty('automationPaused');
+    }
   });
 
   test('a number still missing its country code is refused, with the code to add', async () => {

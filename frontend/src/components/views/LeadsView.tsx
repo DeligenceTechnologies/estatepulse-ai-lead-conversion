@@ -210,6 +210,8 @@ const toLead = (l: LiveLead): Lead => ({
   notes: humanize(l.motivation) ?? undefined,
   customFields: l.customFields,
   timezone: l.timezone,
+  needsReview: l.needsReview,
+  reviewReasons: l.reviewReasons,
 });
 
 const SKIP_TEXT: Record<string, string> = {
