@@ -7,6 +7,29 @@ export interface QuietHours {
   end: string;
 }
 
+/** 00:00–23:59. Anything else would read as NaN, and a NaN window is never quiet. */
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export const isQuietHours = (v: unknown): v is QuietHours =>
+  !!v && typeof v === 'object' && HHMM.test(String((v as QuietHours).start)) && HHMM.test(String((v as QuietHours).end));
+
+/**
+ * The organization's quiet hours from its strategy guardrails, or undefined when it switched
+ * them off. A malformed value saved before validation existed counts as off: the legal hours,
+ * and the default floor where no law applies, still hold.
+ */
+export function quietHoursOf(g: { respectQuietHours?: unknown; quietHours?: unknown } | null | undefined): QuietHours | undefined {
+  if (!g || g.respectQuietHours === false) return undefined;
+  return isQuietHours(g.quietHours) ? { start: g.quietHours.start, end: g.quietHours.end } : undefined;
+}
+
+/**
+ * Where no legal rule covers the lead (outside the US and Canada, or no jurisdiction to go on),
+ * contact still keeps to 08:00–21:00 on the lead's clock, the US federal hours. The organization's
+ * settings can only narrow this, never switch it off.
+ */
+export const DEFAULT_CONTACT_HOURS: QuietHours = { start: '21:00', end: '08:00' };
+
 const toMinutes = (hhmm: string): number => {
   const [h = 0, m = 0] = hhmm.split(':').map(Number);
   return h * 60 + m;
@@ -119,7 +142,10 @@ export function nextLeadContactAt(z: LeadZone, rules: ContactRules, at: Date, op
       reason = 'A day the organization skips';
       continue;
     }
-    const windows = [...(rules.quiet ? [{ hours: rules.quiet, rule: 'Quiet hours' }] : []), ...legal.quiet.map((w) => ({ hours: w.hours, rule: `Legal calling hours (${w.rule})` }))];
+    const floor = legal.quiet.length
+      ? legal.quiet.map((w) => ({ hours: w.hours, rule: `Legal calling hours (${w.rule})` }))
+      : [{ hours: DEFAULT_CONTACT_HOURS, rule: 'Default contact hours (08:00–21:00)' }];
+    const windows = [...(rules.quiet ? [{ hours: rules.quiet, rule: 'Quiet hours' }] : []), ...floor];
     let next = t;
     let moved: string | null = null;
     for (const w of windows) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { leadZone } from './lead-timezone';
-import { nextAllowedAt, nextContactAt, nextLeadContactAt, nextLocalMidnight, weekdayOf } from './quiet-hours';
+import { nextAllowedAt, nextContactAt, nextLeadContactAt, nextLocalMidnight, quietHoursOf, weekdayOf } from './quiet-hours';
 
 const TZ = 'Asia/Kolkata';
 const QUIET = { start: '21:00', end: '08:00' };
@@ -134,5 +134,31 @@ describe("the lead's contact window", () => {
     // Rhode Island closes Sundays and the organization skips the other six: nothing is ever open, yet the loop ends.
     const verdict = nextLeadContactAt(providence, { quiet: QUIET, skipDays: [1, 2, 3, 4, 5, 6] }, at);
     expect(verdict.allowedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('the contact window cannot be switched off or broken (FU-01)', () => {
+  const mumbai = leadZone({ timezone: null, normalizedPhone: '+919876543210' }); // no legal rule is modelled for India
+  const OFF = { quiet: undefined, skipDays: [] as number[] };
+
+  it('with quiet hours off, a lead no law covers still waits for 08:00 on their clock', () => {
+    const lateNight = new Date('2026-11-04T18:00:00.000Z'); // Wed 23:30 in Kolkata
+    expect(nextLeadContactAt(mumbai, OFF, lateNight)).toEqual({ allowedAt: new Date('2026-11-05T02:30:00.000Z'), reason: 'Default contact hours (08:00–21:00)' });
+    const afternoon = new Date('2026-11-05T09:30:00.000Z'); // Thu 15:00 in Kolkata
+    expect(nextLeadContactAt(mumbai, OFF, afternoon)).toEqual({ allowedAt: afternoon, reason: null });
+  });
+
+  it("the organization's quiet hours narrow the floor but never widen it", () => {
+    const sevenFortyFive = new Date('2026-11-05T02:15:00.000Z'); // 07:45 in Kolkata
+    expect(nextLeadContactAt(mumbai, { quiet: { start: '23:00', end: '06:00' }, skipDays: [] }, sevenFortyFive).allowedAt).toEqual(new Date('2026-11-05T02:30:00.000Z'));
+    expect(nextLeadContactAt(mumbai, { quiet: { start: '20:00', end: '10:00' }, skipDays: [] }, sevenFortyFive).allowedAt).toEqual(new Date('2026-11-05T04:30:00.000Z'));
+  });
+
+  it('reads quiet hours only when they are switched on and well formed', () => {
+    expect(quietHoursOf({ quietHours: { start: '21:00', end: '08:00' } })).toEqual({ start: '21:00', end: '08:00' });
+    expect(quietHoursOf({ respectQuietHours: false, quietHours: { start: '21:00', end: '08:00' } })).toBeUndefined();
+    // Saved before validation: read as off, so the legal hours and the floor above still hold.
+    expect(quietHoursOf({ quietHours: { start: 'x', end: 'y' } })).toBeUndefined();
+    expect(quietHoursOf(undefined)).toBeUndefined();
   });
 });

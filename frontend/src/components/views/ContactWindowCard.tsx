@@ -146,7 +146,8 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
               <p className="text-2xs text-slate-500 mt-1">
                 In each lead's local time, from their phone's area code (a time zone field in your lead source is used
                 first). A lead whose time zone cannot be told is held until you set it. Legal calling hours for the
-                lead's country, state or province apply on top and cannot be switched off. A step falling inside this
+                lead's country, state or province apply on top and cannot be switched off; where no such law is known, calls
+                and texts still keep to 08:00–21:00 on the lead's clock. A step falling inside this
                 window is sent when it reopens, never dropped — and the rest of the cadence shifts with it.
               </p>
             </div>
@@ -300,7 +301,9 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
               />
             </span>
             <span className="font-semibold">
-              {respect ? 'Quiet hours enforced' : 'Quiet hours OFF — messages may send at any hour'}
+              {respect
+                ? 'Quiet hours enforced'
+                : "Your quiet hours OFF — legal calling hours still apply (08:00–21:00 on the lead's clock where no stricter law does)"}
             </span>
           </button>
 

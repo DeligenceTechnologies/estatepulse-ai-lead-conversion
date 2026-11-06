@@ -2,8 +2,9 @@ import { ApiError, apiFetch } from '../lib/api';
 
 /**
  * "Call now / schedule" for approved imports (the backend's OUTREACH_SCHEDULING_ENABLED).
- * Switched off, every endpoint answers 404: `getOutreachConfig` then resolves
- * to null and the screens behave exactly as before.
+ * Switched off, every endpoint answers 404. `getOutreachConfig` asks the capability
+ * flag first and, when it is off, resolves to null without calling them, so the
+ * screens hide the scheduling controls with no failed request in the console.
  */
 
 export type OutreachMode = 'now' | 'scheduled';
@@ -52,11 +53,27 @@ export interface OutreachBatch {
 
 const BASE = '/outreach';
 
-export const getOutreachConfig = (): Promise<OutreachConfig | null> =>
-  apiFetch<OutreachConfig>(`${BASE}/config`, { auth: true }).catch((e) => {
+// One question per page load, however many screens ask; forgotten after a failure so the next one asks again.
+let enabledOnce: Promise<boolean> | null = null;
+
+/** Whether the server has outreach scheduling on. A server from before the flag existed answers 404: off. */
+export const outreachSchedulingEnabled = (): Promise<boolean> =>
+  (enabledOnce ??= apiFetch<{ enabled: boolean }>(`${BASE}/enabled`, { auth: true })
+    .then((r) => r.enabled)
+    .catch((e) => {
+      enabledOnce = null;
+      if (e instanceof ApiError && e.status === 404) return false;
+      throw e;
+    }));
+
+export const getOutreachConfig = async (): Promise<OutreachConfig | null> => {
+  if (!(await outreachSchedulingEnabled())) return null;
+  return apiFetch<OutreachConfig>(`${BASE}/config`, { auth: true }).catch((e) => {
+    // Switched off between the two calls: the same as off.
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   });
+};
 
 export const listOutreachBatches = (): Promise<OutreachBatch[]> =>
   apiFetch<{ items: OutreachBatch[] }>(`${BASE}/batches`, { auth: true }).then((r) => r.items);

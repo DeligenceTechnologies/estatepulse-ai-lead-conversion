@@ -3,7 +3,7 @@ import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTempe
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { leadZone } from '@/common/utils/lead-timezone';
-import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, type QuietHours } from '@/common/utils/quiet-hours';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, quietHoursOf, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
@@ -416,7 +416,7 @@ export class EngineService implements OnModuleDestroy {
     // On the LEAD's clock: the organization's quiet hours and days off, plus the legal calling
     // hours of the lead's jurisdiction. Checked again every time the step fires, so a timer that
     // waited overnight sees a zone an agent set meanwhile.
-    const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
+    const quiet = quietHoursOf(guardrails);
     const now = Date.now();
     const zone = leadZone(lead);
     const window = nextLeadContactAt(zone, { quiet, skipDays: skipDaysOf(guardrails?.skipDays) }, new Date(now));

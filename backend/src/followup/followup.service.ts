@@ -13,7 +13,7 @@ import { lockOrganization } from '@/calendar/connection/calendar-access.service'
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { contactZone, leadZone } from '@/common/utils/lead-timezone';
-import { minutesOfDay, nextContactAt, nextLocalMidnight, type QuietHours } from '@/common/utils/quiet-hours';
+import { minutesOfDay, nextContactAt, nextLocalMidnight, quietHoursOf, type QuietHours } from '@/common/utils/quiet-hours';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { IN_STRATEGY_STATUSES, callbackPending, isLeadStatus } from '@/lead/lead-status';
 import { fullName } from '@/lead/lead-scope';
@@ -111,7 +111,7 @@ export class FollowupService {
     const g = (strategy?.guardrails ?? {}) as { respectQuietHours?: boolean; quietHours?: QuietHours; skipDays?: unknown; limits?: unknown };
     return {
       timeZone: settings?.timezone ?? 'UTC',
-      quiet: g.respectQuietHours === false ? undefined : g.quietHours,
+      quiet: quietHoursOf(g),
       skipDays: skipDaysOf(g.skipDays),
       limits: limitsOf(g.limits),
     };
