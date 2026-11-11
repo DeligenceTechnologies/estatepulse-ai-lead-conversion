@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { EngineService, remainingSteps } from './engine.service';
+import { EngineService, ZONE_HELD_REVIEW, remainingSteps } from './engine.service';
+import { OptedOutError } from './sms.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
 
 const ORG = 'org-1';
@@ -23,7 +24,8 @@ interface CallRow {
 }
 
 function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
-  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', status: 'new', dncStatus: false, automationPaused: false };
+  // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way of the step timing under test.
+  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false, reviewReasons: [] as string[] };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
   const since = (where: { createdAt?: { gte: Date } }) => calls.filter((c) => !where.createdAt || c.createdAt >= where.createdAt.gte);
@@ -58,7 +60,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const strategy: Strategy = { name: 'Test', guardrails: { respectQuietHours: false, ...guardrails }, steps };
   const strategies = { getStrategy: vi.fn(async () => strategy) };
-  const smsService = { sendSms: vi.fn(async () => ({ id: 'msg-1' })) };
+  const smsService = { sendSms: vi.fn(async (_org: string, _to: string, text: string) => ({ id: 'msg-1', text })) };
   const queue = { enqueue: vi.fn(async () => 'job-1') };
   const activity = { recordSms: vi.fn(), recordCallFailed: vi.fn(), exitStrategy: vi.fn(), leadVariables: vi.fn(async () => ({ firstName: 'Ana' })) };
   const followup = {
@@ -69,7 +71,8 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   };
   const state = new LeadStateService(prisma as any);
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
-  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any);
+  const optOuts = { optOut: vi.fn(async () => [LEAD]) };
+  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any, optOuts as any);
   const text = (direction: 'inbound' | 'outbound') => texts.push({ direction, createdAt: new Date() });
   const dial = (status: string, durationSeconds: number | null = null, disposition?: string) => {
     const ended = !['ringing', 'in_progress', 'queued'].includes(status);
@@ -77,7 +80,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
     calls.push(row);
     return row;
   };
-  return { engine, lead, prisma, conversations, text, smsService, queue, activity, followup, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
+  return { engine, lead, prisma, conversations, text, smsService, queue, activity, followup, optOuts, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
 }
 
 describe('remainingSteps', () => {
@@ -107,6 +110,47 @@ describe('EngineService strategy', () => {
     vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
   });
   afterEach(() => vi.useRealTimers());
+
+  it("holds every step while the lead's time zone cannot be told, logs it once, and goes on the hour after an agent sets it", async () => {
+    const s = setup();
+    // A toll-free number and no provided zone: nothing may go out until someone says where the lead is.
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: null, normalizedPhone: '+18005550100' });
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual([]);
+    const held = (s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'step_held');
+    expect(held).toHaveLength(1);
+    expect(held[0][0].data.reason).toContain("Waiting for the lead's time zone to be set");
+
+    // An hour later, still unknown: looked at again, nothing sent, nothing logged twice.
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(s.texts()).toEqual([]);
+    expect((s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'step_held')).toHaveLength(1);
+
+    // An agent sets the zone: the next look sends the step.
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: 'UTC', normalizedPhone: '+18005550100' });
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
+  });
+
+  it('stops re-checking after three days without a zone: outreach is paused and the lead flagged for a person', async () => {
+    const s = setup();
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, timezone: null, normalizedPhone: '+18005550100' });
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(3 * 24 * 60 * MIN);
+    expect(s.texts()).toEqual([]);
+    expect(s.prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: LEAD },
+      data: expect.objectContaining({ automationPaused: true, needsReview: true, reviewReasons: { push: ZONE_HELD_REVIEW } }),
+    });
+    const stopped = (s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'strategy_stopped');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0][0].data.reason).toContain('No usable time zone after 3 days');
+    // And it is let go: no further looks.
+    s.prisma.lead.update.mockClear();
+    await vi.advanceTimersByTimeAsync(24 * 60 * MIN);
+    expect(s.prisma.lead.update).not.toHaveBeenCalled();
+  });
 
   it('counts each wait from the step before, so the SMS after a call never goes out with it', async () => {
     const s = setup();
@@ -379,6 +423,20 @@ describe('EngineService safety and recovery', () => {
     expect(s.engine.isRunning(LEAD)).toBe(false);
   });
 
+  it('a STOP after the first text ends the strategy: no call and no later text', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
+
+    // The lead replies STOP: OptOutService makes it do-not-contact and not interested.
+    Object.assign(s.lead, { dncStatus: true, automationPaused: true, status: 'not_interested' });
+    await vi.advanceTimersByTimeAsync(30 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.texts()).toEqual(['text s1']);
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+  });
+
   it('a step that throws is tried again with backoff, and sends once it gets through', async () => {
     const s = setup([sms('s1', 0)]);
     s.followup.contactSlot.mockRejectedValueOnce(new Error('connection reset')).mockRejectedValueOnce(new Error('connection reset'));
@@ -463,6 +521,22 @@ describe('EngineService outcomes', () => {
     expect(s.followup.stopForLead).toHaveBeenCalledWith(ORG, LEAD, 'lead_not_interested', s.prisma);
   });
 
+  it("puts an agent's do-not-contact on the number, through the same opt-out as a STOP", async () => {
+    const s = setup();
+    s.lead.status = 'contacting';
+    const actor = { type: 'user' as const, id: 'user-1' };
+    expect(await s.engine.setStatus(ORG, LEAD, 'not_interested' as any, 'Asked us to stop', { optOut: true, actor })).toBe(true);
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, { source: 'agent', reason: 'Asked us to stop', actor }, s.prisma);
+  });
+
+  it('opts out a lead whose status cannot move: a booked lead keeps its meeting, and is still not contacted', async () => {
+    const s = setup();
+    s.lead.status = 'appointment_booked';
+    expect(await s.engine.setStatus(ORG, LEAD, 'not_interested' as any, 'Said stop on the call', { optOut: true, source: 'call' })).toBe(true);
+    expect(s.lead.status).toBe('appointment_booked');
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, expect.objectContaining({ source: 'call' }), s.prisma);
+  });
+
   it('refuses automation a move the rules do not allow, but lets a person make it', async () => {
     const s = setup();
     s.lead.status = 'appointment_booked';
@@ -474,5 +548,66 @@ describe('EngineService outcomes', () => {
     expect(s.prisma.leadEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ fromStatus: 'appointment_booked', toStatus: 'follow_up', source: 'agent', actorType: 'user', actorId: 'user-1' }),
     });
+  });
+});
+
+describe('EngineService failed texts (SMS08)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const telnyx503 = new Error('Telnyx POST /messages failed 503: {"errors":[{"code":"10007"}]}');
+  const sentOk = (s: ReturnType<typeof setup>) => s.activity.recordSms.mock.calls.filter((c: unknown[]) => c[3] === true).map((c: unknown[]) => c[2]);
+  const events = (s: ReturnType<typeof setup>) => s.prisma.leadEvent.create.mock.calls.map((c: any[]) => c[0].data.type);
+
+  it('tries the same text again a minute later when Telnyx is down, before any later step', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(telnyx503);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentOk(s)).toEqual([]);
+    expect(events(s)).toContain('step_retry');
+
+    await vi.advanceTimersByTimeAsync(MIN);
+    expect(sentOk(s)).toEqual(['text s1']);
+    expect(s.activity.recordSms).not.toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, expect.anything());
+
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sentOk(s)).toEqual(['text s1', 'text s2']);
+  });
+
+  it('gives up after two tries, records the failure and goes on', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(telnyx503).mockRejectedValueOnce(telnyx503).mockRejectedValueOnce(telnyx503);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(MIN);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.activity.recordSms).toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, telnyx503.message);
+    expect(events(s).filter((t: string) => t === 'step_retry')).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(sentOk(s)).toEqual(['text s2']);
+  });
+
+  it('does not try again after a failure that will not pass, such as an invalid number', async () => {
+    const s = setup([sms('s1', 0), sms('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(new Error('Telnyx POST /messages failed 400: {"errors":[{"code":"40310"}]}'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events(s)).not.toContain('step_retry');
+    expect(s.activity.recordSms).toHaveBeenCalledWith(ORG, LEAD, 'text s1', false, expect.stringContaining('40310'));
+  });
+
+  it('opts out a number Telnyx says replied STOP, and ends the strategy', async () => {
+    const s = setup([sms('s1', 0), voice('s2', 5)]);
+    s.smsService.sendSms.mockRejectedValueOnce(new OptedOutError('Telnyx refused the text: this number replied STOP to us (40300)'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.optOuts.optOut).toHaveBeenCalledWith(ORG, { leadId: LEAD }, { source: 'sms_send', reason: expect.stringContaining('40300'), channel: 'sms' });
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
   });
 });

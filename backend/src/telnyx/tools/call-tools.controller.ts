@@ -9,6 +9,7 @@ import { UpdateCallToolsDto } from '../dto/telnyx.dto';
 import { AssistantToolAuth, toolRequest } from './assistant-tool-auth.service';
 import { CallToolsService } from './call-tools.service';
 import { CallbackService } from './callback.service';
+import { MeetingToolService } from './meeting-tool.service';
 import { OutcomeService } from './outcome.service';
 import { TextBackService } from './text-back.service';
 
@@ -18,6 +19,9 @@ const minutes = (value: unknown): number | undefined => {
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
 };
+
+/** A tool left on the assistant from before the switch went off. */
+const OFF = { ok: false, reason: 'off', say: 'Say someone from the team will be in touch.' } as const;
 
 /** What the organization's Telnyx assistant calls on a live call or in a text chat. Business outcomes are a 200 with `ok`. */
 @Public()
@@ -29,12 +33,14 @@ export class CallOutcomeToolController {
     private readonly callbacks: CallbackService,
     private readonly outcomes: OutcomeService,
     private readonly textBacks: TextBackService,
+    private readonly meetings: MeetingToolService,
   ) {}
 
   @Post('callback')
   @HttpCode(HttpStatus.OK)
   async callback(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
     const caller = await this.verify(req, body);
+    if (!(await this.switchedOn(caller.orgId))) return OFF;
     return this.callbacks.schedule(caller, {
       day: str(body?.day, 40),
       time: str(body?.time, 10),
@@ -47,6 +53,7 @@ export class CallOutcomeToolController {
   @HttpCode(HttpStatus.OK)
   async text(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
     const caller = await this.verify(req, body);
+    if (!(await this.switchedOn(caller.orgId))) return OFF;
     return this.textBacks.schedule(caller, {
       day: str(body?.day, 40),
       time: str(body?.time, 10),
@@ -59,7 +66,20 @@ export class CallOutcomeToolController {
   @HttpCode(HttpStatus.OK)
   async record(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
     const caller = await this.verify(req, body);
-    return this.outcomes.record(caller, { outcome: str(body?.outcome, 40), note: str(body?.note, 300) });
+    const outcome = str(body?.outcome, 40);
+    // With the switch off only the opt-out stays: it is honoured whatever else is turned off.
+    if (outcome !== 'do_not_contact' && !(await this.switchedOn(caller.orgId))) return OFF;
+    return this.outcomes.record(caller, { outcome, note: str(body?.note, 300) });
+  }
+
+  private async switchedOn(orgId: string): Promise<boolean> {
+    return (await this.tools.settings(orgId)).enabled;
+  }
+
+  @Post('meeting')
+  @HttpCode(HttpStatus.OK)
+  async meeting(@Req() req: RawBodyRequest<Request>, @Body() body: any) {
+    return this.meetings.lookup(await this.verify(req, body));
   }
 
   private verify(req: RawBodyRequest<Request>, body: any) {

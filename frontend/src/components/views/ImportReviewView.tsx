@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
+import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -21,10 +21,13 @@ import {
 } from '../../utils/googleSheetsApi';
 import { getOutreachConfig, type OutreachChoice, type OutreachConfig } from '../../utils/outreachApi';
 import { FIELD_LABEL, approveMessage, formatValue, rejectMessage } from '../../utils/sheetMapping';
+import { consentReviewCount } from '../../utils/consentReviewApi';
 import { ApproveOutreachModal } from '../imports/ApproveOutreachModal';
+import { ConsentReviewPanel } from '../imports/ConsentReviewPanel';
 import { FileImportModal } from '../imports/FileImportModal';
 import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
+import { KIND_NAME, ReviewLeadDrawer } from '../imports/ReviewLeadDrawer';
 import { errorText } from '../sheets/SheetModal';
 
 /** The review reasons every import starts with; shown as the screen itself, not as badges. */
@@ -34,8 +37,6 @@ const IMPORT_REASONS = [
   'Imported from HubSpot — awaiting owner approval',
 ];
 
-/** What a row's source is called on hover, and whether it has a row number worth showing (a CRM record has none). */
-const KIND_NAME: Record<ImportKind, string> = { google_sheets: 'Google Sheet', file_upload: 'Uploaded file', hubspot: 'HubSpot' };
 /** The API decides at most this many rows per request. */
 const DECISION_BATCH = 500;
 
@@ -46,7 +47,7 @@ const DECISION_BATCH = 500;
 const clean = (i: ReviewItem): boolean =>
   !i.missing && !i.lead?.dncStatus && !!i.lead?.phone && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
-type Tab = 'pending' | 'rejected' | 'changes' | 'outreach';
+type Tab = 'pending' | 'rejected' | 'changes' | 'outreach' | 'consent';
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
 const btn =
@@ -109,12 +110,17 @@ export const ImportReviewView: React.FC = () => {
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [totals, setTotals] = useState<{ pending?: number; rejected?: number }>({});
+  /** Manual leads added without consent (the "Consent needed" tab). */
+  const [consentTotal, setConsentTotal] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'more' | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [armed, setArmed] = useState<null | 'approve' | 'reject' | 'apply' | 'keep'>(null);
   const [upload, setUpload] = useState(false);
+  // The row whose details are open in the side panel, or null. Read-only: an imported lead is
+  // owned by the sheet, file or CRM it came from, and corrected there.
+  const [viewing, setViewing] = useState<ReviewItem | null>(null);
   const [history, setHistory] = useState(false);
   /** Outreach scheduling (OUTREACH_SCHEDULING_ENABLED): null when the server has it off, and approving works as before. */
   const [outreach, setOutreach] = useState<OutreachConfig | null>(null);
@@ -123,6 +129,7 @@ export const ImportReviewView: React.FC = () => {
   const [outreachKey, setOutreachKey] = useState(0);
 
   const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
+  const importsOn = features.sheets || features.files || features.hubspot;
   // "Changed since review" is about one source that keeps syncing — a sheet or
   // the HubSpot account: the chosen one, or the only one.
   const sheetIds = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
@@ -134,14 +141,21 @@ export const ImportReviewView: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sheets, hist, hubspot, launch] = await Promise.all([
+      const [sheets, hist, hubspot, launch, awaitingConsent] = await Promise.all([
         listSheetSources().catch(unlessOff),
         importHistory().catch(unlessOff),
         getCrmStatus('hubspot').catch(unlessOff),
         getOutreachConfig(),
+        consentReviewCount(),
       ]);
+      setConsentTotal(awaitingConsent);
       setOutreach(launch);
       setFeatures({ sheets: sheets !== null, files: hist !== null, hubspot: hubspot !== null });
+      // With every import switched off, the page is only for manual leads awaiting consent.
+      if (sheets === null && hist === null && hubspot === null && tab !== 'consent') {
+        setTab('consent');
+        return;
+      }
       const list = sheets ?? [];
       setSources(list);
       const crmSource = hubspot?.sourceId ? { id: hubspot.sourceId, name: `HubSpot · ${hubspot.account?.name ?? hubspot.account?.id ?? 'account'}` } : null;
@@ -442,12 +456,13 @@ export const ImportReviewView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {(
             [
-              ['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`],
+              ...(importsOn ? ([['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`]] as const) : []),
               // Only a sheet or a CRM changes after review; an uploaded file is read once.
               ...(features.sheets || features.hubspot
                 ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet']] as const)
                 : []),
-              ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
+              ...(importsOn ? ([['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`]] as const) : []),
+              ['consent', `Consent needed${consentTotal !== undefined ? ` (${consentTotal})` : ''}`],
               ...(outreach ? ([['outreach', 'Outreach']] as const) : []),
             ] as const
           ).map(([id, label]) => (
@@ -471,7 +486,7 @@ export const ImportReviewView: React.FC = () => {
               {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
               {decisionButton('approve', 'Approve', 'bg-green-600 text-white hover:bg-green-500')}
             </>
-          ) : tab === 'rejected' || tab === 'outreach' ? null : (
+          ) : tab === 'rejected' || tab === 'outreach' || tab === 'consent' ? null : (
             <>
               {decisionButton('keep', 'Keep current', 'bg-slate-800 text-slate-200 hover:bg-slate-700')}
               {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
@@ -490,8 +505,9 @@ export const ImportReviewView: React.FC = () => {
         )}
 
         {tab === 'outreach' && <OutreachBatches refreshKey={outreachKey} />}
+        {tab === 'consent' && <ConsentReviewPanel onTotal={setConsentTotal} />}
 
-        {loading && tab !== 'outreach' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
+        {loading && tab !== 'outreach' && tab !== 'consent' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
           <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading…
           </div>
@@ -562,7 +578,16 @@ export const ImportReviewView: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-2 py-2 text-slate-300">
-                        <span className="block truncate" title={i.lead?.phone ?? undefined}>
+                        {/* A number that cannot be rung is the reason most rows wait here, so the cell
+                            itself says so rather than hiding it behind the warning icon. */}
+                        <span
+                          className={`block truncate ${i.lead?.phone && !i.lead.phoneValid ? 'text-amber-300' : ''}`}
+                          title={
+                            i.lead?.phone && !i.lead.phoneValid
+                              ? `${i.lead.phone} — no country code, so this cannot be dialled. Add the code where this row came from and sync again.`
+                              : (i.lead?.phone ?? undefined)
+                          }
+                        >
                           {i.lead?.phone ?? '—'}
                         </span>
                       </td>
@@ -587,8 +612,21 @@ export const ImportReviewView: React.FC = () => {
                         />
                       </td>
                       {tab === 'rejected' ? (
-                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap text-center">
-                          {i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}
+                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span>{i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}</span>
+                            {i.lead && (
+                              <button
+                                type="button"
+                                onClick={() => setViewing(i)}
+                                title="See everything this row brought in"
+                                aria-label="View details"
+                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       ) : (
                         <td className="px-2 py-2">
@@ -633,6 +671,17 @@ export const ImportReviewView: React.FC = () => {
                               >
                                 <AlertTriangle className="w-3 h-3" />
                               </span>
+                            )}
+                            {i.lead && (
+                              <button
+                                type="button"
+                                onClick={() => setViewing(i)}
+                                title="See everything this row brought in"
+                                aria-label="View details"
+                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -731,6 +780,14 @@ export const ImportReviewView: React.FC = () => {
           onConfirm={(choice) => void decide('approve', choice)}
         />
       )}
+      {viewing && (
+        <ReviewLeadDrawer
+          item={viewing}
+          warnings={(viewing.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r))}
+          onClose={() => setViewing(null)}
+        />
+      )}
+
       {upload && (
         <FileImportModal
           onClose={() => setUpload(false)}

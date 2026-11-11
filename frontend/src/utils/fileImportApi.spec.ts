@@ -18,10 +18,11 @@ describe('fileProblem', () => {
 });
 
 describe('template', () => {
-  it('holds the recognised headings and one example row, with a + phone and a quoted budget', () => {
+  it('holds the recognised headings and one example row, with a + phone, a time zone and a quoted budget', () => {
     const [header, row] = TEMPLATE_CSV.split('\r\n');
-    expect(header).toBe('Full Name,Phone,Email,Location,Budget,Bedrooms,Notes');
+    expect(header).toBe('Full Name,Phone,Email,Time Zone,Location,Budget,Bedrooms,Notes');
     expect(row).toContain('+1 512-555-0101');
+    expect(row.split(',')[3]).toBe('Central');
     expect(row).toContain('"$300,000 - $450,000"');
   });
   it('formats sizes for people', () => {

@@ -6,6 +6,7 @@ import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { EventsBus } from '@/events/events.bus';
+import { suppressedPhones } from '@/lead/contact-suppression';
 import type { OutreachRequest } from '@/outreach/schedule';
 import { approveTrackingRows } from './approval';
 import { GoogleConnectionsService } from './google-connections.service';
@@ -335,16 +336,12 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const [lastVersion, lastMapping] = (source.syncRemoteVersion ?? '').split(':');
     const rebaseline = lastMapping !== String(source.mappingVersion);
     stats.dbStatements += 2;
-    const [mappingRows, settings] = await Promise.all([
-      this.prisma.leadSourceFieldMapping.findMany({
-        where: { orgId, leadSourceId: sourceId, isActive: true },
-        select: { sourceFieldKey: true, targetField: true, transform: true },
-      }),
-      this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { defaultRegion: true } }),
-    ]);
+    const mappingRows = await this.prisma.leadSourceFieldMapping.findMany({
+      where: { orgId, leadSourceId: sourceId, isActive: true },
+      select: { sourceFieldKey: true, targetField: true, transform: true },
+    });
     const mappings = toStored(mappingRows);
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
-    const region = settings?.defaultRegion ?? 'US';
 
     let orphans = 0;
     if (this.config.get('SHEETS_VERSION_PROBE', { infer: true })) {
@@ -373,7 +370,6 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       labels: new Map(sheet.headers.filter((h) => h.fieldKey).map((h) => [h.fieldKey, h.label])),
       mappings,
       identity,
-      region,
     };
     const present = new Set<string>();
     const seen = new Set<string>();
@@ -656,11 +652,12 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       });
     }
     const ownDnc = new Map(contacts.map((c) => [c.id, c.dncStatus]));
+    const optedOut = await suppressedPhones(this.prisma, orgId, phones);
     const assess = (l: LeadFields, self: string | null) => {
       const p = l.normalized_phone;
       const e = l.normalized_email;
       const others = contacts.filter((c) => c.id !== self && ((p && c.normalizedPhone === p) || (e && c.normalizedEmail === e)));
-      const dnc = others.some((c) => c.dncStatus) || Boolean(self && ownDnc.get(self));
+      const dnc = others.some((c) => c.dncStatus) || Boolean(self && ownDnc.get(self)) || Boolean(p && optedOut.has(p));
       const duplicate = others.length > 0 || Boolean((p && runPhones.has(p)) || (e && runEmails.has(e)));
       if (p) runPhones.add(p);
       if (e) runEmails.add(e);
@@ -744,13 +741,11 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
            SET first_name = v.first_name, last_name = v.last_name,
                email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-               location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+               timezone = COALESCE(v.timezone, l.timezone), location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                external_lead_id = v.external_lead_id, review_reasons = v.review_reasons,
                needs_review = true, dnc_status = l.dnc_status OR v.dnc, updated_at = now()
-          FROM (VALUES ${Prisma.join(refreshValues)}) AS v(id, first_name, last_name, email, normalized_email, email_valid,
-               phone, normalized_phone, phone_valid, location, min_budget, max_budget, bedrooms, motivation,
-               custom_fields, external_lead_id, review_reasons, dnc),
+          FROM (VALUES ${Prisma.join(refreshValues)}) AS v(${LEAD_VALUES_COLUMNS}),
                sheet_import_rows AS r
          WHERE l.id = v.id AND l.organization_id = ${orgId}::uuid
            AND r.lead_id = l.id AND r.organization_id = ${orgId}::uuid AND r.review_state = 'pending'`);
@@ -899,6 +894,8 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
     for (const f of found) if (f.normalizedEmail) known.emails.set(f.normalizedEmail, (known.emails.get(f.normalizedEmail) ?? false) || f.dncStatus);
   }
 
+  const suppressed = await suppressedPhones(prisma, orgId, phones);
+
   const inFile = { phones: new Set<string>(), emails: new Set<string>() };
   const reasons = new Map<number, string[]>();
   let possible = 0;
@@ -906,7 +903,7 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
   for (const b of candidates) {
     const p = b.lead!.normalized_phone;
     const e = b.lead!.normalized_email;
-    const dnc = Boolean((p && known.phones.get(p)) || (e && known.emails.get(e)));
+    const dnc = Boolean((p && (known.phones.get(p) || suppressed.has(p))) || (e && known.emails.get(e)));
     const duplicate = Boolean((p && (known.phones.has(p) || inFile.phones.has(p))) || (e && (known.emails.has(e) || inFile.emails.has(e))));
     if (p) inFile.phones.add(p);
     if (e) inFile.emails.add(e);
@@ -928,6 +925,7 @@ export function leadColumns(l: LeadFields, externalId: string | null) {
     phone: l.phone,
     normalizedPhone: l.normalized_phone,
     phoneValid: l.phone_valid,
+    timezone: l.timezone,
     location: l.location,
     minBudget: l.min_budget,
     maxBudget: l.max_budget,
@@ -941,12 +939,17 @@ export function leadColumns(l: LeadFields, externalId: string | null) {
 export function leadValuesRow(leadId: string, l: LeadFields, externalId: string | null, reviewReasons: string[], dnc: boolean): Prisma.Sql {
   return Prisma.sql`(${leadId}::uuid, ${l.first_name}::varchar, ${l.last_name}::varchar, ${l.email}::varchar,
     ${l.normalized_email}::varchar, ${l.email_valid}::boolean, ${l.phone}::varchar, ${l.normalized_phone}::varchar,
-    ${l.phone_valid}::boolean, ${l.location}::varchar, ${l.min_budget}::numeric, ${l.max_budget}::numeric,
+    ${l.phone_valid}::boolean, ${l.timezone}::varchar, ${l.location}::varchar, ${l.min_budget}::numeric, ${l.max_budget}::numeric,
     ${l.bedrooms}::int, ${l.motivation}::text, ${JSON.stringify(l.custom_fields)}::jsonb,
     ${externalId ? externalId.slice(0, 255) : null}::varchar, ${reviewReasons}::text[], ${dnc}::boolean)`;
 }
 
-const MATERIAL_FIELDS = ['first_name', 'last_name', 'phone', 'email', 'location', 'min_budget', 'max_budget', 'bedrooms', 'motivation'] as const;
+/** The columns of a `leadValuesRow`, for the UPDATE ... FROM (VALUES ...) AS v(...) statements that consume one. */
+export const LEAD_VALUES_COLUMNS = Prisma.raw(
+  'id, first_name, last_name, email, normalized_email, email_valid, phone, normalized_phone, phone_valid, timezone, location, min_budget, max_budget, bedrooms, motivation, custom_fields, external_lead_id, review_reasons, dnc',
+);
+
+const MATERIAL_FIELDS = ['first_name', 'last_name', 'phone', 'email', 'timezone', 'location', 'min_budget', 'max_budget', 'bedrooms', 'motivation'] as const;
 
 /** After a mapping change: does the sheet now say something different about a mapped field? */
 export function materialDiffers(lead: Record<string, unknown>, incoming: LeadFields, mappedTargets: Set<string>): boolean {

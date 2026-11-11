@@ -9,7 +9,7 @@ import { outreachRequest, type OutreachChoice } from '@/outreach/batches';
 import { IMPORT_REASONS_SPENT_ON_DECISION, approveTrackingRows, notDecided } from './approval';
 import type { ChangesQueryDto } from './dto/sheets.dto';
 import type { SessionIdentity } from './google-connections.service';
-import { leadValuesRow, type ChangedValues } from './sheet-import.service';
+import { LEAD_VALUES_COLUMNS, leadValuesRow, type ChangedValues } from './sheet-import.service';
 
 export const REJECTED_REASON = 'Rejected at import review';
 
@@ -161,16 +161,14 @@ export class SheetReviewService {
              SET first_name = v.first_name, last_name = v.last_name,
                  email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                  phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-                 location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+                 timezone = COALESCE(v.timezone, l.timezone), location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                  bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                  external_lead_id = v.external_lead_id,
                  review_reasons = v.review_reasons, needs_review = cardinality(v.review_reasons) > 0,
                  dnc_status = l.dnc_status OR v.dnc,
                  automation_paused = l.automation_paused OR v.normalized_phone IS NULL OR v.dnc,
                  updated_at = now()
-            FROM (VALUES ${Prisma.join(values)}) AS v(id, first_name, last_name, email, normalized_email, email_valid,
-                 phone, normalized_phone, phone_valid, location, min_budget, max_budget, bedrooms, motivation,
-                 custom_fields, external_lead_id, review_reasons, dnc)
+            FROM (VALUES ${Prisma.join(values)}) AS v(${LEAD_VALUES_COLUMNS})
            WHERE l.id = v.id AND l.organization_id = ${orgId}::uuid`;
       }
       // For a CRM row the CRM's values at the time of the flag become the base of the next

@@ -18,6 +18,7 @@ import { CHOICES, ISSUE_TEXT, approveMessage, choicesFromColumns, columnsFromCho
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch } from './OutreachPicker';
 import { PreviewRowsTable, flagged } from './PreviewRowsTable';
+import { TimezoneNotice } from '../common/TimezoneNotice';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
@@ -290,7 +291,9 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-xs font-bold text-slate-200">Upload leads</div>
-              <div className="text-2xs text-slate-500">Only a name and a phone or email are required; the template shows every column we read.</div>
+              <div className="text-2xs text-slate-500">
+                Only a name and a phone or email are required; the template shows every column we read, including the optional Time Zone.
+              </div>
             </div>
             <button
               type="button"
@@ -300,6 +303,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               <Download className="w-3.5 h-3.5" /> Download the template
             </button>
           </div>
+          <TimezoneNotice tone="hint" />
           <div
             role="button"
             tabIndex={0}
@@ -428,6 +432,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                     ))}
                 </div>
               </div>
+              {!Object.values(choices).includes('timezone') && <TimezoneNotice />}
               {preview.mapping.problems.length > 0 && (
                 <ul className="text-2xs text-amber-300 list-disc pl-4 space-y-0.5">
                   {preview.mapping.problems.map((p) => (

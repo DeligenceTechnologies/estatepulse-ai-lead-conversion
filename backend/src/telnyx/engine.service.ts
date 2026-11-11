@@ -1,15 +1,17 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
-import { CallDisposition, CallStatus, ConsentStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
+import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { nextContactAt, type QuietHours } from '@/common/utils/quiet-hours';
+import { leadZone } from '@/common/utils/lead-timezone';
+import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
 import { ActivityService } from './activity.service';
-import { SmsService } from './sms.service';
+import { OptOutService } from './opt-out.service';
+import { OptedOutError, SMS_RETRY_DELAYS_MS, SmsService, isTransientSmsError } from './sms.service';
 import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from './strategy-store.service';
 import { CallQueue } from './calls/call.queue';
 import { CONVERSATION_MIN_SECS } from './calls/call.types';
@@ -34,6 +36,9 @@ export const STEP_RETRY_MAX_MS = 5 * 60_000;
 export const MAX_STEP_FAILURES = 5;
 /** The review flag on a lead whose strategy was parked because a step kept failing. */
 export const STEP_FAILED_REVIEW = 'Outreach stopped: a strategy step kept failing';
+/** A step held this long for a time zone nobody sets is handed to a person instead of re-checked forever. */
+const TZ_HOLD_MAX_MS = 3 * 24 * 60 * 60_000;
+export const ZONE_HELD_REVIEW = 'Outreach paused: the lead has no usable time zone';
 
 const OPEN_CALL: CallStatus[] = [CallStatus.queued, CallStatus.ringing, CallStatus.in_progress];
 
@@ -103,10 +108,14 @@ interface Enrollment {
   queue: StrategyStep[];
   /** Holds already logged, by step and reason, so a step re-checked every 30 s logs its hold once. */
   held: Set<string>;
+  /** When this lead's step was first held for a missing zone; cleared once the gate lets it through. Starts again after a restart. */
+  zoneHeldSince?: number;
   /** The step run last was skipped, so a condition on the next one has nothing to check. */
   previousSkipped: boolean;
   /** Steps whose text or call has gone out (or was being sent): a retry after an error never sends one twice. */
   sent: Set<string>;
+  /** Times each step's text was tried again after a failure that may pass (SMS_RETRY_DELAYS_MS). */
+  smsRetries: Map<string, number>;
   /** Errors in a row; reset once a run gets through. */
   failures: number;
 }
@@ -136,6 +145,7 @@ export class EngineService implements OnModuleDestroy {
     @Inject(forwardRef(() => FollowupService)) private readonly followup: FollowupService,
     private readonly state: LeadStateService,
     private readonly conversations: SmsConversationService,
+    private readonly optOuts: OptOutService,
   ) {}
 
   onModuleDestroy(): void {
@@ -173,6 +183,7 @@ export class EngineService implements OnModuleDestroy {
         held: new Set(),
         previousSkipped: false,
         sent: new Set(),
+        smsRetries: new Map(),
         failures: 0,
       };
       this.active.set(leadId, enrollment);
@@ -240,6 +251,7 @@ export class EngineService implements OnModuleDestroy {
       held: new Set(),
       previousSkipped: logged.at(-1)?.type === 'step_skipped',
       sent: new Set(),
+      smsRetries: new Map(),
       failures: 0,
     };
     this.active.set(leadId, enrollment);
@@ -327,7 +339,7 @@ export class EngineService implements OnModuleDestroy {
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { id: true } });
     if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
     const manual = opts.actor?.type === 'user';
-    // An opt-out sets DNC and stops the sequences together: never one without the other.
+    // An opt-out sets DNC and stops the sequences together, for the number (OptOutService): never one without the other.
     const moved = await this.prisma.$transaction(async (tx) => {
       const result = await this.state.move(
         leadId,
@@ -340,15 +352,19 @@ export class EngineService implements OnModuleDestroy {
           data: {
             ...(reason ? { aiSummary: reason.slice(0, 2000) } : {}),
             ...(status === LeadStatus.follow_up ? { followUpReason: opts.followUpReason ?? FollowUpReason.other } : {}),
-            ...(optOut ? { dncStatus: true, automationPaused: true, consentStatus: ConsentStatus.revoked } : {}),
             ...(INACTIVE_STATUSES.includes(status) && reason ? { lostReason: reason.slice(0, 255) } : {}),
           },
         },
         tx,
       );
+      // It holds for the number, every lead with it, and even when the status cannot move (a booked lead keeps its meeting).
+      if (optOut) {
+        const source = opts.source ?? (manual ? 'agent' : 'system');
+        await this.optOuts.optOut(orgId, { leadId }, { source, reason: reason ?? 'Asked not to be contacted', actor: opts.actor }, tx);
+        return true;
+      }
       if (!result.moved) return false;
-      if (optOut) await this.followup.stopForLead(orgId, leadId, 'opted_out', tx);
-      else if (INACTIVE_STATUSES.includes(status)) await this.followup.stopForLead(orgId, leadId, `lead_${status}`, tx);
+      if (INACTIVE_STATUSES.includes(status)) await this.followup.stopForLead(orgId, leadId, `lead_${status}`, tx);
       return true;
     });
     if (!moved) return false;
@@ -392,21 +408,39 @@ export class EngineService implements OnModuleDestroy {
       return this.appointmentBooked(e.orgId, e.leadId, 'calendar');
     }
 
-    const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
-    const now = Date.now();
-    const allowedAt = nextContactAt(office.timeZone, quiet, skipDaysOf(guardrails?.skipDays), new Date(now)).getTime();
-    if (allowedAt > now) {
-      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), allowedAt - now);
-      return;
-    }
-
     const event = { orgId: e.orgId, leadId: e.leadId, source: 'strategy', channel: step.channel, payload: { stepId: step.id } };
-    const hold = (reason: string) => {
+    /** Logs the hold once per step and reason; true the first time. */
+    const hold = (reason: string): boolean => {
       const key = `${step.id}:${reason}`;
-      if (e.held.has(key)) return;
+      if (e.held.has(key)) return false;
       e.held.add(key);
       this.state.quietly({ ...event, type: 'step_held', reason });
+      return true;
     };
+
+    // On the LEAD's clock: the organization's quiet hours and days off, plus the legal calling
+    // hours of the lead's jurisdiction. Checked again every time the step fires, so a timer that
+    // waited overnight sees a zone an agent set meanwhile.
+    const quiet = guardrails?.respectQuietHours === false ? undefined : guardrails?.quietHours;
+    const now = Date.now();
+    const zone = leadZone(lead);
+    const window = nextLeadContactAt(zone, { quiet, skipDays: skipDaysOf(guardrails?.skipDays) }, new Date(now));
+    if (!window.allowedAt) {
+      e.zoneHeldSince ??= now;
+      if (now - e.zoneHeldSince >= TZ_HOLD_MAX_MS) return this.parkForZone(e, window.reason);
+      const first = hold(window.reason);
+      this.logger[first ? 'log' : 'debug'](gateLine(e.orgId, e.leadId, zone, window, 'held'));
+      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), TZ_RECHECK_MS);
+      return;
+    }
+    e.zoneHeldSince = undefined;
+    if (window.allowedAt.getTime() > now) {
+      hold(`Waiting for the lead's contact window: ${window.reason}`);
+      this.logger.log(gateLine(e.orgId, e.leadId, zone, window, 'deferred'));
+      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), window.allowedAt.getTime() - now);
+      return;
+    }
+    this.logger.debug(gateLine(e.orgId, e.leadId, zone, window, 'allowed'));
 
     // A text the lead asked for comes first: the step waits for it, then goes on by the usual rules.
     if (textBackPending(lead)) {
@@ -485,15 +519,32 @@ export class EngineService implements OnModuleDestroy {
       const variables = await this.activity.leadVariables(e.orgId, e.leadId);
       const text = fillTemplate(step.message ?? '', { ...variables, brokerage: office.brokerage });
       try {
-        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text);
-        await this.activity.recordSms(e.orgId, e.leadId, text, true, sent.id);
+        const sent = await this.sms.sendSms(e.orgId, phone ?? '', text, { outreach: true });
+        await this.activity.recordSms(e.orgId, e.leadId, sent.text, true, sent.id);
         this.state.quietly({ ...event, type: 'step_sent' });
         this.conversations
-          .appendOurMessage(e.orgId, phone, text)
+          .appendOurMessage(e.orgId, phone, sent.text)
           .catch((error) => this.logger.warn(`lead ${e.leadId}: adding our text to the AI chat failed: ${(error as Error).message}`));
       } catch (error) {
-        await this.activity.recordSms(e.orgId, e.leadId, text, false, (error as Error).message);
-        this.state.quietly({ ...event, type: 'step_failed', reason: (error as Error).message });
+        const reason = (error as Error).message;
+        // The number replied STOP to us before: it is opted out like any STOP, and the strategy ends.
+        if (error instanceof OptedOutError) {
+          this.state.quietly({ ...event, type: 'step_skipped', reason });
+          await this.optOuts.optOut(e.orgId, { leadId: e.leadId }, { source: 'sms_send', reason, channel: 'sms' });
+          return this.stop(e);
+        }
+        // Telnyx busy or down: the same step again in a while, its checks made afresh, before anything after it.
+        const tries = e.smsRetries.get(step.id) ?? 0;
+        if (isTransientSmsError(error) && tries < SMS_RETRY_DELAYS_MS.length) {
+          const wait = SMS_RETRY_DELAYS_MS[tries];
+          e.smsRetries.set(step.id, tries + 1);
+          e.sent.delete(step.id);
+          this.state.quietly({ ...event, type: 'step_retry', reason: `${reason} (trying again in ${wait / 60_000} min)` });
+          this.later(e, () => this.fireStep(e, step, office, guardrails), wait);
+          return;
+        }
+        await this.activity.recordSms(e.orgId, e.leadId, text, false, reason);
+        this.state.quietly({ ...event, type: 'step_failed', reason });
       }
     } else if (step.channel === 'voice' && !capped) {
       e.voiceAttempts += 1;
@@ -644,6 +695,38 @@ export class EngineService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Nobody set the zone: the strategy stops rather than re-checking hourly for
+   * ever. Automation is paused and the lead flagged for review, so the owner
+   * sets the zone and starts them again from the lead.
+   */
+  private async parkForZone(e: Enrollment, reason: string): Promise<void> {
+    const days = TZ_HOLD_MAX_MS / 86_400_000;
+    this.logger.warn(`lead ${e.leadId}: ${days} days without a usable time zone — outreach paused for review`);
+    try {
+      const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId }, select: { reviewReasons: true } });
+      await this.prisma.lead.update({
+        where: { id: e.leadId },
+        data: {
+          automationPaused: true,
+          needsReview: true,
+          ...(lead?.reviewReasons.includes(ZONE_HELD_REVIEW) ? {} : { reviewReasons: { push: ZONE_HELD_REVIEW } }),
+        },
+      });
+      await this.state.record({
+        orgId: e.orgId,
+        leadId: e.leadId,
+        type: 'strategy_stopped',
+        source: 'strategy',
+        reason: `No usable time zone after ${days} days: ${reason}`.slice(0, 500),
+      });
+    } catch (error) {
+      this.logger.error(`lead ${e.leadId}: could not pause it for review: ${(error as Error).message}`);
+    } finally {
+      this.stop(e);
+    }
+  }
+
   private stopFor(leadId: string): void {
     const e = this.active.get(leadId);
     if (e) this.stop(e);
@@ -660,12 +743,12 @@ export class EngineService implements OnModuleDestroy {
   }
 
   private async office(orgId: string): Promise<Office> {
-    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, settings: { select: { timezone: true } } } });
-    return { brokerage: org?.name ?? 'our team', timeZone: org?.settings?.timezone ?? 'UTC' };
+    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
+    return { brokerage: org?.name ?? 'our team' };
   }
 }
 
+/** What the steps say about the organization. Timing is the lead's own (their zone), not the office's. */
 interface Office {
   brokerage: string;
-  timeZone: string;
 }

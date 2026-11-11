@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { memoryVariables, QUALIFICATION_PROMPT_START, withQualificationSection } from './qualification';
+import { memoryVariables, qualificationSection, withQualificationSection } from './qualification';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { SmsConversationService } from './sms/sms-conversation.service';
 import { RECORDING_NOTICE } from './recording-notice';
@@ -138,7 +138,8 @@ export class AssistantService {
 
   private readonly hangupReady = new Set<string>();
   private readonly hangupInflight = new Map<string, Promise<void>>();
-  private readonly voices = new Map<string, { voice: string | null; until: number }>();
+  /** The assistant's voice and greeting, read once per VOICE_CACHE_MS; a form save clears it. */
+  private readonly voices = new Map<string, { voice: string | null; greeting: string | null; until: number }>();
 
   constructor(
     private readonly creds: TelnyxCredentialsService,
@@ -164,13 +165,25 @@ export class AssistantService {
 
   /** The assistant's own voice, so a voicemail sounds like the AI that would have talked. Null when it cannot be read. */
   async voiceFor(orgId: string): Promise<string | null> {
+    return (await this.profile(orgId)).voice;
+  }
+
+  /** The assistant's own greeting as saved on Telnyx, placeholders unfilled. Null when it cannot be read. */
+  async greetingOf(orgId: string): Promise<string | null> {
+    return (await this.profile(orgId)).greeting;
+  }
+
+  private async profile(orgId: string): Promise<{ voice: string | null; greeting: string | null }> {
     const hit = this.voices.get(orgId);
-    if (hit && hit.until > Date.now()) return hit.voice;
-    const voice = await this.fetchRaw(orgId)
-      .then((a) => (typeof a?.voice_settings?.voice === 'string' && a.voice_settings.voice) || null)
-      .catch(() => null);
-    this.voices.set(orgId, { voice, until: Date.now() + VOICE_CACHE_MS });
-    return voice;
+    if (hit && hit.until > Date.now()) return hit;
+    const a = await this.fetchRaw(orgId).catch(() => null);
+    const entry = {
+      voice: (typeof a?.voice_settings?.voice === 'string' && a.voice_settings.voice) || null,
+      greeting: typeof a?.greeting === 'string' && a.greeting.trim() ? a.greeting : null,
+      until: Date.now() + VOICE_CACHE_MS,
+    };
+    this.voices.set(orgId, entry);
+    return entry;
   }
 
   private async fetchRaw(orgId: string): Promise<any> {
@@ -186,7 +199,7 @@ export class AssistantService {
   private async keepCallToolsSection(orgId: string, instructions: string): Promise<string> {
     const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { callTools: true } }).catch(() => null);
     const tools = callToolsSettings(row?.callTools);
-    return tools.enabled && tools.telnyx ? withCallToolsSection(instructions) : instructions;
+    return tools.telnyx ? withCallToolsSection(instructions, tools.enabled) : instructions;
   }
 
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
@@ -339,11 +352,12 @@ export class AssistantService {
   async setTools(orgId: string, owned: any[]) {
     const c = await this.requireCreds(orgId);
     const cur = await this.fetchRaw(orgId);
+    // Telnyx lists an assistant's tools by `tool_id`; a shared one is re-attached by it, never copied inline.
     const sharedIds: string[] = ((cur.tools ?? []) as any[])
-      .filter((t) => t?.shared && t?.id)
-      .map((t) => t.id);
+      .filter((t) => t?.shared && (t?.tool_id ?? t?.id))
+      .map((t) => t.tool_id ?? t.id);
 
-    const tools = (owned ?? []).map(({ id: _id, shared: _shared, ...rest }: any) => rest);
+    const tools = (owned ?? []).map(({ id: _id, tool_id: _toolId, shared: _shared, ...rest }: any) => rest);
 
     this.hangupReady.delete(`${orgId}:${c.assistantId}`);
 
@@ -431,7 +445,8 @@ export class AssistantService {
     const cur = current ?? (await this.fetchRaw(orgId));
     const body: any = {};
     const instructions = String(cur.instructions ?? '');
-    if (!instructions.includes(QUALIFICATION_PROMPT_START)) body.instructions = withQualificationSection(instructions);
+    // Missing, or written by an older release: a newer wording reaches every assistant at its next call.
+    if (!instructions.includes(qualificationSection())) body.instructions = withQualificationSection(instructions);
     const defaults = await this.memoryDefaults(orgId);
     const vars = cur.dynamic_variables ?? {};
     if (Object.entries(defaults).some(([k, v]) => vars[k] !== v)) body.dynamic_variables = { ...vars, ...defaults };

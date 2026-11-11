@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { leadsApi, type NewLeadInput } from '../../api/client';
+import { LEADS_CHANGED_EVENT, leadsApi, type NewLeadInput } from '../../api/client';
+import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 
 interface NewLeadModalProps {
@@ -42,6 +43,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
     maxBudget: '',
     bedrooms: '',
     notes: '',
+    timezone: '',
   });
   const [consent, setConsent] = useState(false);
   const [startOutreach, setStartOutreach] = useState(false);
@@ -65,27 +67,50 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
       setError({ message: 'Budget is too large. Enter the amount in full, e.g. 650000.', details: [] });
       return;
     }
-    const body: NewLeadInput = {
-      firstName: form.firstName.trim(),
-      lastName: optionalText(form.lastName),
-      phone: optionalText(form.phone),
-      email: optionalText(form.email),
-      location: optionalText(form.location),
-      timeline: optionalText(form.timeline),
-      minBudget,
-      maxBudget,
-      bedrooms: optionalNumber(form.bedrooms),
-      notes: optionalText(form.notes),
-      consent,
-      startOutreach: consent && startOutreach,
-    };
     setSaving(true);
     setError(null);
     try {
-      const { id } = await leadsApi.create(body);
-      // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
-      toast.success('Lead added.');
-      onCreated(id);
+      if (editing) {
+        // Every field goes, "" and all: on a correction "" means clear, and the form already
+        // holds the whole lead, so sending it all keeps the request and the screen in step.
+        const body: LeadUpdateInput = {
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          phone: form.phone.trim(),
+          email: form.email.trim(),
+          location: form.location.trim(),
+          timeline: form.timeline.trim(),
+          minBudget: minBudget ?? null,
+          maxBudget: maxBudget ?? null,
+          bedrooms: optionalNumber(form.bedrooms) ?? null,
+          notes: form.notes.trim(),
+        };
+        await leadsApi.update(lead.id, body);
+        toast.success('Lead updated.');
+        onSaved(lead.id);
+      } else {
+        const body: NewLeadInput = {
+          firstName: form.firstName.trim(),
+          lastName: optionalText(form.lastName),
+          phone: optionalText(form.phone),
+          email: optionalText(form.email),
+          location: optionalText(form.location),
+          timeline: optionalText(form.timeline),
+          minBudget,
+          maxBudget,
+          bedrooms: optionalNumber(form.bedrooms),
+          notes: optionalText(form.notes),
+          timezone: optionalText(form.timezone),
+          consent,
+          startOutreach: consent && startOutreach,
+        };
+        const { id } = await leadsApi.create(body);
+        // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
+        // Without consent it waits in Import Review, out of the Leads list, until the owner marks it.
+      toast.success(consent ? 'Lead added.' : 'Lead added. Without consent it waits in Import Review → Consent needed; it is not called or texted until you mark its consent there.');
+      if (!consent) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+        onSaved(id);
+      }
       onClose();
     } catch (err) {
       setError({ message: errorText(err), details: errorDetails(err) });
@@ -133,7 +158,35 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ onClose, onCreated }
             <input id="nl-email" type="email" maxLength={255} value={form.email} onChange={set('email')} className={input} />
           </div>
         </div>
-        <p className="text-2xs text-slate-500 -mt-2">A phone number or an email is required.</p>
+        <p className="text-2xs text-slate-500 -mt-2">
+          A phone number or an email is required. Start a phone number with its country code, e.g. +91 98765 43210 —
+          without one we cannot tell which country it belongs to, and the lead cannot be called.
+        </p>
+
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
+            {form.timezone && (
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
+                className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
+              >
+                Use phone&rsquo;s
+              </button>
+            )}
+          </div>
+          <TimezoneSelect
+            id="nl-timezone"
+            value={form.timezone}
+            placeholder="Work it out from the phone number"
+            onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
+            className={input}
+          />
+          <p className="text-2xs text-slate-500 mt-1">
+            Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
+          </p>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>

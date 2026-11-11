@@ -111,13 +111,25 @@ describe('TextBackService.onLeadTexted', () => {
 });
 
 function worker(
-  opts: { textBackAt?: Date | null; status?: string; dnc?: boolean; paused?: boolean; meeting?: number; sendFails?: boolean; attemptsMade?: number; quietNow?: boolean } = {},
+  opts: {
+    textBackAt?: Date | null;
+    status?: string;
+    dnc?: boolean;
+    paused?: boolean;
+    meeting?: number;
+    sendFails?: boolean;
+    attemptsMade?: number;
+    quietNow?: boolean;
+    lastCall?: Record<string, unknown> | null;
+  } = {},
 ) {
   const at = '2026-10-27T05:32:00.000Z';
   const prisma = {
     lead: {
       findUnique: vi.fn(async () => ({
         phone: '+12895550100',
+        // The lead's own clock is the test's clock, so the quiet-hours cases below read as before.
+        timezone: TZ,
         status: opts.status ?? 'engaged',
         dncStatus: opts.dnc ?? false,
         automationPaused: opts.paused ?? false,
@@ -126,10 +138,14 @@ function worker(
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     calendarMeeting: { count: vi.fn(async () => opts.meeting ?? 0) },
+    call: { findFirst: vi.fn(async () => opts.lastCall ?? null) },
   };
   const config = { get: vi.fn(() => true) };
   // Quiet hours off unless the test puts "now" inside them: a window from a minute ago to an hour from now.
-  const followup = { guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })) };
+  const followup = {
+    guardrailsFor: vi.fn(async () => ({ timeZone: TZ, quiet: opts.quietNow ? { start: clock(-60_000), end: clock(60 * 60_000) } : undefined })),
+    holdOnce: vi.fn(async () => undefined),
+  };
   const state = { quietly: vi.fn() };
   const tools = { settings: vi.fn(async () => ({ textBackMessage: DEFAULT_TEXT_BACK_MESSAGE })) };
   const sms = { sendSms: vi.fn(async () => (opts.sendFails ? Promise.reject(new Error('Telnyx unreachable')) : { id: 'msg-1' })) };
@@ -167,8 +183,8 @@ describe('TextBackWorker', () => {
     }
   });
 
-  it('nothing goes to an opted-out, paused, finished or booked lead', async () => {
-    for (const opts of [{ dnc: true }, { paused: true }, { status: 'not_interested' }, { meeting: 1 }]) {
+  it('nothing goes to an opted-out, finished or booked lead', async () => {
+    for (const opts of [{ dnc: true }, { status: 'not_interested' }, { meeting: 1 }]) {
       const s = worker(opts);
       await s.w.process(s.job as any);
       expect(s.sms.sendSms).not.toHaveBeenCalled();
@@ -176,11 +192,46 @@ describe('TextBackWorker', () => {
     }
   });
 
+  it('promoted before its time, it waits for the hour the lead asked for', async () => {
+    // Setting a lead's time zone promotes every delayed job they have; "text me tomorrow at 10" is still tomorrow at 10.
+    const at = new Date(Date.now() + 60 * 60_000);
+    const s = worker({ textBackAt: at });
+    s.job.data.at = at.toISOString();
+    await expect(s.w.process(s.job as any)).rejects.toBeInstanceOf(DelayedError);
+    expect(s.job.moveToDelayed).toHaveBeenCalledWith(at.getTime(), undefined);
+    expect(s.sms.sendSms).not.toHaveBeenCalled();
+  });
+
+  it('still keeps the promise to a lead whose automation is paused (after an agent handed the chat back)', async () => {
+    const s = worker({ paused: true });
+    await s.w.process(s.job as any);
+    expect(s.sms.sendSms).toHaveBeenCalledOnce();
+  });
+
   it('waits out quiet hours', async () => {
     const s = worker({ quietNow: true });
     await expect(s.w.process(s.job as any)).rejects.toBeInstanceOf(DelayedError);
     expect(s.job.moveToDelayed).toHaveBeenCalled();
     expect(s.sms.sendSms).not.toHaveBeenCalled();
+  });
+
+  it("a text asked for on a call waits until that call's answers are saved, so it knows what the lead said", async () => {
+    const live = worker({ lastCall: { status: 'in_progress', disposition: null, endedAt: null, extractedIntel: null } });
+    await expect(live.w.process(live.job as any)).rejects.toBeInstanceOf(DelayedError);
+
+    const scoring = worker({ lastCall: { status: 'completed', disposition: 'connected', endedAt: new Date(Date.now() - 30_000), extractedIntel: {} } });
+    await expect(scoring.w.process(scoring.job as any)).rejects.toBeInstanceOf(DelayedError);
+    expect(scoring.sms.sendSms).not.toHaveBeenCalled();
+
+    const scored = worker({
+      lastCall: { status: 'completed', disposition: 'connected', endedAt: new Date(Date.now() - 30_000), extractedIntel: { qualification: { score: 40 } } },
+    });
+    await scored.w.process(scored.job as any);
+    expect(scored.sms.sendSms).toHaveBeenCalled();
+
+    const gaveUp = worker({ lastCall: { status: 'completed', disposition: 'connected', endedAt: new Date(Date.now() - 4 * 60_000), extractedIntel: {} } });
+    await gaveUp.w.process(gaveUp.job as any);
+    expect(gaveUp.sms.sendSms).toHaveBeenCalled();
   });
 
   it('a failed send is tried again by the queue; the last failure is recorded and the promise given up', async () => {

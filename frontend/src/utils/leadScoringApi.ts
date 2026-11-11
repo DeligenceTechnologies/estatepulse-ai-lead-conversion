@@ -34,7 +34,7 @@ export interface ScoringSettingsResponse extends ScoringSettings {
 
 /** voice_calls.extracted_intel.qualification, as the backend stores it. */
 export interface Qualification {
-  source: 'telnyx_insights' | 'transcript';
+  source: 'telnyx_insights' | 'transcript' | 'conversation';
   /** The assistant's own score and rating, or the backend's point rules for an analysis without one (and every call scored before). */
   scoredBy?: 'assistant' | 'rules';
   score: number;

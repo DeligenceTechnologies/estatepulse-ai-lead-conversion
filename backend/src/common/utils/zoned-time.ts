@@ -28,6 +28,19 @@ function wallClock(instant: number, timeZone: string) {
   return parts as { year: number; month: number; day: number; hour: number; minute: number; second: number };
 }
 
+/**
+ * The canonical IANA name Intl resolves `zone` to: `america/chicago` and
+ * `US/Central` both become `America/Chicago`. A name Intl cannot format comes
+ * back unchanged, for the caller to reject.
+ */
+export function resolvedZone(zone: string): string {
+  try {
+    return formatter(zone).resolvedOptions().timeZone;
+  } catch {
+    return zone;
+  }
+}
+
 export function isTimeZone(zone: string | null | undefined): zone is string {
   if (!zone) return false;
   try {
@@ -49,6 +62,12 @@ export function zonedToInstant(date: string, minutesOfDay: number, timeZone: str
   const wall = Date.UTC(year, month - 1, day) + minutesOfDay * MINUTE_MS;
   const first = wall - zoneOffsetMs(wall, timeZone);
   return wall - zoneOffsetMs(first, timeZone);
+}
+
+/** Minutes since local midnight in `timeZone` (seconds dropped). */
+export function wallMinutes(instant: number, timeZone: string): number {
+  const { hour, minute } = wallClock(instant, timeZone);
+  return hour * 60 + minute;
 }
 
 export function localDate(instant: number, timeZone: string): string {

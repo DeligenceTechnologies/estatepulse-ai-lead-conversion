@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   ArrowDown,
@@ -31,6 +31,8 @@ import {
 } from '../../utils/sequencesApi';
 import { SEQUENCE_PRESETS, fitSteps } from '../../utils/journey';
 import { AlwaysOnRules, StepRules } from '../journey/StepRules';
+import { SmsPreview } from '../journey/SmsPreview';
+import { getBusinessDetails, type BusinessDetailsView } from '../../utils/smsConversationApi';
 
 /**
  * Author a nurture sequence.
@@ -98,6 +100,12 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
   const [description, setDescription] = useState(sequence?.description ?? '');
   const [status, setStatus] = useState<SequenceStatus>(sequence?.status ?? 'active');
   const [triggers, setTriggers] = useState<EnrollTrigger[]>(sequence?.enrollTriggers ?? []);
+  const [details, setDetails] = useState<BusinessDetailsView | null>(null);
+  useEffect(() => {
+    getBusinessDetails()
+      .then(setDetails)
+      .catch(() => undefined);
+  }, []);
   const [closeOutHours, setCloseOutHours] = useState<number>(sequence?.closeOutHours ?? CLOSE_OUT_HOURS.default);
   const [closeOutUnresponsive, setCloseOutUnresponsive] = useState<boolean>(sequence?.closeOutUnresponsive ?? true);
   const closeOutValid = Number.isInteger(closeOutHours) && closeOutHours >= CLOSE_OUT_HOURS.min && closeOutHours <= CLOSE_OUT_HOURS.max;
@@ -231,7 +239,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
     // so `sticky bottom-0` pinned it to the bottom of the SCREEN and it floated
     // across the middle of the steps. A flex column with one scrolling child is
     // what actually keeps a footer at the bottom of a tall dialog.
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-3 md:p-6">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-3 md:p-6">
       <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col max-h-full">
         {/* Header */}
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-800">
@@ -708,8 +716,10 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       <p className="text-2xs text-slate-500 mt-1 flex items-center gap-1">
                         <MessageSquare className="w-3 h-3" />
                         {'{{firstName}} and {{brokerage}} are substituted when it sends.'}
-                        {i === 0 && ' Include "Reply STOP to opt out" on the first message.'}
                       </p>
+                      <div className="mt-2">
+                        <SmsPreview template={step.messageTemplate ?? ''} first={false} details={details} />
+                      </div>
                     </div>
                   ) : (
                     <div>

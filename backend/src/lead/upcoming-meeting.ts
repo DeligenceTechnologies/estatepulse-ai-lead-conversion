@@ -14,3 +14,14 @@ export async function hasUpcomingMeeting(prisma: Pick<PrismaService, 'calendarMe
   const meetings = await prisma.calendarMeeting.count({ where: { orgId, leadId, status: { in: BOOKED }, endsAt: { gt: now } } });
   return meetings > 0;
 }
+
+/** The lead's next meeting that has not ended yet, as hasUpcomingMeeting counts them; null when it has none. */
+export async function nextMeeting(prisma: Pick<PrismaService, 'calendarMeeting'>, orgId: string, leadId: string, now = new Date()) {
+  return prisma.calendarMeeting.findFirst({
+    where: { orgId, leadId, status: { in: BOOKED }, endsAt: { gt: now } },
+    orderBy: { startsAt: 'asc' },
+    select: { startsAt: true, hosts: true, rescheduleUrl: true, cancelUrl: true, hostUser: { select: { firstName: true, lastName: true } } },
+  });
+}
+
+export type UpcomingMeeting = NonNullable<Awaited<ReturnType<typeof nextMeeting>>>;

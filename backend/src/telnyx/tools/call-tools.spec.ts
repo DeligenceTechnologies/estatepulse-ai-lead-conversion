@@ -43,12 +43,14 @@ describe('call tools', () => {
   });
 
   it('identify the call or chat by Telnyx presets, never by the model', () => {
-    const [callback, text, outcome] = callToolDefinitions('https://api.example.com', 'ep_calltools_x');
+    const [callback, text, outcome, meeting] = callToolDefinitions('https://api.example.com', 'ep_calltools_x');
     expect(callback.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/callback');
     expect(text.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/text');
     expect(text.webhook.name).toBe('schedule_text');
     expect(outcome.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/record');
-    for (const tool of [callback, text, outcome]) {
+    expect(meeting.webhook.name).toBe('get_meeting');
+    expect(meeting.webhook.url).toBe('https://api.example.com/tools/telnyx/outcome/meeting');
+    for (const tool of [callback, text, outcome, meeting]) {
       expect(tool.webhook.preset_body_fields).toEqual({ lead_id: '{{leadId}}', call_control_id: '{{call_control_id}}', end_user: '{{telnyx_end_user_target}}' });
       expect(Object.keys(tool.webhook.body_parameters.properties)).not.toContain('lead_id');
       expect(tool.webhook.headers[0].value).toContain('ep_calltools_x');
@@ -61,6 +63,12 @@ describe('call tools', () => {
     expect(section).toContain('call schedule_text');
     expect(section).toContain('Never promise a text without it');
     expect(section).toContain('Never promise a callback without it');
+  });
+
+  it('send a lead who wants to move or cancel a meeting to get_meeting, never to a second booking', () => {
+    const section = callToolsSection();
+    expect(section).toContain('call get_meeting first');
+    expect(section).toContain('Never book a second meeting');
   });
 
   it('fill a message template, dropping a placeholder with no value', () => {

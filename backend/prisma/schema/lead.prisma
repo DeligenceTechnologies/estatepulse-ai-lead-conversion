@@ -12,6 +12,8 @@ model Lead {
   emailValid      Boolean @default(false) @map("email_valid")
   phoneValid      Boolean @default(false) @map("phone_valid")
   externalLeadId  String? @map("external_lead_id") @db.VarChar(255)
+  /// IANA zone the lead source provided or an agent set. Null = worked out from the phone number on every read (common/utils/lead-timezone.ts).
+  timezone        String? @db.VarChar(100)
 
   status          LeadStatus       @default(new)
   followUpReason  FollowUpReason?  @map("follow_up_reason")
@@ -145,6 +147,23 @@ model Call {
   @@index([leadId, createdAt(sort: Desc)])
   @@index([providerCallId])
   @@map("calls")
+}
+
+/// A phone that asked not to be contacted. Do-not-contact belongs to the number, not one lead record: every lead
+/// with it is do-not-contact, a lead created later with it starts that way, and nothing is texted to it. START by
+/// text deletes the row; each lead's lead_events keep the history.
+model ContactSuppression {
+  orgId           String   @map("organization_id") @db.Uuid
+  normalizedPhone String   @map("normalized_phone") @db.VarChar(50)
+  /// What decided it: sms_reply, call, sms_chat, agent, backfill.
+  source          String   @db.VarChar(30)
+  reason          String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, normalizedPhone])
+  @@map("contact_suppressions")
 }
 
 /// What the outreach decided about a lead, one row per decision and in order:

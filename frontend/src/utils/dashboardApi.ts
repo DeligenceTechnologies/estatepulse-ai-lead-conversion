@@ -5,6 +5,8 @@ export interface OwnerDashboard {
   leads: {
     total: number;
     last7Days: number;
+    /** The seven days before those, so the tile can show which way the week went. */
+    previous7Days: number;
     /** new | contacted | qualified | nurture | booked | closed | lost */
     byStatus: Record<string, number>;
     /** Open leads only (not booked, closed or lost). */
