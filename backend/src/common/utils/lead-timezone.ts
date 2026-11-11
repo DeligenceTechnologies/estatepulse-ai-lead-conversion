@@ -2,7 +2,7 @@ import parsePhoneNumberFromString from 'libphonenumber-js';
 import areaRegions from '../data/nanp-regions.json';
 import prefixZones from '../data/phone-timezones.json';
 import aliases from '../data/tz-aliases.json';
-import { isTimeZone } from './zoned-time';
+import { isTimeZone, resolvedZone } from './zoned-time';
 
 /**
  * A lead's time zone, worked out on every read rather than stored.
@@ -51,11 +51,21 @@ const MAX_PREFIX = 9;
 /** More candidates than this is a whole country's list (a toll-free or non-geographic number), not a place. */
 const MAX_CANDIDATES = 3;
 
-/** The current tzdata name for a zone (`Asia/Calcutta` -> `Asia/Kolkata`); unknown names pass through trimmed. */
+/**
+ * The one spelling a zone is stored and compared as: Intl's canonical name
+ * (`america/chicago`, `US/Central` -> `America/Chicago`), then the current
+ * tzdata name (`Asia/Calcutta` -> `Asia/Kolkata`). Unknown names pass through
+ * trimmed. Every write goes through this, so a zone can never miss the phone's
+ * candidates on spelling alone and land in a conflict.
+ */
 export function canonicalZone(zone: string): string {
-  const trimmed = zone.trim();
-  return ALIASES[trimmed] ?? trimmed;
+  const resolved = resolvedZone(zone.trim());
+  return ALIASES[resolved] ?? resolved;
 }
+
+/** `@Transform` for every DTO that takes a zone: one spelling in, so validation and storage agree. Blank becomes undefined. */
+export const toCanonicalZone = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? (value.trim() ? canonicalZone(value) : undefined) : value;
 
 /** The zones the number's longest known prefix sits in; [] when none is known. */
 function phoneCandidates(digits: string): string[] {

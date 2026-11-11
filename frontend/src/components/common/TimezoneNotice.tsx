@@ -11,7 +11,7 @@ export const NO_TIMEZONE_FIELD_NOTICE =
  * `warn` (on a mapping screen with nothing mapped to Time Zone): amber.
  * Neither blocks anything: without the field, the phone number decides.
  */
-export const TimezoneNotice: React.FC<{ tone?: 'warn' | 'hint'; source?: 'form' | 'sheet' | 'file'; className?: string }> = ({ tone = 'warn', className = '' }) => {
+export const TimezoneNotice: React.FC<{ tone?: 'warn' | 'hint'; className?: string }> = ({ tone = 'warn', className = '' }) => {
   const hint = tone === 'hint';
   const box = hint ? 'bg-sky-500/10 border-sky-500/30 text-sky-100' : 'bg-amber-500/10 border-amber-500/30 text-amber-100';
   const Icon = hint ? Lightbulb : AlertTriangle;

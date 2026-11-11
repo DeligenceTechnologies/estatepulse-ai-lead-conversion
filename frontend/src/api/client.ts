@@ -443,6 +443,8 @@ export interface ConnectFormResult extends LeadSourceConfig {
     unmapped: number;
     /** Targets deliberately left for a human — consent, in practice. */
     needsReview: string[];
+    /** False when no form question was mapped to the lead's time zone. */
+    timezoneMapped: boolean;
     mappingStatus: string;
   } | null;
 }

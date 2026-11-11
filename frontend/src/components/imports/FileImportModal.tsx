@@ -303,7 +303,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               <Download className="w-3.5 h-3.5" /> Download the template
             </button>
           </div>
-          <TimezoneNotice tone="hint" source="file" />
+          <TimezoneNotice tone="hint" />
           <div
             role="button"
             tabIndex={0}
@@ -432,7 +432,7 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                     ))}
                 </div>
               </div>
-              {!Object.values(choices).includes('timezone') && <TimezoneNotice source="file" />}
+              {!Object.values(choices).includes('timezone') && <TimezoneNotice />}
               {preview.mapping.problems.length > 0 && (
                 <ul className="text-2xs text-amber-300 list-disc pl-4 space-y-0.5">
                   {preview.mapping.problems.map((p) => (

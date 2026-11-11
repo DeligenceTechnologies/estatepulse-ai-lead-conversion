@@ -320,7 +320,7 @@ export const SheetMappingModal: React.FC<{
             </div>
           )}
 
-          {!Object.values(choices).includes('timezone') && <TimezoneNotice source="sheet" />}
+          {!Object.values(choices).includes('timezone') && <TimezoneNotice />}
 
           {/* Save / switch on */}
           {problems.length > 0 && (

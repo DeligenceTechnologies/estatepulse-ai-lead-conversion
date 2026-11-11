@@ -59,6 +59,14 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
       this.logger.log(`Text back for lead ${leadId} at ${at} dropped: it was moved or cancelled since`);
       return;
     }
+    // The job can run before its time: setting the lead's zone promotes every delayed job they have.
+    // The hour the lead asked for is theirs, so it waits for it again.
+    const due = Date.parse(at);
+    if (due > Date.now()) {
+      this.logger.log(`Text back for lead ${leadId} is not due until ${at}: waiting`);
+      await job.moveToDelayed(due, token);
+      throw new DelayedError();
+    }
     const drop = async (reason: string) => {
       await this.clear(leadId, at);
       this.state.quietly({ orgId, leadId, type: 'text_back_dropped', source: 'text_back', channel: 'sms', reason });
@@ -78,8 +86,8 @@ export class TextBackWorker extends WorkerHost implements OnApplicationBootstrap
     const zone = leadZone(lead);
     const window = nextLeadContactAt(zone, { quiet, skipDays: [] }, new Date(), { callback: true });
     if (!window.allowedAt) {
-      await this.followup.holdOnce(orgId, leadId, `Text held — ${window.reason}`, 'text_back', 'sms');
-      this.logger.log(gateLine(orgId, leadId, zone, window, 'held'));
+      const first = await this.followup.holdOnce(orgId, leadId, `Text held — ${window.reason}`, 'text_back', 'sms');
+      this.logger[first ? 'log' : 'debug'](gateLine(orgId, leadId, zone, window, 'held'));
       await job.moveToDelayed(Date.now() + TZ_RECHECK_MS, token);
       throw new DelayedError();
     }

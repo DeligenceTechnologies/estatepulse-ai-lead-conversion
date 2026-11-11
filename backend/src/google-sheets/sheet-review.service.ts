@@ -161,7 +161,7 @@ export class SheetReviewService {
              SET first_name = v.first_name, last_name = v.last_name,
                  email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                  phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-                 timezone = v.timezone, location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+                 timezone = COALESCE(v.timezone, l.timezone), location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                  bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                  external_lead_id = v.external_lead_id,
                  review_reasons = v.review_reasons, needs_review = cardinality(v.review_reasons) > 0,

@@ -90,7 +90,7 @@ export const SheetTabPickerModal: React.FC<{
           <p className="text-2xs text-slate-500">
             The first row must be the column headings. Nothing is imported until you map the columns and switch it on.
           </p>
-          <TimezoneNotice tone="hint" source="sheet" />
+          <TimezoneNotice tone="hint" />
           <button
             type="button"
             onClick={create}

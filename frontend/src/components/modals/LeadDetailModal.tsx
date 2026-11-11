@@ -217,7 +217,7 @@ export const LeadDetailModal: React.FC = () => {
   const tz = zone ?? lead?.timezone ?? null;
   const tzBlocked = !!tz && (!tz.hasPhone || tz.status === 'needs_review' || tz.status === 'unknown');
   const saveZone = async (next: string | null) => {
-    if (!lead || !next && next !== null) return;
+    if (!lead || next === '') return;
     setSavingZone(true);
     try {
       const { timezone } = await leadsApi.setTimezone(lead.id, next);
@@ -479,26 +479,26 @@ export const LeadDetailModal: React.FC = () => {
                     </div>
                   </div>
                   {tz.hasPhone && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <TimezoneSelect
-                      id="lead-timezone"
-                      value={tz.zone ?? ''}
-                      placeholder={tz.candidates.length > 1 ? 'Choose the zone…' : 'Set the zone…'}
-                      onChange={(next) => void saveZone(next)}
-                      disabled={savingZone}
-                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white max-w-[230px] focus:outline-none focus:border-emerald-600 disabled:opacity-40"
-                    />
-                    {tz.source === 'provided' && (
-                      <button
-                        type="button"
-                        onClick={() => void saveZone(null)}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <TimezoneSelect
+                        id="lead-timezone"
+                        value={tz.zone ?? ''}
+                        placeholder={tz.candidates.length > 1 ? 'Choose the zone…' : 'Set the zone…'}
+                        onChange={(next) => void saveZone(next)}
                         disabled={savingZone}
-                        className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer disabled:opacity-40"
-                      >
-                        Use phone's
-                      </button>
-                    )}
-                  </div>
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white max-w-[230px] focus:outline-none focus:border-emerald-600 disabled:opacity-40"
+                      />
+                      {tz.source === 'provided' && (
+                        <button
+                          type="button"
+                          onClick={() => void saveZone(null)}
+                          disabled={savingZone}
+                          className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer disabled:opacity-40"
+                        >
+                          Use phone's
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
