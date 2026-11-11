@@ -62,15 +62,14 @@ export class CallToolsService {
     return callToolsSettings(row?.callTools);
   }
 
-  /** The hash of the tools' bearer token while they are on; null when off. */
+  /** The hash of the tools' bearer token; the opt-out tool stays on the assistant with the switch off, so it is kept then too. */
   async tokenHash(orgId: string): Promise<string | null> {
-    const s = await this.settings(orgId);
-    return s.enabled ? (s.telnyx?.tokenHash ?? null) : null;
+    return (await this.settings(orgId)).telnyx?.tokenHash ?? null;
   }
 
   async status(orgId: string): Promise<CallToolsStatus> {
     const [s, c] = await Promise.all([this.settings(orgId), this.creds.getCreds(orgId).catch(() => null)]);
-    const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId);
+    const active = !!s.telnyx && this.current(s.telnyx, c?.assistantId, s.enabled);
     const problem = !c?.apiKey || !c.assistantId ? 'Connect Telnyx and create your AI assistant first.' : null;
     const { telnyx: _telnyx, ...settings } = s;
     return { ...settings, defaultConfirmMessage: DEFAULT_CONFIRM_MESSAGE, defaultTextBackMessage: DEFAULT_TEXT_BACK_MESSAGE, active: s.enabled && active, problem };
@@ -95,8 +94,8 @@ export class CallToolsService {
       // Only switching the tools on or off touches Telnyx; the texts, the retry and the text-back switch live here.
       if (patch.enabled === undefined) return;
       this.ready.delete(orgId);
-      if (next.enabled) await this.provision(orgId, true);
-      else await this.teardown(orgId);
+      // Off keeps the opt-out tool: the assistant is provisioned again with it alone.
+      await this.provision(orgId, true);
     });
     return this.status(orgId);
   }
@@ -123,19 +122,23 @@ export class CallToolsService {
   /** Provisions afresh unless what is on Telnyx already matches the assistant and this server. */
   private async provision(orgId: string, rethrow: boolean): Promise<void> {
     const s = await this.settings(orgId);
-    if (!s.enabled || !this.publicApiUrl) return;
+    if (!this.publicApiUrl) return;
+    const full = s.enabled;
     const c = await this.creds.getCreds(orgId).catch(() => null);
     if (!c?.apiKey || !c.assistantId) {
       if (rethrow) throw new AppError('CONFLICT', 'Connect Telnyx and create your AI assistant first.');
       return;
     }
-    if (s.telnyx && this.current(s.telnyx, c.assistantId)) {
+    if (s.telnyx && this.current(s.telnyx, c.assistantId, full)) {
       this.ready.set(orgId, Date.now() + READY_TTL_MS);
       return;
     }
 
     if (s.telnyx) await this.removeFromTelnyx(c.apiKey, s.telnyx);
-    await this.removeStrays(c.apiKey, c.assistantId);
+    // Tools this server attached but never got to record (a save that failed) are still on the
+    // assistant, and Telnyx refuses a second tool with the same name.
+    await this.removeLeftovers(c.apiKey, c.assistantId);
+  
     const identifier = `ep_calltools_${orgId.replace(/-/g, '')}`;
     const token = randomBytes(32).toString('base64url');
     const created: CallToolsTelnyx = {
@@ -146,16 +149,17 @@ export class CallToolsService {
       assistantId: c.assistantId,
       url: this.publicApiUrl,
       version: CALL_TOOLS_VERSION,
+      full,
     };
     try {
       created.secretId = await this.createSecret(c.apiKey, identifier, token);
-      for (const def of callToolDefinitions(this.publicApiUrl, identifier)) {
+      for (const def of callToolDefinitions(this.publicApiUrl, identifier, full)) {
         const tool = await telnyx<{ id?: string; data?: { id: string } }>(c.apiKey, '/ai/tools', { method: 'POST', body: JSON.stringify(def) });
         const toolId = tool.id ?? tool.data?.id ?? '';
         created.toolIds.push(toolId);
         await telnyx(c.apiKey, `/ai/assistants/${c.assistantId}/tools/${toolId}`, { method: 'PUT' });
       }
-      await this.setPrompt(c.apiKey, c.assistantId, withCallToolsSection);
+      await this.setPrompt(c.apiKey, c.assistantId, (instructions) => withCallToolsSection(instructions, full));
     } catch (error) {
       await this.removeFromTelnyx(c.apiKey, created);
       await this.save(orgId, { ...this.stored(s), telnyx: null });
@@ -167,17 +171,9 @@ export class CallToolsService {
     this.logger.log(`call tools provisioned for org ${orgId} on assistant ${c.assistantId}`);
   }
 
-  /** What is on Telnyx is for this assistant, this server and these tool definitions. */
-  private current(t: CallToolsTelnyx, assistantId: string | undefined): boolean {
-    return t.assistantId === assistantId && t.url === this.publicApiUrl && t.version === CALL_TOOLS_VERSION;
-  }
-
-  private async teardown(orgId: string): Promise<void> {
-    const s = await this.settings(orgId);
-    if (!s.telnyx) return;
-    const c = await this.creds.getCreds(orgId).catch(() => null);
-    if (c?.apiKey) await this.removeFromTelnyx(c.apiKey, s.telnyx);
-    await this.save(orgId, { ...this.stored(s), telnyx: null });
+  /** What is on Telnyx is for this assistant, this server, these tool definitions and the switch's position. */
+  private current(t: CallToolsTelnyx, assistantId: string | undefined, full: boolean): boolean {
+    return t.assistantId === assistantId && t.url === this.publicApiUrl && t.version === CALL_TOOLS_VERSION && (t.full ?? true) === full;
   }
 
   /** A secret left behind by an interrupted provisioning has the same identifier; it is replaced. */
@@ -234,6 +230,24 @@ export class CallToolsService {
     if (t.secretId) await quiet(telnyx(apiKey, `/integration_secrets/${t.secretId}`, { method: 'DELETE' }));
   }
 
+  /** Our webhook tools on the assistant that the stored provisioning does not know about: detached and deleted. */
+  private async removeLeftovers(apiKey: string, assistantId: string): Promise<void> {
+    const raw = await telnyx<{ data?: { tools?: unknown }; tools?: unknown }>(apiKey, `/ai/assistants/${assistantId}`);
+    // An assistant lists its tools by `tool_id`.
+    const tools = ((raw?.data ?? raw)?.tools ?? []) as { id?: string; tool_id?: string; type?: string; webhook?: { url?: string } }[];
+    const ours = tools
+      .filter((t) => t.type === 'webhook' && isOurToolUrl(t.webhook?.url))
+      .map((t) => t.tool_id ?? t.id)
+      .filter((id): id is string => !!id);
+    if (!ours.length) return;
+    const quiet = (p: Promise<unknown>) => p.catch((error) => this.logger.warn(`call tools cleanup: ${(error as Error).message}`));
+    for (const id of ours) {
+      await quiet(telnyx(apiKey, `/ai/assistants/${assistantId}/tools/${id}`, { method: 'DELETE' }));
+      await quiet(telnyx(apiKey, `/ai/tools/${id}`, { method: 'DELETE' }));
+    }
+    this.logger.log(`removed ${ours.length} leftover call tool(s) from assistant ${assistantId}`);
+  }
+
   /** Every setting, so saving what was provisioned never resets the rest; a default message is not stored. */
   private stored(s: CallToolsSettings): StoredCallTools {
     return {
@@ -251,4 +265,9 @@ export class CallToolsService {
     const callTools = value as unknown as Prisma.InputJsonObject;
     await this.prisma.organizationSetting.upsert({ where: { orgId }, create: { orgId, callTools }, update: { callTools } });
   }
+}
+
+/** A tool pointing at our outcome endpoints, on any host this server was ever reachable at (an old tunnel too). */
+function isOurToolUrl(url: string | undefined): boolean {
+  return !!url && /\/tools\/telnyx\/outcome\/(callback|text|record)$/.test(url);
 }

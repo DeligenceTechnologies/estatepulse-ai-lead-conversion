@@ -547,6 +547,12 @@ export const leadsApi = {
       method: 'PUT',
       body: JSON.stringify({ agentId }),
     }),
+  /** Approves a lead held for review: its reasons clear and outreach starts, unless `held` says why it cannot. Needs lead.update. */
+  approveReview: (leadId: string) =>
+    request<{ released: boolean; held: 'DO_NOT_CONTACT' | 'NO_DIALABLE_PHONE' | 'NOT_RELEASABLE' | null }>(
+      `/v1/leads/${leadId}/review/approve`,
+      { method: 'POST' },
+    ),
   /** The lead's own time zone, or null to let their phone number decide again. Answers the zone as the list shows it. */
   setTimezone: (leadId: string, timezone: string | null) =>
     request<{ timezone: LeadTimezone }>(`/v1/leads/${leadId}/timezone`, {

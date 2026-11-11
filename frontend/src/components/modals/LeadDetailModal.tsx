@@ -13,6 +13,7 @@ import {
   FileText,
   ChevronDown,
   Globe,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT, leadsApi, type LeadTimezone } from '../../api/client';
@@ -33,6 +34,12 @@ import {
 import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
 import { formatDateTime } from '../../lib/datetime';
+
+const HELD_TEXT = {
+  DO_NOT_CONTACT: 'the lead is on the do-not-contact list',
+  NO_DIALABLE_PHONE: 'there is no phone number to dial; fix it first',
+  NOT_RELEASABLE: 'the lead is no longer new, or an agent is handling it',
+} as const;
 
 /** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,11 +157,16 @@ export const LeadDetailModal: React.FC = () => {
   const [zone, setZone] = useState<LeadTimezone | null>(null);
   const [savingZone, setSavingZone] = useState(false);
 
+  // Approved from this modal: the card goes at once rather than after the pipeline's refetch lands.
+  const [reviewed, setReviewed] = useState(false);
+  const [approving, setApproving] = useState(false);
+
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
   useEffect(() => {
     setAssigned(null);
     setZone(null);
+    setReviewed(false);
     setFlow(null);
     if (!selectedLeadId) return;
     let alive = true;
@@ -228,6 +240,22 @@ export const LeadDetailModal: React.FC = () => {
       toast.error(messageFor(err));
     } finally {
       setSavingZone(false);
+    }
+  };
+  const approveReview = async () => {
+    if (!lead) return;
+    setApproving(true);
+    try {
+      const { released, held } = await leadsApi.approveReview(lead.id);
+      setReviewed(true);
+      if (released) toast.success('Approved. Outreach starts within a minute.');
+      else if (held) toast.info(`Approved, but not contacted: ${HELD_TEXT[held]}.`);
+      else toast.success('Approved.');
+      window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setApproving(false);
     }
   };
   const liveAgent =
@@ -455,6 +483,29 @@ export const LeadDetailModal: React.FC = () => {
                 {/* The rest of what the AI knows: the org's other questions and notes from earlier calls and texts. */}
                 {isLive && <LeadQualificationMemory leadId={lead.id} />}
               </div>
+
+              {/* Held at intake for a person to look at: nothing automated reaches the lead until approved here. */}
+              {isLive && lead.needsReview && !reviewed && (
+                <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-xs text-amber-300 mb-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Waiting for review — not called or texted until approved</span>
+                    </div>
+                    <ul className="text-2xs text-slate-300 list-disc pl-4 space-y-0.5">
+                      {(lead.reviewReasons ?? []).map((r) => <li key={r}>{r}</li>)}
+                    </ul>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void approveReview()}
+                    disabled={approving}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    {approving ? 'Approving…' : 'Approve and start outreach'}
+                  </button>
+                </div>
+              )}
 
               {/* The clock calls and texts keep to: the source's or an agent's zone, else the phone's area code. */}
               {isLive && tz && (

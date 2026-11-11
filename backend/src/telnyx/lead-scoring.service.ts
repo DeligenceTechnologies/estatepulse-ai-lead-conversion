@@ -22,11 +22,12 @@ import {
   type ScoringSettings,
   type Thresholds,
 } from './lead-scoring';
+import { telnyx } from './telnyx-api';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { OutcomeService } from './tools/outcome.service';
 
 export interface Qualification {
-  source: 'telnyx_insights' | 'transcript';
+  source: 'telnyx_insights' | 'transcript' | 'conversation';
   /** The assistant's own score and rating, or the point rules for an analysis that came without one. */
   scoredBy: 'assistant' | 'rules';
   score: number;
@@ -46,6 +47,12 @@ export interface SignedDelivery {
 
 /** How long to wait for the Insight before scoring from the transcript ourselves. */
 export const TRANSCRIPT_FALLBACK_MS = 90_000;
+/**
+ * The last resort, after the Insight and the recording's transcript: the assistant's own conversation,
+ * read from Telnyx. With recording off there is no transcript at all, and a "stop calling me" must still
+ * set do-not-contact.
+ */
+export const CONVERSATION_FALLBACK_MS = 150_000;
 
 /** Outcomes past which a new score only updates the temperature, never the status. */
 const SETTLED_STATUSES: LeadStatus[] = OUTCOME_STATUSES.filter((s) => s !== LeadStatus.interested);
@@ -91,6 +98,37 @@ export class LeadScoringService {
           .finally(() => this.pendingFallback.delete(call.id));
       }, delayMs).unref();
     })().catch((error) => this.logger.warn(`transcript fallback ${ccid}: ${(error as Error).message}`));
+  }
+
+  /** The assistant's conversation ended: scored from it later, unless the Insight or the transcript got there first. */
+  onConversationEnded(ccid: string, payload: any, delayMs = CONVERSATION_FALLBACK_MS): void {
+    const conversationId: unknown = payload?.conversation_id ?? payload?.conversation?.id;
+    if (typeof conversationId !== 'string' || !conversationId) return;
+    setTimeout(() => {
+      void this.scoreFromConversation(ccid, conversationId).catch((error) =>
+        this.logger.warn(`conversation scoring for ${ccid}: ${(error as Error).message}`),
+      );
+    }, delayMs).unref();
+  }
+
+  async scoreFromConversation(ccid: string, conversationId: string): Promise<Qualification | null> {
+    const call = await this.prisma.call.findFirst({ where: { providerCallId: ccid }, orderBy: { createdAt: 'desc' } });
+    if (!call || call.disposition === CallDisposition.voicemail) return null;
+    if ((call.extractedIntel as { qualification?: unknown } | null)?.qualification) return null;
+    const c = await this.creds.getCreds(call.orgId).catch(() => null);
+    if (!c?.apiKey) return null;
+    const res = await telnyx<{ data?: { role?: string; text?: string; content?: string }[] }>(
+      c.apiKey,
+      `/ai/conversations/${encodeURIComponent(conversationId)}/messages?page[size]=200`,
+    );
+    const lines = (res.data ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ who: m.role === 'user' ? 'Lead' : 'Assistant', text: (m.text ?? m.content ?? '').trim() }))
+      .filter((m) => m.text);
+    if (!lines.some((m) => m.who === 'Lead')) return null;
+    const transcript = lines.map((m) => `${m.who}: ${m.text}`).join('\n');
+    this.logger.log(`call ${call.id} had no analysis yet; scoring it from the assistant's conversation`);
+    return this.apply(call, await this.insights.extractFromTranscript(call.orgId, transcript), 'conversation');
   }
 
   async scoreIfUnscored(orgId: string, callId: string): Promise<Qualification | null> {

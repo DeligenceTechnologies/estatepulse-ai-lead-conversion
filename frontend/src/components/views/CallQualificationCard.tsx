@@ -45,7 +45,9 @@ export const CallQualificationCard: React.FC<{ extractedIntel: unknown }> = ({ e
             ? 'scored by the AI assistant'
             : q.source === 'telnyx_insights'
               ? 'scored when the call ended'
-              : 'scored from the transcript'}
+              : q.source === 'conversation'
+                ? "scored from the AI's conversation"
+                : 'scored from the transcript'}
         </span>
       </div>
 
