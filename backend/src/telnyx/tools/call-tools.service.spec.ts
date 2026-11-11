@@ -78,7 +78,7 @@ describe('CallToolsService', () => {
       '/ai/assistants/assistant-1/tools/tool-old-2',
       '/ai/tools/tool-old-2',
     ]);
-    expect(stored).toMatchObject({ telnyx: expect.objectContaining({ toolIds: ['tool-new', 'tool-new', 'tool-new'] }) });
+    expect(stored).toMatchObject({ telnyx: expect.objectContaining({ toolIds: ['tool-new', 'tool-new', 'tool-new', 'tool-new'] }) });
   });
 
   it('takes our tools off the assistant when nothing records them, so a name clash never blocks putting them on again', async () => {

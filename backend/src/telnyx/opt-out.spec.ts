@@ -17,7 +17,7 @@ describe('a spoken opt-out', () => {
       const prompt = withCallToolsSection('# Role\nHello.', false);
       expect(prompt).toContain('do_not_contact');
       expect(prompt).not.toContain('schedule_callback');
-      expect(callToolDefinitions('https://api.example.com', 'secret').map((d) => d.webhook.name)).toEqual(['schedule_callback', 'schedule_text', 'record_outcome']);
+      expect(callToolDefinitions('https://api.example.com', 'secret').map((d) => d.webhook.name)).toEqual(['schedule_callback', 'schedule_text', 'record_outcome', 'get_meeting']);
     });
 
     const REQ = { header: () => undefined } as any;
@@ -31,6 +31,7 @@ describe('a spoken opt-out', () => {
         callbacks as any,
         outcomes as any,
         { schedule: vi.fn() } as any,
+        { lookup: vi.fn() } as any,
       );
       return { c, outcomes, callbacks };
     };

@@ -135,10 +135,7 @@ export class CallToolsService {
     }
 
     if (s.telnyx) await this.removeFromTelnyx(c.apiKey, s.telnyx);
-    // Tools this server attached but never got to record (a save that failed) are still on the
-    // assistant, and Telnyx refuses a second tool with the same name.
-    await this.removeLeftovers(c.apiKey, c.assistantId);
-  
+    await this.removeStrays(c.apiKey, c.assistantId);
     const identifier = `ep_calltools_${orgId.replace(/-/g, '')}`;
     const token = randomBytes(32).toString('base64url');
     const created: CallToolsTelnyx = {
@@ -206,15 +203,17 @@ export class CallToolsService {
    * Our tools still on the assistant though nothing here records them (a
    * provision that failed half way, a record lost): Telnyx refuses a second
    * webhook tool of the same name, so every provision after would fail too.
-   * They come off before the tools are put on again.
+   * They come off before the tools are put on again. Ours by name, or by URL
+   * pointing at our outcome endpoints on any host (an old tunnel too).
    */
   private async removeStrays(apiKey: string, assistantId: string): Promise<void> {
     const quiet = (p: Promise<unknown>) => p.catch((error) => this.logger.warn(`call tools, removing a stray: ${(error as Error).message}`));
     const raw = await telnyx<any>(apiKey, `/ai/assistants/${assistantId}`);
     const tools: any[] = (raw?.data ?? raw)?.tools ?? [];
     for (const t of tools) {
-      if (t?.type !== 'webhook' || !t.tool_id || !CALL_TOOL_NAMES.includes(t.webhook?.name ?? t.name)) continue;
-      this.logger.warn(`assistant ${assistantId}: removing a stray ${t.webhook?.name ?? t.name} tool (${t.tool_id})`);
+      const name = t?.webhook?.name ?? t?.name;
+      if (t?.type !== 'webhook' || !t.tool_id || !(CALL_TOOL_NAMES.includes(name) || isOurToolUrl(t.webhook?.url))) continue;
+      this.logger.warn(`assistant ${assistantId}: removing a stray ${name} tool (${t.tool_id})`);
       await quiet(telnyx(apiKey, `/ai/assistants/${assistantId}/tools/${t.tool_id}`, { method: 'DELETE' }));
       await quiet(telnyx(apiKey, `/ai/tools/${t.tool_id}`, { method: 'DELETE' }));
     }
@@ -228,24 +227,6 @@ export class CallToolsService {
       await quiet(telnyx(apiKey, `/ai/tools/${id}`, { method: 'DELETE' }));
     }
     if (t.secretId) await quiet(telnyx(apiKey, `/integration_secrets/${t.secretId}`, { method: 'DELETE' }));
-  }
-
-  /** Our webhook tools on the assistant that the stored provisioning does not know about: detached and deleted. */
-  private async removeLeftovers(apiKey: string, assistantId: string): Promise<void> {
-    const raw = await telnyx<{ data?: { tools?: unknown }; tools?: unknown }>(apiKey, `/ai/assistants/${assistantId}`);
-    // An assistant lists its tools by `tool_id`.
-    const tools = ((raw?.data ?? raw)?.tools ?? []) as { id?: string; tool_id?: string; type?: string; webhook?: { url?: string } }[];
-    const ours = tools
-      .filter((t) => t.type === 'webhook' && isOurToolUrl(t.webhook?.url))
-      .map((t) => t.tool_id ?? t.id)
-      .filter((id): id is string => !!id);
-    if (!ours.length) return;
-    const quiet = (p: Promise<unknown>) => p.catch((error) => this.logger.warn(`call tools cleanup: ${(error as Error).message}`));
-    for (const id of ours) {
-      await quiet(telnyx(apiKey, `/ai/assistants/${assistantId}/tools/${id}`, { method: 'DELETE' }));
-      await quiet(telnyx(apiKey, `/ai/tools/${id}`, { method: 'DELETE' }));
-    }
-    this.logger.log(`removed ${ours.length} leftover call tool(s) from assistant ${assistantId}`);
   }
 
   /** Every setting, so saving what was provisioned never resets the rest; a default message is not stored. */
@@ -269,5 +250,5 @@ export class CallToolsService {
 
 /** A tool pointing at our outcome endpoints, on any host this server was ever reachable at (an old tunnel too). */
 function isOurToolUrl(url: string | undefined): boolean {
-  return !!url && /\/tools\/telnyx\/outcome\/(callback|text|record)$/.test(url);
+  return !!url && /\/tools\/telnyx\/outcome\/(callback|text|record|meeting)$/.test(url);
 }
