@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Observable, Subject, filter } from 'rxjs';
 
-export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned' | 'conversation.updated';
+export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned' | 'lead.updated' | 'conversation.updated';
 
 export interface LiveEvent {
   organizationId: string;
   type: LiveEventType;
   leadSourceId: string | null;
-  /** The lead whose text thread changed (conversation.updated), so a screen refetches only that thread. */
+  /** The lead whose text thread changed (conversation.updated) or whose details were edited (lead.updated). */
   leadId?: string;
   at: string;
 }
