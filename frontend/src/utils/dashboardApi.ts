@@ -14,7 +14,7 @@ export interface OwnerDashboard {
   };
   /** Lead created -> first outreach, last 30 days. Nulls when nothing was contacted. */
   speedToLead: { sample: number; medianSeconds: number | null; within60sPct: number | null };
-  attention: { hotUnassigned: number; neverContacted: number; needsReview: number };
+  attention: { hotUnassigned: number; neverContacted: number; needsReview: number; awaitingImportReview: number };
   calls7Days: { total: number; byStatus: Record<string, number> };
   upcomingAppointments: number;
   sources30Days: { name: string; count: number }[];

@@ -320,6 +320,7 @@ export const DashboardContent: React.FC<ReturnType<typeof useDashboardData>> = (
         { label: 'hot leads with no agent', count: data.attention.hotUnassigned, to: '/leads?tab=hot' },
         { label: 'not contacted yet', count: data.attention.neverContacted, to: '/leads?tab=new' },
         { label: 'flagged for review', count: data.attention.needsReview, to: '/leads' },
+        { label: 'waiting in Import Review', count: data.attention.awaitingImportReview, to: '/import-review' },
       ].filter((a) => a.count > 0)
     : [];
 
