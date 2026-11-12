@@ -13,6 +13,8 @@ import type { SaveMappingDto, CreateSheetSourceDto, EnableSheetDto, ReviewQueryD
 import { GoogleConnectionsService, type SessionIdentity } from './google-connections.service';
 import { GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
 import { READ_CHUNK_ROWS, SheetImportService, contactFlags, toStored, type RunStats } from './sheet-import.service';
+import { CRM_EDIT_FIELDS, crmRowIsEditable } from '@/crm/crm-records';
+import { editableTargets, rowIsEditable } from './sheet-row-edit.service';
 import {
   FULL_NAME_TARGET,
   MAX_COLUMNS,
@@ -438,10 +440,14 @@ export class SheetSourcesService {
         missingSince: true,
         createdAt: true,
         reviewedAt: true,
-        leadSource: { select: { id: true, name: true, provider: true } },
+        reviewState: true,
+        leadId: true,
+        rowKey: true,
+        leadSource: { select: { id: true, name: true, provider: true, connectionMethod: true, syncRowKeyField: true } },
         lead: {
           select: {
             id: true,
+            externalLeadId: true,
             firstName: true,
             lastName: true,
             phone: true,
@@ -466,6 +472,15 @@ export class SheetSourcesService {
     });
     const page = rows.slice(0, limit);
     const last = page.at(-1);
+    // Which fields each editable sheet can take back: one read of the mappings for the page's sources.
+    const editableSources = [...new Set(page.filter(rowIsEditable).map((r) => r.leadSource.id))];
+    const sourceMappings = editableSources.length
+      ? await this.prisma.leadSourceFieldMapping.findMany({
+          where: { orgId, leadSourceId: { in: editableSources }, isActive: true },
+          select: { leadSourceId: true, targetField: true },
+        })
+      : [];
+    const fieldsOf = (sourceId: string) => editableTargets(sourceMappings.filter((m) => m.leadSourceId === sourceId));
     const total = cursor ? undefined : await this.prisma.sheetImportRow.count({ where: scope });
     return {
       items: page.map((r) => ({
@@ -479,6 +494,15 @@ export class SheetSourcesService {
           name: r.leadSource.name,
           kind: reviewKind(r.leadSource.provider),
         },
+        /**
+         * Set when the row can be corrected here and written back to where it came from: `via` says
+         * where, `fields` the ones that source has a place for (a sheet: its mapped columns).
+         */
+        edit: rowIsEditable(r)
+          ? { via: 'sheet' as const, fields: fieldsOf(r.leadSource.id) }
+          : crmRowIsEditable(r)
+            ? { via: 'crm' as const, fields: [...CRM_EDIT_FIELDS] }
+            : null,
         lead: r.lead
           ? {
               id: r.lead.id,

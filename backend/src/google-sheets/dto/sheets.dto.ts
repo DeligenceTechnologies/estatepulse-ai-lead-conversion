@@ -9,6 +9,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsTimeZone,
   IsUUID,
   Matches,
   Max,
@@ -18,6 +19,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { toCanonicalZone } from '@/common/utils/lead-timezone';
 import { OutreachChoiceDto } from '@/outreach/outreach.dto';
 import { MAPPING_TARGETS } from '../sheet-rows';
 
@@ -161,4 +163,34 @@ export class ReviewQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/** PATCH a pending sheet row from Import Review: only the keys sent are written to the sheet. "" clears a cell. */
+export class EditSheetRowDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  email?: string;
+
+  /** Only when the sheet maps a timezone column; otherwise the lead's own zone is set with PUT v1/leads/:id/timezone. */
+  @IsOptional()
+  @Transform(toCanonicalZone)
+  @IsTimeZone({ message: 'timezone must be an IANA time zone such as America/Vancouver' })
+  @MaxLength(100)
+  timezone?: string;
 }

@@ -4,11 +4,12 @@ import { GoogleSheetsController, ImportReviewController } from './google-sheets.
 import { GoogleClient } from './google.client';
 import { SheetImportService } from './sheet-import.service';
 import { SheetReviewService } from './sheet-review.service';
+import { SheetRowEditService } from './sheet-row-edit.service';
 import { SheetSourcesService } from './sheet-sources.service';
 
 @Module({
   controllers: [GoogleSheetsController, ImportReviewController],
-  providers: [GoogleClient, GoogleConnectionsService, SheetImportService, SheetSourcesService, SheetReviewService],
+  providers: [GoogleClient, GoogleConnectionsService, SheetImportService, SheetSourcesService, SheetReviewService, SheetRowEditService],
   exports: [SheetImportService, SheetReviewService],
 })
 export class GoogleSheetsModule {}

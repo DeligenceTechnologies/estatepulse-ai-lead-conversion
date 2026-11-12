@@ -18,6 +18,7 @@ const DIFF_FIELDS = [
   ['last_name', 'lastName'],
   ['phone', 'phone'],
   ['email', 'email'],
+  ['timezone', 'timezone'],
   ['location', 'location'],
   ['min_budget', 'minBudget'],
   ['max_budget', 'maxBudget'],
@@ -101,6 +102,7 @@ export class SheetReviewService {
             lastName: true,
             phone: true,
             email: true,
+            timezone: true,
             location: true,
             minBudget: true,
             maxBudget: true,
@@ -125,6 +127,8 @@ export class SheetReviewService {
             current: normalize(prefix && field === 'custom_fields' ? ownCustom(current?.[column], prefix) : current?.[column]),
             incoming: normalize(incoming?.[field]),
           }))
+          // A blank timezone in the sheet leaves the lead's own one alone (COALESCE on apply): not a difference.
+          .filter((d) => !(d.field === 'timezone' && d.incoming == null))
           .filter((d) => JSON.stringify(d.current) !== JSON.stringify(d.incoming));
         return {
           rowId: r.id,

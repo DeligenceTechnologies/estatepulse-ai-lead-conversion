@@ -303,6 +303,22 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     return claimed ? this.run(claimed, approve) : null;
   }
 
+  /**
+   * Re-reads one sheet now, as "Sync now" does, and waits for it: after a row was written from
+   * Import Review, its pending lead is refreshed from what the sheet now says. `ran: false` when
+   * a sync of it is already running; it is then due, and the next pass picks it up.
+   */
+  async syncSourceNow(orgId: string, sourceId: string): Promise<{ ran: boolean }> {
+    await this.prisma.leadSource.updateMany({ where: { id: sourceId, orgId }, data: { syncNextAt: new Date(), remoteSyncedAt: null } });
+    if (!this.enabled || this.stopped) return { ran: false };
+    const claimed = await this.claim({ orgId, sourceId });
+    if (!claimed) {
+      this.nudge();
+      return { ran: false };
+    }
+    return { ran: (await this.run(claimed)).ok };
+  }
+
   private async importOnce(orgId: string, sourceId: string, stats: RunStats, approve: Approval | null): Promise<RunResult> {
     stats.dbStatements += 1;
     const source = await this.prisma.leadSource.findFirst({
@@ -598,6 +614,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           lastName: true,
           phone: true,
           email: true,
+          timezone: true,
           location: true,
           minBudget: true,
           maxBudget: true,
@@ -613,6 +630,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
             last_name: l.lastName,
             phone: l.phone,
             email: l.email,
+            timezone: l.timezone,
             location: l.location,
             min_budget: l.minBudget,
             max_budget: l.maxBudget,
