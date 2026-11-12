@@ -343,10 +343,19 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const mappings = toStored(mappingRows);
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
 
-    let orphans = 0;
+    // Drive's file version lags minutes behind in-cell Sheets edits, so a probe skip can leave Import
+    // Review showing values the sheet no longer has — and the owner applies those into the lead. Never
+    // skip the read while a row is still the owner's to decide, or not yet linked to a lead.
+    let undecided = 0;
     if (this.config.get('SHEETS_VERSION_PROBE', { infer: true })) {
       stats.dbStatements += 1;
-      orphans = await this.prisma.sheetImportRow.count({ where: { orgId, leadSourceId: sourceId, leadId: null } });
+      undecided = await this.prisma.sheetImportRow.count({
+        where: {
+          orgId,
+          leadSourceId: sourceId,
+          OR: [{ leadId: null }, { reviewState: 'pending' }, { changedAfterReviewAt: { not: null } }],
+        },
+      });
     }
     const sheet = await this.readTab(
       orgId,
@@ -356,7 +365,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       mappings,
       identity,
       stats,
-      rebaseline || orphans > 0 ? null : lastVersion || null,
+      rebaseline || undecided > 0 ? null : lastVersion || null,
       source.remoteSyncedAt,
     );
     const versionToken = sheet.version === null ? null : `${sheet.version}:${source.mappingVersion}`;
