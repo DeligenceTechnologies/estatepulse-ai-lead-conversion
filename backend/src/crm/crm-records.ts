@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ConnectionMethod, LeadSourceProvider, ReviewState } from '@prisma/client';
 import { CANONICAL_FIELDS } from '@/ingest/processing/canonical-fields';
 import { applyTransform, isDialable, isValidEmail } from '@/ingest/processing/transforms';
 import { validateCanonicalValues, type CanonicalValue } from '@/ingest/processing/validators';
@@ -383,4 +384,29 @@ export function buildCrmRow(provider: string, label: CrmProviderLabel, contact: 
     reviewReasons,
     crmPrefix: label.customPrefix,
   };
+}
+
+/** The contact fields a CRM row can take back from Import Review. Time zone is EstatePulse's own and stays on the lead. */
+export const CRM_EDIT_FIELDS = ['first_name', 'last_name', 'phone', 'email'] as const;
+
+/**
+ * Whether a CRM row can be edited from Import Review: pending, still in the CRM, and its lead
+ * carries the very contact id the row was keyed by. A lead linked to a CRM contact from another
+ * source can carry that source's id, and must not have someone else's record written to.
+ */
+export function crmRowIsEditable(row: {
+  rowKey: string;
+  reviewState: ReviewState;
+  missingSince: Date | null;
+  lead: { externalLeadId: string | null } | null;
+  leadSource: { provider: LeadSourceProvider; connectionMethod: ConnectionMethod };
+}): boolean {
+  return (
+    row.reviewState === ReviewState.pending &&
+    !row.missingSince &&
+    row.leadSource.provider === LeadSourceProvider.HUBSPOT &&
+    row.leadSource.connectionMethod === ConnectionMethod.SYNC &&
+    !!row.lead?.externalLeadId &&
+    crmRowKey(row.leadSource.provider, 'contact', row.lead.externalLeadId) === row.rowKey
+  );
 }

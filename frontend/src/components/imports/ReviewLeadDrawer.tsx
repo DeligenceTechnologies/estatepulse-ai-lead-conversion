@@ -1,6 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, FileX, PhoneOff, X } from 'lucide-react';
-import type { ImportKind, ReviewItem } from '../../utils/googleSheetsApi';
+import { toast } from 'react-toastify';
+import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
+import { messageFor } from '../../lib/api';
+import { editCrmRow, editReviewRow, type EditableField, type ImportKind, type ReviewItem } from '../../utils/googleSheetsApi';
+import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SourceBadge } from './ImportHistoryModal';
 
 /** What a row's source is called when it is named in full. */
@@ -34,6 +38,30 @@ const Row: React.FC<{ label: string; value: React.ReactNode; tone?: 'plain' | 'w
   </div>
 );
 
+const INPUT =
+  'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-600 disabled:opacity-40';
+
+/** One editable line of the Contact section: an input where the sheet has a column for it, the value otherwise. */
+const EditRow: React.FC<{
+  label: string;
+  field: EditableField;
+  fields: EditableField[];
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+  type?: string;
+  placeholder?: string;
+  tone?: 'plain' | 'warn';
+}> = ({ label, field, fields, value, onChange, disabled, type = 'text', placeholder, tone }) =>
+  fields.includes(field) ? (
+    <Row
+      label={label}
+      value={<input type={type} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} disabled={disabled} className={INPUT} aria-label={label} />}
+    />
+  ) : (
+    <Row label={label} value={<span title="The sheet has no column for this">{show(value)}</span>} tone={tone} />
+  );
+
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="px-5 py-4">
     <h4 className="text-2xs font-semibold uppercase tracking-wider text-slate-500 mb-2">{title}</h4>
@@ -43,17 +71,63 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 /**
  * Everything one row brought in, in a panel sliding in from the right — the same panel the team
- * screen uses for a member. Read-only on purpose: an imported lead is owned by the sheet, file
- * or CRM it came from, so anything wrong is corrected there and synced again. What is wrong is
- * named here rather than left as an icon to hover.
+ * screen uses for a member. An imported lead is owned by the sheet, file or CRM it came from, so
+ * it is read-only here, except a Google Sheets row synced by an ID column (`item.edit`): its name,
+ * phone and email are written back into the sheet and the sheet is re-read, so the two never
+ * disagree. What is wrong is named here rather than left as an icon to hover.
  */
-export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; onClose: () => void }> = ({
+export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; onClose: () => void; onSaved?: () => void }> = ({
   item,
   warnings,
   onClose,
+  onSaved,
 }) => {
   const lead = item.lead;
   const kind = item.source?.kind ?? 'google_sheets';
+  const editable = Boolean(item.edit && lead);
+  const fields = item.edit?.fields ?? [];
+  const toCrm = item.edit?.via === 'crm';
+  // Where a save goes, as the owner would say it.
+  const target = toCrm ? KIND_NAME[kind] : 'the sheet';
+
+  const initial = {
+    firstName: lead?.firstName ?? '',
+    lastName: lead?.lastName ?? '',
+    phone: lead?.phone ?? '',
+    email: lead?.email ?? '',
+    timezone: lead?.timezone ?? '',
+  };
+  const [form, setForm] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const set = (key: keyof typeof initial) => (v: string) => setForm((f) => ({ ...f, [key]: v }));
+  const dirty = (Object.keys(initial) as (keyof typeof initial)[]).filter((k) => form[k].trim() !== initial[k]);
+
+  const save = async () => {
+    if (!lead || dirty.length === 0) return;
+    setSaving(true);
+    try {
+      // What the sheet has a column for goes into the sheet; a zone with no column is the lead's own.
+      const TARGET = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', email: 'email', timezone: 'timezone' } as const;
+      const toSheet = Object.fromEntries(dirty.filter((k) => fields.includes(TARGET[k])).map((k) => [k, form[k].trim()]));
+      let synced = true;
+      if (Object.keys(toSheet).length > 0) {
+        // A CRM is re-read in the background, so the lead follows a moment later; a sheet is re-read before this answers.
+        synced = toCrm ? false : (await editReviewRow(item.rowId, toSheet)).synced;
+        if (toCrm) await editCrmRow('hubspot', item.rowId, toSheet);
+      }
+      if (dirty.includes('timezone') && !fields.includes('timezone')) await leadsApi.setTimezone(lead.id, form.timezone || null);
+      const wrote = Object.keys(toSheet).length > 0;
+      toast.success(
+        !wrote ? 'Time zone saved.' : synced ? `Saved, and written to ${target}.` : `Written to ${target}. The lead updates in a moment.`,
+      );
+      window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+      onSaved?.();
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -122,27 +196,69 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
                   </div>
                 ))}
                 <p className="text-2xs text-amber-200/80 border-t border-amber-500/20 pt-2 leading-relaxed">
-                  These details cannot be changed here — they are read from the source every sync.{' '}
-                  {FIX_AT[kind]}
+                  {editable
+                    ? toCrm
+                      ? `Fix the contact details below: saving updates the contact in ${target}, then re-reads it. Anything else is changed in ${target} itself.`
+                      : `Fix the contact details below: saving writes them into row ${item.rowNumber} of the sheet, then re-reads it. Anything else is changed in the sheet itself.`
+                    : `These details cannot be changed here — they are read from the source every sync. ${FIX_AT[kind]}`}
                 </p>
               </div>
             </div>
           )}
 
-          <Section title="Contact">
-            <Row label="First name" value={show(lead?.firstName)} />
-            <Row label="Last name" value={show(lead?.lastName)} />
-            <Row
-              label="Phone"
-              value={show(lead?.phone)}
-              tone={lead?.phone && !lead.phoneValid ? 'warn' : 'plain'}
-            />
-            <Row label="Email" value={show(lead?.email)} tone={lead?.email && !lead.emailValid ? 'warn' : 'plain'} />
-            <Row
-              label="Time zone"
-              value={lead?.timezone ?? <span className="text-slate-500">Worked out from the phone number</span>}
-            />
-          </Section>
+          {editable ? (
+            <Section title={`Contact — saved to ${target}`}>
+              <EditRow label="First name" field="first_name" fields={fields} value={form.firstName} onChange={set('firstName')} disabled={saving} />
+              <EditRow label="Last name" field="last_name" fields={fields} value={form.lastName} onChange={set('lastName')} disabled={saving} />
+              <EditRow
+                label="Phone"
+                field="phone"
+                fields={fields}
+                value={form.phone}
+                onChange={set('phone')}
+                disabled={saving}
+                type="tel"
+                placeholder="+1 415 555 0100"
+                tone={lead?.phone && !lead.phoneValid ? 'warn' : 'plain'}
+              />
+              <EditRow label="Email" field="email" fields={fields} value={form.email} onChange={set('email')} disabled={saving} type="email" />
+              <Row
+                label="Time zone"
+                value={
+                  <>
+                    <TimezoneSelect
+                      id="review-lead-timezone"
+                      value={form.timezone}
+                      onChange={set('timezone')}
+                      disabled={saving}
+                      placeholder="Worked out from the phone number"
+                      className={INPUT}
+                    />
+                    {!fields.includes('timezone') && (
+                      <p className="mt-1 text-2xs text-slate-500">
+                        Kept in EstatePulse only — {toCrm ? target : 'the sheet'} has no time zone {toCrm ? 'field we write to' : 'column'}.
+                      </p>
+                    )}
+                  </>
+                }
+              />
+            </Section>
+          ) : (
+            <Section title="Contact">
+              <Row label="First name" value={show(lead?.firstName)} />
+              <Row label="Last name" value={show(lead?.lastName)} />
+              <Row
+                label="Phone"
+                value={show(lead?.phone)}
+                tone={lead?.phone && !lead.phoneValid ? 'warn' : 'plain'}
+              />
+              <Row label="Email" value={show(lead?.email)} tone={lead?.email && !lead.emailValid ? 'warn' : 'plain'} />
+              <Row
+                label="Time zone"
+                value={lead?.timezone ?? <span className="text-slate-500">Worked out from the phone number</span>}
+              />
+            </Section>
+          )}
 
           <Section title="What they want">
             <Row label="Location" value={show(lead?.location)} />
@@ -162,14 +278,24 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
           )}
         </div>
 
-        <div className="border-t border-slate-800 px-5 py-3 bg-slate-950/40">
+        <div className="border-t border-slate-800 px-5 py-3 bg-slate-950/40 flex gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+            className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
           >
-            Close
+            {editable ? 'Cancel' : 'Close'}
           </button>
+          {editable && (
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving || dirty.length === 0}
+              className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving…' : `Save to ${toCrm ? target : 'sheet'}`}
+            </button>
+          )}
         </div>
       </aside>
     </div>
