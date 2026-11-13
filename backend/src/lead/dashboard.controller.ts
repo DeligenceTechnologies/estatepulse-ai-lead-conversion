@@ -21,6 +21,7 @@ interface SummaryRow {
   hot_unassigned: number;
   never_contacted: number;
   needs_review: number;
+  awaiting_import_review: number;
   contacted_sample: number;
   contacted_within_60: number;
   median_delay_seconds: number | null;
@@ -45,8 +46,14 @@ export class DashboardController {
     const closed = CLOSED_STATUSES as string[];
 
     const [row] = await this.prisma.$queryRaw<SummaryRow[]>`
+      -- Leads still waiting in Import Review (or rejected there) are hidden everywhere else,
+      -- so they must not be counted here either: filter once, in the CTE every tile reads.
       WITH l AS (
-        SELECT * FROM leads WHERE organization_id = ${org}::uuid
+        SELECT * FROM leads
+         WHERE organization_id = ${org}::uuid
+           AND NOT EXISTS (SELECT 1 FROM sheet_import_rows r
+                            WHERE r.lead_id = leads.id
+                              AND r.review_state IN ('pending','rejected'))
       ),
       -- Speed to lead: from arrival to the strategy's first step that really went (a text sent, a call
       -- queued), so a wait on the first step counts; leads from before the step log use first_contact_at.
@@ -72,6 +79,10 @@ export class DashboardController {
         count(*) FILTER (WHERE temperature = 'hot' AND status <> ALL(${closed}::lead_status[]) AND assigned_to_id IS NULL)::int AS hot_unassigned,
         count(*) FILTER (WHERE status = 'new' AND first_contact_at IS NULL AND NOT dnc_status)::int AS never_contacted,
         count(*) FILTER (WHERE needs_review)::int AS needs_review,
+        -- Rows the owner has not approved or rejected yet: they are excluded from l above,
+        -- so without this the dashboard would never mention them at all.
+        (SELECT count(*)::int FROM sheet_import_rows
+          WHERE organization_id = ${org}::uuid AND review_state = 'pending') AS awaiting_import_review,
         (SELECT count(*)::int FROM delays) AS contacted_sample,
         (SELECT count(*)::int FROM delays WHERE s <= 60) AS contacted_within_60,
         (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY s) FROM delays) AS median_delay_seconds,
@@ -110,6 +121,7 @@ export class DashboardController {
         hotUnassigned: row.hot_unassigned,
         neverContacted: row.never_contacted,
         needsReview: row.needs_review,
+        awaitingImportReview: row.awaiting_import_review,
       },
       calls7Days: { total: Object.values(calls).reduce((a, b) => a + b, 0), byStatus: calls },
       upcomingAppointments: row.upcoming_appointments,
