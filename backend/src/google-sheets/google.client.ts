@@ -10,13 +10,17 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
+const FORMS = 'https://forms.googleapis.com/v1/forms';
 
 export const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+export const FORM_MIME = 'application/vnd.google-apps.form';
 
 export type GoogleErrorKind =
   | 'REAUTH'
   | 'UNAUTHORIZED'
   | 'DENIED'
+  /** A 403 the owner cannot fix: the API is switched off for our Cloud project. */
+  | 'API_DISABLED'
   | 'NOT_FOUND'
   | 'RATE_LIMITED'
   | 'UNAVAILABLE'
@@ -156,6 +160,40 @@ export class GoogleClient {
     );
   }
 
+  /**
+   * A form's question schema (Google Forms API `forms.get`).
+   *
+   * Reachable with the drive.file scope this app already asks for: Google's
+   * own discovery document lists drive.file among the accepted scopes for
+   * forms.get and forms.responses.list, and drive.file covers exactly the
+   * files the owner picked in the Google Picker. No extra scope, no new
+   * consent screen, no re-verification. See docs/google-forms.md.
+   */
+  async form<T>(accessToken: string, formId: string): Promise<T> {
+    return this.getJson<T>(`${FORMS}/${encodeURIComponent(formId)}`, accessToken);
+  }
+
+  /**
+   * A page of a form's responses, newest submissions included.
+   *
+   * `since` filters server-side on Google's own submission timestamp, which is
+   * what makes a recovery poll cheap. Drive's `file.version` is NOT used to
+   * decide whether anything arrived: a form's version tracks edits to the
+   * form, not the responses to it, so it would miss every new submission.
+   */
+  async formResponses<T>(
+    accessToken: string,
+    formId: string,
+    opts: { since?: Date | null; pageSize?: number; pageToken?: string | null } = {},
+  ): Promise<T> {
+    const q = new URLSearchParams();
+    if (opts.pageSize) q.set('pageSize', String(opts.pageSize));
+    if (opts.pageToken) q.set('pageToken', opts.pageToken);
+    if (opts.since) q.set('filter', `timestamp > ${opts.since.toISOString()}`);
+    const query = q.toString();
+    return this.getJson<T>(`${FORMS}/${encodeURIComponent(formId)}/responses${query ? `?${query}` : ''}`, accessToken);
+  }
+
   async readGrid(
     accessToken: string,
     spreadsheetId: string,
@@ -239,11 +277,15 @@ export class GoogleClient {
 
   private async apiError(res: Response): Promise<GoogleApiError> {
     const body = (await res.json().catch(() => ({}))) as {
-      error?: { message?: string; status?: string; errors?: { reason?: string }[] } | string;
+      error?:
+        | { message?: string; status?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] }
+        | string;
     };
     const e = typeof body.error === 'object' ? body.error : undefined;
     const message = (e?.message ?? `Google returned HTTP ${res.status}`).slice(0, 300);
-    const reasons = (e?.errors ?? []).map((x) => x.reason);
+    // Classic Drive/Sheets errors carry `errors[].reason`; the newer APIs
+    // (Forms among them) put the same code in `details[].reason` instead.
+    const reasons = [...(e?.errors ?? []), ...(e?.details ?? [])].map((x) => x.reason);
     const rateLimited =
       res.status === 429 ||
       e?.status === 'RESOURCE_EXHAUSTED' ||
@@ -252,6 +294,10 @@ export class GoogleClient {
 
     if (rateLimited) return new GoogleApiError('RATE_LIMITED', message, res.status);
     if (res.status === 401) return new GoogleApiError('UNAUTHORIZED', message, 401);
+    // "The API is off for our project" and "this account cannot open that file"
+    // are both 403, but only the second one is the owner's to fix. Telling them
+    // to pick the file again when the API is disabled is an endless loop.
+    if (res.status === 403 && reasons.includes('SERVICE_DISABLED')) return new GoogleApiError('API_DISABLED', message, 403);
     if (res.status === 403) return new GoogleApiError('DENIED', message, 403);
     if (res.status === 404) return new GoogleApiError('NOT_FOUND', message, 404);
     if (res.status >= 500) return new GoogleApiError('UNAVAILABLE', message, res.status);

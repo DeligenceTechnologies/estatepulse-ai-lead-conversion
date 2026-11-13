@@ -146,6 +146,18 @@ export const envValidationSchema = Joi.object({
     SHEETS_VERSION_PROBE: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     SHEETS_FULL_READ_MAX_AGE_MS: Joi.number().integer().positive().default(21_600_000),
 
+    // Google Forms. An Apps Script on the owner's form posts each response to
+    // ingest/v1/google-forms/:token (the primary delivery); polling
+    // forms.responses.list only recovers what the script failed to deliver.
+    // Off unless GOOGLE_FORMS_ENABLED: the ingest route and every management
+    // route answer 404 and the card is hidden. Reuses the Google OAuth client
+    // and the drive.file scope that Google Sheets already connects with.
+    GOOGLE_FORMS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    // How often the recovery poller looks for sources that are due.
+    FORMS_POLL_MS: Joi.number().integer().positive().default(60_000),
+    // How long after a successful poll a source is due again.
+    FORMS_SYNC_INTERVAL_MS: Joi.number().integer().positive().default(900_000),
+
     FILE_IMPORT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     FILE_IMPORT_MAX_BYTES: Joi.number().integer().positive().default(5 * 1024 * 1024),
 

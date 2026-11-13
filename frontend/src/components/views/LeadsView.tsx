@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Contact,
   FileSpreadsheet,
   FileUp,
@@ -81,26 +82,27 @@ const budgetRange = (l: LiveLead): string | null => {
   return null;
 };
 
+/** A webhook and nothing more: there is no product to name, so "webhook" IS the answer. */
+const GENERIC_WEBHOOK_PROVIDERS = new Set(['WEBHOOK', 'CUSTOM']);
+
 /**
  * What the row is badged with: where the lead actually came from.
  *
- * `source.type` is the transport and is 'webhook' for every ingested lead,
- * which makes it useless as a label the moment a second integration exists —
- * a form we connected through Tally's API read "webhook" exactly like a URL
- * pasted by hand. So an API-connected source is badged with its provider
- * ("tally") and only a manually pasted URL keeps "webhook", which is the same
- * rule the Lead Sources list uses for its connection pill. The customer's own
- * label for the form ("Buyer Inquiry") stays on hover.
+ * This column answers "which form did this person fill in", so it is keyed off
+ * the PROVIDER, never off `connectionMethod`. Connection method is how we were
+ * wired up, which belongs on the Lead Sources page's connection pill — reading
+ * it here badged every `MANUAL` source "webhook", so a Google Form (connected
+ * through Google, but delivering via a script the owner installs rather than a
+ * webhook we create over Google's API) read exactly like a pasted URL.
+ *
+ * The customer's own label for the form ("Buyer Inquiry") stays on hover.
  */
 const sourceLabel = (l: LiveLead): string => {
   const s = l.source;
   if (!s) return 'manual';
-  // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
-  const method = (s.connectionMethod ?? '').toUpperCase();
-  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
-  // MANUAL means a webhook URL the owner set up by hand (the Webhook card, a pasted form URL), not a lead typed in;
-  // `type` is the provider ("custom", "tally"), so it is not used here.
-  return 'webhook';
+  const provider = (s.provider ?? '').toUpperCase();
+  if (!provider || GENERIC_WEBHOOK_PROVIDERS.has(provider)) return 'webhook';
+  return provider.toLowerCase().replace(/_/g, ' ');
 };
 
 /**
@@ -112,8 +114,11 @@ const sourceLabel = (l: LiveLead): string => {
  */
 const sourceIcon = (l: LiveLead): LucideIcon => {
   const s = l.source;
-  // Only a lead typed in has no source: the pen. A MANUAL source is a hand-set webhook URL, so it falls to the webhook glyph.
+  // Only a lead typed in has no source: the pen.
   if (!s) return PenLine;
+  // A form keeps its own glyph whatever the transport — the same one the Google
+  // Forms card uses — because the reader is looking for the form, not the wiring.
+  if ((s.provider ?? '').toUpperCase() === 'GOOGLE_FORMS') return ClipboardList;
   switch ((s.connectionMethod ?? '').toUpperCase()) {
     case 'API':
       return Radio;
