@@ -227,6 +227,28 @@ export class GoogleClient {
     return values.map((row) => row.map((cell) => (cell == null ? '' : String(cell))));
   }
 
+  /**
+   * Writes single cells of one tab, addressed like readGrid by sheetId and 0-based row and
+   * column, so neither the tab's title nor A1 notation is needed. RAW: what is written is
+   * stored as typed text, so a "+1415…" phone is not read as a formula or a number.
+   */
+  async writeCells(accessToken: string, spreadsheetId: string, sheetId: number, cells: { row: number; col: number; value: string }[]): Promise<void> {
+    if (cells.length === 0) return;
+    const res = await this.send(`${SHEETS}/${encodeURIComponent(spreadsheetId)}/values:batchUpdateByDataFilter`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        valueInputOption: 'RAW',
+        data: cells.map((c) => ({
+          dataFilter: { gridRange: { sheetId, startRowIndex: c.row, endRowIndex: c.row + 1, startColumnIndex: c.col, endColumnIndex: c.col + 1 } },
+          majorDimension: 'ROWS',
+          values: [[c.value]],
+        })),
+      }),
+    });
+    if (!res.ok) throw await this.apiError(res);
+  }
+
   private async tokenRequest(params: Record<string, string>): Promise<GoogleTokens> {
     const res = await this.send(TOKEN_URL, {
       method: 'POST',

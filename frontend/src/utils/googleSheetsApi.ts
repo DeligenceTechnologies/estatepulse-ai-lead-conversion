@@ -226,6 +226,9 @@ export const sheetRuns = (id: string): Promise<SheetRun[]> =>
 
 export type ImportKind = 'google_sheets' | 'file_upload' | 'hubspot';
 
+/** The lead fields Import Review can write back into a sheet. */
+export type EditableField = 'first_name' | 'last_name' | 'phone' | 'email' | 'timezone';
+
 export interface ReviewItem {
   rowId: string;
   rowNumber: number;
@@ -235,6 +238,12 @@ export interface ReviewItem {
   missing: boolean;
   /** The sheet tab or the uploaded file the row came from. */
   source: { id: string; name: string; kind: ImportKind } | null;
+  /**
+   * Set when the row can be corrected here and the change written back to where it came from:
+   * `via: 'sheet'` a pending row of a sheet synced by an ID column, `via: 'crm'` a pending HubSpot
+   * contact. `fields` are the ones that source has a place for (a sheet: its mapped columns).
+   */
+  edit: { via: 'sheet' | 'crm'; fields: EditableField[] } | null;
   lead: {
     id: string;
     firstName: string | null;
@@ -305,6 +314,27 @@ export const reviewQueue = (q: {
   if (q.cursor) p.set('cursor', q.cursor);
   return apiFetch<ReviewPage>(`${BASE}/review?${p.toString()}`, { auth: true });
 };
+
+/**
+ * Writes the changed fields into the row's Google Sheet, then re-reads the sheet so the lead follows.
+ * `synced: false` when a sync was already running: the lead catches up on the next one, in moments.
+ */
+export const editReviewRow = (
+  rowId: string,
+  changes: Partial<{ firstName: string; lastName: string; phone: string; email: string; timezone: string }>,
+): Promise<{ written: EditableField[]; synced: boolean }> =>
+  apiFetch(`${BASE}/review/rows/${rowId}`, { method: 'PATCH', body: changes, auth: true });
+
+/**
+ * Writes the changed fields to the CRM contact (HubSpot), then queues a re-read of it: the lead
+ * follows within moments, in the background. The time zone is never sent — it stays EstatePulse's.
+ */
+export const editCrmRow = (
+  provider: 'hubspot',
+  rowId: string,
+  changes: Partial<{ firstName: string; lastName: string; phone: string; email: string }>,
+): Promise<{ written: EditableField[]; queued: boolean }> =>
+  apiFetch(`/integrations/crm/${provider}/review/rows/${rowId}`, { method: 'PATCH', body: changes, auth: true });
 
 /** `outreach` is how they launch (only with outreach scheduling on); without it they launch now. */
 export const approveRows = (rowIds: string[], outreach?: OutreachChoice): Promise<ApproveResult> =>

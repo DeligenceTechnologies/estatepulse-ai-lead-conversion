@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AppError } from '@/common/errors/app-error';
@@ -9,6 +9,7 @@ import {
   ChangesQueryDto,
   CompleteOAuthDto,
   CreateSheetSourceDto,
+  EditSheetRowDto,
   EnableSheetDto,
   ResolveChangesDto,
   ReviewQueryDto,
@@ -19,6 +20,7 @@ import {
 import { GoogleConnectionsService, type SessionIdentity } from './google-connections.service';
 import { ImportReviewEnabledGuard, SheetsEnabledGuard } from './import-enabled.guard';
 import { SheetReviewService } from './sheet-review.service';
+import { SheetRowEditService } from './sheet-row-edit.service';
 import { SheetSourcesService } from './sheet-sources.service';
 
 const identity = (auth: AuthContext): SessionIdentity => ({
@@ -142,7 +144,15 @@ export class ImportReviewController {
   constructor(
     private readonly sources: SheetSourcesService,
     private readonly reviews: SheetReviewService,
+    private readonly edits: SheetRowEditService,
   ) {}
+
+  /** Corrects a pending Google Sheets row: written into the sheet, then re-read so the lead follows. */
+  @Patch('rows/:rowId')
+  @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
+  editRow(@CurrentAuth() auth: AuthContext, @Param('rowId', ParseUUIDPipe) rowId: string, @Body() body: EditSheetRowDto) {
+    return this.edits.edit(identity(auth), rowId, body);
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.LEAD_IMPORT)

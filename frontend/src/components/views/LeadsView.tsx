@@ -341,7 +341,7 @@ export const LeadsView: React.FC = () => {
   // only runs after render, by when `invalidate` below exists, and useLiveEvents
   // reads it through a ref, so an inline handler costs no reconnect.
   const { connected } = useLiveEvents((e) => {
-    if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
+    if (e.type === 'lead.created' || e.type === 'lead.assigned' || e.type === 'lead.updated') invalidate();
   });
 
   // Stream up: it reports every change as it happens, so the poll is only a

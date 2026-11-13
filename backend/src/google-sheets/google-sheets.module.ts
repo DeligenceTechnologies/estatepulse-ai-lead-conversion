@@ -4,11 +4,12 @@ import { GoogleSheetsController, ImportReviewController } from './google-sheets.
 import { GoogleClient } from './google.client';
 import { SheetImportService } from './sheet-import.service';
 import { SheetReviewService } from './sheet-review.service';
+import { SheetRowEditService } from './sheet-row-edit.service';
 import { SheetSourcesService } from './sheet-sources.service';
 
 @Module({
   controllers: [GoogleSheetsController, ImportReviewController],
-  providers: [GoogleClient, GoogleConnectionsService, SheetImportService, SheetSourcesService, SheetReviewService],
+  providers: [GoogleClient, GoogleConnectionsService, SheetImportService, SheetSourcesService, SheetReviewService, SheetRowEditService],
   // GoogleClient and the connection service are exported for the Google Forms
   // module: one Google account per organization, one OAuth flow, one token
   // refresh. Forms must not grow a second connection system beside Sheets'.

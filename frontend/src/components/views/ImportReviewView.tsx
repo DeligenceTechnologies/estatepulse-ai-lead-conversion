@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
+import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, Pencil, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -676,11 +676,11 @@ export const ImportReviewView: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => setViewing(i)}
-                                title="See everything this row brought in"
-                                aria-label="View details"
+                                title={i.edit ? 'Edit the contact details — saved back to the sheet' : 'See everything this row brought in'}
+                                aria-label={i.edit ? 'Edit details' : 'View details'}
                                 className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
                               >
-                                <Eye className="w-3 h-3" />
+                                {i.edit ? <Pencil className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                               </button>
                             )}
                           </div>
@@ -785,6 +785,13 @@ export const ImportReviewView: React.FC = () => {
           item={viewing}
           warnings={(viewing.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r))}
           onClose={() => setViewing(null)}
+          onSaved={() => {
+            const crm = viewing.edit?.via === 'crm';
+            setViewing(null);
+            void load();
+            // A CRM contact is re-read by the sync worker in the background: look again once it has.
+            if (crm) window.setTimeout(() => void load(), 3000);
+          }}
         />
       )}
 

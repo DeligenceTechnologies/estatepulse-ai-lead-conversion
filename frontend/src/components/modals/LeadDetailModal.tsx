@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Globe,
   AlertTriangle,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT, leadsApi, type LeadTimezone } from '../../api/client';
@@ -22,6 +23,7 @@ import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
+import { NewLeadModal } from './NewLeadModal';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import {
   getCall,
@@ -40,6 +42,12 @@ const HELD_TEXT = {
   NO_DIALABLE_PHONE: 'there is no phone number to dial; fix it first',
   NOT_RELEASABLE: 'the lead is no longer new, or an agent is handling it',
 } as const;
+
+/**
+ * A review reason about the phone, as the API words it ("Phone has no country code…", "Phone number
+ * cannot be read…"); not the note left after an agent already corrected it.
+ */
+const isPhoneProblem = (reason: string) => /^phone\b/i.test(reason) && !/corrected by hand/i.test(reason);
 
 /** Database leads have UUID ids; demo-store leads are `lead_<timestamp>`. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -161,12 +169,16 @@ export const LeadDetailModal: React.FC = () => {
   const [reviewed, setReviewed] = useState(false);
   const [approving, setApproving] = useState(false);
 
+  // The edit form, open over the dossier; `phone` puts the cursor on the phone number.
+  const [editing, setEditing] = useState<{ focus?: 'phone' } | null>(null);
+
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
   useEffect(() => {
     setAssigned(null);
     setZone(null);
     setReviewed(false);
+    setEditing(null);
     setFlow(null);
     if (!selectedLeadId) return;
     let alive = true;
@@ -188,13 +200,13 @@ export const LeadDetailModal: React.FC = () => {
     return () => { alive = false; };
   }, [selectedLeadId]);
 
-  // Esc closes the dossier, like every other dialog.
+  // Esc closes the dossier, like every other dialog — but only the edit form while it is open on top.
   useEffect(() => {
-    if (!selectedLeadId) return;
+    if (!selectedLeadId || editing) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedLeadId(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedLeadId, setSelectedLeadId]);
+  }, [selectedLeadId, setSelectedLeadId, editing]);
 
   // Real outreach: enrols the lead into the office's strategy (call/SMS via Telnyx).
   const [enrolling, setEnrolling] = useState(false);
@@ -340,6 +352,18 @@ export const LeadDetailModal: React.FC = () => {
 
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-2 lg:justify-end lg:shrink-0">
+            {isLive && (
+              <button
+                type="button"
+                onClick={() => setEditing({})}
+                title="Correct the lead's name, contact details and what they are looking for"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Edit lead</span>
+              </button>
+            )}
+
             {isLive && (
               <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
             )}
@@ -496,14 +520,28 @@ export const LeadDetailModal: React.FC = () => {
                       {(lead.reviewReasons ?? []).map((r) => <li key={r}>{r}</li>)}
                     </ul>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void approveReview()}
-                    disabled={approving}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
-                  >
-                    {approving ? 'Approving…' : 'Approve and start outreach'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {/* Approving a bad number only holds it again (NO_DIALABLE_PHONE): fix it first. */}
+                    {(lead.reviewReasons ?? []).some(isPhoneProblem) && (
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ focus: 'phone' })}
+                        disabled={approving}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Fix phone
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void approveReview()}
+                      disabled={approving}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
+                    >
+                      {approving ? 'Approving…' : 'Approve and start outreach'}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -520,7 +558,7 @@ export const LeadDetailModal: React.FC = () => {
                     </div>
                     <div className={`text-2xs ${tzBlocked ? 'text-amber-300' : 'text-slate-500'}`}>
                       {!tz.hasPhone
-                        ? 'No usable phone number — this lead cannot be called or texted. Add a phone number first.'
+                        ? 'No usable phone number — this lead cannot be called or texted until one is added.'
                         : tz.reason.charAt(0).toUpperCase() + tz.reason.slice(1)}
                       {tz.hasPhone && tzBlocked && ' — not called or texted until it is set.'}
                       {tz.hasPhone && tz.jurisdiction.country &&
@@ -529,6 +567,16 @@ export const LeadDetailModal: React.FC = () => {
                         }.`}
                     </div>
                   </div>
+                  {!tz.hasPhone && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing({ focus: 'phone' })}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      {lead.phone ? 'Fix phone' : 'Add phone'}
+                    </button>
+                  )}
                   {tz.hasPhone && (
                     <div className="flex items-center gap-2 shrink-0">
                       <TimezoneSelect
@@ -651,6 +699,17 @@ export const LeadDetailModal: React.FC = () => {
         </div>
 
       </div>
+
+      {editing && isLive && (
+        <NewLeadModal
+          mode="edit"
+          leadId={lead.id}
+          focus={editing.focus}
+          onClose={() => setEditing(null)}
+          // A new phone can mean a new zone: drop the one shown from this modal and read the refetched lead's.
+          onSaved={({ changed }) => { if (changed.includes('phone')) setZone(null); }}
+        />
+      )}
     </div>
   );
 };
