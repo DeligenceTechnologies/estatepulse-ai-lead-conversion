@@ -677,8 +677,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const stored = leads.find(l => l.id === id);
     const piped = externalLeads[id];
     if (stored && piped) {
-      // The pipeline's copy is the fresher read of the assignment and of the lead's time zone.
-      return { ...stored, assignedAgentId: piped.assignedAgentId, assignedAgentName: piped.assignedAgentName, timezone: piped.timezone ?? stored.timezone };
+      // The pipeline's copy is the fresher read of the assignment, the lead's time zone and its
+      // review hold — /api/leads does not carry the review fields at all.
+      return {
+        ...stored,
+        assignedAgentId: piped.assignedAgentId,
+        assignedAgentName: piped.assignedAgentName,
+        timezone: piped.timezone ?? stored.timezone,
+        needsReview: piped.needsReview,
+        reviewReasons: piped.reviewReasons,
+      };
     }
     return stored ?? piped;
   };

@@ -454,7 +454,7 @@ describe('batch progress', () => {
 describe('leads list', () => {
   it('says where each lead stands with outreach: scheduled, waiting, released, skipped, paused', async () => {
     const o = await setupOrg({ max: 2, reserved: 1 });
-    const leads = new LeadsController(prisma, {} as never, {} as never, {} as never, {} as never);
+    const leads = new LeadsController(prisma, {} as never, {} as never, {} as never, {} as never, {} as never);
     const later = await imported(o, 1);
     const start = ahead(HOUR);
     await reviewsOn.approve(o.who, later.rowIds, { mode: 'scheduled', ...wall(start) });

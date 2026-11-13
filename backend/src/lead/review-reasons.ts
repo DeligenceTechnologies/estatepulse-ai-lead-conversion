@@ -18,8 +18,14 @@ export interface ReviewFacts {
 export const PHONE_NO_CODE_REASON = 'Phone has no country code (e.g. +91) — it cannot be dialled';
 export const PHONE_UNREADABLE_REASON = 'Phone number cannot be read — it cannot be dialled';
 
+/**
+ * Left on a lead held for review when an agent corrects its phone and that was the only reason
+ * it was held: the hold stays until a person approves it, so outreach never starts from an edit.
+ */
+export const PHONE_CORRECTED_REASON = 'Phone number was corrected by hand — approve to start outreach';
+
 /** Every wording the pipeline uses for "this number is no good": the validator's, and the importer's. */
-const isPhoneReason = (r: string): boolean => r === PHONE_UNPARSED_REASON || r.startsWith('Phone: ');
+export const isPhoneReason = (r: string): boolean => r === PHONE_UNPARSED_REASON || r.startsWith('Phone: ');
 
 /**
  * A review reason is written once, when a lead arrives, and never looked at again — so a reason

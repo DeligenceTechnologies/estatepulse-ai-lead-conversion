@@ -298,8 +298,8 @@ export const LeadSourcesView: React.FC = () => {
    */
   const onLiveEvent = useCallback(
     (e: { type: string; leadSourceId: string | null }) => {
-      // Who works a lead, or what they text, changes nothing this screen shows.
-      if (e.type === 'lead.assigned' || e.type === 'conversation.updated') return;
+      // Who works a lead, what they text, or a correction to their details changes nothing this screen shows.
+      if (e.type === 'lead.assigned' || e.type === 'lead.updated' || e.type === 'conversation.updated') return;
       sourcesQuery.invalidate();
       // Ignore traffic belonging to a form the user is not looking at.
       if (selectedId && (e.leadSourceId === null || e.leadSourceId === selectedId)) {
