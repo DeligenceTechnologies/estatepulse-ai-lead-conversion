@@ -1,3 +1,4 @@
+import { GoogleFormsAdapter } from './google-forms.adapter';
 import { TallyAdapter } from './tally.adapter';
 import { TypeformAdapter } from './typeform.adapter';
 import { InvalidPayloadError, type IngestAdapter, type NormalizedAnswer, type NormalizedDelivery } from './types';
@@ -56,4 +57,10 @@ export class GenericWebhookAdapter implements IngestAdapter {
 }
 
 export const adapterFor = (provider: string): IngestAdapter =>
-  provider === 'TALLY' ? new TallyAdapter() : provider === 'TYPEFORM' ? new TypeformAdapter() : new GenericWebhookAdapter();
+  provider === 'TALLY'
+    ? new TallyAdapter()
+    : provider === 'TYPEFORM'
+      ? new TypeformAdapter()
+      : provider === 'GOOGLE_FORMS'
+        ? new GoogleFormsAdapter()
+        : new GenericWebhookAdapter();
