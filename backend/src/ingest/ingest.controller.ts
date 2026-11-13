@@ -1,9 +1,6 @@
 import { Controller, Headers, Logger, Param, Post, Req, Res, type RawBodyRequest } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { Public } from '@/auth/decorators/public.decorator';
-import type { IntegrationEnv } from '@/common/utils/interface';
-import { GOOGLE_FORMS_SIGNATURE_HEADER } from '@/google-forms/constants';
 import { IngestService, type IngestRoute } from './ingest.service';
 import { ProcessingWorker } from './processing/worker.service';
 
@@ -20,7 +17,6 @@ export class IngestController {
   constructor(
     private readonly ingest: IngestService,
     private readonly worker: ProcessingWorker,
-    private readonly config: ConfigService<IntegrationEnv, true>,
   ) {}
 
   @Post('ingest/v1/tally/:token')
@@ -41,27 +37,6 @@ export class IngestController {
     @Headers('typeform-signature') signature?: string,
   ) {
     return this.handle('TYPEFORM', token, req, res, signature);
-  }
-
-  /**
-   * Where the Apps Script on an owner's Google Form posts each response. The
-   * script is an external client like any other provider: the token in the
-   * path and the HMAC over the body are the whole credential, and switching
-   * the feature off makes the route answer 404 exactly as an unknown token
-   * does, so nothing leaks about whether it exists.
-   */
-  @Post('ingest/v1/google-forms/:token')
-  googleForms(
-    @Param('token') token: string,
-    @Req() req: RawBodyRequest<Request>,
-    @Res() res: Response,
-    @Headers(GOOGLE_FORMS_SIGNATURE_HEADER) signature?: string,
-  ) {
-    if (!this.config.get('GOOGLE_FORMS_ENABLED', { infer: true })) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    return this.handle('GOOGLE_FORMS', token, req, res, signature);
   }
 
   @Post(['ingest/v1/webhook/:token', 'webhooks/leads/:token'])

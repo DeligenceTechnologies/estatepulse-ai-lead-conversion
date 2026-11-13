@@ -23,7 +23,6 @@ import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
 import { ConnectModal } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
 import { CustomWebhookCard } from './CustomWebhookCard';
-import { GoogleFormsCard } from './GoogleFormsCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { HubSpotCard } from './HubSpotCard';
 import { IntegrationCard } from './IntegrationCard';
@@ -362,11 +361,6 @@ export const ConnectionCards: React.FC = () => {
         {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings.
             Google Sheets is self-loading: its account is not a lead source. */}
         <GoogleSheetsCard />
-
-        {/* Google Forms — same Google account as Sheets, but the owner pastes a
-            short Apps Script into their form because Google Forms has no
-            webhook of its own. Hidden where the server has it switched off. */}
-        <GoogleFormsCard />
 
         {/* Webhook — one URL for any app or form; the owner maps the first payload's fields. Hidden when the server has it off. */}
         <CustomWebhookCard

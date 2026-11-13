@@ -464,21 +464,7 @@ export const pickerReady = (): boolean => Boolean(window.google?.accounts?.oauth
  * or null if they cancel. `accountEmail` steers Google to the connected account:
  * a file picked as a different account grants the server nothing.
  */
-export const pickSpreadsheet = (cfg: GoogleSheetsConfig, accountEmail: string | null): Promise<string | null> =>
-  pickDriveFile(cfg, accountEmail, 'SPREADSHEETS');
-
-/**
- * The picker itself, for one kind of Google file.
- *
- * Google Forms uses this too, with the FORMS view. Picking a file is what
- * grants this app (drive.file) access to it, which is the same grant whichever
- * kind it is — so there is one picker here and not one per integration.
- */
-export function pickDriveFile(
-  cfg: GoogleSheetsConfig,
-  accountEmail: string | null,
-  viewId: 'SPREADSHEETS' | 'FORMS',
-): Promise<string | null> {
+export function pickSpreadsheet(cfg: GoogleSheetsConfig, accountEmail: string | null): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const g = window.google;
     const tokenClient = g.accounts.oauth2.initTokenClient({
@@ -491,7 +477,7 @@ export function pickDriveFile(
           reject(new Error('Google did not grant access for the picker.'));
           return;
         }
-        const view = new g.picker.DocsView(g.picker.ViewId[viewId])
+        const view = new g.picker.DocsView(g.picker.ViewId.SPREADSHEETS)
           .setMode(g.picker.DocsViewMode.LIST)
           .setIncludeFolders(false);
         new g.picker.PickerBuilder()
