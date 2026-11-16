@@ -25,6 +25,7 @@ import { NO_TIMEZONE_FIELD_NOTICE } from '../common/TimezoneNotice';
 import { formatDateTime } from '../../lib/datetime';
 import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
 import { isCustomSource } from '../../utils/customWebhookApi';
+import { Button, IconButton } from '../common/Button';
 
 
 const SignaturePill: React.FC<{ state: string | null; usedPrevious: boolean }> = ({
@@ -340,13 +341,9 @@ export const LeadSourcesView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setActiveView('integrations')}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Settings2 className="w-3.5 h-3.5" />
+        <Button variant="secondary" onClick={() => setActiveView('integrations')} icon={<Settings2 />}>
           Manage connections
-        </button>
+        </Button>
       </div>
 
       {/*
@@ -387,12 +384,9 @@ export const LeadSourcesView: React.FC = () => {
               <div className="text-xs text-slate-400 leading-relaxed">
                 No lead sources yet. Connect one on Lead Integrations.
               </div>
-              <button
-                onClick={() => setActiveView('integrations')}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
-              >
+              <Button onClick={() => setActiveView('integrations')}>
                 Connect a form
-              </button>
+              </Button>
             </div>
           ) : (
             sources.map((s) => (
@@ -459,14 +453,9 @@ export const LeadSourcesView: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                   {isCustomSource(selected) && (
-                    <button
-                      type="button"
-                      onClick={() => setMapping(selected.id)}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <Button variant="secondary" size="sm" onClick={() => setMapping(selected.id)} icon={<SlidersHorizontal />}>
                       Mapping &amp; test
-                    </button>
+                    </Button>
                   )}
                   <SourceStatusPill source={selected} />
                   <ConnectionPill source={selected} />
@@ -485,12 +474,9 @@ export const LeadSourcesView: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={() => setActiveView('leads')}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer"
-                  >
+                  <Button variant="link" onClick={() => setActiveView('leads')}>
                     Open pipeline →
-                  </button>
+                  </Button>
                 </div>
 
                 {leads === null ? (
@@ -526,14 +512,12 @@ export const LeadSourcesView: React.FC = () => {
                       />
                       Auto-refresh
                     </label>
-                    <button
+                    <IconButton
+                      size="sm"
                       onClick={refreshAll}
-                      className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 ${detailQuery.refreshing ? 'animate-spin' : ''}`}
-                      />
-                    </button>
+                      aria-label="Refresh"
+                      icon={<RefreshCw className={detailQuery.refreshing ? 'animate-spin' : ''} />}
+                    />
                   </div>
                 </div>
 

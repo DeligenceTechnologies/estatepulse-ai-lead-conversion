@@ -18,6 +18,11 @@ export interface OwnerDashboard {
   calls7Days: { total: number; byStatus: Record<string, number> };
   upcomingAppointments: number;
   sources30Days: { name: string; count: number }[];
+  /**
+   * The last 14 days, oldest first, today last, in the office's time zone: leads that arrived,
+   * AI calls placed and texts sent. Missing from an older backend, and empty if its read failed.
+   */
+  trend14Days?: { day: string; leads: number; calls: number; texts: number }[];
 }
 
 export const getOwnerDashboard = (): Promise<OwnerDashboard> =>

@@ -1,4 +1,5 @@
 import { toast } from 'react-toastify';
+import { Button } from '../components/common/Button';
 
 /**
  * A yes/no question asked as a toast, in place of window.confirm.
@@ -19,20 +20,12 @@ export const confirmToast = (message: string, confirmLabel = 'OK'): Promise<bool
         <div className="space-y-3">
           <p>{message}</p>
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => answer(closeToast, false)}
-              className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold transition-colors cursor-pointer"
-            >
+            <Button variant="outline" size="sm" onClick={() => answer(closeToast, false)}>
               Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => answer(closeToast, true)}
-              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-on-accent text-xs font-bold transition-colors cursor-pointer"
-            >
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => answer(closeToast, true)}>
               {confirmLabel}
-            </button>
+            </Button>
           </div>
         </div>
       ),

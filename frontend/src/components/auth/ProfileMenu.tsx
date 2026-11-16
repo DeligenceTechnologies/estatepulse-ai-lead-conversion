@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowLeftRight,
   Briefcase,
@@ -8,6 +9,7 @@ import {
   Loader2,
   LogOut,
   MonitorSmartphone,
+  Palette,
   Settings,
   ShieldCheck,
 } from 'lucide-react';
@@ -15,6 +17,8 @@ import { toast } from 'react-toastify';
 import { displayName, initialsFor, useAuth } from '../../context/AuthContext';
 import { messageFor, type Role } from '../../lib/api';
 import { confirmToast } from '../../lib/toast';
+import { Drawer } from '../calendar/shared/Drawer';
+import { AppearanceSettings } from '../settings/AppearanceSettings';
 import { ChangePasswordModal } from './ChangePasswordModal';
 
 const PROFILE_OPTIONS: Record<Role, { label: string; hint: string; icon: React.ReactNode }> = {
@@ -38,6 +42,9 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
   const { user, organization, roleName, role, profiles, switchProfile, logout, logoutAll } = useAuth();
   const [open, setOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  // Stable, so the drawer's focus effect runs once per opening.
+  const closeAppearance = useCallback(() => setAppearanceOpen(false), []);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const canSwitch = profiles.length > 1;
@@ -166,6 +173,17 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
               className={item}
               onClick={() => {
                 setOpen(false);
+                setAppearanceOpen(true);
+              }}
+            >
+              <Palette className="w-3.5 h-3.5" /> Appearance
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={item}
+              onClick={() => {
+                setOpen(false);
                 setChangingPassword(true);
               }}
             >
@@ -197,6 +215,22 @@ export const ProfileMenu: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenS
         </div>
       )}
       {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
+      {/* In both shells: an agent has no Settings page, but chooses their own look.
+          Portalled to <body>, like ChangePasswordModal: the navbar's
+          backdrop-filter would otherwise trap the fixed overlay inside it. */}
+      {appearanceOpen &&
+        createPortal(
+          <Drawer
+            icon={Palette}
+            title="Appearance"
+            hint="Theme, brand colour and buttons. Changes apply instantly."
+            width="xl"
+            onClose={closeAppearance}
+          >
+            <AppearanceSettings />
+          </Drawer>,
+          document.body,
+        )}
     </div>
   );
 };

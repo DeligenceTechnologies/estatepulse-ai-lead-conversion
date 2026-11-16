@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Sliders,
   Sparkles,
@@ -19,11 +19,12 @@ import {
   Trash2,
   Voicemail,
   MessageSquare,
-  Lock
+  Lock,
+  X
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { confirmToast } from '../../lib/toast';
-import { useApp } from '../../context/AppContext';
+import { pathForView, useApp } from '../../context/AppContext';
 import {
   getAssistant,
   updateAssistant,
@@ -62,9 +63,13 @@ import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { BusinessDetailsCard } from './BusinessDetailsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
+import { Button, IconButton } from '../common/Button';
 
 export const AISettingsView: React.FC = () => {
-  const { orgSettings, updateOrgSettings, setActiveView } = useApp();
+  const { orgSettings, updateOrgSettings } = useApp();
+  const navigate = useNavigate();
+  /** The Telnyx connection lives in Settings → Telnyx. */
+  const openTelnyxSettings = () => navigate({ pathname: pathForView('settings'), search: '?tab=telnyx' });
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
@@ -395,13 +400,13 @@ export const AISettingsView: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">AI Assistant</h2>
           <p className="text-xs text-slate-400">
-            The prompt, voice and outreach strategy your AI agent uses on every lead.
+            How your AI agent talks, sounds and reaches out to leads.
           </p>
         </div>
 
       </div>
 
-      {/* The connection itself is made on Integrations & Webhooks. This page
+      {/* The connection itself is made in Settings → Telnyx. This page
           only reports what that connection is, and sends you there if there
           isn't one — a prompt editor should not open on a credentials form. */}
       {status === null && (
@@ -411,42 +416,25 @@ export const AISettingsView: React.FC = () => {
       )}
 
       {status && !(status.connected && status.hasAssistant) && (
-        <div className="bg-slate-900/90 border border-amber-500/40 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-500/30 shrink-0">
-            <Plug className="w-5 h-5" />
+        <div className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-6 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-300 flex items-center justify-center border border-amber-500/25 shrink-0">
+              <Plug className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-bold text-white">
+                {status.connected ? 'Add an AI assistant in Telnyx' : 'Connect Telnyx to get started'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {status.connected
+                  ? 'Telnyx is connected, but no assistant is set up yet. Add one, then come back here.'
+                  : 'Your AI agent calls and texts through Telnyx. Connect it once, then set up the voice and prompt here.'}
+              </p>
+            </div>
+            <Button onClick={openTelnyxSettings} iconRight={<ArrowRight />} className="shrink-0">
+              {status.connected ? 'Open Telnyx settings' : 'Connect Telnyx'}
+            </Button>
           </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-white">
-              {status.connected
-                ? 'No AI assistant on your Telnyx account yet'
-                : 'Telnyx account not connected'}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              {status.connected ? (
-                <>
-                  Your Telnyx credentials are saved, but there is no assistant to configure. Create
-                  or attach one under{' '}
-                  <span className="text-slate-200">Settings → Telnyx</span>, then come back
-                  to write its prompt and tone.
-                </>
-              ) : (
-                <>
-                  Please connect your Telnyx account under{' '}
-                  <span className="text-slate-200">Settings → Telnyx</span>. Prompt,
-                  tone and voice settings are written straight to the live agent, so there is nothing
-                  to edit until it exists.
-                </>
-              )}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveView('integrations')}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-950 transition-colors cursor-pointer shrink-0"
-          >
-            Go to Integrations &amp; Webhooks
-            <ArrowRight className="w-4 h-4" />
-          </button>
         </div>
       )}
 
@@ -454,7 +442,7 @@ export const AISettingsView: React.FC = () => {
       <form onSubmit={handleSave} className="space-y-6">
 
         {/* What the agent is actually running on. Read-only: the credentials
-            are edited on Integrations & Webhooks, and showing a Disconnect
+            are edited in Settings → Telnyx, and showing a Disconnect
             here would be a second, competing place to break the connection.
             The agent switcher stays — picking which assistant you are editing
             is part of editing it. */}
@@ -476,14 +464,9 @@ export const AISettingsView: React.FC = () => {
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveView('integrations')}
-              className="text-xs font-semibold text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-            >
+            <Button variant="outline" size="sm" onClick={openTelnyxSettings} iconRight={<ArrowRight />}>
               Manage connection
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </div>
 
           {/* Capability, not credentials.
@@ -579,9 +562,7 @@ export const AISettingsView: React.FC = () => {
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" /> Live: {assistantName}
                 </span>
               )}
-              <button type="button" onClick={loadAgent} className="text-slate-500 hover:text-slate-300" title="Reload from agent">
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
+              <IconButton size="sm" onClick={loadAgent} aria-label="Reload from agent" icon={<RefreshCw />} />
             </div>
           </div>
 
@@ -842,13 +823,9 @@ export const AISettingsView: React.FC = () => {
                   disabled={interruptThreshold == null}
                   className="flex-1 accent-emerald-500 disabled:opacity-40"
                 />
-                <button
-                  type="button"
-                  onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}
-                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 whitespace-nowrap cursor-pointer"
-                >
+                <Button variant="link" onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}>
                   {interruptThreshold == null ? 'Set manually' : 'Automatic'}
-                </button>
+                </Button>
               </div>
               <span className="text-xs text-slate-500 mt-1 block">
                 Higher means the agent is more certain before it stops talking. Raise it if it keeps cutting
@@ -1045,13 +1022,18 @@ export const AISettingsView: React.FC = () => {
               <Sliders className="w-4 h-4 text-amber-400" />
               Tools / Workflows <span className="text-xs text-slate-500 font-normal">— what the agent can do during a call</span>
             </h3>
-            <button
-              onClick={() => { setEditingTool(null); setToolModalOpen(true); }}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditingTool(null);
+                setToolModalOpen(true);
+              }}
               disabled={toolBusy}
-              className="shrink-0 px-3 py-1.5 bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 rounded-lg text-xs font-bold hover:bg-emerald-600/30 disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+              icon={<Plus />}
             >
-              <Plus className="w-3 h-3" /> Add tool
-            </button>
+              Add tool
+            </Button>
           </div>
 
           <div className="space-y-2 text-xs">
@@ -1090,23 +1072,26 @@ export const AISettingsView: React.FC = () => {
                   {/* A shared tool is edited where it lives, not here: this
                       agent is one of several using it. */}
                   {!t.shared && (
-                    <button
-                      onClick={() => { setEditingTool(t); setToolModalOpen(true); }}
+                    <IconButton
+                      size="sm"
+                      className="hover:text-emerald-300!"
+                      onClick={() => {
+                        setEditingTool(t);
+                        setToolModalOpen(true);
+                      }}
                       disabled={toolBusy}
-                      className="p-1.5 text-slate-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
                       aria-label={`Edit ${toolLabel(t)}`}
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                      icon={<Pencil />}
+                    />
                   )}
-                  <button
+                  <IconButton
+                    size="sm"
+                    className="hover:text-rose-300!"
                     onClick={() => removeTool(t)}
                     disabled={toolBusy}
-                    className="p-1.5 text-slate-400 hover:text-rose-400 disabled:opacity-50 cursor-pointer"
                     aria-label={`Remove ${toolLabel(t)}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    icon={<Trash2 />}
+                  />
                 </div>
               </div>
             ))}
@@ -1127,7 +1112,7 @@ export const AISettingsView: React.FC = () => {
               <Building2 className="w-4 h-4 text-cyan-400" />
               Dynamic Variables <span className="text-xs text-slate-500 font-normal">— fixed values for every call, use as {'{{key}}'} in the prompt</span>
             </h3>
-            <button type="button" onClick={addVar} className="text-xs text-emerald-400 font-semibold hover:text-emerald-300">+ Add variable</button>
+            <Button variant="link" onClick={addVar} icon={<Plus />}>Add variable</Button>
           </div>
 
           <div className="space-y-2 text-xs">
@@ -1151,7 +1136,7 @@ export const AISettingsView: React.FC = () => {
                   placeholder="Austin Home Advisors"
                   className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500"
                 />
-                <button type="button" onClick={() => removeVar(i)} className="text-rose-400 hover:text-rose-300 px-2">✕</button>
+                <IconButton size="sm" className="hover:text-rose-300!" onClick={() => removeVar(i)} aria-label="Remove variable" icon={<X />} />
                 {LEAD_VARIABLES.some((l) => l.name === v.key.trim()) && (
                   <span className="text-[11px] text-amber-300 shrink-0" title="The app sends this lead's own value on every call and chat">
                     Replaced per lead on every call
@@ -1174,7 +1159,7 @@ export const AISettingsView: React.FC = () => {
             the contact hours changed nothing the engine ever saw. */}
         {/* The ids are link targets (OutreachPicker's "Change" links): /ai-settings#<id>. */}
         <div id="contact-window" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+          <ContactWindowCard blurb="When and how often the AI may contact a lead. Follow-up sequences use the same rules." />
         </div>
 
         <div id="call-capacity" className="scroll-mt-6 rounded-2xl transition-shadow">
@@ -1224,14 +1209,9 @@ export const AISettingsView: React.FC = () => {
 
         {/* Submit */}
         <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={deploying}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            {deploying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            <span>{deploying ? 'Deploying to AI agent…' : 'Save Configuration'}</span>
-          </button>
+          <Button type="submit" size="lg" loading={deploying} icon={<Save />}>
+            {deploying ? 'Deploying to AI agent…' : 'Save Configuration'}
+          </Button>
         </div>
 
       </form>

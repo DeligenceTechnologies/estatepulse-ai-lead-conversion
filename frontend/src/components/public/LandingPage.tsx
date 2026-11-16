@@ -85,7 +85,7 @@ const Brand: React.FC = () => (
 );
 
 export const LandingPage: React.FC = () => (
-  <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-white">
+  <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-on-accent">
     <header className="border-b border-slate-800/70">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
         <Brand />

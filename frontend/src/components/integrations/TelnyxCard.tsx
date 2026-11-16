@@ -42,7 +42,7 @@ const TelnyxConnectModal: React.FC<{
   // there the overlay would only cover the card's own corner of the screen.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div className="w-full max-w-2xl my-8" onClick={(e) => e.stopPropagation()}>
@@ -108,7 +108,7 @@ export const TelnyxCard: React.FC = () => {
                 : 'Connect Telnyx',
           icon: connected ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
           onClick: () => setOpen(true),
-          className: 'bg-violet-600 hover:bg-violet-500 text-on-accent shadow-md shadow-violet-950',
+          variant: 'primary',
         }}
       >
         {error && (

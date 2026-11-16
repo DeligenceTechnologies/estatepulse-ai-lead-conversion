@@ -30,6 +30,13 @@ interface SummaryRow {
   sources: { name: string | null; source_id: string | null; count: number }[] | null;
 }
 
+interface TrendRow {
+  day: string;
+  leads: number;
+  calls: number;
+  texts: number;
+}
+
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly prisma: PrismaService) {}
@@ -45,7 +52,7 @@ export class DashboardController {
     const since30 = new Date(now - 30 * DAY_MS);
     const closed = CLOSED_STATUSES as string[];
 
-    const [row] = await this.prisma.$queryRaw<SummaryRow[]>`
+    const [[row], trend] = await Promise.all([this.prisma.$queryRaw<SummaryRow[]>`
       -- Leads still waiting in Import Review (or rejected there) are hidden everywhere else,
       -- so they must not be counted here either: filter once, in the CTE every tile reads.
       WITH l AS (
@@ -99,7 +106,7 @@ export class DashboardController {
                   WHERE created_at >= ${since30} GROUP BY lead_source_id) g
            LEFT JOIN lead_sources src
              ON src.id = g.lead_source_id AND src.organization_id = ${org}::uuid) AS sources
-      FROM l`;
+      FROM l`, this.trend(org)]);
 
     const byStatus = Object.fromEntries(row.by_status.map((g) => [g.status, g.n]));
     const calls = row.calls_by_status ?? {};
@@ -131,6 +138,58 @@ export class DashboardController {
         name: s.source_id ? (s.name ?? 'Removed source') : 'Added manually',
         count: s.count,
       })),
+      trend14Days: trend,
     };
+  }
+
+  /**
+   * The last 14 days, one row per day in the office's time zone (today last): leads that arrived,
+   * AI calls placed and texts sent. Days with nothing are zero rows, so the chart has no gaps.
+   * The chart is extra: if this read fails the rest of the dashboard still loads, with no trend.
+   */
+  private async trend(org: string): Promise<TrendRow[]> {
+    try {
+      return await this.prisma.$queryRaw<TrendRow[]>`
+        WITH tz AS (
+          SELECT coalesce((SELECT timezone FROM org_settings WHERE organization_id = ${org}::uuid), 'America/New_York') AS z
+        ),
+        days AS (
+          SELECT generate_series(
+                   (now() AT TIME ZONE (SELECT z FROM tz))::date - 13,
+                   (now() AT TIME ZONE (SELECT z FROM tz))::date,
+                   interval '1 day')::date AS d
+        ),
+        lo AS (
+          SELECT (created_at AT TIME ZONE (SELECT z FROM tz))::date AS d, count(*)::int AS n
+            FROM leads
+           WHERE organization_id = ${org}::uuid AND created_at >= now() - interval '15 days'
+             -- Same rule as the summary: rows still in (or rejected from) Import Review are not leads yet.
+             AND NOT EXISTS (SELECT 1 FROM sheet_import_rows r
+                              WHERE r.lead_id = leads.id AND r.review_state IN ('pending','rejected'))
+           GROUP BY 1
+        ),
+        ca AS (
+          SELECT (created_at AT TIME ZONE (SELECT z FROM tz))::date AS d, count(*)::int AS n
+            FROM calls
+           WHERE organization_id = ${org}::uuid AND created_at >= now() - interval '15 days'
+           GROUP BY 1
+        ),
+        tx AS (
+          SELECT (created_at AT TIME ZONE (SELECT z FROM tz))::date AS d, count(*)::int AS n
+            FROM messages
+           WHERE organization_id = ${org}::uuid AND created_at >= now() - interval '15 days'
+             AND direction = 'outbound' AND channel = 'sms'
+           GROUP BY 1
+        )
+        SELECT to_char(days.d, 'YYYY-MM-DD') AS day,
+               coalesce(lo.n, 0) AS leads, coalesce(ca.n, 0) AS calls, coalesce(tx.n, 0) AS texts
+          FROM days
+          LEFT JOIN lo USING (d)
+          LEFT JOIN ca USING (d)
+          LEFT JOIN tx USING (d)
+         ORDER BY days.d`;
+    } catch {
+      return [];
+    }
   }
 }

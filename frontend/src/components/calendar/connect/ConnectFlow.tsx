@@ -10,7 +10,8 @@ import {
 } from '../../../utils/calendarApi';
 import { CalComConnect } from './CalComConnect';
 import { CalendlyConnect } from './CalendlyConnect';
-import { Notice, PROVIDER_IDS, PROVIDERS, PrimaryButton, ProviderBadge, WORKSPACE_LABEL, panel } from '../shared/ui';
+import { Button } from '../../common/Button';
+import { Notice, PROVIDER_IDS, PROVIDERS, ProviderBadge, WORKSPACE_LABEL, panel } from '../shared/ui';
 
 const describe = (connection: CalendarConnection): string =>
   [connection.accountEmail ?? connection.accountName, connection.workspaceName ?? WORKSPACE_LABEL[connection.workspaceType]]
@@ -31,7 +32,7 @@ const SavedAccount: React.FC<{
   onConnectAnother: () => void;
 }> = ({ provider, connection, onConnected, onConnectAnother }) => {
   const [busy, setBusy] = useState(false);
-  const { label, button } = PROVIDERS[provider];
+  const { label } = PROVIDERS[provider];
 
   const use = async () => {
     setBusy(true);
@@ -51,17 +52,12 @@ const SavedAccount: React.FC<{
         <AccountLine connection={connection} />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <PrimaryButton onClick={() => void use()} busy={busy} className={button} icon={<Check className="w-3.5 h-3.5" />}>
+        <Button onClick={() => void use()} loading={busy} icon={<Check />}>
           Use this {label} account
-        </PrimaryButton>
-        <button
-          type="button"
-          onClick={onConnectAnother}
-          disabled={busy}
-          className="text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-50"
-        >
+        </Button>
+        <Button variant="ghost" onClick={onConnectAnother} disabled={busy}>
           Connect a different account
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -88,13 +84,9 @@ export const ConnectFlow: React.FC<{
           <AccountLine connection={status.connection} />
         </div>
         {onCancel && (
-          <PrimaryButton
-            onClick={onCancel}
-            className={PROVIDERS[choice].button}
-            icon={<Check className="w-3.5 h-3.5" />}
-          >
+          <Button onClick={onCancel} icon={<Check />}>
             Keep {PROVIDERS[choice].label}
-          </PrimaryButton>
+          </Button>
         )}
       </div>
     );
@@ -130,14 +122,14 @@ export const ConnectFlow: React.FC<{
           </Notice>
         )}
         {saved?.status === 'active' && connectNew[choice] && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setConnectNew((value) => ({ ...value, [choice]: false }))}
-            className="inline-flex items-center gap-1.5 text-2xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
+            icon={<RotateCcw />}
           >
-            <RotateCcw className="w-3 h-3" />
             Use the saved account instead
-          </button>
+          </Button>
         )}
         {form}
       </div>
@@ -201,13 +193,9 @@ export const ConnectFlow: React.FC<{
       <div className={`${panel} p-4`}>{panelBody}</div>
 
       {onCancel && (
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
-        >
+        <Button variant="secondary" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       )}
     </div>
   );

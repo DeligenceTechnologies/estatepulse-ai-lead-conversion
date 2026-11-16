@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { KeyRound, Loader2, AlertTriangle, Sparkles, Link2, CheckCircle2, Pencil, ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { KeyRound, AlertTriangle, Sparkles, Link2, CheckCircle2, Pencil, ChevronDown, ChevronRight, Plus, X, ExternalLink, Lock } from 'lucide-react';
 import { toast } from 'react-toastify';
 import {
   TelnyxStatus,
@@ -16,6 +16,42 @@ import {
 import { TelnyxAccounts } from './TelnyxAccounts';
 import { useApp } from '../../context/AppContext';
 import { FromNumberSelect } from './FromNumberSelect';
+import { IconButton, Button } from '../common/Button';
+
+const input =
+  'w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500';
+
+/** A labelled form field with an optional one-line hint. */
+const Field: React.FC<{ label: string; required?: boolean; hint?: React.ReactNode; children: React.ReactNode }> = ({
+  label,
+  required,
+  hint,
+  children,
+}) => (
+  <div className="min-w-0">
+    <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 mb-1.5">
+      {label}
+      {required && <span className="text-rose-400" aria-label="required">*</span>}
+    </label>
+    {children}
+    {hint && <p className="text-2xs text-slate-400 mt-1.5">{hint}</p>}
+  </div>
+);
+
+/** A numbered step heading; the number turns into a tick once the step is done. */
+const Step: React.FC<{ n: number; title: string; done?: boolean; aside?: React.ReactNode }> = ({ n, title, done, aside }) => (
+  <div className="flex items-center gap-2.5">
+    <span
+      className={`w-6 h-6 rounded-full text-2xs font-bold flex items-center justify-center shrink-0 border ${
+        done ? 'bg-green-500/15 text-green-300 border-green-500/30' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+      }`}
+    >
+      {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
+    </span>
+    <span className="text-sm font-bold text-white">{title}</span>
+    {aside && <div className="ml-auto">{aside}</div>}
+  </div>
+);
 
 /**
  * Bring-Your-Own-Telnyx: enter credentials, then create or attach an assistant.
@@ -89,128 +125,127 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
     setReplacingKey(false);
   }, [status.accountId, status.fromNumber, status.label]);
 
+  const missing = [
+    !apiKey && !status.connected && 'API key',
+    !status.hasPublicKey && !publicKey.trim() && 'Public key',
+    !fromNumber.trim() && 'From number',
+  ].filter(Boolean) as string[];
+
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-      <div>
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <KeyRound className="w-4 h-4 text-emerald-400" />
-          {status.connected
-            ? status.label || 'Your Telnyx connection'
-            : 'Connect your Telnyx account'}
-        </h3>
-        <p className="text-xs text-slate-400 mt-1">
-          EstatePulse runs the AI voice agent on <span className="text-slate-300">your own</span> Telnyx account.
-          {status.connected ? ' Change the number it calls from, or swap the key.' : ' Add your credentials once'}{' — '}
-          <a href="https://portal.telnyx.com" target="_blank" rel="noreferrer" className="text-emerald-400 underline">portal.telnyx.com</a>.
-        </p>
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-5 shadow-xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <span className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
+            <KeyRound className="w-4 h-4 text-emerald-400" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-white">
+              {status.connected ? status.label || 'Your Telnyx connection' : 'Connect your Telnyx account'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {status.connected
+                ? 'Change the number you call from, or swap the key.'
+                : 'Your AI agent calls and texts through your own Telnyx account. Takes about 2 minutes.'}
+            </p>
+          </div>
+        </div>
+        <a
+          href="https://portal.telnyx.com"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 shrink-0"
+        >
+          Open Telnyx portal <ExternalLink className="w-3.5 h-3.5" />
+        </a>
       </div>
 
       {status.hasIntegration && !status.connected && (
-        <div className="flex items-center justify-between gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
-          <span className="text-slate-300">You have a saved connection that's currently disconnected.</span>
-          <button
-            type="button"
-            disabled={busy !== null}
+        <div className="flex items-center justify-between gap-2 text-xs bg-amber-500/10 border border-amber-500/25 rounded-xl px-3.5 py-2.5">
+          <span className="text-slate-200">You have a saved connection that is switched off.</span>
+          <Button
+            size="sm"
+            disabled={busy !== null && busy !== 'reconnect'}
+            loading={busy === 'reconnect'}
             onClick={() => run('reconnect', () => reconnectTelnyx(), 'Telnyx reconnected.')}
-            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5"
           >
-            {busy === 'reconnect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             Reconnect
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Step 1 — credentials */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-xs font-bold flex items-center justify-center">1</span>
-          <span className="text-xs font-semibold text-slate-200">API credentials</span>
-          {status.connected && (
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => run('disconnect', () => disconnectTelnyx(), 'Telnyx disconnected.')}
-              className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold disabled:opacity-50"
-            >
-              {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
-            </button>
-          )}
-        </div>
+      <section className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 space-y-4">
+        <Step
+          n={1}
+          title="Your Telnyx keys"
+          done={status.connected}
+          aside={
+            status.connected && (
+              <Button
+                variant="danger-soft"
+                size="sm"
+                disabled={busy !== null && busy !== 'disconnect'}
+                loading={busy === 'disconnect'}
+                onClick={() => run('disconnect', () => disconnectTelnyx(), 'Telnyx disconnected.')}
+              >
+                {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+              </Button>
+            )
+          }
+        />
 
-        <div className="space-y-3 text-xs pl-7">
-          {/* Named, because an org with three of these cannot tell them apart by
-              a masked key. Optional: a first account needs no disambiguating. */}
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Account name <span className="text-slate-500 font-normal">(so you can tell your accounts apart)</span>
-            </label>
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Austin office"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-emerald-500"
-            />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Named, because an org with three of these cannot tell them apart by a masked key. */}
+          <Field label="Account name" hint="Optional. Helps if you have more than one.">
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Austin office" className={input} />
+          </Field>
 
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              API Key {!status.connected && <span className="text-rose-400 font-normal">* required</span>}
-            </label>
+          <Field label="API key" required={!status.connected} hint={!status.connected && 'Telnyx → Keys & Credentials → API Keys'}>
             {status.connected && !replacingKey ? (
-              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                {/* That a key is stored and works is the whole message. Its
-                    characters are not, even masked. */}
-                <span className="text-white truncate">API key saved and working</span>
-                <button
-                  type="button"
-                  onClick={() => setReplacingKey(true)}
-                  className="ml-auto text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
-                >
-                  <Pencil className="w-3 h-3" /> Replace
-                </button>
+              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                {/* That a key is stored and works is the whole message. Its characters are not, even masked. */}
+                <span className="text-white truncate">Saved and working</span>
+                <Button variant="link" className="ml-auto" onClick={() => setReplacingKey(true)} icon={<Pencil />}>
+                  Replace
+                </Button>
               </div>
             ) : (
-              <>
+              <div className="flex items-center gap-2">
                 <input
                   type="password"
                   value={apiKey}
                   autoFocus={replacingKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="KEY0123…"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+                  className={`${input} font-mono`}
                 />
                 {status.connected && (
-                  <button
-                    type="button"
-                    onClick={() => { setReplacingKey(false); setApiKey(''); }}
-                    className="text-xs text-slate-400 hover:text-slate-200 mt-1.5 cursor-pointer"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setReplacingKey(false);
+                      setApiKey('');
+                    }}
                   >
-                    Cancel — keep the key already on file
-                  </button>
+                    Cancel
+                  </Button>
                 )}
-              </>
+              </div>
             )}
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Public Key {!status.hasPublicKey && <span className="text-rose-400 font-normal">* required</span>}
-            </label>
+          <Field label="Public key" required={!status.hasPublicKey} hint="Telnyx → Keys & Credentials → Public Key">
             <input
               value={publicKey}
               onChange={(e) => setPublicKey(e.target.value)}
-              placeholder={status.hasPublicKey ? 'Saved — paste a new one to replace it' : 'e.g. AbCd…='}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+              placeholder={status.hasPublicKey ? 'Saved. Paste a new one to replace it' : 'e.g. AbCd…='}
+              className={`${input} font-mono`}
             />
-            <p className="text-2xs text-slate-500 mt-1">
-              Telnyx signs every webhook with this key, and we ignore events that are not signed. Copy it from
-              Telnyx &rarr; Account Settings &rarr; Keys &amp; Credentials &rarr; Public Key.
-            </p>
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">From Number <span className="text-rose-400 font-normal">* required</span></label>
+          <Field label="From number" required hint="The number your AI calls and texts from.">
             <FromNumberSelect
               apiKey={apiKey}
               useStored={status.connected}
@@ -218,87 +253,80 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
               value={fromNumber}
               onChange={setFromNumber}
             />
-            <p className="text-2xs text-slate-500 mt-1">The Telnyx number calls are placed from. Required to dial leads.</p>
-          </div>
+          </Field>
         </div>
 
-        {/* The Call Control Application and Messaging Profile are found from the
-            key — and repaired if they go stale — so they are reported here as
-            results rather than asked for as questions. */}
         {status.connected && (
-          <div className="pl-7 space-y-2">
-            <p className="text-xs text-slate-500">Detected from your account — nothing to enter:</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <div className="bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 min-w-0">
-                <div className="text-2xs text-slate-500">Voice Connection</div>
-                <div className="text-xs font-mono text-slate-200 truncate" title={status.connectionId}>
-                  {status.connectionId || 'not detected'}
-                </div>
-              </div>
-              <div className="bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 min-w-0">
-                <div className="text-2xs text-slate-500">Messaging Profile</div>
-                <div className="text-xs font-mono text-slate-200 truncate" title={status.messagingProfileId}>
-                  {status.messagingProfileId || 'none — SMS disabled'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {status.connected && (
-          <div className="pl-7 flex flex-wrap items-center gap-3 text-xs">
-            <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Voice calling ready</span>
+          <div className="flex flex-wrap items-center gap-2 text-2xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-300 border border-green-500/25">
+              <CheckCircle2 className="w-3 h-3" /> Calls ready
+            </span>
             {status.hasMessaging ? (
-              <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> SMS messaging ready</span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-300 border border-green-500/25">
+                <CheckCircle2 className="w-3 h-3" /> Texts ready
+              </span>
             ) : (
-              <span className="flex items-center gap-1 text-amber-400"><AlertTriangle className="w-3.5 h-3.5" /> SMS not available — assign your number to a Telnyx Messaging Profile to enable texting</span>
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25"
+                title="Assign your number to a Telnyx Messaging Profile to enable texting."
+              >
+                <AlertTriangle className="w-3 h-3" /> Texts off: add your number to a Messaging Profile in Telnyx
+              </span>
             )}
           </div>
         )}
 
-        <div className="pl-7">
+        {/* The Call Control Application and Messaging Profile are found from the key (and repaired if they go stale),
+            so they are an override folded away, not a question. */}
+        <div>
           <button
             type="button"
             onClick={() => setAdvanced((v) => !v)}
             className="text-xs text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
           >
             {advanced ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            Advanced — override the detected IDs
+            Advanced settings
           </button>
 
           {advanced && (
-            <div className="mt-2 space-y-3">
-              <p className="text-xs text-slate-500 leading-relaxed">
-                We pick the Call Control Application and Messaging Profile off your API key and fix
-                them if they drift. Set these only when your account has more than one and calls must
-                go through a specific pair. Left blank, detection stays on.
+            <div className="mt-3 space-y-3">
+              <p className="text-2xs text-slate-400">
+                We detect these from your API key. Fill them in only if calls must use a specific connection. Leave blank to auto-detect.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 text-xs">Voice Connection ID</label>
-                  <input value={connectionId} onChange={(e) => setConnectionId(e.target.value)} placeholder={status.connectionId || 'Leave blank to auto-detect'} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-500" />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 text-xs">Messaging Profile ID</label>
-                  <input value={messagingProfileId} onChange={(e) => setMessagingProfileId(e.target.value)} placeholder={status.messagingProfileId || 'Leave blank to auto-detect'} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-500" />
-                </div>
+                <Field label="Voice connection ID">
+                  <input
+                    value={connectionId}
+                    onChange={(e) => setConnectionId(e.target.value)}
+                    placeholder={status.connectionId || 'Auto-detect'}
+                    className={`${input} font-mono`}
+                  />
+                </Field>
+                <Field label="Messaging profile ID">
+                  <input
+                    value={messagingProfileId}
+                    onChange={(e) => setMessagingProfileId(e.target.value)}
+                    placeholder={status.messagingProfileId || 'Auto-detect (none means texts are off)'}
+                    className={`${input} font-mono`}
+                  />
+                </Field>
               </div>
             </div>
           )}
         </div>
 
-        <div className="pl-7">
-          <button
-            type="button"
-            disabled={busy !== null || (!apiKey && !status.connected) || !fromNumber.trim() || (!status.hasPublicKey && !publicKey.trim())}
+        <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-800">
+          <Button
+            disabled={(busy !== null && busy !== 'save') || missing.length > 0}
+            loading={busy === 'save'}
+            icon={<KeyRound />}
             onClick={() =>
               run('save', () => {
                 const payload: TelnyxCredentials = { fromNumber, label };
                 if (apiKey) payload.apiKey = apiKey;
                 if (publicKey.trim()) payload.publicKey = publicKey.trim();
-                // Overrides only travel when Advanced is open and filled in. Echoing
-                // the stored ids back would pin the connection to them and stop the
-                // server re-detecting — which is how a stale id survives a re-save.
+                // Overrides only travel when Advanced is open and filled in. Echoing the stored ids back would pin the
+                // connection to them and stop the server re-detecting — which is how a stale id survives a re-save.
                 if (advanced && connectionId.trim()) payload.connectionId = connectionId.trim();
                 if (advanced && messagingProfileId.trim()) payload.messagingProfileId = messagingProfileId.trim();
                 return saveTelnyxCredentials(payload).then((r) => {
@@ -310,73 +338,57 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                 });
               })
             }
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
           >
-            {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
-            {status.connected ? 'Save changes' : 'Connect'}
-          </button>
-          {!fromNumber.trim() && <p className="text-2xs text-rose-400 mt-1.5">A From Number is required before you can save.</p>}
-          {!status.hasPublicKey && !publicKey.trim() && (
-            <p className="text-2xs text-rose-400 mt-1.5">A Public Key is required before you can save — without it Telnyx's events are ignored.</p>
-          )}
+            {status.connected ? 'Save changes' : 'Connect Telnyx'}
+          </Button>
+          {missing.length > 0 && <p className="text-2xs text-slate-400">Still needed: {missing.join(', ')}</p>}
         </div>
-      </div>
+      </section>
 
       {/* The other accounts on file, and the way to put another one there. */}
       {status.connected && (
-        <div className="space-y-3 border-t border-slate-800 pt-4">
+        <div className="space-y-3">
           <TelnyxAccounts accounts={accounts} onChange={refresh} />
 
           {adding ? (
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-3">
+            <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-white">Add another Telnyx account</p>
-                <button
-                  type="button"
-                  onClick={() => setAdding(false)}
-                  className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <p className="text-sm font-bold text-white">Add another Telnyx account</p>
+                <IconButton onClick={() => setAdding(false)} aria-label="Close" icon={<X />} />
               </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                It is saved alongside the others and becomes the active one — calls and SMS switch
-                to it straight away. The account you are on now is kept, not replaced.
-              </p>
+              <p className="text-2xs text-slate-400">It becomes the active account right away. Your current one is kept.</p>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <input
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder="Name (e.g. Dallas office)"
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500"
-                />
-                <input
-                  type="password"
-                  value={newApiKey}
-                  onChange={(e) => setNewApiKey(e.target.value)}
-                  placeholder="API key (KEY0123…)"
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono focus:outline-none focus:border-emerald-500"
-                />
-                <FromNumberSelect
-                  apiKey={newApiKey}
-                  useStored={false}
-                  value={newFrom}
-                  onChange={setNewFrom}
-                  compact
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field label="Account name">
+                  <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="e.g. Dallas office" className={input} />
+                </Field>
+                <Field label="API key" required>
+                  <input
+                    type="password"
+                    value={newApiKey}
+                    onChange={(e) => setNewApiKey(e.target.value)}
+                    placeholder="KEY0123…"
+                    className={`${input} font-mono`}
+                  />
+                </Field>
+                <Field label="Public key" required>
+                  <input
+                    value={newPublicKey}
+                    onChange={(e) => setNewPublicKey(e.target.value)}
+                    placeholder="e.g. AbCd…="
+                    className={`${input} font-mono`}
+                  />
+                </Field>
+                <Field label="From number" required>
+                  <FromNumberSelect apiKey={newApiKey} useStored={false} value={newFrom} onChange={setNewFrom} compact />
+                </Field>
               </div>
 
-              <input
-                value={newPublicKey}
-                onChange={(e) => setNewPublicKey(e.target.value)}
-                placeholder="Public key — Telnyx → Keys & Credentials → Public Key"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
-              />
-
-              <button
-                type="button"
-                disabled={busy !== null || !newApiKey.trim() || !newFrom.trim() || !newPublicKey.trim()}
+              <Button
+                size="sm"
+                disabled={(busy !== null && busy !== 'add') || !newApiKey.trim() || !newFrom.trim() || !newPublicKey.trim()}
+                loading={busy === 'add'}
+                icon={<Plus />}
                 onClick={() =>
                   run('add', () =>
                     addTelnyxAccount({
@@ -395,61 +407,95 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                     }),
                   )
                 }
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
               >
-                {busy === 'add' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Add and switch to it
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="text-xs text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add another Telnyx account
-            </button>
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)} icon={<Plus />}>
+              Add another Telnyx account
+            </Button>
           )}
         </div>
       )}
 
-      {/* Step 2 — assistant */}
-      <div className={`space-y-3 ${status.connected ? '' : 'opacity-40 pointer-events-none'}`}>
-        <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-400 text-xs font-bold flex items-center justify-center">2</span>
-          <span className="text-xs font-semibold text-slate-200">AI voice assistant</span>
-        </div>
+      {/* Step 2 — assistant. Folded to one line until step 1 is done, so the first visit is one short form. */}
+      <section className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 space-y-4">
+        <Step
+          n={2}
+          title="AI voice assistant"
+          done={status.hasAssistant}
+          aside={
+            !status.connected && (
+              <span className="inline-flex items-center gap-1.5 text-2xs text-slate-400">
+                <Lock className="w-3 h-3" /> Finish step 1 first
+              </span>
+            )
+          }
+        />
 
-        <div className="pl-7 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {/* Option A: auto-create */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-            <p className="text-xs font-semibold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> Create with default settings</p>
-            <p className="text-xs text-slate-400 mt-1 mb-2">Name it, and we'll create a ready-to-use real-estate qualifier assistant in your account.</p>
-            <input
-              value={assistantName}
-              onChange={(e) => setAssistantName(e.target.value)}
-              placeholder="Assistant name (e.g. Austin Home Advisors)"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs mb-2 focus:outline-none focus:border-emerald-500"
-            />
-            <button type="button" disabled={busy !== null || !assistantName.trim()} onClick={() => run('create', () => createAssistant(assistantName).then(() => setActiveView('ai_settings')), 'AI assistant created.')} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5">
-              {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              Create assistant
-            </button>
-          </div>
+        {status.connected && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Option A: auto-create */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+              <div>
+                <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Create a new one
+                  <span className="text-2xs font-semibold px-1.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
+                    Recommended
+                  </span>
+                </p>
+                <p className="text-2xs text-slate-400 mt-1">Ready to use for real-estate leads. Just give it a name.</p>
+              </div>
+              <input
+                value={assistantName}
+                onChange={(e) => setAssistantName(e.target.value)}
+                placeholder="e.g. Austin Home Advisors"
+                className={input}
+              />
+              <Button
+                size="sm"
+                disabled={(busy !== null && busy !== 'create') || !assistantName.trim()}
+                loading={busy === 'create'}
+                icon={<Sparkles />}
+                className="self-start"
+                onClick={() =>
+                  run('create', () => createAssistant(assistantName).then(() => setActiveView('ai_settings')), 'AI assistant created.')
+                }
+              >
+                Create assistant
+              </Button>
+            </div>
 
-          {/* Option B: attach existing */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-            <p className="text-xs font-semibold text-white flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5 text-cyan-400" /> Use an existing assistant</p>
-            <p className="text-xs text-slate-400 mt-1 mb-2">Already built one in Telnyx? Paste its ID.</p>
-            <div className="flex items-center gap-2">
-              <input value={assistantId} onChange={(e) => setAssistantId(e.target.value)} placeholder="assistant-…" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500" />
-              <button type="button" disabled={busy !== null || !assistantId} onClick={() => run('attach', () => attachAssistant(assistantId.trim()), 'AI assistant attached.')} className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold">
-                {busy === 'attach' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Attach'}
-              </button>
+            {/* Option B: attach existing */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+              <div>
+                <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Link2 className="w-3.5 h-3.5 text-cyan-400" /> Use one you already have
+                </p>
+                <p className="text-2xs text-slate-400 mt-1">Paste its ID from Telnyx.</p>
+              </div>
+              <input
+                value={assistantId}
+                onChange={(e) => setAssistantId(e.target.value)}
+                placeholder="assistant-…"
+                className={`${input} font-mono`}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={(busy !== null && busy !== 'attach') || !assistantId}
+                loading={busy === 'attach'}
+                icon={<Link2 />}
+                onClick={() => run('attach', () => attachAssistant(assistantId.trim()), 'AI assistant attached.')}
+              >
+                Attach
+              </Button>
             </div>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 };

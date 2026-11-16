@@ -6,6 +6,7 @@ import { Strategy, StrategyStep, getStrategy, saveStrategy, emptyStep } from '..
 import { AlwaysOnRules, StepRules } from '../journey/StepRules';
 import { SmsPreview } from '../journey/SmsPreview';
 import { BUSINESS_DETAILS_SAVED, getBusinessDetails, type BusinessDetailsView } from '../../utils/smsConversationApi';
+import { Button, IconButton } from '../common/Button';
 
 /** A step's condition depends on the step before it, so every change refits them all. */
 const fit = (steps: StrategyStep[]) => fitSteps(steps, (s) => s.channel);
@@ -171,9 +172,9 @@ export const StrategyEditor: React.FC = () => {
             <span className="text-slate-500 text-xs">{i === 0 ? 'after the lead comes in' : 'after the step before'}</span>
 
             <div className="ml-auto flex items-center gap-1">
-              <button type="button" onClick={() => move(i, -1)} className="text-slate-500 hover:text-slate-200 p-1"><ArrowUp className="w-3.5 h-3.5" /></button>
-              <button type="button" onClick={() => move(i, 1)} className="text-slate-500 hover:text-slate-200 p-1"><ArrowDown className="w-3.5 h-3.5" /></button>
-              <button type="button" onClick={() => removeStep(i)} className="text-rose-400 hover:text-rose-300 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+              <IconButton size="sm" onClick={() => move(i, -1)} aria-label="Move up" icon={<ArrowUp />} />
+              <IconButton size="sm" onClick={() => move(i, 1)} aria-label="Move down" icon={<ArrowDown />} />
+              <IconButton size="sm" className="hover:text-rose-300!" onClick={() => removeStep(i)} aria-label="Remove step" icon={<Trash2 />} />
             </div>
           </div>
 
@@ -216,22 +217,16 @@ export const StrategyEditor: React.FC = () => {
       <AlwaysOnRules />
 
       <div className="flex items-center gap-2 pt-1">
-        <button type="button" onClick={() => addStep('sms')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">
-          <MessageSquare className="w-3.5 h-3.5" /> Add SMS
-        </button>
-        <button type="button" onClick={() => addStep('voice')} className="flex items-center gap-1 text-xs text-emerald-400 font-semibold hover:text-emerald-300">
-          <Phone className="w-3.5 h-3.5" /> Add Call
-        </button>
+        <Button variant="outline" size="sm" onClick={() => addStep('sms')} icon={<MessageSquare />}>
+          Add SMS
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => addStep('voice')} icon={<Phone />}>
+          Add Call
+        </Button>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent rounded-lg text-xs font-bold flex items-center gap-1.5"
-          >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          <Button size="sm" onClick={save} loading={saving} icon={<Save />}>
             {saving ? 'Saving…' : 'Save Strategy'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

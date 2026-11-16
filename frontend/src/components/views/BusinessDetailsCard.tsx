@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { BUSINESS_DETAILS_SAVED, getBusinessDetails, updateBusinessDetails, type BusinessDetails, type BusinessDetailsView } from '../../utils/smsConversationApi';
 import { displayNumber } from '../../utils/smsCompliance';
+import { Button } from '../common/Button';
 
 const FIELDS: { key: keyof BusinessDetails; label: string; placeholder: string; max: number; hint?: string }[] = [
   { key: 'mailingAddress', label: 'Mailing address', placeholder: '100 King St W, Suite 500, Toronto ON M5X 1A9', max: 200, hint: 'A street address or PO box leads can write to.' },
@@ -109,15 +110,9 @@ export const BusinessDetailsCard: React.FC = () => {
             </div>
           ))}
           <div className="flex justify-end pt-1">
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={!changed}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
-            >
-              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            <Button size="sm" onClick={() => void save()} disabled={!changed} loading={busy}>
               Save details
-            </button>
+            </Button>
           </div>
         </fieldset>
       )}

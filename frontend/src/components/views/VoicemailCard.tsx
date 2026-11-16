@@ -3,6 +3,7 @@ import { Info, Loader2, Voicemail } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { getVoicemail, updateVoicemail, type VoicemailStatus } from '../../utils/voicemailApi';
+import { Button } from '../common/Button';
 
 /** Matches the server's limit: about 30 seconds spoken. */
 const MAX_CHARS = 500;
@@ -166,23 +167,13 @@ export const VoicemailCard: React.FC = () => {
                   </div>
                   <div className="flex items-center justify-end gap-2 pt-2">
                     {status.message !== status.defaultMessage && (
-                      <button
-                        type="button"
-                        onClick={() => void save({ message: '' }, 'Default voicemail message restored.')}
-                        className="px-4 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold cursor-pointer disabled:opacity-40"
-                      >
+                      <Button variant="outline" size="sm" onClick={() => void save({ message: '' }, 'Default voicemail message restored.')}>
                         Use default
-                      </button>
+                      </Button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => void save({ message: draft }, 'Voicemail message saved.')}
-                      disabled={!changed || !draft.trim()}
-                      className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
-                    >
-                      {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <Button size="sm" onClick={() => void save({ message: draft }, 'Voicemail message saved.')} disabled={!changed || !draft.trim()} loading={busy}>
                       Save message
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}

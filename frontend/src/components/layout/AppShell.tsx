@@ -3,7 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { ChevronRight, Menu } from 'lucide-react';
 import { ProfileMenu } from '../auth/ProfileMenu';
 import { DashboardSidebar, type NavGroup } from './DashboardSidebar';
-import { ThemeToggle } from './ThemeToggle';
+import { AppearanceButton } from './AppearanceButton';
+import { IconButton } from '../common/Button';
 
 const COLLAPSED_KEY = 'ep_sidebar_collapsed';
 
@@ -54,7 +55,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-on-accent">
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-slate-950/80 lg:hidden" onClick={() => setMobileOpen(false)} />
+        <div className="fixed inset-0 z-40 bg-scrim backdrop-blur-[2px] lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
       <DashboardSidebar
         groups={groups}
@@ -69,14 +70,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="sticky top-0 z-30 h-14 shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 bg-slate-900/90 backdrop-blur-xl border-b border-slate-800">
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <button
-              type="button"
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open menu"
-              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer transition-colors"
-            >
-              <Menu className="w-[18px] h-[18px]" />
-            </button>
+            <IconButton className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu" icon={<Menu />} />
             {current && (
               <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0 text-xs">
                 {group?.label && (
@@ -91,14 +85,14 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <ThemeToggle />
+            <AppearanceButton hasSettings={hasSettings} />
             <div className="w-px h-6 bg-slate-800 mx-1" aria-hidden />
             <ProfileMenu onOpenSettings={hasSettings ? () => onNavigate('settings') : undefined} />
           </div>
         </header>
 
         {/* Every view renders its own heading and actions below the navbar. */}
-        <main className="flex-1 overflow-y-auto custom-scrollbar">{children}</main>
+        <main className="app-canvas flex-1 overflow-y-auto custom-scrollbar">{children}</main>
       </div>
     </div>
   );

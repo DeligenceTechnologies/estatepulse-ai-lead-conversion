@@ -12,6 +12,7 @@ import {
   type CalendarProviderId,
   type OrganizationCalendarStatus,
 } from '../../../utils/calendarApi';
+import { Button } from '../../common/Button';
 import { CalComConnect } from './CalComConnect';
 import { CalendlyConnect } from './CalendlyConnect';
 import { ConnectFlow } from './ConnectFlow';
@@ -20,7 +21,6 @@ import {
   PROVIDERS,
   ProviderBadge,
   ROLE_LABEL,
-  SecondaryButton,
   StatusPill,
   WORKSPACE_LABEL,
   panel,
@@ -114,46 +114,42 @@ const ConnectionSummary: React.FC<{
         <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800">
           {canEdit && (
             <>
-              <SecondaryButton onClick={onSwitch} disabled={disconnecting} icon={<ArrowLeftRight className="w-3.5 h-3.5" />}>
+              <Button variant="outline" size="sm" onClick={onSwitch} disabled={disconnecting} icon={<ArrowLeftRight />}>
                 Change calendar
-              </SecondaryButton>
+              </Button>
               {confirming ? (
                 <>
                   <span className="text-2xs text-slate-400">Disconnect {label}?</span>
-                  <SecondaryButton
-                    danger
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => void disconnect()}
-                    disabled={disconnecting}
-                    icon={<Unlink className="w-3.5 h-3.5" />}
+                    loading={disconnecting}
+                    icon={<Unlink />}
                   >
                     {disconnecting ? 'Disconnecting…' : 'Yes, disconnect'}
-                  </SecondaryButton>
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(false)}
-                    disabled={disconnecting}
-                    className="h-8 px-2 text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={disconnecting}>
                     Cancel
-                  </button>
+                  </Button>
                 </>
               ) : (
-                <SecondaryButton onClick={() => setConfirming(true)} icon={<Unlink className="w-3.5 h-3.5" />}>
+                <Button variant="danger-soft" size="sm" onClick={() => setConfirming(true)} icon={<Unlink />}>
                   Disconnect
-                </SecondaryButton>
+                </Button>
               )}
             </>
           )}
           {/* Settings only connects; availability and meetings live under Calendar in the sidebar. */}
           {!broken && !confirming && (
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => navigate('/team-availability')}
-              className="group ml-auto h-8 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-on-accent inline-flex items-center gap-1.5 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              iconRight={<ArrowRight />}
+              className="ml-auto"
             >
               Open Calendar
-              <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -252,13 +248,9 @@ export const ConnectCalendar: React.FC = () => {
           <div className="font-semibold text-rose-100">Calendar status could not be loaded</div>
           {loadError}
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-100 bg-rose-500/20 hover:bg-rose-500/30 cursor-pointer transition-colors"
-        >
+        <Button variant="danger-soft" size="sm" onClick={() => void load()}>
           Retry
-        </button>
+        </Button>
       </div>
     );
   } else if (!status) {

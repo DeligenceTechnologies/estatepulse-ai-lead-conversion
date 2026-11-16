@@ -1,0 +1,193 @@
+/*
+ * typography.css — every text style in the app, in one place.
+ *
+ * Two layers:
+ *
+ * 1. Tag defaults (@layer base). A bare <h1> … <h6>, <p>, <label>, <small>
+ *    gets a sensible size, weight, line height and letter spacing. Tailwind's
+ *    preflight resets all of these to plain body text; this puts the
+ *    hierarchy back. Any class on the tag still wins (utilities layer), so
+ *    existing screens keep the look they set. Colour is not set here on
+ *    purpose: text inherits the colour of its container, so a <p> inside a
+ *    red alert stays red.
+ *
+ * 2. Text roles (`type-*` utilities). One class sets size, weight, spacing and
+ *    a colour that reads well in both themes. Prefer these for new code, or
+ *    use the <Heading> / <Text> components (components/common/Text.tsx):
+ *
+ *      type-display   hero numbers and landing headlines
+ *      type-h1        page title (one per page)
+ *      type-h2        page heading / section title
+ *      type-h3        card or panel title
+ *      type-h4        small section title inside a card
+ *      type-body      normal reading text
+ *      type-body-sm   secondary text, descriptions, table cells
+ *      type-muted     quieter supporting text
+ *      type-caption   hints, timestamps, helper text
+ *      type-label     form labels
+ *      type-overline  small uppercase group labels
+ *
+ * Sizes use the scale in index.css (text-2xs is the 12.5px floor), colours use
+ * the role tokens in theme.css, so both themes follow automatically.
+ */
+
+/* ---------------------------------------------------------------------------
+ * Rendering: crisp, even text in both themes.
+ * ------------------------------------------------------------------------- */
+html {
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+  font-feature-settings: 'cv11', 'ss01';
+}
+/* Thin "antialiased" smoothing suits light text on dark; dark text on a light
+   page reads heavier and clearer with the platform's default smoothing. */
+:root[data-theme="light"] body {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* ---------------------------------------------------------------------------
+ * 1. Tag defaults
+ * ------------------------------------------------------------------------- */
+@layer base {
+  /* Medium weight by default: thin strokes are the first thing to blur for
+     tired or older eyes. Anything with its own font-* class keeps it. */
+  body {
+    font-weight: 500;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  h1 {
+    font-size: var(--text-2xl);
+    line-height: 2rem;
+    letter-spacing: -0.02em;
+    font-weight: 800;
+  }
+  h2 {
+    font-size: var(--text-xl);
+    line-height: 1.75rem;
+    letter-spacing: -0.015em;
+  }
+  h3 {
+    font-size: var(--text-base);
+    line-height: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+  }
+  h5 {
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+  }
+  h6 {
+    font-size: var(--text-2xs);
+    line-height: var(--text-2xs--line-height);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  label {
+    font-weight: 500;
+  }
+  small {
+    font-size: var(--text-2xs);
+    line-height: var(--text-2xs--line-height);
+  }
+  strong,
+  b {
+    font-weight: 700;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Text roles
+ * ------------------------------------------------------------------------- */
+@utility type-display {
+  font-size: var(--text-3xl);
+  line-height: 2.375rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--color-fg);
+  text-wrap: balance;
+}
+@utility type-h1 {
+  font-size: var(--text-2xl);
+  line-height: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-fg);
+  text-wrap: balance;
+}
+@utility type-h2 {
+  font-size: var(--text-xl);
+  line-height: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--color-fg);
+  text-wrap: balance;
+}
+@utility type-h3 {
+  font-size: var(--text-base);
+  line-height: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-fg);
+}
+@utility type-h4 {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: 700;
+  color: var(--color-fg);
+}
+@utility type-body {
+  font-size: var(--text-sm);
+  line-height: 1.5rem;
+  font-weight: 500;
+  color: var(--color-slate-200);
+  text-wrap: pretty;
+}
+@utility type-body-sm {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: 500;
+  color: var(--color-slate-300);
+  text-wrap: pretty;
+}
+@utility type-muted {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: 500;
+  color: var(--color-fg-muted);
+  text-wrap: pretty;
+}
+@utility type-caption {
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  font-weight: 600;
+  color: var(--color-fg-subtle);
+}
+@utility type-label {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: 600;
+  color: var(--color-slate-200);
+}
+@utility type-overline {
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-fg-subtle);
+}

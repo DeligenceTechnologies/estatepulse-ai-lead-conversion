@@ -32,7 +32,8 @@ export const Panel: React.FC<{
       {typeof aside === 'string' ? <span className="text-2xs text-slate-500 shrink-0">{aside}</span> : aside}
     </div>
 
-    <div className="custom-scrollbar flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-4 pr-1 -mr-1">
+    {/* No overscroll containment: once the card's own list reaches its end, the wheel scrolls the page. */}
+    <div className="custom-scrollbar flex-1 min-h-0 overflow-y-auto space-y-4 pr-1 -mr-1">
       {children}
     </div>
   </div>

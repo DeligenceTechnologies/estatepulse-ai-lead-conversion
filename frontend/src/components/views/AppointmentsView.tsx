@@ -15,6 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listAppointments, type Appointment } from '../../utils/calendarApi';
 import { formatDate, formatTime } from '../../lib/datetime';
+import { Button } from '../common/Button';
 
 type Tab = 'upcoming' | 'past' | 'cancelled' | 'all';
 
@@ -124,18 +125,9 @@ export const AppointmentsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={refresh}
-          disabled={refreshing}
-          className="text-xs text-slate-300 bg-slate-900 border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 h-fit"
-        >
-          {refreshing ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
-          )}
+        <Button variant="outline" onClick={refresh} loading={refreshing} icon={<RefreshCw />}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -270,12 +262,9 @@ export const AppointmentsView: React.FC = () => {
                 </div>
 
                 <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => setSelectedLeadId(appt.leadId)}
-                    className="text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  >
+                  <Button variant="link" onClick={() => setSelectedLeadId(appt.leadId)}>
                     View Lead Profile →
-                  </button>
+                  </Button>
 
                   {!cancelled && !ended && appt.meetingUrl && (
                     <a
@@ -317,12 +306,8 @@ const EmptyState: React.FC<{ onGoToAgents: () => void }> = ({ onGoToAgents }) =>
         lead is not recorded.
       </p>
     </div>
-    <button
-      onClick={onGoToAgents}
-      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-    >
-      <ExternalLink className="w-3.5 h-3.5" />
+    <Button variant="secondary" size="sm" onClick={onGoToAgents} icon={<ExternalLink />}>
       See which agents have connected
-    </button>
+    </Button>
   </div>
 );

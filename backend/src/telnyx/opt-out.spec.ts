@@ -92,7 +92,7 @@ describe('a spoken opt-out', () => {
       await service.scoreFromConversation('cc-1', 'conv-1');
       expect(apply).not.toHaveBeenCalled();
     });
-
+ 
     it('waits after the conversation ends, then looks', () => {
       vi.useFakeTimers();
       const { service } = make();

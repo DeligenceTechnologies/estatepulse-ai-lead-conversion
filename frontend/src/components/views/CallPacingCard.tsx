@@ -3,6 +3,7 @@ import { Gauge, Loader2 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { getOrgSettings, updateOrgSettings } from '../../utils/orgSettingsApi';
 import { getOutreachConfig } from '../../utils/outreachApi';
+import { Button } from '../common/Button';
 
 const input = 'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-24 text-center focus:outline-none focus:border-emerald-600';
 
@@ -81,15 +82,9 @@ export const CallPacingCard: React.FC<{ limit?: number }> = ({ limit: saved }) =
                 Of your {limit} concurrent call{limit === 1 ? '' : 's'}, a batch may use {limit - reserved} at a time.
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving || invalid}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
-            >
-              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            <Button size="sm" onClick={() => void save()} disabled={invalid} loading={saving}>
               Save call pacing
-            </button>
+            </Button>
           </>
         )
       )}

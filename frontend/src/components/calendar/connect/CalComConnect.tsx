@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Check, Eye, EyeOff, KeyRound, Link2, Loader2, User, Users } from 'lucide-react';
+import { Check, Eye, EyeOff, KeyRound, Link2, User, Users } from 'lucide-react';
 import { messageFor } from '../../../lib/api';
 import { connectCalCom, listCalComTeams, type CalComAccountCheck } from '../../../utils/calendarApi';
-import { Notice, PROVIDERS, PrimaryButton, panel } from '../shared/ui';
+import { Button } from '../../common/Button';
+import { Notice, PROVIDERS, panel } from '../shared/ui';
 
 type Target = 'personal' | number;
 
@@ -121,14 +122,9 @@ export const CalComConnect: React.FC<{ onConnected: () => Promise<boolean>; reco
             </button>
           </div>
           {!checked && (
-            <button
-              type="submit"
-              disabled={busy || !key}
-              className="h-9 px-4 rounded-lg text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            <Button type="submit" variant="secondary" disabled={!key} loading={busy} icon={<Check />}>
               Verify key
-            </button>
+            </Button>
           )}
         </div>
         <p className="mt-1.5 text-2xs text-slate-500">
@@ -163,15 +159,9 @@ export const CalComConnect: React.FC<{ onConnected: () => Promise<boolean>; reco
                 : 'Choose your personal account or one of your teams.'}
           </p>
 
-          <PrimaryButton
-            onClick={() => void connect()}
-            disabled={target === null}
-            busy={busy}
-            className={PROVIDERS.cal.button}
-            icon={<Link2 className="w-3.5 h-3.5" />}
-          >
+          <Button onClick={() => void connect()} disabled={target === null} loading={busy} icon={<Link2 />}>
             {reconnect ? 'Reconnect Cal.com' : 'Connect Cal.com'}
-          </PrimaryButton>
+          </Button>
         </div>
       )}
     </div>

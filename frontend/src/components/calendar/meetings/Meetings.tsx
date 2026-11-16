@@ -6,6 +6,7 @@ import { Notice, PROVIDERS } from '../shared/ui';
 import { EventTypesDrawer } from './EventTypesDrawer';
 import { MeetingsPanel } from './MeetingsPanel';
 import { typeColors, upcomingByType, type MeetingFilters } from './meetings';
+import { Button } from '../../common/Button';
 
 /** Re-render often enough for "in 5 min" and "Live now" to stay true. */
 const CLOCK_TICK_MS = 30_000;
@@ -52,18 +53,17 @@ export const Meetings: React.FC<{ provider: CalendarProviderId; syncVersion: num
   }
 
   const eventsButton = (
-    <button
-      type="button"
+    <Button
+      variant="outline"
       onClick={() => setEventsOpen(true)}
       disabled={data === null}
       aria-haspopup="dialog"
       title="Event types and their booking links"
-      className="h-9 px-3 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:border-slate-600 hover:text-white inline-flex items-center gap-1.5 shrink-0 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+      icon={<CalendarRange />}
     >
-      <CalendarRange className="w-3.5 h-3.5" />
       Events
       {data && <span className="text-2xs text-slate-500 tabular-nums">{eventTypes.length}</span>}
-    </button>
+    </Button>
   );
 
   return (

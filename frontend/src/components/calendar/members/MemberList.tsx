@@ -1,7 +1,8 @@
 import React from 'react';
-import { Check, ExternalLink, Loader2, UserPlus } from 'lucide-react';
+import { Check, ExternalLink, UserPlus } from 'lucide-react';
 import type { CalendarMember } from '../../../utils/calendarApi';
 import { ROLE_LABEL } from '../shared/ui';
+import { Button } from '../../common/Button';
 
 const initials = (name: string): string =>
   name
@@ -131,15 +132,15 @@ export const MemberList: React.FC<{
                     On team
                   </span>
                 ) : canAdd && member.email ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => onAdd(member)}
                     disabled={adding !== null}
-                    aria-busy={busy || undefined}
+                    loading={busy}
                     title={`Create an agent login for ${member.name}`}
-                    className="h-8 px-3 rounded-lg text-xs font-semibold border border-slate-700 text-slate-200 hover:border-emerald-500/60 hover:text-emerald-200 hover:bg-emerald-500/10 inline-flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                    icon={<UserPlus />}
                   >
-                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                     {busy ? (
                       'Adding…'
                     ) : (
@@ -148,7 +149,7 @@ export const MemberList: React.FC<{
                         Add<span className="hidden sm:inline"> to team</span>
                       </span>
                     )}
-                  </button>
+                  </Button>
                 ) : (
                   <span
                     className="h-7 px-2.5 inline-flex items-center rounded-full text-2xs font-semibold bg-slate-800 text-slate-400"

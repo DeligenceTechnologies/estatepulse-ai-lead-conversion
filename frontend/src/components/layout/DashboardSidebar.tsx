@@ -2,12 +2,15 @@ import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Building2, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { IconButton } from '../common/Button';
 
 export interface NavItem {
   id: string;
   label: string;
   icon: LucideIcon;
   badge?: number;
+  /** Hover text for the badge, saying what it counts. */
+  badgeTitle?: string;
   /** Navigable but not built yet. */
   soon?: boolean;
 }
@@ -64,6 +67,7 @@ const NavRow: React.FC<{ item: NavItem; active: boolean; collapsed: boolean; onC
       {!!item.badge && (
         <>
           <span
+            title={item.badgeTitle}
             className={`text-2xs font-semibold px-1.5 min-w-5 text-center rounded-full bg-slate-800 text-slate-300 ${
               collapsed ? 'lg:hidden' : ''
             }`}
@@ -98,7 +102,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   return (
     <aside
       className={`fixed lg:static inset-y-0 left-0 z-50 h-screen flex flex-col shrink-0 overflow-hidden select-none
-        bg-slate-900 border-r border-slate-800 shadow-[2px_0_16px_rgba(0,0,0,0.12)] lg:shadow-none
+        bg-slate-900 border-r border-slate-800 shadow-(--shadow-drawer) lg:shadow-none
         transition-[width,transform] duration-300 ease-in-out w-60 ${collapsed ? 'lg:w-[68px]' : ''}
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
     >
@@ -124,14 +128,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             <span className="block text-2xs text-slate-500 truncate max-w-[140px]">{organization?.name ?? '—'}</span>
           </div>
         </button>
-        <button
-          type="button"
-          onClick={onMobileClose}
-          aria-label="Close menu"
-          className="lg:hidden w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
-        >
-          <X className="w-4 h-4" aria-hidden />
-        </button>
+        <IconButton className="lg:hidden" onClick={onMobileClose} aria-label="Close menu" icon={<X />} />
       </div>
 
       {/* Links */}
