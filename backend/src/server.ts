@@ -30,6 +30,8 @@ const ROOT_ROUTES = [
   'ingest/v1/typeform/:token',
   'ingest/v1/webhook/:token',
   'ingest/v1/custom/:token',
+  // The URL baked into the Apps Script on an owner's Google Form.
+  'ingest/v1/google-forms/:token',
   'ingest/v1/crm/hubspot/webhook',
   'webhooks/leads/:token',
   'webhooks/telnyx/voice',

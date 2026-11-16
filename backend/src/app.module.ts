@@ -15,6 +15,7 @@ import { IngestModule } from './ingest/ingest.module';
 import { IntegrationModule } from './integration/integration.module';
 import { LeadSourceModule } from './lead-source/lead-source.module';
 import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
+import { GoogleFormsModule } from './google-forms/google-forms.module';
 import { FileImportModule } from './file-import/file-import.module';
 import { CrmModule } from './crm/crm.module';
 import { CustomWebhookModule } from './custom-webhook/custom-webhook.module';
@@ -44,6 +45,7 @@ import {QueueModule} from "@/queue/queue.module";
     IngestModule,
     LeadSourceModule,
     GoogleSheetsModule,
+    GoogleFormsModule,
     FileImportModule,
     CustomWebhookModule,
     CrmModule,
