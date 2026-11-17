@@ -9,6 +9,7 @@ import {
   type FormSource,
 } from '../../utils/googleFormsApi';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
+import { Button } from '../common/Button';
 
 /**
  * Mapping a Google Form's questions to lead fields.
@@ -125,18 +126,18 @@ export const FormMappingModal: React.FC<{
             <span className="text-2xs text-slate-500">
               {questions.length} question{questions.length === 1 ? '' : 's'} on this form
             </span>
-            <button
-              type="button"
-              disabled={refreshing}
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={refreshing}
+              icon={<RefreshCw />}
               onClick={() => {
                 setRefreshing(true);
                 void load(true);
               }}
-              className="text-2xs font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer disabled:opacity-40"
             >
-              {refreshing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
               Check for changes
-            </button>
+            </Button>
           </div>
 
           <div className="rounded-xl border border-slate-800 divide-y divide-slate-800 max-h-[22rem] overflow-y-auto">
@@ -194,22 +195,12 @@ export const FormMappingModal: React.FC<{
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white cursor-pointer"
-            >
+            <Button variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              type="button"
-              disabled={saving || clashes.size > 0}
-              onClick={save}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 hover:bg-green-500 text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            </Button>
+            <Button loading={saving} disabled={clashes.size > 0} onClick={save} icon={<Check />}>
               Save mapping
-            </button>
+            </Button>
           </div>
         </div>
       )}

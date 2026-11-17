@@ -24,6 +24,7 @@ import { FormMappingModal } from '../googleforms/FormMappingModal';
 import { FormSetupModal } from '../googleforms/FormSetupModal';
 import { errorText, timeAgo } from '../sheets/SheetModal';
 import { IntegrationCard } from './IntegrationCard';
+import { Button, buttonClass } from '../common/Button';
 
 /**
  * Google Forms — connect the Google account, pick a form, map its questions,
@@ -41,7 +42,7 @@ const TONE = {
   idle: 'bg-slate-800 text-slate-400 border-slate-700',
 } as const;
 
-const link = 'text-2xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40';
+const link = buttonClass({ variant: 'ghost', size: 'sm' });
 
 const SourceRow: React.FC<{
   source: FormSource;
@@ -112,9 +113,9 @@ const SourceRow: React.FC<{
             </button>
           </>
         ) : null}
-        <button type="button" className={`${link} hover:text-rose-300`} disabled={busy} onClick={() => setConfirmRemove(true)}>
+        <Button variant="ghost" size="sm" className="hover:text-rose-300!" disabled={busy} onClick={() => setConfirmRemove(true)}>
           Remove
-        </button>
+        </Button>
         {busy && <Loader2 className="w-3 h-3 animate-spin text-slate-500" />}
       </div>
 
@@ -125,14 +126,9 @@ const SourceRow: React.FC<{
             an address that no longer accepts them.
           </div>
           <div className="flex gap-3">
-            <button
-              type="button"
-              className="font-bold text-rose-300 hover:text-rose-200 cursor-pointer disabled:opacity-40"
-              disabled={busy}
-              onClick={() => act(() => removeFormSource(source.id), 'Form removed.')}
-            >
+            <Button variant="danger" size="sm" disabled={busy} onClick={() => act(() => removeFormSource(source.id), 'Form removed.')}>
               Remove form
-            </button>
+            </Button>
             <button type="button" className={link} disabled={busy} onClick={() => setConfirmRemove(false)}>
               Cancel
             </button>
@@ -246,21 +242,22 @@ export const GoogleFormsCard: React.FC = () => {
   };
 
   const action = !config?.configured
-    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, className: 'bg-slate-800 text-slate-500 cursor-default' }
+    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, variant: 'secondary' as const, disabled: true }
     : busy === 'connect'
-      ? { label: 'Waiting for Google… (cancel)', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, className: 'bg-slate-800 text-slate-300 hover:bg-slate-700' }
+      ? { label: 'Waiting for Google… (cancel)', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, variant: 'secondary' as const }
       : !connection || !live
         ? {
             label: connection ? 'Reconnect Google' : 'Connect Google',
             icon: connection ? <RefreshCw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />,
             onClick: connect,
-            className: 'bg-green-600 text-white hover:bg-green-500',
+            variant: 'primary' as const,
           }
         : {
             label: busy === 'pick' ? 'Choose a form in Google…' : 'Add a form',
             icon: busy === 'pick' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />,
             onClick: pickerConfigured && busy !== 'pick' ? addForm : () => undefined,
-            className: pickerConfigured ? 'bg-slate-800 text-slate-100 hover:bg-slate-700' : 'bg-slate-800 text-slate-500 cursor-default',
+            variant: 'secondary' as const,
+            disabled: !pickerConfigured,
           };
 
   // Switched off on this server (GOOGLE_FORMS_ENABLED): no card at all.
@@ -332,19 +329,20 @@ export const GoogleFormsCard: React.FC = () => {
         )}
 
         {connection && (
-          <button
-            type="button"
+          <Button
+            variant={armed ? 'danger-soft' : 'ghost'}
+            size="sm"
             onClick={disconnect}
             onBlur={() => setArmed(false)}
             disabled={busy !== null}
-            className="text-2xs font-bold text-slate-500 hover:text-rose-300 transition-colors cursor-pointer disabled:opacity-40"
+            className={armed ? '' : 'hover:text-rose-300!'}
           >
             {busy === 'disconnect'
               ? 'Disconnecting…'
               : armed
                 ? 'Click again to disconnect Google — Sheets and Forms both stop'
                 : 'Disconnect Google'}
-          </button>
+          </Button>
         )}
 
         {error && (

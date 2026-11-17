@@ -10,7 +10,9 @@ import {
   type NewLeadInput,
 } from '../../api/client';
 import { TimezoneSelect } from '../common/TimezoneSelect';
+import { Select } from '../common/Select';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
+import { Button } from '../common/Button';
 
 interface CreateProps {
   mode?: 'create';
@@ -277,15 +279,16 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
       subtitle={
         editing
           ? focusPhone
-            ? 'Correct the phone number. Start it with the country code so the lead can be called.'
-            : 'Correct the lead’s details. Status, consent and assignment are changed on the lead itself.'
-          : 'Type in a lead you got by phone, walk-in or referral.'
+            ? 'Fix the phone number. Start with the country code.'
+            : 'Update the lead’s details.'
+          : 'Add a lead from a call, walk-in or referral.'
       }
       icon={icon}
+      wide
       onClose={props.onClose}
     >
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label htmlFor="nl-first" className={label}>
               First name <span className="text-rose-400">*</span>
@@ -323,55 +326,48 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
           </div>
         </div>
         <p className="text-2xs text-slate-500 -mt-2">
-          A phone number or an email is required. Start a phone number with its country code, e.g. +91 98765 43210 —
-          without one we cannot tell which country it belongs to, and the lead cannot be called.
-          {editing && ' A new number or address is checked against the do-not-contact list again.'}
+          Phone or email is required. Start the phone with the country code, e.g. +1 or +91.
         </p>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Edit mode leaves the zone to the lead's own control, which wakes queued calls when it changes. */}
         {!editing && (
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1">
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between gap-2 mb-1 h-[var(--text-xs--line-height)]">
               <label htmlFor="nl-timezone" className={`${label} mb-0`}>Time zone</label>
               {form.timezone && (
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, timezone: '' }))}
-                  className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer"
-                >
-                  Use phone&rsquo;s
-                </button>
+                <Button variant="link" onClick={() => setForm((f) => ({ ...f, timezone: '' }))}>
+                  Reset
+                </Button>
               )}
             </div>
             <TimezoneSelect
               id="nl-timezone"
               value={form.timezone}
-              placeholder="Work it out from the phone number"
+              placeholder="Auto (from phone number)"
               onChange={(zone) => setForm((f) => ({ ...f, timezone: zone }))}
               className={input}
             />
-            <p className="text-2xs text-slate-500 mt-1">
-              Calls and texts keep to the lead&rsquo;s local time. Left unset, their phone number decides.
-            </p>
           </div>
         )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="nl-location" className={label}>Preferred location</label>
             <input id="nl-location" maxLength={255} value={form.location} onChange={set('location')} className={input} />
           </div>
           <div>
             <label htmlFor="nl-timeline" className={label}>Timeline</label>
-            <select id="nl-timeline" value={form.timeline} onChange={set('timeline')} className={input}>
+            <Select id="nl-timeline" value={form.timeline} onChange={set('timeline')} className={input}>
               <option value="">Not sure</option>
               {timelineOptions.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label htmlFor="nl-min" className={label}>Budget min</label>
             <input id="nl-min" inputMode="numeric" placeholder="500000" value={form.minBudget} onChange={set('minBudget')} className={`${input} font-mono`} />
@@ -387,25 +383,26 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
           {editing && (
             <div>
               <label htmlFor="nl-financing" className={label}>Financing</label>
-              <select id="nl-financing" value={form.financingStatus} onChange={set('financingStatus')} className={input}>
+              <Select id="nl-financing" value={form.financingStatus} onChange={set('financingStatus')} className={input}>
                 <option value="">Not known</option>
                 {financingOptions.map((f) => (
                   <option key={f.value} value={f.value}>
                     {f.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
         </div>
 
+        <div className={`grid grid-cols-1 gap-3 ${editing ? '' : 'md:grid-cols-2'}`}>
         <div>
           <label htmlFor="nl-notes" className={label}>Notes</label>
           <textarea
             id="nl-notes"
             rows={3}
             maxLength={2000}
-            placeholder="What they are looking for, how they found you…"
+            placeholder="What they want, how they found you…"
             value={form.notes}
             onChange={set('notes')}
             className={`${input} resize-y`}
@@ -426,8 +423,8 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
                 className="mt-0.5 w-4 h-4 accent-emerald-500 cursor-pointer"
               />
               <span>
-                <span className="block text-xs font-semibold text-slate-200">The lead agreed to be contacted</span>
-                <span className="block text-2xs text-slate-500">They said yes to calls and texts from you.</span>
+                <span className="block text-xs font-semibold text-slate-200">Lead agreed to be contacted</span>
+                <span className="block text-2xs text-slate-500">Said yes to calls and texts.</span>
               </span>
             </label>
             <label className={`flex items-start gap-2.5 ${consent ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
@@ -442,33 +439,29 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
                 <span className="block text-xs font-semibold text-slate-200">Start AI outreach now</span>
                 <span className="block text-2xs text-slate-500">
                   {consent
-                    ? 'The AI assistant calls them like any new lead. Leave off to reach out yourself.'
-                    : 'Needs the lead’s agreement first.'}
+                    ? 'AI calls them right away. Leave off to call yourself.'
+                    : 'Needs consent first.'}
                 </span>
               </span>
             </label>
           </div>
         )}
+        </div>
 
         {error && <SheetError message={error.message} details={error.details} />}
 
         <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={props.onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-          >
+          <Button variant="secondary" onClick={props.onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            disabled={saving || !form.firstName.trim() || !hasContact || unchanged}
+            disabled={!form.firstName.trim() || !hasContact || unchanged}
+            loading={saving}
             title={unchanged ? 'Nothing has changed yet' : undefined}
-            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
           >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {editing ? 'Save changes' : 'Add lead'}
-          </button>
+          </Button>
         </div>
       </form>
     </SheetModal>

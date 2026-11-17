@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
+import { IconButton } from '../../common/Button';
 
 const WIDTH = { md: 'sm:max-w-md', xl: 'sm:max-w-3xl' } as const;
 
@@ -36,7 +37,7 @@ export const Drawer: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className="absolute inset-0 bg-slate-950/80 animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
 
       <aside
         className={`relative w-full ${WIDTH[width]} h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col animate-slide-in-right text-slate-100`}
@@ -53,15 +54,7 @@ export const Drawer: React.FC<{
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {actions}
-            <button
-              ref={closeButton}
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center justify-center shrink-0 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <IconButton ref={closeButton} onClick={onClose} aria-label="Close" icon={<X />} />
           </div>
         </header>
 

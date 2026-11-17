@@ -9,6 +9,7 @@ import {
   type FormTest,
 } from '../../utils/googleFormsApi';
 import { SheetError, SheetModal, errorText, timeAgo } from '../sheets/SheetModal';
+import { Button } from '../common/Button';
 
 /**
  * Getting the owner's form to send us its responses.
@@ -122,14 +123,9 @@ export const FormSetupModal: React.FC<{
         <div className="space-y-4">
           <div className="space-y-3">
             <Step n={1} title="Copy the script">
-              <button
-                type="button"
-                onClick={copy}
-                disabled={busy === 'copy'}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 hover:bg-green-500 text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-              >
-                <Copy className="w-3.5 h-3.5" /> Copy script
-              </button>
+              <Button size="sm" onClick={copy} disabled={busy === 'copy'} icon={<Copy />}>
+                Copy script
+              </Button>
               <p className="text-2xs text-amber-300/90 flex items-start gap-1.5">
                 <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                 It contains this form’s private delivery key. Keep it in your form only — don’t post it anywhere shared.
@@ -172,15 +168,9 @@ export const FormSetupModal: React.FC<{
                 Fill in your own form once, then check below. Responses that arrive before you switch the form on are kept and wait for
                 your review — nothing is contacted.
               </p>
-              <button
-                type="button"
-                onClick={test}
-                disabled={busy === 'test'}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-              >
-                {busy === 'test' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              <Button variant="secondary" size="sm" onClick={test} loading={busy === 'test'} icon={<Play />}>
                 Test connection
-              </button>
+              </Button>
             </Step>
           </div>
 
@@ -234,15 +224,9 @@ export const FormSetupModal: React.FC<{
             <span className="text-2xs text-slate-500">
               {mapped ? 'Questions are mapped.' : 'Map the questions before switching this form on.'}
             </span>
-            <button
-              type="button"
-              onClick={activate}
-              disabled={busy === 'activate' || !mapped || source.live}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 hover:bg-green-500 text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-            >
-              {busy === 'activate' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            <Button size="sm" onClick={activate} loading={busy === 'activate'} disabled={!mapped || source.live} icon={<Check />}>
               {source.live ? 'Already on' : 'Switch this form on'}
-            </button>
+            </Button>
           </div>
         </div>
       )}

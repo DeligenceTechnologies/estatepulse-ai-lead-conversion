@@ -28,6 +28,7 @@ import {
 import { CopyField } from '../leadsources/CopyField';
 import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
 import { TimezoneNotice } from '../common/TimezoneNotice';
+import { buttonClass } from '../common/Button';
 
 /**
  * Add a webhook: name and how the sender proves itself -> URL and secret
@@ -43,8 +44,8 @@ import { TimezoneNotice } from '../common/TimezoneNotice';
 
 const input = 'w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500';
 const select = 'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500/60';
-const primary = 'px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-on-accent hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5';
-const secondary = 'px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-100 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5';
+const primary = buttonClass();
+const secondary = buttonClass({ variant: 'secondary' });
 
 type Step = 'setup' | 'waiting' | 'map' | 'done';
 

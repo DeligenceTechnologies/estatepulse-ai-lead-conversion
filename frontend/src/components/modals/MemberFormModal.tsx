@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  Loader2,
   MailWarning,
   Save,
   Clock,
@@ -31,6 +30,7 @@ import {
 import { DEFAULT_WORKING_HOURS, normalizeWeek, type WorkingDay } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
+import { IconButton, Button } from '../common/Button';
 
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_MAX_LEADS = 25;
@@ -241,7 +241,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="member-form-title"
@@ -263,14 +263,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={close}
-            disabled={saving}
-            aria-label="Close"
-            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <IconButton onClick={close} disabled={saving} aria-label="Close" className="shrink-0" icon={<X />} />
         </div>
 
         {created ? (
@@ -493,23 +486,18 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
             </Section>
 
             <div className="sticky bottom-0 -mx-5 px-5 py-3 bg-slate-900 border-t border-slate-800 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={close}
-                disabled={saving}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
+              <Button variant="secondary" onClick={close} disabled={saving}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                disabled={saving || nothingToSave}
+                disabled={nothingToSave}
+                loading={saving}
                 title={nothingToSave ? 'Nothing has changed yet' : undefined}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                icon={<Save />}
               >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {editing ? 'Save changes' : 'Add Member'}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -607,14 +595,9 @@ const CreatedResult: React.FC<{ member: CreatedMember; onDone: () => void }> = (
         </div>
       </div>
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onDone}
-          autoFocus
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold transition-colors cursor-pointer"
-        >
+        <Button onClick={onDone} autoFocus>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );

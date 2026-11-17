@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Copy, ExternalLink } from 'lucide-react';
+import { IconButton } from '../../common/Button';
 
 const iconButton =
   'p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500';
@@ -15,17 +16,15 @@ export const CopyLink: React.FC<{ url: string; title: string }> = ({ url, title 
   }, [copied]);
 
   return (
-    <button
-      type="button"
+    <IconButton
+      size="sm"
       onClick={() => {
         void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => undefined);
       }}
       title={copied ? 'Copied' : title}
       aria-label={title}
-      className={iconButton}
-    >
-      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-    </button>
+      icon={copied ? <Check className="text-emerald-400" /> : <Copy />}
+    />
   );
 };
 

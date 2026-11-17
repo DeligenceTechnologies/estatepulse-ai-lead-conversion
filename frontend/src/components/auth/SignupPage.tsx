@@ -7,6 +7,7 @@ import { messageFor, type OrganizationType } from '../../lib/api';
 import type { CheckEmailState } from './CheckEmailPage';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton, inputClass } from './AuthLayout';
+import { Button, IconButton } from '../common/Button';
 
 /** Offered first: the leads EstatePulse calls are in North America. The owner changes it here or later in Settings. */
 const DEFAULT_TIMEZONE = 'America/New_York';
@@ -160,15 +161,9 @@ export const SignupPage: React.FC = () => {
               );
             })}
           </div>
-          <button
-            type="button"
-            onClick={() => setStep(2)}
-            disabled={!organizationType}
-            className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:hover:bg-emerald-600 text-on-accent text-sm font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-          >
+          <Button size="lg" fullWidth onClick={() => setStep(2)} disabled={!organizationType} iconRight={<ArrowRight />}>
             Continue
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -179,14 +174,9 @@ export const SignupPage: React.FC = () => {
               <span className="font-semibold text-slate-100">{chosen.title}</span>
               {organizationType === 'individual' ? ' · Owner + Agent' : ' · Owner'}
             </span>
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              disabled={busy}
-              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer disabled:cursor-not-allowed"
-            >
+            <Button variant="link" onClick={() => setStep(1)} disabled={busy}>
               Change
-            </button>
+            </Button>
           </div>
         )}
         <FormError message={error} />
@@ -277,15 +267,14 @@ export const SignupPage: React.FC = () => {
             error={mismatch ? 'Passwords do not match.' : null}
           />
           <div className="flex gap-2">
-            <button
-              type="button"
+            <IconButton
+              variant="secondary"
+              size="lg"
               onClick={() => setStep(1)}
               disabled={busy}
               aria-label="Back"
-              className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
+              icon={<ArrowLeft />}
+            />
             <div className="flex-1">
               <SubmitButton busy={busy} disabled={mismatch}>
                 Create account

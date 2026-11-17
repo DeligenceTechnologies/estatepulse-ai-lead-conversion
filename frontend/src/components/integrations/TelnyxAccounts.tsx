@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Loader2, Pencil, PhoneCall, Trash2, X } from 'lucide-react';
+import { Check, Pencil, PhoneCall, Trash2, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import {
   TelnyxAccount,
@@ -7,6 +7,7 @@ import {
   deleteTelnyxAccount,
   renameTelnyxAccount,
 } from '../../utils/assistantApi';
+import { IconButton, Button } from '../common/Button';
 
 /**
  * The shelf of saved Telnyx accounts.
@@ -89,20 +90,13 @@ export const TelnyxAccounts: React.FC<{
                       placeholder="Account name"
                       className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500"
                     />
-                    <button
-                      type="button"
+                    <IconButton
+                      size="sm"
                       onClick={() => commitRename(a.id)}
-                      className="p-1 rounded-lg text-emerald-400 hover:bg-slate-800 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRenaming(null)}
-                      className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                      aria-label="Save name"
+                      icon={<Check className="text-emerald-400" />}
+                    />
+                    <IconButton size="sm" onClick={() => setRenaming(null)} aria-label="Cancel" icon={<X />} />
                   </div>
                 ) : (
                   <>
@@ -126,46 +120,36 @@ export const TelnyxAccounts: React.FC<{
                   <Check className="w-3 h-3" /> Active
                 </span>
               ) : (
-                <button
-                  type="button"
-                  disabled={busy !== null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy !== null && busy !== `use:${a.id}`}
+                  loading={busy === `use:${a.id}`}
                   onClick={() => void run(`use:${a.id}`, () => activateTelnyxAccount(a.id), 'Account activated.')}
-                  className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 transition-colors cursor-pointer disabled:opacity-40 shrink-0 flex items-center gap-1.5"
                 >
-                  {busy === `use:${a.id}` && <Loader2 className="w-3 h-3 animate-spin" />}
                   Use this
-                </button>
+                </Button>
               )}
 
               {renaming !== a.id && (
-                <button
-                  type="button"
-                  title="Rename"
-                  onClick={() => startRename(a)}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                <IconButton size="sm" aria-label="Rename" onClick={() => startRename(a)} icon={<Pencil />} />
               )}
 
-              <button
-                type="button"
-                title="Forget this account"
-                disabled={busy !== null}
+              <IconButton
+                size="sm"
+                variant={confirmDelete === a.id ? 'danger' : 'ghost'}
+                aria-label={confirmDelete === a.id ? 'Click again to forget this account' : 'Forget this account'}
+                disabled={busy !== null && busy !== `del:${a.id}`}
+                loading={busy === `del:${a.id}`}
+                icon={<Trash2 />}
+                className={confirmDelete === a.id ? '' : 'hover:text-rose-300!'}
                 onClick={() => {
                   if (confirmDelete !== a.id) return setConfirmDelete(a.id);
                   void run(`del:${a.id}`, () => deleteTelnyxAccount(a.id), 'Account deleted.').then(() =>
                     setConfirmDelete(null),
                   );
                 }}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
-                  confirmDelete === a.id
-                    ? 'bg-rose-600 text-on-accent'
-                    : 'text-slate-500 hover:text-rose-300 hover:bg-slate-800'
-                }`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              />
             </div>
 
             {/* Deleting the account in use stops calls outright — nothing is

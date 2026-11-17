@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ExternalLink, FileQuestion, Loader2, RefreshCw, Search } from 'lucide-react';
 import type { ProviderForm } from '../../api/client';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * Pick the form to connect.
@@ -43,13 +44,15 @@ export const FormPicker: React.FC<{
         <div className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
           Build and publish a form with your provider, then refresh.
         </div>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
+          className="flex! mx-auto"
           onClick={onRefresh}
-          className="mx-auto px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          icon={<RefreshCw className={loading ? 'animate-spin' : ''} />}
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh
-        </button>
+        </Button>
       </div>
     );
   }
@@ -66,13 +69,12 @@ export const FormPicker: React.FC<{
             className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
         </div>
-        <button
+        <IconButton
+          variant="secondary"
           onClick={onRefresh}
-          title="Refresh"
-          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+          aria-label="Refresh"
+          icon={<RefreshCw className={loading ? 'animate-spin' : ''} />}
+        />
       </div>
 
       {/* The picker cannot detect this for sources created the old way:

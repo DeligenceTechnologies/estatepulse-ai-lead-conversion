@@ -9,6 +9,7 @@ import {
   saveScoringSettings,
   type Criterion,
 } from '../../utils/leadScoringApi';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * How the office scores a lead: its points chart (what each thing the caller
@@ -73,8 +74,6 @@ export const LeadTemperatureCard: React.FC = () => {
 
   const inputClass =
     'w-24 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600';
-  const linkClass = 'flex items-center gap-1 text-xs disabled:opacity-40 cursor-pointer';
-
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
       <div>
@@ -128,31 +127,17 @@ export const LeadTemperatureCard: React.FC = () => {
                       onChange={(e) => update(i, { points: Number(e.target.value) })}
                       className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white text-right focus:outline-none focus:border-emerald-600"
                     />
-                    <button
-                      type="button"
-                      onClick={() => remove(i)}
-                      aria-label={`Remove ${c.label || 'this line'}`}
-                      className="text-slate-500 hover:text-rose-400 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    <IconButton size="sm" className="hover:text-rose-300!" onClick={() => remove(i)} aria-label={`Remove ${c.label || 'this line'}`} icon={<X />} />
                   </div>
                 ))}
               </div>
               <div className="flex items-center gap-4 mt-2">
-                <button
-                  type="button"
-                  onClick={add}
-                  disabled={points.length >= MAX_CRITERIA}
-                  className={`${linkClass} text-emerald-400 hover:text-emerald-300`}
-                >
-                  <Plus className="w-3.5 h-3.5" />
+                <Button variant="link" onClick={add} disabled={points.length >= MAX_CRITERIA} icon={<Plus />}>
                   Add criterion
-                </button>
-                <button type="button" onClick={() => setPoints(defaults)} className={`${linkClass} text-slate-400 hover:text-white`}>
-                  <RotateCcw className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setPoints(defaults)} icon={<RotateCcw />}>
                   Reset to defaults
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -180,14 +165,9 @@ export const LeadTemperatureCard: React.FC = () => {
                     : `Every line needs a label of up to ${MAX_CRITERION_LABEL} characters and whole-number points from −100 to 100, up to ${MAX_CRITERIA} lines.`}
               </p>
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => void save()}
-                  disabled={saving || !valid}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
-                >
+                <Button size="sm" onClick={() => void save()} disabled={!valid} loading={saving}>
                   {saving ? 'Saving…' : 'Save scoring'}
-                </button>
+                </Button>
               </div>
             </div>
           </>

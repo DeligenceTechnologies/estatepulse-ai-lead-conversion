@@ -11,6 +11,7 @@ import {
   assignNumber,
   unassignNumber,
 } from '../../utils/assistantApi';
+import { Button } from '../common/Button';
 
 // Phone number provisioning: search & preview, buy, or assign an existing number.
 export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => void }> = ({ status, onChange }) => {
@@ -78,7 +79,7 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
           {status.fromNumber ? (
             <>
               <span className="text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Active: {status.fromNumber}</span>
-              <button type="button" onClick={() => disconnect(status.fromNumber)} disabled={busy !== null} className="text-rose-400 hover:text-rose-300 font-semibold disabled:opacity-50">Disconnect</button>
+              <Button variant="danger-soft" size="sm" onClick={() => disconnect(status.fromNumber)} disabled={busy !== null}>Disconnect</Button>
             </>
           ) : 'No number assigned yet'}
         </span>
@@ -100,9 +101,9 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
             </div>
             <label className="flex items-center gap-1.5 text-slate-300"><input type="checkbox" checked={wantVoice} onChange={(e) => setWantVoice(e.target.checked)} /> Voice</label>
             <label className="flex items-center gap-1.5 text-slate-300"><input type="checkbox" checked={wantSms} onChange={(e) => setWantSms(e.target.checked)} /> SMS</label>
-            <button type="button" onClick={search} disabled={busy !== null} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5">
-              {busy === 'search' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />} Search
-            </button>
+            <Button size="sm" onClick={search} disabled={busy !== null && busy !== 'search'} loading={busy === 'search'} icon={<Search />}>
+              Search
+            </Button>
           </div>
 
           {available && available.length === 0 && <p className="text-xs text-slate-500">No numbers matched — try a different area code or fewer features.</p>}
@@ -116,9 +117,15 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-slate-400">{cost(n)}</span>
-                  <button type="button" onClick={() => buyAndUse(n)} disabled={busy !== null} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent rounded-lg font-bold flex items-center gap-1.5">
-                    {busy === n.phone_number ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />} Buy &amp; use
-                  </button>
+                  <Button
+                    size="sm"
+                    onClick={() => buyAndUse(n)}
+                    disabled={busy !== null && busy !== n.phone_number}
+                    loading={busy === n.phone_number}
+                    icon={<ShoppingCart />}
+                  >
+                    Buy &amp; use
+                  </Button>
                 </div>
               </div>
             ))}
@@ -135,13 +142,25 @@ export const PhoneNumberCard: React.FC<{ status: TelnyxStatus; onChange: () => v
             <div key={n.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 text-xs">
               <span className="font-mono text-white">{n.phone_number}</span>
               {status.fromNumber === n.phone_number ? (
-                <button type="button" onClick={() => disconnect(n.phone_number)} disabled={busy !== null} className="px-3 py-1 border border-rose-900/50 text-rose-400 hover:text-rose-300 disabled:opacity-50 rounded-lg font-bold">
-                  {busy === n.phone_number ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Disconnect'}
-                </button>
+                <Button
+                  variant="danger-soft"
+                  size="sm"
+                  onClick={() => disconnect(n.phone_number)}
+                  disabled={busy !== null && busy !== n.phone_number}
+                  loading={busy === n.phone_number}
+                >
+                  Disconnect
+                </Button>
               ) : (
-                <button type="button" onClick={() => useOwned(n)} disabled={busy !== null} className="px-3 py-1 border border-slate-700 hover:border-slate-500 disabled:opacity-50 text-white rounded-lg font-bold">
-                  {busy === n.phone_number ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Connect'}
-                </button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => useOwned(n)}
+                  disabled={busy !== null && busy !== n.phone_number}
+                  loading={busy === n.phone_number}
+                >
+                  Connect
+                </Button>
               )}
             </div>
           ))}

@@ -5,7 +5,6 @@ import {
   FileText,
   PhoneCall,
   PhoneOff,
-  RotateCw,
   Search,
   Sparkles,
   Volume2,
@@ -21,6 +20,8 @@ import {
 } from '../../utils/historyApi';
 import { CallQualificationCard } from './CallQualificationCard';
 import { addDays, dayFromIsoDate, formatDateTime } from '../../lib/datetime';
+import { Button } from '../common/Button';
+import { Select } from '../common/Select';
 
 const dayStartIso = (date: string): string | undefined => {
   const day = date ? dayFromIsoDate(date) : null;
@@ -44,16 +45,74 @@ const dayEndIso = (date: string): string | undefined => {
  * than the one every browser already ships.
  */
 
+/** Outcome badges: a soft tint, a hairline border and readable text of one hue (as the lead statuses). */
 export const OUTCOME_STYLES: Record<CallOutcome, string> = {
-  APPOINTMENT_BOOKED: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
-  QUALIFIED: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-  HUMAN_HANDOFF: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-  ANSWERED: 'bg-slate-700/60 text-slate-200 border-slate-600',
-  IN_PROGRESS: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-  NO_ANSWER: 'bg-slate-800 text-slate-400 border-slate-700',
-  NOT_INTERESTED: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-  FAILED: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+  APPOINTMENT_BOOKED: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
+  QUALIFIED: 'bg-green-500/10 text-green-300 border-green-500/25',
+  HUMAN_HANDOFF: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25',
+  ANSWERED: 'bg-blue-500/10 text-blue-300 border-blue-500/25',
+  IN_PROGRESS: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
+  NO_ANSWER: 'bg-slate-500/10 text-slate-300 border-slate-500/25',
+  NOT_INTERESTED: 'bg-rose-500/10 text-rose-300 border-rose-500/25',
+  FAILED: 'bg-red-500/10 text-red-300 border-red-500/25',
 };
+
+const OUTCOME_DOTS: Record<CallOutcome, string> = {
+  APPOINTMENT_BOOKED: 'bg-purple-400',
+  QUALIFIED: 'bg-green-400',
+  HUMAN_HANDOFF: 'bg-cyan-400',
+  ANSWERED: 'bg-blue-400',
+  IN_PROGRESS: 'bg-amber-400',
+  NO_ANSWER: 'bg-slate-400',
+  NOT_INTERESTED: 'bg-rose-400',
+  FAILED: 'bg-red-400',
+};
+
+export const OUTCOME_LABELS: Record<CallOutcome, string> = {
+  APPOINTMENT_BOOKED: 'Appointment booked',
+  QUALIFIED: 'Qualified',
+  HUMAN_HANDOFF: 'Handed to agent',
+  ANSWERED: 'Answered',
+  IN_PROGRESS: 'In progress',
+  NO_ANSWER: 'No answer',
+  NOT_INTERESTED: 'Not interested',
+  FAILED: 'Failed',
+};
+
+const OutcomeBadge: React.FC<{ outcome: CallOutcome }> = ({ outcome }) => (
+  <span
+    className={`inline-flex items-center gap-1.5 whitespace-nowrap text-2xs font-semibold pl-2 pr-2.5 py-0.5 rounded-full border shrink-0 ${OUTCOME_STYLES[outcome]}`}
+  >
+    <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${OUTCOME_DOTS[outcome]}`} />
+    {OUTCOME_LABELS[outcome]}
+  </span>
+);
+
+/** "AI: Hello" -> a bold speaker and the line. Lines without a speaker print as they are. */
+const Transcript: React.FC<{ text: string }> = ({ text }) => (
+  <div className="space-y-2">
+    {text.split('\n').map((line, i) => {
+      const m = /^([A-Za-z][\w .'-]{0,30}):\s*(.*)$/.exec(line);
+      if (!m) return line.trim() ? <p key={i} className="text-xs text-slate-300 leading-relaxed">{line}</p> : null;
+      const ai = /^(ai|assistant|agent ai|bot)$/i.test(m[1].trim());
+      return (
+        <p key={i} className="text-xs leading-relaxed">
+          <span className={`font-bold mr-1.5 ${ai ? 'text-emerald-400' : 'text-sky-400'}`}>{m[1]}</span>
+          <span className="text-slate-200">{m[2]}</span>
+        </p>
+      );
+    })}
+  </div>
+);
+
+/** A small figure above the list. */
+const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
+  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-3 shadow-lg">
+    <p className="text-2xs font-semibold text-slate-400">{label}</p>
+    <p className="text-xl font-bold text-white tracking-tight mt-0.5">{value}</p>
+    {hint && <p className="text-2xs text-slate-500 mt-0.5">{hint}</p>}
+  </div>
+);
 
 const OUTCOMES: CallOutcome[] = [
   'ANSWERED',
@@ -67,9 +126,9 @@ const OUTCOMES: CallOutcome[] = [
 ];
 
 const TEMP_STYLES: Record<string, string> = {
-  hot: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-  warm: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-  cold: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+  hot: 'bg-rose-500/10 text-rose-300 border-rose-500/25',
+  warm: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
+  cold: 'bg-sky-500/10 text-sky-300 border-sky-500/25',
 };
 
 export const duration = (s: number | null): string => {
@@ -80,7 +139,7 @@ export const duration = (s: number | null): string => {
 };
 
 const selectClass =
-  'bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-600';
+  'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-600';
 
 /**
  * The recording, with a src that holds still.
@@ -181,22 +240,27 @@ export const CallsView: React.FC = () => {
 
   const filtered = outcome || temperature || agentId || from || to || search;
 
+  // Figures for the calls on screen (the current filters, newest 200).
+  const connected = calls.filter((c) => c.outcome !== 'NO_ANSWER' && c.outcome !== 'FAILED' && c.outcome !== 'IN_PROGRESS');
+  const timed = calls.filter((c) => c.durationSeconds != null && c.durationSeconds > 0);
+  const avgSeconds = timed.length ? Math.round(timed.reduce((t, c) => t + (c.durationSeconds ?? 0), 0) / timed.length) : null;
+  const booked = calls.filter((c) => c.outcome === 'APPOINTMENT_BOOKED').length;
+  const pct = (n: number) => (calls.length ? `${Math.round((n / calls.length) * 100)}% of calls` : undefined);
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Call History</h2>
-          <p className="text-xs text-slate-400">
-            Every AI call this office has placed — recording, transcript and outcome.
-          </p>
+          <p className="text-xs text-slate-400">Every AI call with its recording, transcript and outcome.</p>
         </div>
-        <button
-          onClick={callsQuery.refresh}
-          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <RotateCw className={`w-3.5 h-3.5 ${callsQuery.refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat label="Total calls" value={calls.length.toLocaleString()} hint={filtered ? 'Matching your filters' : undefined} />
+        <Stat label="Connected" value={connected.length.toLocaleString()} hint={pct(connected.length)} />
+        <Stat label="Avg. duration" value={duration(avgSeconds)} />
+        <Stat label="Appointments booked" value={booked.toLocaleString()} hint={pct(booked)} />
       </div>
 
       {callsQuery.stale && (
@@ -207,27 +271,27 @@ export const CallsView: React.FC = () => {
       )}
 
       {/* Filters */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center gap-2">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-wrap items-center gap-2 shadow-lg">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by lead name or number"
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-600"
           />
         </div>
 
-        <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className={selectClass}>
+        <Select value={outcome} onChange={(e) => setOutcome(e.target.value)} className={selectClass}>
           <option value="">All outcomes</option>
           {OUTCOMES.map((o) => (
             <option key={o} value={o}>
-              {o.replace(/_/g, ' ').toLowerCase()}
+              {OUTCOME_LABELS[o]}
             </option>
           ))}
-        </select>
+        </Select>
 
-        <select
+        <Select
           value={temperature}
           onChange={(e) => setTemperature(e.target.value)}
           className={selectClass}
@@ -236,17 +300,17 @@ export const CallsView: React.FC = () => {
           <option value="hot">Hot</option>
           <option value="warm">Warm</option>
           <option value="cold">Cold</option>
-        </select>
+        </Select>
 
         {agents.length > 0 && (
-          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className={selectClass}>
+          <Select value={agentId} onChange={(e) => setAgentId(e.target.value)} className={selectClass}>
             <option value="">All agents</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {[a.firstName, a.lastName].filter(Boolean).join(' ') || a.email}
               </option>
             ))}
-          </select>
+          </Select>
         )}
 
         <input
@@ -265,12 +329,9 @@ export const CallsView: React.FC = () => {
         />
 
         {filtered && (
-          <button
-            onClick={clearFilters}
-            className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
-          >
+          <Button variant="link" onClick={clearFilters}>
             Clear
-          </button>
+          </Button>
         )}
       </div>
 
@@ -278,7 +339,7 @@ export const CallsView: React.FC = () => {
         {/* List */}
         <div className="lg:col-span-5 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-xl">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs">
-            <span className="font-semibold text-slate-300">
+            <span className="font-semibold text-slate-200">
               {calls.length} call{calls.length === 1 ? '' : 's'}
             </span>
             {calls.length === 200 && (
@@ -301,19 +362,19 @@ export const CallsView: React.FC = () => {
               <div
                 key={call.id}
                 onClick={() => setSelectedId(call.id)}
-                className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2.5 ${
                   call.id === selectedId
-                    ? 'bg-slate-800/90 border-emerald-500/60 shadow-md'
-                    : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                    ? 'bg-emerald-500/[0.06] border-emerald-500/50 ring-1 ring-emerald-500/30 shadow-md'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-950'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border ${
                         call.outcome === 'NO_ANSWER' || call.outcome === 'FAILED'
-                          ? 'bg-slate-800 text-slate-500'
-                          : 'bg-emerald-500/20 text-emerald-400'
+                          ? 'bg-slate-500/10 border-slate-500/20 text-slate-400'
+                          : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
                       }`}
                     >
                       {call.outcome === 'NO_ANSWER' || call.outcome === 'FAILED' ? (
@@ -323,32 +384,28 @@ export const CallsView: React.FC = () => {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-bold text-xs text-white truncate">{call.leadName}</div>
+                      <div className="font-bold text-sm text-white truncate">{call.leadName}</div>
                       <div className="text-2xs text-slate-400 font-mono truncate">
                         {call.leadPhone ?? 'no number'}
                       </div>
                     </div>
                   </div>
 
-                  <span
-                    className={`text-2xs font-bold font-mono px-2 py-0.5 rounded-full border shrink-0 ${OUTCOME_STYLES[call.outcome]}`}
-                  >
-                    {call.outcome.replace(/_/g, ' ')}
-                  </span>
+                  <OutcomeBadge outcome={call.outcome} />
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between text-2xs text-slate-400 pt-2 border-t border-slate-800">
                   <span className="flex items-center gap-2">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3 text-slate-500" />
                       {duration(call.durationSeconds)}
                     </span>
-                    {call.recordingUrl && <Volume2 className="w-3 h-3 text-emerald-500" />}
-                    {call.hasTranscript && <FileText className="w-3 h-3 text-cyan-500" />}
+                    {call.recordingUrl && <Volume2 className="w-3 h-3 text-emerald-400" aria-label="Has recording" />}
+                    {call.hasTranscript && <FileText className="w-3 h-3 text-cyan-400" aria-label="Has transcript" />}
                     {call.temperature && (
                       <span
-                        className={`text-2xs uppercase font-bold px-1.5 rounded border ${
-                          TEMP_STYLES[call.temperature] ?? 'bg-slate-800 text-slate-400 border-slate-700'
+                        className={`capitalize font-semibold px-2 rounded-full border ${
+                          TEMP_STYLES[call.temperature] ?? 'bg-slate-500/10 text-slate-300 border-slate-500/25'
                         }`}
                       >
                         {call.temperature}
@@ -374,14 +431,17 @@ export const CallsView: React.FC = () => {
           <div className="lg:col-span-7 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white">{detail.leadName}</h3>
-                  <span className="text-xs font-mono text-cyan-400">{detail.leadPhone}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-bold text-white">{detail.leadName}</h3>
+                  <OutcomeBadge outcome={detail.outcome} />
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {detail.provider} • {detail.direction} •{' '}
-                  {detail.startedAt ? formatDateTime(detail.startedAt) : 'not started'}
-                  {detail.agentName && <> • owned by {detail.agentName}</>}
+                <p className="text-xs text-slate-400 mt-1">
+                  <span className="font-mono text-slate-300">{detail.leadPhone}</span>
+                  {' · '}
+                  {detail.startedAt ? formatDateTime(detail.startedAt) : 'Not started'}
+                  {' · '}
+                  <span className="capitalize">{detail.direction}</span>
+                  {detail.agentName && <> · Agent: {detail.agentName}</>}
                 </p>
               </div>
               {/* <button
@@ -405,8 +465,7 @@ export const CallsView: React.FC = () => {
                 <RecordingPlayer key={detail.id} url={detail.recordingUrl} />
               ) : (
                 <p className="text-xs text-slate-500">
-                  No recording. Either the office has call recording switched off, or the file has
-                  not finished uploading — Telnyx delivers it a little after the call ends.
+                  No recording yet. It arrives a minute after the call, or recording is turned off.
                 </p>
               )}
             </div>
@@ -416,9 +475,9 @@ export const CallsView: React.FC = () => {
             {/* Summary */}
             {detail.aiSummary && (
               <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-2">
-                <div className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  Summary
+                <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  AI summary
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
                   {detail.aiSummary}
@@ -428,19 +487,15 @@ export const CallsView: React.FC = () => {
 
             {/* Transcript */}
             <div className="space-y-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-cyan-400" />
                 Transcript
               </div>
               <div className="max-h-72 overflow-y-auto bg-slate-950 p-4 rounded-xl border border-slate-800 custom-scrollbar">
                 {detail.transcript ? (
-                  <pre className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap font-sans">
-                    {detail.transcript}
-                  </pre>
+                  <Transcript text={detail.transcript} />
                 ) : (
-                  <p className="text-xs text-slate-500">
-                    No transcript yet. Telnyx transcribes after the recording is closed, so it
-                    arrives a minute or two behind the call.
-                  </p>
+                  <p className="text-xs text-slate-500">No transcript yet. It arrives a minute or two after the call.</p>
                 )}
               </div>
             </div>

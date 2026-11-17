@@ -6,6 +6,7 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
 import { listMembers, memberName, type OrganizationMember } from '../../utils/agentsApi';
+import { Button } from '../common/Button';
 
 interface Props {
   leadId: string;
@@ -110,17 +111,17 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+        icon={<UserPlus className="text-emerald-400" />}
+        iconRight={<ChevronDown className="text-slate-500" />}
       >
-        <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
-        <span>{current ? 'Reassign agent' : 'Assign agent'}</span>
-        <ChevronDown className="w-3 h-3 text-slate-500" />
-      </button>
+        {current ? 'Reassign agent' : 'Assign agent'}
+      </Button>
 
       {open && (
         <div
@@ -149,13 +150,9 @@ export const AssignAgentControl: React.FC<Props> = ({ leadId, current, onAssigne
                 Nobody can take leads yet. Add an agent, or turn on <strong>I also take leads</strong>{' '}
                 to work leads yourself.
               </p>
-              <button
-                type="button"
-                onClick={goToTeam}
-                className="text-emerald-300 hover:text-emerald-200 font-semibold cursor-pointer"
-              >
+              <Button variant="link" onClick={goToTeam}>
                 Go to Agent Team →
-              </button>
+              </Button>
             </div>
           ) : (
             <ul className="max-h-72 overflow-y-auto py-1">

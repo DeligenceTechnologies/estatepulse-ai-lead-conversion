@@ -1,9 +1,10 @@
 import React from 'react';
-import { Eye, Loader2, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
+import { Eye, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import { displayName, initialsFor } from '../../context/AuthContext';
 import type { TeamMember, UserStatus } from '../../utils/usersApi';
 import { DAY_SHORT } from '../../utils/workingHours';
 import { formatDate as formatDay, formatDateTime } from '../../lib/datetime';
+import { IconButton } from '../common/Button';
 
 /**
  * The pieces a team member is drawn with on the Team Members screen. The card
@@ -200,9 +201,6 @@ const stop = (fn: () => void) => (e: React.MouseEvent) => {
   fn();
 };
 
-const actionBtn =
-  'w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
-
 /** View, Edit and Delete — the last thing in every row and card. */
 export const MemberActions: React.FC<{
   name: string;
@@ -214,38 +212,35 @@ export const MemberActions: React.FC<{
   onDelete: () => void;
 }> = ({ name, canEdit, canDelete, deleting, onView, onEdit, onDelete }) => (
   <div className="flex items-center justify-end gap-1" onKeyDown={(e) => e.stopPropagation()}>
-    <button
-      type="button"
+    <IconButton
+      size="sm"
       onClick={stop(onView)}
       title="View details"
       aria-label={`View ${name}`}
-      className={`${actionBtn} hover:text-sky-300 hover:bg-sky-500/10`}
-    >
-      <Eye className="w-3.5 h-3.5" />
-    </button>
+      className="hover:text-sky-300! hover:bg-sky-500/10!"
+      icon={<Eye />}
+    />
     {canEdit && (
-      <button
-        type="button"
+      <IconButton
+        size="sm"
         onClick={stop(onEdit)}
         disabled={deleting}
         title="Edit"
         aria-label={`Edit ${name}`}
-        className={`${actionBtn} hover:text-emerald-300 hover:bg-emerald-500/10`}
-      >
-        <Pencil className="w-3.5 h-3.5" />
-      </button>
+        className="hover:text-emerald-300! hover:bg-emerald-500/10!"
+        icon={<Pencil />}
+      />
     )}
     {canDelete && (
-      <button
-        type="button"
+      <IconButton
+        size="sm"
         onClick={stop(onDelete)}
-        disabled={deleting}
+        loading={deleting}
         title="Delete"
         aria-label={`Delete ${name}`}
-        className={`${actionBtn} hover:text-rose-300 hover:bg-rose-500/10`}
-      >
-        {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-      </button>
+        className="hover:text-rose-300! hover:bg-rose-500/10!"
+        icon={<Trash2 />}
+      />
     )}
   </div>
 );

@@ -7,6 +7,7 @@ import { connectCrm, disconnectCrm, getCrmStatus, isCrmDisabled, startCrmSync, t
 import { errorText, timeAgo } from '../sheets/SheetModal';
 import { CrmRunsModal, crmCountsLine } from './CrmRunsModal';
 import { IntegrationCard } from './IntegrationCard';
+import { Button, buttonClass } from '../common/Button';
 
 /**
  * HubSpot — connect the office's HubSpot account and import its contacts as
@@ -28,7 +29,7 @@ const Fact: React.FC<{ label: string; value: React.ReactNode }> = ({ label, valu
   </div>
 );
 
-const link = 'text-2xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default';
+const link = buttonClass({ variant: 'ghost', size: 'sm' });
 
 export const HubSpotCard: React.FC = () => {
   const { setActiveView } = useApp();
@@ -145,19 +146,19 @@ export const HubSpotCard: React.FC = () => {
   const last = status?.lastRun ?? null;
 
   const action = !status?.configured
-    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, className: 'bg-slate-800 text-slate-500 cursor-default' }
+    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, variant: 'secondary' as const, disabled: true }
     : busy === 'connect'
-      ? { label: `Waiting for ${NAME}… (cancel)`, icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, className: 'bg-slate-800 text-slate-300 hover:bg-slate-700' }
+      ? { label: `Waiting for ${NAME}… (cancel)`, icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, variant: 'secondary' as const }
       : !live
         ? {
             label: s === 'reauthorization_required' ? `Reconnect ${NAME}` : `Connect ${NAME}`,
             icon: s === 'reauthorization_required' ? <RefreshCw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />,
             onClick: connect,
-            className: 'bg-orange-600 text-white hover:bg-orange-500',
+            variant: 'primary' as const,
           }
         : run || busy === 'sync'
-          ? { label: run?.status === 'queued' ? 'Import queued…' : 'Importing…', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: () => undefined, className: 'bg-slate-800 text-slate-400 cursor-default' }
-          : { label: 'Sync now', icon: <RefreshCw className="w-3.5 h-3.5" />, onClick: sync, className: 'bg-slate-800 text-slate-100 hover:bg-slate-700' };
+          ? { label: run?.status === 'queued' ? 'Import queued…' : 'Importing…', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: () => undefined, variant: 'secondary' as const, disabled: true }
+          : { label: 'Sync now', icon: <RefreshCw className="w-3.5 h-3.5" />, onClick: sync, variant: 'secondary' as const };
 
   return (
     <>
@@ -168,7 +169,7 @@ export const HubSpotCard: React.FC = () => {
           </div>
         }
         title={NAME}
-        blurb="Import your CRM contacts; complete ones go straight to Leads"
+        blurb="Bring in your HubSpot contacts"
         connected={live}
         loading={loading}
         accent="border-orange-500/40"
@@ -176,15 +177,13 @@ export const HubSpotCard: React.FC = () => {
       >
         {!loading && !status?.configured && (
           <p className="text-xs text-slate-500">
-            The server has no HubSpot app yet. Set HUBSPOT_CLIENT_ID and HUBSPOT_CLIENT_SECRET to enable this.
+            Not set up on the server yet (needs HUBSPOT_CLIENT_ID and HUBSPOT_CLIENT_SECRET).
           </p>
         )}
 
         {!loading && status?.configured && s === 'not_connected' && (
           <p className="text-xs text-slate-500">
-            Connecting imports your HubSpot contacts as leads. Contacts with a name, a valid email and a valid phone go straight to
-            Leads, and outreach. Contacts with missing or invalid details, or that match another lead, wait in Import Review until
-            you approve them or complete them in HubSpot.
+            Complete contacts go straight to Leads. Incomplete or duplicate ones wait in Import Review for you.
           </p>
         )}
 
@@ -202,13 +201,13 @@ export const HubSpotCard: React.FC = () => {
         {s === 'reauthorization_required' && (
           <div className="flex items-start gap-1.5 text-xs text-amber-300">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            HubSpot access was revoked or has expired. Reconnect to keep syncing — leads already imported stay as they are.
+            HubSpot access expired. Reconnect to keep syncing. Imported leads are kept.
           </div>
         )}
         {s === 'disconnected' && (
           <p className="text-xs text-slate-500">
-            Disconnected. The {status?.importedLeads.toLocaleString()} lead{status?.importedLeads === 1 ? '' : 's'} imported from HubSpot were kept;
-            reconnecting the same account carries on without duplicating them.
+            Disconnected. {status?.importedLeads.toLocaleString()} imported lead{status?.importedLeads === 1 ? ' was' : 's were'} kept.
+            Reconnecting won't create duplicates.
           </p>
         )}
 
@@ -244,11 +243,11 @@ export const HubSpotCard: React.FC = () => {
         )}
 
         {status && (status.pendingReview > 0 || status.changesToReview > 0) && (
-          <button type="button" onClick={() => setActiveView('import_review')} className="text-2xs font-bold text-orange-300 hover:text-orange-200 cursor-pointer text-left">
+          <Button variant="link" onClick={() => setActiveView('import_review')} className="whitespace-normal! text-left">
             {status.pendingReview > 0 && `${status.pendingReview.toLocaleString()} waiting for review`}
             {status.pendingReview > 0 && status.changesToReview > 0 && ' · '}
             {status.changesToReview > 0 && `${status.changesToReview.toLocaleString()} change${status.changesToReview === 1 ? '' : 's'} to review`}
-          </button>
+          </Button>
         )}
 
         {(live || s === 'reauthorization_required') && (
@@ -256,15 +255,16 @@ export const HubSpotCard: React.FC = () => {
             <button type="button" className={link} onClick={() => setHistory(true)}>
               History
             </button>
-            <button
-              type="button"
+            <Button
+              variant={armed ? 'danger-soft' : 'ghost'}
+              size="sm"
               onClick={disconnect}
               onBlur={() => setArmed(false)}
               disabled={busy !== null}
-              className={`${link} hover:text-rose-300`}
+              className={armed ? '' : 'hover:text-rose-300!'}
             >
-              {busy === 'disconnect' ? 'Disconnecting…' : armed ? 'Click again to disconnect — syncing stops, leads are kept' : `Disconnect ${NAME}`}
-            </button>
+              {busy === 'disconnect' ? 'Disconnecting…' : armed ? 'Click again to disconnect (leads are kept)' : `Disconnect ${NAME}`}
+            </Button>
           </div>
         )}
 

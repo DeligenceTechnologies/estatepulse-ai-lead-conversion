@@ -10,7 +10,6 @@ export const PROVIDERS: Record<
     icon: React.ElementType;
     tone: string;
     selected: string;
-    button: string;
     focus: string;
   }
 > = {
@@ -20,7 +19,6 @@ export const PROVIDERS: Record<
     icon: CalendarCheck,
     tone: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
     selected: 'border-sky-500/60 bg-sky-500/[0.06]',
-    button: 'bg-sky-600 hover:bg-sky-500 focus-visible:ring-sky-400',
     focus: 'focus:border-sky-500',
   },
   cal: {
@@ -29,7 +27,6 @@ export const PROVIDERS: Record<
     icon: CalendarClock,
     tone: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
     selected: 'border-indigo-500/60 bg-indigo-500/[0.06]',
-    button: 'bg-indigo-600 hover:bg-indigo-500 focus-visible:ring-indigo-400',
     focus: 'focus:border-indigo-500',
   },
 };
@@ -99,48 +96,6 @@ export const ProviderBadge: React.FC<{ id: CalendarProviderId; size?: 'sm' | 'md
     </span>
   );
 };
-
-export const PrimaryButton: React.FC<{
-  onClick: () => void;
-  disabled?: boolean;
-  busy?: boolean;
-  className: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ onClick, disabled, busy, className, icon, children }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled || busy}
-    aria-busy={busy || undefined}
-    className={`h-9 px-4 rounded-lg text-xs font-semibold text-on-accent inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-  >
-    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
-    {children}
-  </button>
-);
-
-export const SecondaryButton: React.FC<{
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ onClick, disabled, danger, icon, children }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    className={`h-8 px-3 rounded-lg text-xs font-semibold border inline-flex items-center gap-1.5 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-50 disabled:cursor-not-allowed ${
-      danger
-        ? 'text-rose-100 bg-rose-500/15 border-rose-500/40 hover:bg-rose-500/25'
-        : 'text-slate-300 border-slate-700 hover:border-slate-600 hover:text-white'
-    }`}
-  >
-    {icon}
-    {children}
-  </button>
-);
 
 export const StatusPill: React.FC<{ tone: 'neutral' | 'success' | 'warning'; spinning?: boolean; children: React.ReactNode }> = ({
   tone,

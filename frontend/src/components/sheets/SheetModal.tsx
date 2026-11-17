@@ -32,7 +32,7 @@ export const SheetModal: React.FC<{
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div className={`w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} my-8`} onClick={(e) => e.stopPropagation()}>

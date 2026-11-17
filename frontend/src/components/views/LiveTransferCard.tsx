@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, PhoneCall } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
+import { Button } from '../common/Button';
 import {
   LIVE_TRANSFER_LIMITS as L,
   getLiveTransfer,
@@ -191,14 +192,14 @@ export const LiveTransferCard: React.FC = () => {
                 className={numberField}
               />
               <span>seconds.</span>
-              <button
-                type="button"
+              <Button
+                size="sm"
+                className="ml-auto"
                 onClick={() => void save(timing, 'Ringing saved.')}
                 disabled={busy || !on || !timingChanged || !timingValid}
-                className="ml-auto px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold cursor-pointer"
               >
                 Save
-              </button>
+              </Button>
             </div>
             {timingValid ? (
               <p className="text-[11px] text-slate-500">The lead holds for at most about {longestWait} seconds before the AI comes back.</p>
@@ -222,23 +223,13 @@ export const LiveTransferCard: React.FC = () => {
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600 disabled:opacity-50"
             />
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void save({ holdMessage: holdDraft.trim() }, 'Hold message saved.')}
-                disabled={busy || !on || !holdChanged}
-                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold cursor-pointer"
-              >
+              <Button size="sm" onClick={() => void save({ holdMessage: holdDraft.trim() }, 'Hold message saved.')} disabled={busy || !on || !holdChanged}>
                 Save
-              </button>
+              </Button>
               {holdDraft.trim() !== status.defaultHoldMessage && (
-                <button
-                  type="button"
-                  onClick={() => void save({ holdMessage: '' }, 'Default hold message restored.')}
-                  disabled={busy || !on}
-                  className="text-slate-400 hover:text-white cursor-pointer"
-                >
+                <Button variant="outline" size="sm" onClick={() => void save({ holdMessage: '' }, 'Default hold message restored.')} disabled={busy || !on}>
                   Use the default
-                </button>
+                </Button>
               )}
             </div>
           </div>

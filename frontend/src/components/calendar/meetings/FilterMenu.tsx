@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import type { CalendarEventType } from '../../../utils/calendarApi';
 import type { MeetingFilters } from './meetings';
+import { Button } from '../../common/Button';
 
 const Checkbox: React.FC<{ checked: boolean }> = ({ checked }) => (
   <span
@@ -70,13 +71,9 @@ export const FilterMenu: React.FC<{
           <div className="flex items-center justify-between px-2 pt-1 pb-1.5">
             <span className="text-2xs font-bold uppercase tracking-wide text-slate-500">Meeting types</span>
             {active > 0 && (
-              <button
-                type="button"
-                onClick={() => onChange({ types: [], showCanceled: false })}
-                className="text-2xs font-semibold text-slate-400 hover:text-white cursor-pointer"
-              >
+              <Button variant="link" onClick={() => onChange({ types: [], showCanceled: false })}>
                 Clear all
-              </button>
+              </Button>
             )}
           </div>
           <div className="max-h-64 overflow-y-auto">

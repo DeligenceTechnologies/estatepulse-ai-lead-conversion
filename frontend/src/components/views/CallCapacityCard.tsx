@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Loader2, PhoneCall } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { getCallCapacity, saveCallCapacity, type CallCapacity } from '../../utils/callCapacityApi';
+import { Button } from '../common/Button';
 
 const MAX = 500;
 
@@ -96,14 +97,9 @@ export const CallCapacityCard: React.FC<{ onSaved?: (limit: number) => void }> =
                 ? 'Telnyx allows 2 concurrent calls on a free (unverified) account and 10 on a verified account by default. To go higher, ask Telnyx support to raise your account limit first.'
                 : `Enter a whole number from 1 to ${MAX}.`}
             </p>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving || !valid || !status?.connected}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer shrink-0"
-            >
+            <Button size="sm" onClick={() => void save()} disabled={!valid || !status?.connected} loading={saving}>
               {saving ? 'Saving…' : 'Save limit'}
-            </button>
+            </Button>
           </div>
         </>
       )}

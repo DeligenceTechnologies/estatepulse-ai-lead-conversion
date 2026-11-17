@@ -6,7 +6,6 @@ import {
   Copy,
   Gauge,
   Globe,
-  Loader2,
   LogIn,
   Mail,
   Pencil,
@@ -41,6 +40,7 @@ import {
   timeSince,
   todayIndex,
 } from './MemberParts';
+import { IconButton, Button } from '../common/Button';
 
 interface MemberDrawerProps {
   member: TeamMember;
@@ -72,17 +72,13 @@ const CopyButton: React.FC<{ value: string; label: string }> = ({ value, label }
     }
   };
   return (
-    <button
-      type="button"
+    <IconButton
+      size="sm"
       onClick={() => void copy()}
       title={copied ? 'Copied' : `Copy ${label}`}
       aria-label={`Copy ${label}`}
-      className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
-        copied ? 'text-emerald-300 bg-emerald-500/10' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'
-      }`}
-    >
-      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-    </button>
+      icon={copied ? <Check className="text-emerald-400" /> : <Copy />}
+    />
   );
 };
 
@@ -171,7 +167,7 @@ const WeekTimeline: React.FC<{ member: TeamMember; now: Date }> = ({ member, now
               {isToday && nowPct !== null && (
                 <div
                   title={`Now · ${localTimeIn(member.timezone, now) ?? ''}`}
-                  className="absolute -top-1 -bottom-1 w-0.5 rounded-full bg-white shadow"
+                  className="absolute -top-1 -bottom-1 w-0.5 rounded-full bg-on-accent shadow"
                   style={{ left: `${nowPct}%` }}
                 />
               )}
@@ -229,20 +225,13 @@ export const MemberDrawer: React.FC<MemberDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="member-drawer-title">
-      <div className="absolute inset-0 bg-slate-950/80 animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
 
       <aside className="relative w-full sm:max-w-lg h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col animate-slide-in-right">
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           {/* Identity */}
           <div className="relative border-b border-slate-800 bg-slate-950/40">
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute top-3 right-3 w-8 h-8 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center justify-center cursor-pointer transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <IconButton onClick={onClose} aria-label="Close" className="absolute top-3 right-3" icon={<X />} />
 
             <div className="px-5 pt-6 pb-5">
               <div className="flex items-center gap-4 pr-8">
@@ -362,26 +351,14 @@ export const MemberDrawer: React.FC<MemberDrawerProps> = ({
         {(canEdit || canDelete) && (
           <div className="shrink-0 border-t border-slate-800 bg-slate-900/95 backdrop-blur px-5 py-3 flex items-center gap-2">
             {canDelete && (
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={deleting}
-                className="h-9 px-3 rounded-lg text-xs font-semibold text-rose-300 border border-rose-500/30 hover:bg-rose-500/10 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              <Button variant="danger-soft" onClick={onDelete} loading={deleting} icon={<Trash2 />}>
                 Delete
-              </button>
+              </Button>
             )}
             {canEdit && (
-              <button
-                type="button"
-                onClick={onEdit}
-                disabled={deleting}
-                className="ml-auto h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <Pencil className="w-3.5 h-3.5" />
+              <Button className="ml-auto" onClick={onEdit} disabled={deleting} icon={<Pencil />}>
                 Edit member
-              </button>
+              </Button>
             )}
           </div>
         )}

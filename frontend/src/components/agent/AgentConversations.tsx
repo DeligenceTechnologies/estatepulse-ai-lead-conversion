@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Ban, Bot, Inbox, Loader2, RotateCw, Send, UserRound } from 'lucide-react';
+import { AlertTriangle, Ban, Bot, Inbox, RotateCw, Send, UserRound } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
@@ -18,6 +18,7 @@ import {
   type ConversationRow,
   type MessageRow,
 } from '../../utils/agentMeApi';
+import { Button } from '../common/Button';
 
 const TEMP_STYLES: Record<string, string> = {
   hot: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
@@ -83,15 +84,9 @@ const ChatComposer: React.FC<{ leadId: string; onSent: () => void }> = ({ leadId
         placeholder="Text the lead… (Enter to send, Shift+Enter for a new line)"
         className="flex-1 resize-none bg-slate-950 border border-slate-800 focus:border-emerald-500/60 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 outline-none"
       />
-      <button
-        type="button"
-        onClick={() => void send()}
-        disabled={sending || !text.trim()}
-        className="px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-      >
-        {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+      <Button onClick={() => void send()} disabled={!text.trim()} loading={sending} icon={<Send />}>
         Send
-      </button>
+      </Button>
     </div>
   );
 };
@@ -181,13 +176,13 @@ export const AgentConversations: React.FC = () => {
           <h2 className="text-xl font-bold text-white tracking-tight">Conversations</h2>
           <p className="text-xs text-slate-400">Text threads of the leads assigned to you, including the AI&apos;s chat before you got them.</p>
         </div>
-        <button
+        <Button
+          variant="outline"
           onClick={threadsQuery.refresh}
-          className="px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          icon={<RotateCw className={threadsQuery.refreshing ? 'animate-spin' : ''} />}
         >
-          <RotateCw className={`w-3.5 h-3.5 ${threadsQuery.refreshing ? 'animate-spin' : ''}`} />
           Refresh
-        </button>
+        </Button>
       </div>
 
       {threadsQuery.stale && (
@@ -266,19 +261,14 @@ export const AgentConversations: React.FC = () => {
                       {current.hasInboundReply && <> • the lead has replied</>}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant={mine ? 'outline' : 'primary'}
                     onClick={() => void toggleTakeover()}
-                    disabled={switching}
-                    className={`shrink-0 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 ${
-                      mine
-                        ? 'bg-slate-900 border border-slate-700 hover:border-slate-600 text-slate-200'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    }`}
+                    loading={switching}
+                    icon={mine ? <Bot /> : <UserRound />}
                   >
-                    {switching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : mine ? <Bot className="w-3.5 h-3.5" /> : <UserRound className="w-3.5 h-3.5" />}
                     {mine ? 'Hand back to AI' : 'Take over chat'}
-                  </button>
+                  </Button>
                 </div>
                 <div
                   className={`mx-5 mt-4 flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${
