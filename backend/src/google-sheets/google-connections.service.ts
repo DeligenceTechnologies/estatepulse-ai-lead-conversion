@@ -337,17 +337,26 @@ export class GoogleConnectionsService {
       case 'REAUTH':
       case 'UNAUTHORIZED':
         return httpError(409, 'GOOGLE_REAUTH_REQUIRED', 'Google access was revoked or has expired. Reconnect Google to continue.');
+      case 'API_DISABLED':
+        // Nothing the owner does fixes this, so say so and keep Google's own
+        // wording (it names the API and the enable link) in the server log.
+        this.logger.error(`Google API disabled for this project: ${error.message}`);
+        return httpError(
+          503,
+          'GOOGLE_API_DISABLED',
+          'This Google integration is not switched on for EstatePulse yet. Choosing the file again will not help — ask an administrator to enable the Google API for the EstatePulse project.',
+        );
       case 'DENIED':
         return httpError(
           403,
           'GOOGLE_FILE_ACCESS_DENIED',
-          'EstatePulse cannot open that spreadsheet with this Google account. Select it again with the Google picker, signed in as the connected account.',
+          'EstatePulse cannot open that file with this Google account. Select it again with the Google picker, signed in as the connected account.',
         );
       case 'NOT_FOUND':
         return httpError(
           404,
           'GOOGLE_FILE_NOT_FOUND',
-          'Spreadsheet not found. It may be deleted or trashed, or it was not selected with the Google picker as the connected account.',
+          'That file was not found. It may be deleted or trashed, or it was not selected with the Google picker as the connected account.',
         );
       case 'RATE_LIMITED':
         return httpError(429, 'GOOGLE_RATE_LIMITED', 'Google is rate-limiting requests. Try again in a minute.');

@@ -30,6 +30,7 @@ import { useReloadOnSync } from '../shared/CalendarPanel';
 import { syncedAgo } from '../shared/SyncButton';
 import { PROVIDERS } from '../shared/ui';
 import { displayTimeZone } from '../../../lib/datetime';
+import { Button, IconButton } from '../../common/Button';
 
 type Span = 1 | 7;
 type Filter = 'all' | 'free' | 'busy';
@@ -42,9 +43,6 @@ const segment = (active: boolean) =>
   `h-8 px-3 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
     active ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-slate-200'
   }`;
-
-const iconButton =
-  'h-9 w-9 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-700 inline-flex items-center justify-center cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
 const Legend: React.FC = () => (
   <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-2xs font-medium text-slate-400">
@@ -211,13 +209,9 @@ export const TeamAvailability: React.FC<{ syncVersion: number }> = ({ syncVersio
         icon={<AlertTriangle className="w-6 h-6 text-rose-400" />}
         title="Couldn’t load availability"
         action={
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="h-9 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-100 cursor-pointer transition-colors"
-          >
+          <Button variant="secondary" onClick={() => void load()}>
             Try again
-          </button>
+          </Button>
         }
       >
         {error}
@@ -231,13 +225,9 @@ export const TeamAvailability: React.FC<{ syncVersion: number }> = ({ syncVersio
         icon={<CalendarClock className="w-6 h-6 text-emerald-400" />}
         title={calendar?.connection ? 'Reconnect your calendar' : 'Connect a calendar'}
         action={
-          <button
-            type="button"
-            onClick={() => navigate('/settings?tab=calendar')}
-            className="h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold cursor-pointer transition-colors"
-          >
+          <Button onClick={() => navigate('/settings?tab=calendar')}>
             {calendar?.connection ? 'Reconnect calendar' : 'Connect calendar'}
-          </button>
+          </Button>
         }
       >
         {calendar?.connection
@@ -338,20 +328,25 @@ export const TeamAvailability: React.FC<{ syncVersion: number }> = ({ syncVersio
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => move(-1)} disabled={loading || !first || !range || first <= range.minDate} aria-label={span === 1 ? 'Previous day' : 'Previous week'} className={iconButton}>
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setDate(null)}
-              disabled={loading || live}
-              className="h-9 px-3 rounded-lg border border-slate-800 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
+            <IconButton
+              variant="outline"
+              size="lg"
+              onClick={() => move(-1)}
+              disabled={loading || !first || !range || first <= range.minDate}
+              aria-label={span === 1 ? 'Previous day' : 'Previous week'}
+              icon={<ChevronLeft />}
+            />
+            <Button variant="outline" onClick={() => setDate(null)} disabled={loading || live}>
               Today
-            </button>
-            <button type="button" onClick={() => move(1)} disabled={loading || !first || !range || first >= range.maxDate} aria-label={span === 1 ? 'Next day' : 'Next week'} className={iconButton}>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            </Button>
+            <IconButton
+              variant="outline"
+              size="lg"
+              onClick={() => move(1)}
+              disabled={loading || !first || !range || first >= range.maxDate}
+              aria-label={span === 1 ? 'Next day' : 'Next week'}
+              icon={<ChevronRight />}
+            />
             <div role="radiogroup" aria-label="Range" className="inline-flex h-9 p-0.5 rounded-lg bg-slate-900 border border-slate-800">
               {([1, 7] as const).map((value) => (
                 <button key={value} type="button" role="radio" aria-checked={span === value} onClick={() => setSpan(value)} className={segment(span === value)}>

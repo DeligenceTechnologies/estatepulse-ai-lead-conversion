@@ -27,6 +27,7 @@ import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { TelnyxWebhookController } from './telnyx-webhook.controller';
 import { TelnyxController } from './telnyx.controller';
 import { VoiceService } from './voice.service';
+import { TransferLegs } from './transfer-legs';
 import { AssistantToolAuth } from './tools/assistant-tool-auth.service';
 import { CallOutcomeToolController, CallToolsSettingsController } from './tools/call-tools.controller';
 import { CallToolsService } from './tools/call-tools.service';
@@ -85,6 +86,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     OutcomeService,
     TextBackService,
     TextBackWorker,
+    TransferLegs,
   ],
   exports: [
     CallQueue,
@@ -99,6 +101,9 @@ import { VoicemailService } from './voicemail/voicemail.service';
     AssistantToolAuth,
     SmsConversationService,
     ChatTakeoverService,
+    VoiceService,
+    CallToolsService,
+    TransferLegs,
   ],
 })
 export class TelnyxModule {}

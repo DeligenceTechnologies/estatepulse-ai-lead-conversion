@@ -64,10 +64,20 @@ const PORTAL_LEAD_FIELDS = {
 
 type PortalLeadRow = Prisma.LeadGetPayload<{ select: typeof PORTAL_LEAD_FIELDS }>;
 
-function sourceLabel(source: PortalLeadRow['leadSource']): string {
+/** A webhook and nothing more: there is no product to name, so "webhook" IS the answer. */
+const GENERIC_WEBHOOK_PROVIDERS: ReadonlySet<string> = new Set(['WEBHOOK', 'CUSTOM']);
+
+/**
+ * Where the lead came from, keyed off the provider rather than how we were
+ * wired to it. Reading `connectionMethod` here badged every MANUAL source
+ * "webhook", which hid Google Forms behind a transport name. Kept identical to
+ * the leads table's own rule (LeadsView.tsx) so one lead reads the same in both.
+ */
+export function sourceLabel(source: PortalLeadRow['leadSource']): string {
   if (!source) return 'manual';
-  if (source.connectionMethod === 'MANUAL') return 'webhook';
-  return source.provider.toLowerCase().replace(/_/g, ' ');
+  const provider = source.provider.toUpperCase();
+  if (GENERIC_WEBHOOK_PROVIDERS.has(provider)) return 'webhook';
+  return provider.toLowerCase().replace(/_/g, ' ');
 }
 
 function toPortalLead(r: PortalLeadRow) {

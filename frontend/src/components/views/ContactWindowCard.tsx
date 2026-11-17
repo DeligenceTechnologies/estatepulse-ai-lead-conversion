@@ -1,8 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Loader2, ShieldCheck } from 'lucide-react';
+import {
+  CalendarOff,
+  Clock,
+  Gauge,
+  Loader2,
+  MessageSquare,
+  Moon,
+  PhoneCall,
+  PhoneOff,
+  ShieldCheck,
+  Timer,
+} from 'lucide-react';
 import { toast } from 'react-toastify';
 import { DEFAULT_LIMITS, WEEKDAYS, type ContactLimits } from '../../utils/journey';
 import { getStrategy, saveStrategy, type Guardrails } from '../../utils/strategiesApi';
+import { Button } from '../common/Button';
 
 /**
  * The contact window and safety limits, as one org-wide setting.
@@ -20,6 +32,54 @@ import { getStrategy, saveStrategy, type Guardrails } from '../../utils/strategi
  */
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const field =
+  'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-600 disabled:opacity-40';
+
+/** One setting: an icon, a short name, the control and a one-line hint. */
+const Tile: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  aside?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}> = ({ icon, title, hint, aside, className = '', children }) => (
+  <div className={`bg-slate-950/50 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 ${className}`}>
+    <div className="flex items-center gap-2.5">
+      <span className="w-7 h-7 rounded-lg bg-slate-500/10 border border-slate-500/20 text-slate-300 flex items-center justify-center shrink-0 [&>svg]:w-3.5 [&>svg]:h-3.5">
+        {icon}
+      </span>
+      <span className="text-xs font-bold text-slate-100 flex-1">{title}</span>
+      {aside}
+    </div>
+    {children}
+    <p className="text-2xs text-slate-400 leading-relaxed mt-auto">{hint}</p>
+  </div>
+);
+
+/** A number box with its unit after it ("3 calls"). */
+const NumberField: React.FC<{
+  id?: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (value: string) => void;
+}> = ({ id, value, min, max, unit, onChange }) => (
+  <label className="flex items-center gap-2 text-xs text-slate-300">
+    <input
+      id={id}
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`${field} w-20 text-center`}
+    />
+    {unit}
+  </label>
+);
 
 interface Props {
   /** Why this setting is on THIS page, phrased for the page it is on. */
@@ -49,7 +109,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
         if (g.limits) setLimits({ ...DEFAULT_LIMITS, ...g.limits });
         if (Array.isArray(g.skipDays)) setSkipDays(g.skipDays);
       })
-      .catch((e) => setError(e?.message || 'Could not load your contact window.'))
+      .catch((e) => setError(e?.message || 'Could not load your contact settings.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,7 +129,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
   const save = async () => {
     if (!valid) {
       setError(
-        'Times must be 24-hour HH:MM (e.g. 21:00), limits whole numbers (calls and texts up to 20 a day, the gaps and waits up to 1440 min), and at least one day open.',
+        'Check the values: limits are whole numbers (up to 20 a day, waits up to 1440 min) and at least one day must stay open.',
       );
       return;
     }
@@ -90,9 +150,9 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           skipDays,
         },
       });
-      toast.success('Contact window saved.');
+      toast.success('Contact settings saved.');
     } catch (e: any) {
-      toast.error(e?.message || 'Could not save your contact window.');
+      toast.error(e?.message || 'Could not save your contact settings.');
     } finally {
       setSaving(false);
     }
@@ -100,227 +160,169 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-      <div>
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+      <div className="flex items-start gap-3">
+        <span className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center shrink-0">
           <Clock className="w-4 h-4 text-amber-400" />
-          Contact Window &amp; Safety Guardrails
-        </h3>
-        <p className="text-xs text-slate-400 mt-1">{blurb}</p>
+        </span>
+        <div>
+          <h3 className="text-sm font-bold text-white">Contact hours &amp; limits</h3>
+          <p className="text-xs text-slate-400 mt-0.5">{blurb}</p>
+        </div>
       </div>
 
       {error && (
-        <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
-          {error}
-        </div>
+        <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">{error}</div>
       )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Loading your contact window…
+          Loading…
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Quiet hours <span className="text-slate-500 font-normal">— nothing sends</span>
-              </label>
-              <div className="flex items-center gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+            <Tile
+              className="lg:col-span-3"
+              icon={<Moon />}
+              title="Quiet hours"
+              hint="In the lead's local time. Anything due now waits until morning; nothing is skipped."
+              aside={
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={respect}
+                  aria-label="Quiet hours on"
+                  onClick={() => setRespect(!respect)}
+                  className="flex items-center gap-2 text-2xs font-semibold cursor-pointer"
+                >
+                  <span className={respect ? 'text-green-300' : 'text-rose-300'}>{respect ? 'On' : 'Off'}</span>
+                  <span
+                    className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${respect ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent shadow transition-all ${
+                        respect ? 'left-[18px]' : 'left-0.5'
+                      }`}
+                    />
+                  </span>
+                </button>
+              }
+            >
+              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-300">
+                <span>No contact from</span>
                 <input
                   type="time"
                   value={start}
                   onChange={(e) => setStart(e.target.value)}
                   disabled={!respect}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-32 text-center disabled:opacity-40 focus:outline-none focus:border-emerald-600"
+                  aria-label="Quiet hours start"
+                  className={`${field} w-32 text-center`}
                 />
-                <span className="text-slate-400">to</span>
+                <span>to</span>
                 <input
                   type="time"
                   value={end}
                   onChange={(e) => setEnd(e.target.value)}
                   disabled={!respect}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-32 text-center disabled:opacity-40 focus:outline-none focus:border-emerald-600"
+                  aria-label="Quiet hours end"
+                  className={`${field} w-32 text-center`}
                 />
               </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                In each lead's local time, from their phone's area code (a time zone field in your lead source is used
-                first). A lead whose time zone cannot be told is held until you set it. Legal calling hours for the
-                lead's country, state or province apply on top and cannot be switched off. A step falling inside this
-                window is sent when it reopens, never dropped — and the rest of the cadence shifts with it.
-              </p>
-            </div>
+              {!respect && (
+                <p className="text-2xs font-semibold text-rose-300">Off: texts and calls can go out at any hour.</p>
+              )}
+            </Tile>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Max AI call attempts <span className="text-slate-500 font-normal">— per lead</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={maxVoice}
-                onChange={(e) => setMaxVoice(Number(e.target.value))}
-                className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600"
-              />
-              <p className="text-2xs text-slate-500 mt-1">
-                Applies to the strategy's calls. Do-not-contact is absolute and is not a setting.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Daily limits <span className="text-slate-500 font-normal">— per lead, 0 is no limit</span>
-              </label>
-              <div className="flex items-center gap-2 flex-wrap">
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={limits.callsPerDay}
-                  onChange={(e) => setLimit('callsPerDay', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">calls</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={limits.smsPerDay}
-                  onChange={(e) => setLimit('smsPerDay', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">texts, at least</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.minGapMinutes}
-                  onChange={(e) => setLimit('minGapMinutes', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min apart</span>
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                Shared by the strategy and every sequence. The gap is between two calls or two texts; a text can still
-                follow a call within minutes. A step over the limit waits for the next day&apos;s window. The AI&apos;s
-                chat replies and a callback the lead asked for are not held back.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Days off <span className="text-slate-500 font-normal">— nobody is contacted</span>
-              </label>
-              <div className="flex items-center gap-1 flex-wrap">
-                {WEEKDAYS.map((day, d) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => toggleDay(d)}
-                    className={`px-2 py-1.5 rounded-lg border text-2xs font-semibold cursor-pointer ${
-                      skipDays.includes(d) ? 'border-rose-700/60 bg-rose-900/30 text-rose-300' : 'border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    {day}
-                  </button>
-                ))}
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                A step due on a day off goes at the start of the next open day. A callback the lead asked for still
-                happens.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label htmlFor="redial-gap" className="block text-slate-300 font-semibold mb-1">
-                After a busy or declined call <span className="text-slate-500 font-normal">— 0 is no wait</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">wait</span>
-                <input
-                  id="redial-gap"
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.redialGapMinutes}
-                  onChange={(e) => setLimit('redialGapMinutes', e.target.value)}
-                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min before calling again</span>
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                Someone who just declined is not rung straight back. A callback the lead asked for is not held back.
-                Default 30 min.
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="chat-quiet" className="block text-slate-300 font-semibold mb-1">
-                While a lead is texting <span className="text-slate-500 font-normal">— follow-up sequences, 0 is no wait</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">wait</span>
-                <input
-                  id="chat-quiet"
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.chatQuietMinutes}
-                  onChange={(e) => setLimit('chatQuietMinutes', e.target.value)}
-                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min after their last text</span>
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                A sequence step never lands in the middle of a chat. The outreach strategy keeps its own rule: a call waits
-                until the chat has been quiet for that step&apos;s wait. Default 30 min.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setRespect(!respect)}
-            className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
-          >
-            <span
-              className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${
-                respect ? 'bg-emerald-600' : 'bg-rose-700'
-              }`}
+            <Tile
+              className="lg:col-span-3"
+              icon={<CalendarOff />}
+              title="Days off"
+              hint="Tap a day to turn it off. Steps move to the next open day."
             >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${
-                  respect ? 'left-[18px]' : 'left-0.5'
-                }`}
-              />
-            </span>
-            <span className="font-semibold">
-              {respect ? 'Quiet hours enforced' : 'Quiet hours OFF — messages may send at any hour'}
-            </span>
-          </button>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {WEEKDAYS.map((day, d) => {
+                  const off = skipDays.includes(d);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      aria-pressed={off}
+                      onClick={() => toggleDay(d)}
+                      className={`w-11 py-1.5 rounded-lg border text-2xs font-semibold cursor-pointer transition-colors ${
+                        off
+                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-300 line-through'
+                          : 'border-green-500/25 bg-green-500/10 text-green-300 hover:border-green-500/40'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </Tile>
 
-          <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-            <p className="text-xs text-slate-500 flex items-center gap-1.5 min-w-0">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">
-                One window for both the strategy and every follow-up sequence.
-              </span>
+            <Tile className="lg:col-span-2" icon={<Gauge />} title="Daily limit per lead" hint="0 means no limit.">
+              <div className="flex items-center gap-4 flex-wrap">
+                <NumberField value={limits.callsPerDay} min={0} max={20} unit="calls" onChange={(v) => setLimit('callsPerDay', v)} />
+                <NumberField value={limits.smsPerDay} min={0} max={20} unit="texts" onChange={(v) => setLimit('smsPerDay', v)} />
+              </div>
+            </Tile>
+
+            <Tile
+              className="lg:col-span-2"
+              icon={<Timer />}
+              title="Gap between messages"
+              hint="Between two calls or two texts to the same lead."
+            >
+              <NumberField value={limits.minGapMinutes} min={0} max={1440} unit="min" onChange={(v) => setLimit('minGapMinutes', v)} />
+            </Tile>
+
+            <Tile className="lg:col-span-2" icon={<PhoneCall />} title="Max AI call attempts" hint="Per lead, in total.">
+              <NumberField value={maxVoice} min={1} max={10} unit="calls" onChange={(v) => setMaxVoice(Number(v))} />
+            </Tile>
+
+            <Tile
+              className="lg:col-span-3"
+              icon={<PhoneOff />}
+              title="After a declined call"
+              hint="Wait before calling again. Callbacks the lead asked for are not delayed."
+            >
+              <NumberField
+                id="redial-gap"
+                value={limits.redialGapMinutes}
+                min={0}
+                max={1440}
+                unit="min"
+                onChange={(v) => setLimit('redialGapMinutes', v)}
+              />
+            </Tile>
+
+            <Tile
+              className="lg:col-span-3"
+              icon={<MessageSquare />}
+              title="While a lead is texting"
+              hint="Wait after their last text, so a step never interrupts a chat."
+            >
+              <NumberField
+                id="chat-quiet"
+                value={limits.chatQuietMinutes}
+                min={0}
+                max={1440}
+                unit="min"
+                onChange={(v) => setLimit('chatQuietMinutes', v)}
+              />
+            </Tile>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
+            <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              Legal calling hours and do-not-contact always apply.
             </p>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={saving || !valid}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
-              >
-                {saving ? 'Saving…' : 'Save window'}
-              </button>
-            </div>
+            <Button size="sm" onClick={() => void save()} disabled={!valid} loading={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
           </div>
         </>
       )}

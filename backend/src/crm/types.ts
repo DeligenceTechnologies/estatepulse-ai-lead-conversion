@@ -104,4 +104,14 @@ export interface CrmAdapter {
   readContacts(accessToken: string, ids: string[]): Promise<{ found: CrmContact[]; missing: string[] }>;
   /** Contacts modified at or after `sinceMs`, oldest first. */
   changedContactsSince(accessToken: string, sinceMs: number, cursor: string | null): Promise<CrmChangedPage>;
+  /** Writes contact fields an owner corrected in Import Review; only the keys sent change. Needs the CRM's write scope. */
+  updateContact(accessToken: string, externalId: string, fields: CrmContactUpdate): Promise<CrmContact>;
+}
+
+/** The contact fields EstatePulse may write back to a CRM. */
+export interface CrmContactUpdate {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
 }

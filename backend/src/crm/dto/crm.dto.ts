@@ -22,3 +22,26 @@ export class CrmRunsQueryDto {
   @Max(50)
   limit?: number;
 }
+
+/** PATCH a pending CRM contact from Import Review: only the keys sent are written to the CRM. */
+export class EditCrmContactDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  email?: string;
+}

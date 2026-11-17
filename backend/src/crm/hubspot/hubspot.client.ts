@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CRM_PROVIDER_LABELS, HUBSPOT_PROVIDER } from '../crm-records';
-import { CrmApiError, type CrmAccount, type CrmAdapter, type CrmChangedPage, type CrmContactPage, type CrmTokens } from '../types';
+import { CrmApiError, type CrmAccount, type CrmAdapter, type CrmChangedPage, type CrmContactPage, type CrmContactUpdate, type CrmTokens } from '../types';
 import { HUBSPOT_CONTACT_PROPERTIES, modifiedAtMs, toCrmContact, type HubSpotObject } from './hubspot-contacts';
 
 /**
@@ -24,7 +24,9 @@ import { HUBSPOT_CONTACT_PROPERTIES, modifiedAtMs, toCrmContact, type HubSpotObj
 
 /** Without this a connection cannot read a single contact. `oauth` is added to every app by HubSpot. */
 const REQUIRED_SCOPES = ['crm.objects.contacts.read'] as const;
-const DEFAULT_SCOPES = 'oauth crm.objects.contacts.read';
+// Write is asked for, not required: a connection granted before it keeps syncing, and only an edit
+// from Import Review asks for a reconnect (see CrmRowEditService).
+const DEFAULT_SCOPES = 'oauth crm.objects.contacts.read crm.objects.contacts.write';
 
 /** HubSpot's maximum page size for the list and batch-read endpoints. */
 export const PAGE_SIZE = 100;
@@ -186,6 +188,21 @@ export class HubSpotClient implements CrmAdapter {
       contacts: (body.results ?? []).map(toCrmContact),
       nextCursor: body.paging?.next?.after ?? null,
     };
+  }
+
+  /** Writes the given contact fields; only the keys sent change. Returns the contact as HubSpot now holds it. */
+  async updateContact(accessToken: string, externalId: string, fields: CrmContactUpdate): Promise<ReturnType<typeof toCrmContact>> {
+    const properties: Record<string, string> = {};
+    if (fields.firstName !== undefined) properties.firstname = fields.firstName;
+    if (fields.lastName !== undefined) properties.lastname = fields.lastName;
+    if (fields.email !== undefined) properties.email = fields.email;
+    if (fields.phone !== undefined) properties.phone = fields.phone;
+    const body = await this.json<HubSpotObject>(`${this.api}/crm/objects/${this.version}/contacts/${encodeURIComponent(externalId)}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties }),
+    });
+    return toCrmContact(body);
   }
 
   async readContacts(accessToken: string, ids: string[]): Promise<{ found: ReturnType<typeof toCrmContact>[]; missing: string[] }> {

@@ -7,6 +7,7 @@ import { getOrganizationCalendar, type CalendarProviderId, type OrganizationCale
 import { TeamAvailability } from '../calendar/availability/TeamAvailability';
 import { SyncButton } from '../calendar/shared/SyncButton';
 import { PROVIDERS } from '../calendar/shared/ui';
+import { Button } from '../common/Button';
 
 export type CalendarSection = 'availability';
 
@@ -65,9 +66,6 @@ const ConnectedCalendar: React.FC<{ provider: CalendarProviderId; onOpen?: () =>
   );
 };
 
-const primaryButton =
-  'h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400';
-
 /**
  * The Calendar pages — Team Availability — each its own sidebar entry, all
  * read from the Calendly or Cal.com account connected once under
@@ -117,13 +115,9 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
         icon={<AlertTriangle className="w-6 h-6 text-rose-400" />}
         title="Couldn’t load your calendar"
         action={
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="h-9 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-100 cursor-pointer transition-colors"
-          >
+          <Button variant="secondary" onClick={() => void load()}>
             Try again
-          </button>
+          </Button>
         }
       >
         {error}
@@ -139,9 +133,9 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
         title={broken ? 'Reconnect your calendar' : 'Connect a calendar'}
         action={
           canConnect ? (
-            <button type="button" onClick={openCalendarSettings} className={primaryButton}>
+            <Button onClick={openCalendarSettings}>
               {broken ? 'Reconnect calendar' : 'Connect calendar'}
-            </button>
+            </Button>
           ) : undefined
         }
       >

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Sliders,
   Sparkles,
@@ -19,11 +19,19 @@ import {
   Trash2,
   Voicemail,
   MessageSquare,
-  Lock
+  Lock,
+  X,
+  Bot,
+  Megaphone,
+  Mic,
+  Target,
+  Database,
+  Scale,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { confirmToast } from '../../lib/toast';
-import { useApp } from '../../context/AppContext';
+import { pathForView, useApp } from '../../context/AppContext';
 import {
   getAssistant,
   updateAssistant,
@@ -58,13 +66,58 @@ import { QualificationQuestionsCard } from './QualificationQuestionsCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
+import { LiveTransferCard } from './LiveTransferCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { BusinessDetailsCard } from './BusinessDetailsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
+import { Button, IconButton } from '../common/Button';
+
+/** The page's sections. Each is a tab, so the owner sees one topic at a time. */
+type TabId = 'agent' | 'outreach' | 'voice' | 'qualify' | 'data' | 'compliance';
+
+const TABS: Array<{ id: TabId; label: string; icon: React.ComponentType<{ className?: string }>; title: string; blurb: string }> = [
+  { id: 'agent', label: 'Agent & prompt', icon: Bot, title: 'Who your agent is', blurb: 'The number it uses, its name, tone, greeting and the instructions it follows.' },
+  { id: 'outreach', label: 'Outreach', icon: Megaphone, title: 'How it reaches new leads', blurb: 'The call and text sequence, contact hours, and how many calls run at once.' },
+  { id: 'voice', label: 'Voice & calls', icon: Mic, title: 'How it sounds on a call', blurb: 'Voice, pace, recording, call quality, voicemail and fine-tuning.' },
+  { id: 'qualify', label: 'Qualification', icon: Target, title: 'What it asks and how it scores', blurb: 'Questions, lead scoring, in-call booking, callbacks and outcomes.' },
+  { id: 'data', label: 'Tools & data', icon: Database, title: 'What it can do and know', blurb: 'Texting, tools it can run during a call, fixed variables and agent takeover.' },
+  { id: 'compliance', label: 'Compliance', icon: Scale, title: 'Who you are to leads', blurb: 'Business details shown in texts, and the rules the agent always follows.' },
+];
+
+const TAB_LABEL = Object.fromEntries(TABS.map((t) => [t.id, t.label])) as Record<TabId, string>;
+
+/** Which tab holds each card that other pages link to as /ai-settings#<id>. */
+const HASH_TAB: Record<string, TabId> = {
+  'contact-window': 'outreach',
+  'call-capacity': 'outreach',
+  'call-pacing': 'outreach',
+  'qualification-questions': 'qualify',
+  voicemail: 'voice',
+};
+
+/** A tab's heading: what this section is for, in one line. */
+const TabIntro: React.FC<{ tab: TabId }> = ({ tab }) => {
+  const t = TABS.find((x) => x.id === tab)!;
+  const Icon = t.icon;
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4" />
+      </span>
+      <div className="min-w-0">
+        <h3 className="text-base font-bold text-white leading-tight">{t.title}</h3>
+        <p className="text-xs text-slate-400 mt-0.5">{t.blurb}</p>
+      </div>
+    </div>
+  );
+};
 
 export const AISettingsView: React.FC = () => {
-  const { orgSettings, updateOrgSettings, setActiveView } = useApp();
+  const { orgSettings, updateOrgSettings } = useApp();
+  const navigate = useNavigate();
+  /** The Telnyx connection lives in Settings → Telnyx. */
+  const openTelnyxSettings = () => navigate({ pathname: pathForView('settings'), search: '?tab=telnyx' });
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);
@@ -352,10 +405,30 @@ export const AISettingsView: React.FC = () => {
     });
   };
 
+  const [tab, setTab] = useState<TabId>('agent');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  /** Switching tabs starts the new one from the top, under the sticky tab bar. */
+  const goTab = (id: TabId) => {
+    setTab(id);
+    // Only when scrolled past the tab bar: a short scroll up, never a jump to the page top.
+    requestAnimationFrame(() => {
+      const anchor = document.getElementById('ai-settings-tabs');
+      const shell = anchor?.closest('main');
+      if (!anchor || !shell) return;
+      const offset = anchor.getBoundingClientRect().top - shell.getBoundingClientRect().top;
+      if (offset < 0) shell.scrollTop += offset;
+    });
+  };
+
   // A link such as /ai-settings#contact-window lands on that card and points it out, once per
   // navigation. The cards render only after the Telnyx status loads, so this runs again then.
   const { hash, key } = useLocation();
   const landed = useRef<string | null>(null);
+  // The card has to be on screen to be landed on, so its tab opens first.
+  useEffect(() => {
+    const t = HASH_TAB[hash.slice(1)];
+    if (t) setTab(t);
+  }, [hash, key]);
   useEffect(() => {
     if (!hash || landed.current === key) return;
     const el = document.getElementById(hash.slice(1));
@@ -388,20 +461,20 @@ export const AISettingsView: React.FC = () => {
   }, [hash, key, status]);
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto text-slate-100">
+    <div className={`px-6 pt-6 space-y-5 max-w-5xl mx-auto text-slate-100 ${status?.connected && status.hasAssistant ? '' : 'pb-6'}`}>
       
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">AI Assistant</h2>
           <p className="text-xs text-slate-400">
-            The prompt, voice and outreach strategy your AI agent uses on every lead.
+            How your AI agent talks, sounds and reaches out to leads.
           </p>
         </div>
 
       </div>
 
-      {/* The connection itself is made on Integrations & Webhooks. This page
+      {/* The connection itself is made in Settings → Telnyx. This page
           only reports what that connection is, and sends you there if there
           isn't one — a prompt editor should not open on a credentials form. */}
       {status === null && (
@@ -411,153 +484,125 @@ export const AISettingsView: React.FC = () => {
       )}
 
       {status && !(status.connected && status.hasAssistant) && (
-        <div className="bg-slate-900/90 border border-amber-500/40 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-500/30 shrink-0">
-            <Plug className="w-5 h-5" />
+        <div className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-6 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-300 flex items-center justify-center border border-amber-500/25 shrink-0">
+              <Plug className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-bold text-white">
+                {status.connected ? 'Add an AI assistant in Telnyx' : 'Connect Telnyx to get started'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {status.connected
+                  ? 'Telnyx is connected, but no assistant is set up yet. Add one, then come back here.'
+                  : 'Your AI agent calls and texts through Telnyx. Connect it once, then set up the voice and prompt here.'}
+              </p>
+            </div>
+            <Button onClick={openTelnyxSettings} iconRight={<ArrowRight />} className="shrink-0">
+              {status.connected ? 'Open Telnyx settings' : 'Connect Telnyx'}
+            </Button>
           </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-white">
-              {status.connected
-                ? 'No AI assistant on your Telnyx account yet'
-                : 'Telnyx account not connected'}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              {status.connected ? (
-                <>
-                  Your Telnyx credentials are saved, but there is no assistant to configure. Create
-                  or attach one under{' '}
-                  <span className="text-slate-200">Settings → Telnyx</span>, then come back
-                  to write its prompt and tone.
-                </>
-              ) : (
-                <>
-                  Please connect your Telnyx account under{' '}
-                  <span className="text-slate-200">Settings → Telnyx</span>. Prompt,
-                  tone and voice settings are written straight to the live agent, so there is nothing
-                  to edit until it exists.
-                </>
-              )}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveView('integrations')}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-950 transition-colors cursor-pointer shrink-0"
-          >
-            Go to Integrations &amp; Webhooks
-            <ArrowRight className="w-4 h-4" />
-          </button>
         </div>
       )}
 
       {status && status.connected && status.hasAssistant && (
-      <form onSubmit={handleSave} className="space-y-6">
+      <form onSubmit={handleSave} className="space-y-5">
 
-        {/* What the agent is actually running on. Read-only: the credentials
-            are edited on Integrations & Webhooks, and showing a Disconnect
-            here would be a second, competing place to break the connection.
-            The agent switcher stays — picking which assistant you are editing
-            is part of editing it. */}
-        <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-violet-600/20 text-violet-300 flex items-center justify-center border border-violet-500/30 shrink-0">
-                <PhoneCall className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  {status.label || 'Telnyx connected'}
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                </h3>
-                <p className="text-xs text-slate-400">
-                  {status.accountCount > 1
-                    ? `This agent runs on the active one of your ${status.accountCount} Telnyx accounts.`
-                    : 'This agent calls and texts from your own Telnyx account.'}
-                </p>
-              </div>
+        {/* What the agent runs on, in one slim bar. Read-only: the credentials are
+            edited in Settings → Telnyx. The agent switcher stays — picking which
+            assistant you are editing is part of editing it. */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-violet-600/20 text-violet-300 flex items-center justify-center border border-violet-500/30 shrink-0">
+              <PhoneCall className="w-4 h-4" />
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveView('integrations')}
-              className="text-xs font-semibold text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-600 rounded-lg px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-            >
-              Manage connection
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Capability, not credentials.
-              The four tiles here used to print the masked API key, the from
-              number, the assistant id and the connect date. The key is a secret
-              even masked and belongs nowhere near a settings page; the id is an
-              internal handle nobody acts on; and the number is already shown, in
-              full and with its controls, by PhoneNumberCard directly below —
-              so it was duplication as well as noise. What is left is the only
-              question this card exists to answer: can this agent call and text
-              right now? */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="flex items-center gap-2.5 bg-slate-950 border border-emerald-800/40 rounded-xl px-3.5 py-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-100">Voice calls</div>
-                <div className="text-xs text-emerald-400">Ready</div>
-              </div>
-            </div>
-
-            <div
-              className={`flex items-center gap-2.5 bg-slate-950 rounded-xl px-3.5 py-2.5 border ${
-                status.hasMessaging ? 'border-emerald-800/40' : 'border-amber-800/50'
-              }`}
-            >
-              {status.hasMessaging ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-100">SMS messaging</div>
-                <div
-                  className={`text-xs ${status.hasMessaging ? 'text-emerald-400' : 'text-amber-400'}`}
-                >
-                  {status.hasMessaging
-                    ? 'Ready'
-                    : 'Assign your number to a Messaging Profile'}
-                </div>
-              </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white flex items-center gap-1.5 truncate">
+                {status.label || 'Telnyx connected'}
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              </p>
+              <p className="text-2xs text-slate-500 truncate">
+                {status.connectedAt
+                  ? `Connected ${formatDate(status.connectedAt, { day: 'numeric', month: 'short', year: 'numeric' })}`
+                  : 'Connected'}
+                {status.accountCount > 1 && ` · active one of ${status.accountCount} accounts`}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-slate-800">
-            <p className="text-xs text-slate-500 min-w-0">
-              {status.connectedAt
-                ? `Connected ${formatDate(status.connectedAt, {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}`
-                : 'Connected'}
-              {status.accountCount > 1 && ` · ${status.accountCount} accounts on file`}
-            </p>
+          <div className="flex items-center gap-1.5 text-2xs font-semibold">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
+              <CheckCircle2 className="w-3 h-3" /> Calls
+            </span>
+            {status.hasMessaging ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
+                <CheckCircle2 className="w-3 h-3" /> SMS
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25"
+                title="Assign your number to a Telnyx Messaging Profile to enable texting."
+              >
+                <AlertTriangle className="w-3 h-3" /> SMS off
+              </span>
+            )}
+          </div>
 
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
             {assistants.length > 0 && (
-              <div className="flex items-center gap-2 text-xs ml-auto shrink-0">
-                <span className="text-slate-400">Editing agent:</span>
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Editing</span>
                 <select
                   value={status.assistantId}
                   onChange={(e) => switchAgent(e.target.value)}
                   disabled={switching}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-white focus:outline-none focus:border-emerald-500 max-w-[220px]"
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 h-8 text-white focus:outline-none focus:border-emerald-500 max-w-[200px]"
                 >
                   {assistants.map((a) => (
                     <option key={a.id} value={a.id}>{a.name || a.id}</option>
                   ))}
                 </select>
                 {switching && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
-              </div>
+              </label>
             )}
+            <Button variant="outline" size="sm" onClick={openTelnyxSettings} iconRight={<ArrowRight />}>
+              Manage
+            </Button>
           </div>
         </div>
 
+        {/* Sections as tabs: one topic on screen at a time instead of one endless page.
+            Hidden tabs stay mounted, so nothing typed in one is lost by visiting another. */}
+        <div id="ai-settings-tabs" aria-hidden className="h-0" />
+        <div className="sticky top-0 z-20 -mx-6 px-6 py-2 bg-slate-950/85 backdrop-blur border-b border-slate-800/80">
+          <div role="tablist" aria-label="AI assistant sections" className="flex gap-1 overflow-x-auto no-scrollbar">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => goTab(t.id)}
+                  className={`shrink-0 inline-flex items-center gap-2 px-3.5 h-9 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/40'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 border border-transparent'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${active ? 'text-emerald-300' : ''}`} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <section role="tabpanel" aria-label={TAB_LABEL.agent} className={tab === 'agent' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="agent" />
         <PhoneNumberCard status={status} onChange={refreshStatus} />
 
         {/* Core Persona & Strategy */}
@@ -579,9 +624,7 @@ export const AISettingsView: React.FC = () => {
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" /> Live: {assistantName}
                 </span>
               )}
-              <button type="button" onClick={loadAgent} className="text-slate-500 hover:text-slate-300" title="Reload from agent">
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
+              <IconButton size="sm" onClick={loadAgent} aria-label="Reload from agent" icon={<RefreshCw />} />
             </div>
           </div>
 
@@ -685,7 +728,10 @@ export const AISettingsView: React.FC = () => {
           </div>
 
         </div>
+        </section>
 
+        <section role="tabpanel" aria-label={TAB_LABEL.outreach} className={tab === 'outreach' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="outreach" />
         {/* Outbound Communication Strategy — its own block */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -696,6 +742,25 @@ export const AISettingsView: React.FC = () => {
           <StrategyEditor />
         </div>
 
+        {/* The real org-wide guardrails, read by BOTH schedulers. The card
+            that used to be here bound to the browser's demo store, so editing
+            the contact hours changed nothing the engine ever saw. */}
+        {/* The ids are link targets (OutreachPicker's "Change" links): /ai-settings#<id>. */}
+        <div id="contact-window" className="scroll-mt-24 rounded-2xl transition-shadow">
+          <ContactWindowCard blurb="When and how often the AI may contact a lead. Follow-up sequences use the same rules." />
+        </div>
+
+        <div id="call-capacity" className="scroll-mt-24 rounded-2xl transition-shadow">
+          <CallCapacityCard onSaved={setCallLimit} />
+        </div>
+
+        <div id="call-pacing" className="scroll-mt-24 rounded-2xl transition-shadow">
+          <CallPacingCard limit={callLimit} />
+        </div>
+        </section>
+
+        <section role="tabpanel" aria-label={TAB_LABEL.voice} className={tab === 'voice' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="voice" />
         {/* Voice & Call Behavior */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -842,13 +907,9 @@ export const AISettingsView: React.FC = () => {
                   disabled={interruptThreshold == null}
                   className="flex-1 accent-emerald-500 disabled:opacity-40"
                 />
-                <button
-                  type="button"
-                  onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}
-                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 whitespace-nowrap cursor-pointer"
-                >
+                <Button variant="link" onClick={() => setInterruptThreshold(interruptThreshold == null ? 0.5 : null)}>
                   {interruptThreshold == null ? 'Set manually' : 'Automatic'}
-                </button>
+                </Button>
               </div>
               <span className="text-xs text-slate-500 mt-1 block">
                 Higher means the agent is more certain before it stops talking. Raise it if it keeps cutting
@@ -888,71 +949,32 @@ export const AISettingsView: React.FC = () => {
 
             <p className="md:col-span-2 text-xs text-slate-500 flex items-center gap-1.5">
               <Voicemail className="w-3.5 h-3.5" />
-              Answering machines and voicemail are set in the Voicemail card further down this page.
+              Answering machines and voicemail are set in the Voicemail card below.
             </p>
           </div>
         </div>
 
-        {/* Channels & Data */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-emerald-400" />
-            Channels &amp; Data
-          </h3>
-
-          <div className="space-y-4 text-xs">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              {[
-                {
-                  label: smsBusy ? 'Updating…' : 'Let this agent answer texts from leads',
-                  on: smsEnabled,
-                  set: (next: boolean) => void toggleSms(next),
-                  disabled: smsBusy,
-                },
-                {
-                  label: 'Keep conversation history at the provider',
-                  on: dataRetention,
-                  set: setDataRetention,
-                  disabled: false,
-                },
-              ].map(({ label, on, set, disabled }) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => set(!on)}
-                  disabled={disabled}
-                  className="flex items-center gap-2 text-slate-300 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
-                >
-                  <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
-                  </span>
-                  <span className="font-semibold">{label}</span>
-                </button>
-              ))}
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Fetch lead details from your own URL
-                <span className="text-slate-500 font-normal ml-1">— optional</span>
-              </label>
-              <input
-                type="url"
-                value={dynamicVarsWebhook}
-                onChange={(e) => setDynamicVarsWebhook(e.target.value)}
-                disabled={smsEnabled}
-                placeholder="https://your-portal.com/api/assistant/context"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-60"
-              />
-              <span className="text-xs text-slate-500 mt-1 block">
-                {smsEnabled
-                  ? 'EstatePulse uses this while the agent answers texts: it gives the agent the lead’s details and the text they are replying to.'
-                  : 'Called as each conversation starts, to pull the newest details rather than whatever was true when the call was scheduled. The lead’s own fields are already sent without this.'}
-              </span>
-            </div>
-          </div>
+        <div id="voicemail" className="scroll-mt-24 rounded-2xl transition-shadow">
+          <VoicemailCard />
         </div>
 
+        {/* The fine-tuning most people never touch, folded away. */}
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+            className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left cursor-pointer"
+          >
+            <span>
+              <span className="text-sm font-bold text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-fuchsia-400" /> Advanced voice &amp; transcription
+              </span>
+              <span className="text-2xs text-slate-500 block mt-0.5">Voice clarity, expressiveness, speech-to-text model and turn timing.</span>
+            </span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={showAdvanced ? 'px-5 pb-5 space-y-6' : 'hidden'}>
         {/* Advanced Voice */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1019,23 +1041,85 @@ export const AISettingsView: React.FC = () => {
             </div>
           </div>
         </div>
+          </div>
+        </div>
+        </section>
 
-        {/* Post-Call Processing */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
+        <section role="tabpanel" aria-label={TAB_LABEL.qualify} className={tab === 'qualify' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="qualify" />
+        <div id="qualification-questions" className="scroll-mt-24 rounded-2xl transition-shadow">
+          <QualificationQuestionsCard />
+        </div>
+
+        <LeadTemperatureCard />
+
+        <InCallBookingCard />
+
+        <CallToolsCard />
+
+        <LiveTransferCard />
+        </section>
+
+        <section role="tabpanel" aria-label={TAB_LABEL.data} className={tab === 'data' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="data" />
+        {/* Channels & Data */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            Post-Call Processing
+            <MessageSquare className="w-4 h-4 text-emerald-400" />
+            Channels &amp; Data
           </h3>
-          <p className="text-xs text-slate-400">
-            When enabled, the assistant can run its tools after a call ends, for example to log notes from the
-            conversation. Lead scoring does not depend on this: every finished call is scored either way.
-          </p>
-          <button type="button" onClick={() => setPostCall(!postCall)} className="flex items-center gap-2 text-slate-300 text-xs">
-            <span className={`w-9 h-5 rounded-full transition-colors relative ${postCall ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${postCall ? 'left-[18px]' : 'left-0.5'}`} />
-            </span>
-            <span className="font-semibold">{postCall ? 'Enabled' : 'Disabled'}</span>
-          </button>
+
+          <div className="space-y-4 text-xs">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              {[
+                {
+                  label: smsBusy ? 'Updating…' : 'Let this agent answer texts from leads',
+                  on: smsEnabled,
+                  set: (next: boolean) => void toggleSms(next),
+                  disabled: smsBusy,
+                },
+                {
+                  label: 'Keep conversation history at the provider',
+                  on: dataRetention,
+                  set: setDataRetention,
+                  disabled: false,
+                },
+              ].map(({ label, on, set, disabled }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => set(!on)}
+                  disabled={disabled}
+                  className="flex items-center gap-2 text-slate-300 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                >
+                  <span className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? 'bg-emerald-600' : 'bg-slate-700'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+                  </span>
+                  <span className="font-semibold">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Fetch lead details from your own URL
+                <span className="text-slate-500 font-normal ml-1">— optional</span>
+              </label>
+              <input
+                type="url"
+                value={dynamicVarsWebhook}
+                onChange={(e) => setDynamicVarsWebhook(e.target.value)}
+                disabled={smsEnabled}
+                placeholder="https://your-portal.com/api/assistant/context"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-60"
+              />
+              <span className="text-xs text-slate-500 mt-1 block">
+                {smsEnabled
+                  ? 'EstatePulse uses this while the agent answers texts: it gives the agent the lead’s details and the text they are replying to.'
+                  : 'Called as each conversation starts, to pull the newest details rather than whatever was true when the call was scheduled. The lead’s own fields are already sent without this.'}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Tools / Workflows — created, edited and tested here. */}
@@ -1045,13 +1129,18 @@ export const AISettingsView: React.FC = () => {
               <Sliders className="w-4 h-4 text-amber-400" />
               Tools / Workflows <span className="text-xs text-slate-500 font-normal">— what the agent can do during a call</span>
             </h3>
-            <button
-              onClick={() => { setEditingTool(null); setToolModalOpen(true); }}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditingTool(null);
+                setToolModalOpen(true);
+              }}
               disabled={toolBusy}
-              className="shrink-0 px-3 py-1.5 bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 rounded-lg text-xs font-bold hover:bg-emerald-600/30 disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+              icon={<Plus />}
             >
-              <Plus className="w-3 h-3" /> Add tool
-            </button>
+              Add tool
+            </Button>
           </div>
 
           <div className="space-y-2 text-xs">
@@ -1090,30 +1179,33 @@ export const AISettingsView: React.FC = () => {
                   {/* A shared tool is edited where it lives, not here: this
                       agent is one of several using it. */}
                   {!t.shared && (
-                    <button
-                      onClick={() => { setEditingTool(t); setToolModalOpen(true); }}
+                    <IconButton
+                      size="sm"
+                      className="hover:text-emerald-300!"
+                      onClick={() => {
+                        setEditingTool(t);
+                        setToolModalOpen(true);
+                      }}
                       disabled={toolBusy}
-                      className="p-1.5 text-slate-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
                       aria-label={`Edit ${toolLabel(t)}`}
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                      icon={<Pencil />}
+                    />
                   )}
-                  <button
+                  <IconButton
+                    size="sm"
+                    className="hover:text-rose-300!"
                     onClick={() => removeTool(t)}
                     disabled={toolBusy}
-                    className="p-1.5 text-slate-400 hover:text-rose-400 disabled:opacity-50 cursor-pointer"
                     aria-label={`Remove ${toolLabel(t)}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    icon={<Trash2 />}
+                  />
                 </div>
               </div>
             ))}
           </div>
 
           <p className="text-xs text-slate-500">
-            Tools save as soon as you add or edit one — they are not part of the Deploy button above.
+            Tools save as soon as you add or edit one — they are not part of the Save changes button.
             The one worth adding first: a <span className="text-slate-300 font-mono">report_qualification</span> webhook to
             <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;leadId&#125;&#125;/qualified</span>, so the agent reports
             hot/warm/cold and hands the lead off by itself.
@@ -1127,7 +1219,7 @@ export const AISettingsView: React.FC = () => {
               <Building2 className="w-4 h-4 text-cyan-400" />
               Dynamic Variables <span className="text-xs text-slate-500 font-normal">— fixed values for every call, use as {'{{key}}'} in the prompt</span>
             </h3>
-            <button type="button" onClick={addVar} className="text-xs text-emerald-400 font-semibold hover:text-emerald-300">+ Add variable</button>
+            <Button variant="link" onClick={addVar} icon={<Plus />}>Add variable</Button>
           </div>
 
           <div className="space-y-2 text-xs">
@@ -1151,7 +1243,7 @@ export const AISettingsView: React.FC = () => {
                   placeholder="Austin Home Advisors"
                   className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500"
                 />
-                <button type="button" onClick={() => removeVar(i)} className="text-rose-400 hover:text-rose-300 px-2">✕</button>
+                <IconButton size="sm" className="hover:text-rose-300!" onClick={() => removeVar(i)} aria-label="Remove variable" icon={<X />} />
                 {LEAD_VARIABLES.some((l) => l.name === v.key.trim()) && (
                   <span className="text-[11px] text-amber-300 shrink-0" title="The app sends this lead's own value on every call and chat">
                     Replaced per lead on every call
@@ -1169,36 +1261,29 @@ export const AISettingsView: React.FC = () => {
           </p>
         </div>
 
-        {/* The real org-wide guardrails, read by BOTH schedulers. The card
-            that used to be here bound to the browser's demo store, so editing
-            the contact hours changed nothing the engine ever saw. */}
-        {/* The ids are link targets (OutreachPicker's "Change" links): /ai-settings#<id>. */}
-        <div id="contact-window" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <ContactWindowCard blurb="When the AI agent may contact a lead, and how hard it may try. The same window governs every follow-up sequence." />
+        {/* Post-Call Processing */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            Post-Call Processing
+          </h3>
+          <p className="text-xs text-slate-400">
+            When enabled, the assistant can run its tools after a call ends, for example to log notes from the
+            conversation. Lead scoring does not depend on this: every finished call is scored either way.
+          </p>
+          <button type="button" onClick={() => setPostCall(!postCall)} className="flex items-center gap-2 text-slate-300 text-xs">
+            <span className={`w-9 h-5 rounded-full transition-colors relative ${postCall ? 'bg-emerald-600' : 'bg-slate-700'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${postCall ? 'left-[18px]' : 'left-0.5'}`} />
+            </span>
+            <span className="font-semibold">{postCall ? 'Enabled' : 'Disabled'}</span>
+          </button>
         </div>
-
-        <div id="call-capacity" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallCapacityCard onSaved={setCallLimit} />
-        </div>
-
-        <div id="call-pacing" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <CallPacingCard limit={callLimit} />
-        </div>
-
-        <div id="qualification-questions" className="scroll-mt-6 rounded-2xl transition-shadow">
-          <QualificationQuestionsCard />
-        </div>
-
-        <LeadTemperatureCard />
-
-        <InCallBookingCard />
-
-        <VoicemailCard />
-
-        <CallToolsCard />
 
         <TakeoverGreetingCard />
+        </section>
 
+        <section role="tabpanel" aria-label={TAB_LABEL.compliance} className={tab === 'compliance' ? 'space-y-6' : 'hidden'}>
+          <TabIntro tab="compliance" />
         <BusinessDetailsCard />
 
         {/* Statements of behaviour, not settings — nothing here is editable. */}
@@ -1221,17 +1306,17 @@ export const AISettingsView: React.FC = () => {
             <p>The AI agent never gives legal advice, never guarantees mortgage approval, never makes unverified pricing promises, and escalates to a human whenever uncertain.</p>
           </div>
         </div>
+        </section>
 
-        {/* Submit */}
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={deploying}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            {deploying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            <span>{deploying ? 'Deploying to AI agent…' : 'Save Configuration'}</span>
-          </button>
+        {/* Always in reach, on every tab: the one button that deploys the agent's settings. */}
+        <div className="sticky bottom-0 z-20 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-t border-slate-800/80 flex flex-wrap items-center gap-3">
+          <p className="text-2xs text-slate-400 flex-1 min-w-[200px] leading-relaxed">
+            Saves the persona, prompt, voice, call and data settings to your live agent. Cards with their own Save button
+            (strategy, contact hours, questions…) save on their own.
+          </p>
+          <Button type="submit" size="lg" loading={deploying} icon={<Save />}>
+            {deploying ? 'Deploying…' : 'Save changes'}
+          </Button>
         </div>
 
       </form>

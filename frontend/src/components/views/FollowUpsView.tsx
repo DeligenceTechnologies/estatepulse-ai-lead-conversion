@@ -9,7 +9,6 @@ import {
   Pencil,
   PhoneCall,
   Plus,
-  RotateCw,
   ShieldAlert,
   UserPlus,
   XCircle,
@@ -34,6 +33,7 @@ import {
   type Enrollment,
   type Sequence,
 } from '../../utils/sequencesApi';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * Nurture sequences and the leads inside them.
@@ -52,13 +52,45 @@ import {
  * a courtesy; the 403 is the actual boundary.
  */
 
-const STATUS_STYLES: Record<string, string> = {
-  active: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-  processing: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-  paused: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-  completed: 'bg-slate-700/60 text-slate-300 border-slate-600',
-  stopped: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+/** Status pills: a soft tint, a hairline border, readable text and a dot of one hue. */
+const STATUS_STYLES: Record<string, { pill: string; dot: string }> = {
+  active: { pill: 'bg-green-500/10 text-green-300 border-green-500/25', dot: 'bg-green-400' },
+  processing: { pill: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25', dot: 'bg-cyan-400' },
+  paused: { pill: 'bg-amber-500/10 text-amber-300 border-amber-500/25', dot: 'bg-amber-400' },
+  completed: { pill: 'bg-slate-500/10 text-slate-300 border-slate-500/25', dot: 'bg-slate-400' },
+  stopped: { pill: 'bg-rose-500/10 text-rose-300 border-rose-500/25', dot: 'bg-rose-400' },
+  inactive: { pill: 'bg-slate-500/10 text-slate-400 border-slate-500/25', dot: 'bg-slate-500' },
+  archived: { pill: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/25', dot: 'bg-zinc-400' },
 };
+
+const StatusPill: React.FC<{ status: string }> = ({ status }) => {
+  const tone = STATUS_STYLES[status] ?? STATUS_STYLES.completed;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap text-2xs font-semibold pl-2 pr-2.5 py-0.5 rounded-full border capitalize ${tone.pill}`}
+    >
+      <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+      {status}
+    </span>
+  );
+};
+
+/** "no_more_steps" -> "No more steps". */
+const humanize = (s: string) => {
+  const t = s.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+/** A small figure at the top of the page. */
+const Stat: React.FC<{ label: string; value: number; tone: string }> = ({ label, value, tone }) => (
+  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-3 shadow-lg">
+    <p className="text-2xs font-semibold text-slate-400 flex items-center gap-1.5">
+      <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${tone}`} />
+      {label}
+    </p>
+    <p className="text-xl font-bold text-white tracking-tight mt-0.5">{value.toLocaleString()}</p>
+  </div>
+);
 
 /**
  * `now` is passed in, from a clock the view ticks, rather than read here: the
@@ -142,64 +174,63 @@ export const FollowUpsView: React.FC = () => {
     }
   };
 
+  const live = sequences.filter((q) => q.status !== 'archived');
+  const totals = live.reduce(
+    (t, q) => ({
+      active: t.active + q.activeCount,
+      paused: t.paused + q.pausedCount,
+      done: t.done + q.completedCount,
+    }),
+    { active: 0, paused: 0, done: 0 },
+  );
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Follow-Up Sequences</h2>
-          <p className="text-xs text-slate-400">
-            Nurture for warm and cold leads, run from the database so a deploy cannot cancel it.
-          </p>
+          <p className="text-xs text-slate-400">Automatic texts and AI calls that keep warm and cold leads engaged.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={refreshAll}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <RotateCw className={`w-3.5 h-3.5 ${sequencesQuery.refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          {isOwner && sequences.length > 0 && (
-            <button
-              onClick={() => setEditing(null)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New sequence
-            </button>
-          )}
-        </div>
+        {isOwner && sequences.length > 0 && (
+          <Button onClick={() => setEditing(null)} icon={<Plus />}>
+            New sequence
+          </Button>
+        )}
       </div>
 
       {(sequencesQuery.stale || enrollmentsQuery.stale) && (
         <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5" />
-          Showing the last good result — the most recent refresh failed.
+          Showing the last saved data. The latest update failed.
         </div>
       )}
 
       {sequences.length > 0 && (
-      <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-xs text-slate-300 flex items-start gap-3">
-        <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-        <div>
-          <div className="font-bold text-slate-100">What stops a sequence</div>
-          <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-            A reply of STOP or UNSUBSCRIBE, a booking, a human takeover, the lead going hot, or
-            running out of steps. Nothing else. Any other inbound reply pauses the sequence so we
-            are not texting over a live conversation, and every step is held back until the
-            office&apos;s quiet hours are over rather than being skipped.
-          </p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Stat label="Sequences" value={live.length} tone="bg-blue-400" />
+          <Stat label="Leads active" value={totals.active} tone="bg-green-400" />
+          <Stat label="Leads paused" value={totals.paused} tone="bg-amber-400" />
+          <Stat label="Leads finished" value={totals.done} tone="bg-slate-400" />
         </div>
-      </div>
       )}
 
-      {/* The window every sequence obeys. Editable here as well as in AI
-          Settings because it is one org-wide setting: an office looking at its
-          nurture drips has no way to know a quiet window governs them unless it
-          is in front of them. */}
-      {isOwner && (
-        <ContactWindowCard blurb="Every sequence below is held inside this window. A step that comes due during quiet hours is sent when it reopens, never skipped." />
+      {sequences.length > 0 && (
+        <div className="bg-slate-900/90 border border-slate-800 px-4 py-3 rounded-2xl flex items-start gap-3 shadow-lg">
+          <span className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center justify-center shrink-0">
+            <ShieldAlert className="w-4 h-4 text-amber-400" />
+          </span>
+          <div>
+            <div className="text-xs font-bold text-slate-100">When a sequence stops</div>
+            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+              The lead replies STOP, books, is taken over by an agent, turns hot, or gets every step. Any other reply
+              pauses it.
+            </p>
+          </div>
+        </div>
       )}
+
+      {/* The window every sequence obeys: one org-wide setting, shown here because it governs these drips. */}
+      {isOwner && <ContactWindowCard blurb="Steps are only sent inside these hours. A step due outside them waits." />}
 
       {/* Sequences */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -209,29 +240,21 @@ export const FollowUpsView: React.FC = () => {
               <p className="text-xs text-slate-500">Loading…</p>
             ) : (
               <>
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center mx-auto">
                   <GitFork className="w-5 h-5 text-emerald-400" />
                 </div>
                 <div className="space-y-1.5 max-w-md mx-auto">
-                  <h3 className="text-sm font-bold text-white">No follow-up sequences yet</h3>
+                  <h3 className="text-sm font-bold text-white">No sequences yet</h3>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    A sequence is a series of texts and AI callbacks, spaced out over days or
-                    weeks. Build one, then add leads to it by hand or in bulk — or point it at a
-                    temperature to enrol those leads automatically.
+                    A sequence sends texts and AI calls over days or weeks. Create one, then add leads to it.
                   </p>
                 </div>
                 {isOwner ? (
-                  <button
-                    onClick={() => setEditing(null)}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" />
+                  <Button onClick={() => setEditing(null)} icon={<Plus />}>
                     Create a sequence
-                  </button>
+                  </Button>
                 ) : (
-                  <p className="text-xs text-slate-500">
-                    Ask an owner to set one up.
-                  </p>
+                  <p className="text-xs text-slate-500">Ask an owner to set one up.</p>
                 )}
               </>
             )}
@@ -240,136 +263,121 @@ export const FollowUpsView: React.FC = () => {
 
         {sequences.map((seq) => {
           const days = cumulativeDays(seq.steps);
+          const auto = seq.enrollTriggers.length > 0;
           return (
             <div
               key={seq.id}
-              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl"
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl flex flex-col overflow-hidden hover:border-slate-700 transition-colors"
             >
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">
-                  {seq.code}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {/* The count alone on the badge, every condition spelled
-                      out on hover: which leads land here is the question asked
-                      of this screen, and it does not fit in a pill. */}
-                  <span
-                    className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
-                      seq.enrollTriggers.length
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                    }`}
-                    title={
-                      seq.enrollTriggers.length
-                        ? 'Adds leads automatically when: ' +
-                          seq.enrollTriggers
-                            .map((t) => TRIGGER_LABELS[t] ?? t)
-                            .join(', ')
-                        : 'Leads are only added by hand'
-                    }
-                  >
-                    {seq.enrollTriggers.length
-                      ? `auto: ${seq.enrollTriggers.length} condition${seq.enrollTriggers.length > 1 ? 's' : ''}`
-                      : 'manual only'}
-                  </span>
-                  <span
-                    className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
-                      STATUS_STYLES[seq.status] ?? STATUS_STYLES.completed
-                    }`}
-                  >
-                    {seq.status}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-white">{seq.name}</h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">{seq.description}</p>
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                  Steps
-                </div>
-                {seq.steps.map((step, idx) => (
-                  <div
-                    key={step.stepOrder}
-                    className="flex items-start gap-2.5 text-xs bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/60"
-                  >
-                    <div className="w-5 h-5 rounded-full bg-slate-800 text-2xs font-bold font-mono text-emerald-400 flex items-center justify-center shrink-0">
-                      {step.stepOrder}
-                    </div>
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-1.5 font-semibold text-slate-200 flex-wrap">
-                        {step.actionType === 'sms' ? (
-                          <MessageSquare className="w-3 h-3 text-cyan-400" />
-                        ) : (
-                          <PhoneCall className="w-3 h-3 text-emerald-400" />
-                        )}
-                        <span className="capitalize">
-                          {step.actionType === 'sms' ? 'SMS' : 'AI callback'}
-                        </span>
-                        <span className="text-slate-600">•</span>
-                        <span className="text-amber-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          day {days[idx]}
-                        </span>
-                        <span className="text-slate-600 text-2xs">
-                          (+{formatDelay(step.delayMinutes)})
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        {step.messageTemplate ?? step.voicePrompt}
-                      </p>
-                    </div>
+              {/* Header */}
+              <div className="p-5 pb-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-white truncate">{seq.name}</h3>
+                    <span className="text-2xs font-mono text-slate-500">{seq.code}</span>
                   </div>
-                ))}
+                  <StatusPill status={seq.status} />
+                </div>
+                {seq.description && <p className="text-xs text-slate-400 leading-relaxed">{seq.description}</p>}
+                <span
+                  className={`inline-flex items-center gap-1.5 text-2xs font-semibold px-2.5 py-0.5 rounded-full border ${
+                    auto
+                      ? 'bg-violet-500/10 text-violet-300 border-violet-500/25'
+                      : 'bg-slate-500/10 text-slate-300 border-slate-500/25'
+                  }`}
+                  title={
+                    auto
+                      ? 'Adds leads automatically when: ' + seq.enrollTriggers.map((t) => TRIGGER_LABELS[t] ?? t).join(', ')
+                      : 'Leads are only added by hand'
+                  }
+                >
+                  {auto ? `Auto-adds leads · ${seq.enrollTriggers.length} rule${seq.enrollTriggers.length > 1 ? 's' : ''}` : 'Added by hand'}
+                </span>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 grid grid-cols-4 gap-2 text-center">
-                {[
-                  ['Active', seq.activeCount, 'text-emerald-400'],
-                  ['Paused', seq.pausedCount, 'text-amber-400'],
-                  ['Done', seq.completedCount, 'text-slate-300'],
-                  ['Stopped', seq.stoppedCount, 'text-rose-400'],
-                ].map(([label, count, color]) => (
-                  <div key={String(label)}>
-                    <div className={`font-mono font-bold text-sm ${color}`}>{count}</div>
-                    <div className="text-2xs text-slate-500 uppercase">{label}</div>
+              {/* Steps, as a timeline */}
+              <div className="px-5 pb-4">
+                <div className="text-2xs font-bold text-slate-400 mb-2">
+                  {seq.steps.length} step{seq.steps.length === 1 ? '' : 's'} · {days[days.length - 1] ?? 0} days
+                </div>
+                <ol className="relative space-y-2 before:absolute before:left-[11px] before:top-3 before:bottom-3 before:w-px before:bg-slate-800">
+                  {seq.steps.map((step, idx) => {
+                    const sms = step.actionType === 'sms';
+                    return (
+                      <li key={step.stepOrder} className="relative flex items-start gap-3">
+                        <span
+                          className={`relative z-10 w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
+                            sms
+                              ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                          }`}
+                        >
+                          {sms ? <MessageSquare className="w-3 h-3" /> : <PhoneCall className="w-3 h-3" />}
+                        </span>
+                        <div className="min-w-0 flex-1 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+                            {sms ? 'Text message' : 'AI call'}
+                            <span className="ml-auto inline-flex items-center gap-1 text-2xs font-semibold text-amber-300">
+                              <Clock className="w-3 h-3" />
+                              Day {days[idx]}
+                              <span className="text-slate-500 font-normal">(+{formatDelay(step.delayMinutes)})</span>
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 leading-relaxed mt-0.5 line-clamp-2">
+                            {step.messageTemplate ?? step.voicePrompt}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+
+              {/* Counts */}
+              <div className="mt-auto grid grid-cols-4 border-t border-slate-800 divide-x divide-slate-800">
+                {(
+                  [
+                    ['Active', seq.activeCount, 'bg-green-400'],
+                    ['Paused', seq.pausedCount, 'bg-amber-400'],
+                    ['Done', seq.completedCount, 'bg-slate-400'],
+                    ['Stopped', seq.stoppedCount, 'bg-rose-400'],
+                  ] as const
+                ).map(([label, count, dot]) => (
+                  <div key={label} className="py-3 text-center">
+                    <div className="text-base font-bold text-white">{count}</div>
+                    <div className="text-2xs text-slate-400 inline-flex items-center gap-1">
+                      <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                      {label}
+                    </div>
                   </div>
                 ))}
               </div>
 
               {isOwner && seq.status !== 'archived' && (
-                <div className="pt-3 border-t border-slate-800 flex items-center gap-2">
-                  <button
+                <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/40 flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="flex-1"
                     onClick={() => setEnrolling(seq)}
                     disabled={seq.status !== 'active'}
-                    title={
-                      seq.status === 'active'
-                        ? undefined
-                        : 'Only an active sequence can accept leads'
-                    }
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                    title={seq.status === 'active' ? undefined : 'Only an active sequence can take leads'}
+                    icon={<UserPlus />}
                   >
-                    <UserPlus className="w-3.5 h-3.5" />
                     Add leads
-                  </button>
-                  <button
-                    onClick={() => setEditing(seq)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setEditing(seq)} icon={<Pencil />}>
                     Edit
-                  </button>
-                  <button
+                  </Button>
+                  <IconButton
+                    variant="secondary"
+                    size="sm"
+                    className="hover:text-rose-300!"
                     onClick={() => void onArchive(seq)}
-                    disabled={busyId === seq.id}
-                    title="Archive — keeps the history, stops every live enrolment"
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 text-xs border border-slate-700 cursor-pointer disabled:opacity-40"
-                  >
-                    <Archive className="w-3.5 h-3.5" />
-                  </button>
+                    loading={busyId === seq.id}
+                    title="Archive: keeps the history, stops it for every lead"
+                    aria-label="Archive sequence"
+                    icon={<Archive />}
+                  />
                 </div>
               )}
             </div>
@@ -379,117 +387,96 @@ export const FollowUpsView: React.FC = () => {
 
       {/* Enrolments */}
       {sequences.length > 0 && (
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
-          <span className="text-sm font-bold text-white">Enrolled leads</span>
-          <span className="text-xs text-slate-500">{enrollments.length} shown</span>
-        </div>
-
-        {enrollments.length === 0 ? (
-          <p className="text-xs text-slate-500 text-center py-10">
-            {enrollmentsQuery.data === null
-              ? 'Loading…'
-              : 'Nobody is in a sequence yet. Warm and cold leads are enrolled the moment an AI call returns their temperature.'}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-2xs uppercase text-slate-500 bg-slate-950/60">
-                <tr>
-                  <th className="text-left font-semibold px-5 py-2">Lead</th>
-                  <th className="text-left font-semibold px-3 py-2">Sequence</th>
-                  <th className="text-left font-semibold px-3 py-2">Step</th>
-                  <th className="text-left font-semibold px-3 py-2">Status</th>
-                  <th className="text-left font-semibold px-3 py-2">Next action</th>
-                  <th className="text-left font-semibold px-3 py-2">Added by</th>
-                  <th className="text-left font-semibold px-3 py-2">Why it stopped</th>
-                  <th className="px-5 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {enrollments.map((e) => (
-                  <tr
-                    key={e.id}
-                    onClick={() => setSelectedLeadId(e.leadId)}
-                    className="border-t border-slate-800/60 hover:bg-slate-800/40 cursor-pointer"
-                  >
-                    <td className="px-5 py-2.5">
-                      <div className="font-semibold text-slate-100">{e.leadName}</div>
-                      <div className="text-2xs text-slate-500 font-mono">{e.leadPhone}</div>
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-300 font-mono text-xs">
-                      {e.sequenceCode}
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-400">{e.awaitingReply ? 'Waiting for reply' : e.currentStep}</td>
-                    <td className="px-3 py-2.5">
-                      <span
-                        className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border ${
-                          STATUS_STYLES[e.status] ?? STATUS_STYLES.completed
-                        }`}
-                      >
-                        {e.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-400">
-                      <span title={e.nextActionAt ?? ''}>{relative(e.nextActionAt, now)}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span
-                        className={`text-2xs uppercase font-semibold ${
-                          e.enrolledBy === 'auto' ? 'text-slate-500' : 'text-cyan-400'
-                        }`}
-                      >
-                        {e.enrolledBy}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-400">
-                      {e.stoppedReason === 'opted_out' ? (
-                        <span className="flex items-center gap-1 text-rose-400">
-                          <Ban className="w-3 h-3" />
-                          opted out
-                        </span>
-                      ) : (
-                        <span title={e.lastError ?? ''}>{e.stoppedReason ?? '—'}</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-2.5 text-right">
-                      {isOwner && (e.status === 'active' || e.status === 'paused') && (
-                        <button
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            void onRemove(e);
-                          }}
-                          disabled={busyId === e.id}
-                          title="Remove from this sequence"
-                          className="text-slate-500 hover:text-rose-400 disabled:opacity-40 cursor-pointer"
-                        >
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+            <span className="text-sm font-bold text-white">Leads in sequences</span>
+            <span className="text-2xs font-semibold text-slate-300 bg-slate-500/10 border border-slate-500/25 rounded-full px-2.5 py-0.5">
+              {enrollments.length}
+            </span>
           </div>
-        )}
-      </div>
+
+          {enrollments.length === 0 ? (
+            <p className="text-xs text-slate-500 text-center py-10">
+              {enrollmentsQuery.data === null ? 'Loading…' : 'No leads in a sequence yet.'}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-2xs text-slate-400 bg-slate-950/60">
+                  <tr>
+                    <th className="text-left font-semibold px-5 py-2.5">Lead</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Sequence</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Step</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Status</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Next</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Added</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Stop reason</th>
+                    <th className="px-5 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {enrollments.map((e) => (
+                    <tr
+                      key={e.id}
+                      onClick={() => setSelectedLeadId(e.leadId)}
+                      className="border-t border-slate-800 hover:bg-slate-800/40 cursor-pointer transition-colors"
+                    >
+                      <td className="px-5 py-3">
+                        <div className="font-semibold text-slate-100">{e.leadName}</div>
+                        <div className="text-2xs text-slate-500 font-mono">{e.leadPhone}</div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-300">{e.sequenceName ?? e.sequenceCode}</td>
+                      <td className="px-3 py-3 text-slate-300">
+                        {e.awaitingReply ? <span className="text-amber-300">Waiting for reply</span> : `Step ${e.currentStep}`}
+                      </td>
+                      <td className="px-3 py-3">
+                        <StatusPill status={e.status} />
+                      </td>
+                      <td className="px-3 py-3 text-slate-300 whitespace-nowrap">
+                        <span title={e.nextActionAt ?? ''}>{relative(e.nextActionAt, now)}</span>
+                      </td>
+                      <td className="px-3 py-3 text-slate-400">{e.enrolledBy === 'auto' ? 'Auto' : 'By hand'}</td>
+                      <td className="px-3 py-3 text-slate-400">
+                        {e.stoppedReason === 'opted_out' ? (
+                          <span className="inline-flex items-center gap-1 text-rose-300">
+                            <Ban className="w-3 h-3" />
+                            Opted out
+                          </span>
+                        ) : (
+                          <span title={e.lastError ?? ''}>{e.stoppedReason ? humanize(e.stoppedReason) : '—'}</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {isOwner && (e.status === 'active' || e.status === 'paused') && (
+                          <IconButton
+                            size="sm"
+                            className="hover:text-rose-300!"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              void onRemove(e);
+                            }}
+                            disabled={busyId === e.id}
+                            aria-label="Remove from this sequence"
+                            title="Remove from this sequence"
+                            icon={<XCircle />}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {editing !== undefined && (
-        <SequenceEditorModal
-          sequence={editing}
-          onClose={() => setEditing(undefined)}
-          onSaved={refreshAll}
-        />
+        <SequenceEditorModal sequence={editing} onClose={() => setEditing(undefined)} onSaved={refreshAll} />
       )}
 
       {enrolling && (
-        <EnrollLeadsModal
-          sequence={enrolling}
-          onClose={() => setEnrolling(null)}
-          onEnrolled={refreshAll}
-        />
+        <EnrollLeadsModal sequence={enrolling} onClose={() => setEnrolling(null)} onEnrolled={refreshAll} />
       )}
     </div>
   );

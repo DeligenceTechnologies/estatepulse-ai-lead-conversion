@@ -1,0 +1,93 @@
+/// How a live transfer of a lead's call to an agent ended up.
+enum CallTransferStatus {
+  /// Agents are being rung; the lead is on hold.
+  dialing
+  /// An agent accepted and the calls were bridged.
+  connected
+  /// Nobody took it (or nobody was available); the AI came back for a booking or a callback.
+  no_agent
+  /// The lead hung up while the agents were being rung.
+  abandoned
+  /// Telnyx refused a command we needed; the AI came back.
+  failed
+
+  @@map("call_transfer_status")
+}
+
+/// One agent rung for a transfer.
+enum TransferAttemptStatus {
+  dialing
+  /// Picked up; checked for an answering machine before the lead is put through.
+  answered
+  /// A person answered and was bridged to the lead.
+  accepted
+  /// Rejected the call, or hung up just after picking up.
+  declined
+  no_answer
+  busy
+  /// A voicemail answered: hung up on, never bridged.
+  voicemail
+  failed
+  /// Stopped because the lead hung up or another agent took the call.
+  cancelled
+
+  @@map("transfer_attempt_status")
+}
+
+/// A live transfer of an AI call to an agent: what triggered it, and how it ended.
+model CallTransfer {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  orgId             String             @map("organization_id") @db.Uuid
+  leadId            String             @map("lead_id") @db.Uuid
+  /// The lead's call (calls.id).
+  callId            String             @map("call_id") @db.Uuid
+  /// The lead's Telnyx call_control_id: the leg agents are bridged to.
+  leadCallControlId String             @map("lead_call_control_id") @db.VarChar(255)
+  status            CallTransferStatus @default(dialing)
+  /// Why the AI asked for it: hot_lead or requested_agent.
+  reason            String             @db.VarChar(40)
+  /// What the lead said that made them hot ({ budget, location, preApproved, showing, summary }).
+  facts             Json               @default("{}")
+  connectedUserId   String?            @map("connected_user_id") @db.Uuid
+  /// After no_agent / failed: what the AI was told to offer instead (booking | callback).
+  fallback          String?            @db.VarChar(20)
+  startedAt         DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
+  connectedAt       DateTime?          @map("connected_at") @db.Timestamptz(6)
+  endedAt           DateTime?          @map("ended_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lead     Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  attempts TransferAttempt[]
+
+  @@index([orgId, createdAt])
+  @@index([leadId])
+  @@index([leadCallControlId])
+  @@map("call_transfers")
+}
+
+/// One agent rung for a transfer, in order.
+model TransferAttempt {
+  id                 String                @id @default(uuid(7)) @db.Uuid
+  orgId              String                @map("organization_id") @db.Uuid
+  transferId         String                @map("transfer_id") @db.Uuid
+  userId             String                @map("user_id") @db.Uuid
+  /// 1 for the first agent rung, 2 for the next…
+  position           Int
+  phone              String                @db.VarChar(50)
+  /// The agent leg's Telnyx call_control_id.
+  agentCallControlId String?               @map("agent_call_control_id") @db.VarChar(255)
+  status             TransferAttemptStatus @default(dialing)
+  hangupCause        String?               @map("hangup_cause") @db.VarChar(60)
+  dialedAt           DateTime              @default(now()) @map("dialed_at") @db.Timestamptz(6)
+  answeredAt         DateTime?             @map("answered_at") @db.Timestamptz(6)
+  endedAt            DateTime?             @map("ended_at") @db.Timestamptz(6)
+
+  transfer CallTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, position])
+  @@index([agentCallControlId])
+  @@index([userId, status])
+  @@map("transfer_attempts")
+}

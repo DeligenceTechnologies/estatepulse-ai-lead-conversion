@@ -15,6 +15,7 @@ import {
 import { MessageThread } from '../conversations/MessageThread';
 import { statusLabel, statusTone } from '../../lib/leadStatus';
 import { formatDate as formatDay } from '../../lib/datetime';
+import { Button, IconButton } from '../common/Button';
 
 /** Same tones the owner's pipeline uses, so one lead reads the same on both screens. */
 const TEMPERATURE_TONE: Record<string, string> = {
@@ -75,7 +76,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
   }, [leadId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-150">
       <div className="relative w-full max-w-2xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden text-slate-100 h-[100dvh] sm:h-auto sm:max-h-[90vh] flex flex-col">
         <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -100,13 +101,7 @@ const LeadDetailModal: React.FC<{ leadId: string; onClose: () => void }> = ({ le
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <IconButton onClick={onClose} aria-label="Close" className="shrink-0" icon={<X />} />
         </div>
 
         <div className="p-4 sm:p-5 space-y-4 text-xs flex-1 min-h-0 overflow-y-auto custom-scrollbar">
@@ -211,13 +206,9 @@ export const AgentLeads: React.FC = () => {
           <h2 className="text-xl font-bold text-white tracking-tight">My Leads</h2>
           <p className="text-xs text-slate-400">Leads currently assigned to you.</p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${leads === null ? 'animate-spin' : ''}`} />
+        <Button variant="outline" onClick={() => void load()} icon={<RefreshCw className={leads === null ? 'animate-spin' : ''} />}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       {error && (

@@ -35,6 +35,8 @@ interface ClaimedEvent {
   provider: string;
   payload: unknown;
   attempts: number;
+  /** Why the delivery was held, if it was: a setup capture is flagged below. */
+  outcome_reason: string | null;
 }
 
 type MappedValue = string | number | boolean | null;
@@ -151,7 +153,8 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
          SET queue_state = 'PROCESSING', locked_by = ${this.instanceId}, locked_at = now(), attempts = e.attempts + 1
         FROM claimed
        WHERE e.id = claimed.id
-      RETURNING e.id, e.organization_id, e.lead_source_id, e.provider::text AS provider, e.payload, e.attempts`;
+      RETURNING e.id, e.organization_id, e.lead_source_id, e.provider::text AS provider, e.payload, e.attempts,
+                e.outcome_reason`;
   }
 
   private async requeueStuck(): Promise<void> {
@@ -178,9 +181,11 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
 
       let parsed: NormalizedDelivery;
       let mappings: LeadSourceFieldMapping[];
-      // A delivery held while a custom webhook was being set up: its lead is
-      // created paused and flagged, never auto-contacted.
-      let capturedDuringSetup = false;
+      // A delivery held while the source was still being set up — a custom
+      // webhook being mapped, or a Google Form whose questions the owner had
+      // not finished mapping. Its lead is created paused and flagged, never
+      // auto-contacted. Carried on the claim so no second read is needed.
+      const capturedDuringSetup = event.outcome_reason === CAPTURED_DURING_SETUP;
 
       if (source.provider === CUSTOM_PROVIDER) {
         // Custom webhook. A form provider's payload on it is parsed by that
@@ -204,8 +209,6 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           // Extra-field rows are consumed by the extractor; the engine sees only lead columns.
           mappings = rows.filter((m) => m.targetField !== CUSTOM_TARGET);
         }
-        const held = await this.prisma.ingestEvent.findUnique({ where: { id: event.id }, select: { outcomeReason: true } });
-        capturedDuringSetup = held?.outcomeReason === CAPTURED_DURING_SETUP;
       } else {
         parsed = adapterFor(event.provider).parse(event.payload);
         await this.syncFieldCatalog(event.organization_id, source.id, parsed.answers);

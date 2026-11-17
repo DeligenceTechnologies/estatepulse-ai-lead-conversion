@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma, type OutreachBatchStatus, type OutreachItemState } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { AppError } from '@/common/errors/app-error';
 import { paginate } from '@/common/pagination/paginate';
 import type { ListQuery } from '@/common/pagination/pagination.types';
 import { PrismaService } from '@/common/prisma/prisma.service';
@@ -11,10 +12,12 @@ import { PERMISSIONS } from '@/role/permissions';
 import { AssignLeadDto } from './dto/assign-lead.dto';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { SetLeadTimezoneDto } from './dto/set-lead-timezone.dto';
+import { UpdateLeadDto } from './dto/update-lead.dto';
 import { LeadAssignmentService } from './lead-assignment.service';
+import { LeadEditService } from './lead-edit.service';
 import { LeadReviewService } from './lead-review.service';
 import { LeadTimezoneService } from './lead-timezone.service';
-import { OUTSIDE_IMPORT_REVIEW, fullName } from './lead-scope';
+import { OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
 import { liveReviewReasons } from './review-reasons';
@@ -149,6 +152,7 @@ export class LeadsController {
     private readonly manualLeads: ManualLeadService,
     private readonly timezones: LeadTimezoneService,
     private readonly reviews: LeadReviewService,
+    private readonly edits: LeadEditService,
   ) {}
 
   /** One lead added by hand. Same pipeline as a form submission, without a lead source. */
@@ -239,6 +243,40 @@ export class LeadsController {
       sources,
       agents: agents.map((a) => ({ id: a.id, name: fullName(a.firstName, a.lastName, 'Unnamed agent') })),
     };
+  }
+
+  /**
+   * One lead as a row of the list, fresh from the database: what the edit form starts from.
+   * Same visibility as the edit itself, and like the list, nothing still in import review.
+   */
+  @Get(':leadId')
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  one(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return this.row(auth, leadId);
+  }
+
+  /**
+   * A correction to the lead's own details; only the fields sent change and null clears one.
+   * Answers the lead as a row of the list, plus what changed and whether it is now do-not-contact.
+   */
+  @Patch(':leadId')
+  @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
+  async update(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string, @Body() body: UpdateLeadDto) {
+    const { changed, becameDoNotContact } = await this.edits.update(auth, leadId, body);
+    return { lead: await this.row(auth, leadId), changed: Object.keys(changed), becameDoNotContact };
+  }
+
+  private async row(auth: AuthContext, leadId: string) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW } as Prisma.LeadWhereInput,
+      select: LEAD_FIELDS,
+    });
+    if (!lead) throw new AppError('NOT_FOUND', 'No such lead');
+    const [counts, outreach] = await Promise.all([
+      this.contactLeadCounts(auth.organizationId, [lead]),
+      this.outreachEntries(auth.organizationId, [lead.id]),
+    ]);
+    return toLeadRow(lead, counts.get(lead.id) ?? 1, outreach.get(lead.id));
   }
 
   /** PUT: the body is the whole desired state, so repeating it changes nothing. */

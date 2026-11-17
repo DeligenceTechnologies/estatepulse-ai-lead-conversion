@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import type { OutreachChoice, OutreachConfig } from '../../utils/outreachApi';
 import { SheetError, SheetModal } from '../sheets/SheetModal';
 import { OutreachPicker, initialLaunch, launchChoice, launchProblem } from './OutreachPicker';
+import { Button } from '../common/Button';
 
 /**
  * Approve, and choose how the approved leads launch: now, or at a time in a
@@ -42,18 +42,12 @@ export const ApproveOutreachModal: React.FC<{
       {error && <SheetError message={error} />}
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onClose} disabled={busy} className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white cursor-pointer disabled:opacity-40">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>
           Cancel
-        </button>
-        <button
-          type="button"
-          disabled={busy || launchProblem(launch) !== null}
-          onClick={() => onConfirm(launchChoice(launch))}
-          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-500 cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
-        >
-          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        </Button>
+        <Button disabled={launchProblem(launch) !== null} loading={busy} onClick={() => onConfirm(launchChoice(launch))}>
           {launch.mode === 'now' ? 'Approve and call now' : 'Approve and schedule'}
-        </button>
+        </Button>
       </div>
     </SheetModal>
   );

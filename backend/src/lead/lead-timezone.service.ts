@@ -56,8 +56,11 @@ export class LeadTimezoneService {
     return zone;
   }
 
-  /** Delayed calls and texts for the lead are promoted: the worker re-checks them against the new zone now. */
-  private async wake(leadId: string): Promise<void> {
+  /**
+   * Delayed calls and texts for the lead are promoted: the worker re-checks them against the new
+   * zone now. Also used when an edit changes the phone number, which the zone is worked out from.
+   */
+  async wake(leadId: string): Promise<void> {
     // ponytail: scans every delayed job of both queues; index jobs by lead if the queues grow past a few thousand.
     for (const queue of [this.calls, this.texts]) {
       try {

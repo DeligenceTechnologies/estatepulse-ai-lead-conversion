@@ -3,12 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   CalendarDays,
-  ChevronDown,
   Clock,
   Globe,
   Loader2,
   LocateFixed,
   Mail,
+  Palette,
   PhoneCall,
   RotateCcw,
   Save,
@@ -38,13 +38,16 @@ import { TimezoneSelect } from '../common/TimezoneSelect';
 import { ConnectCalendar } from '../calendar/connect/ConnectCalendar';
 import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
+import { Button } from '../common/Button';
+import { AppearanceSettings } from '../settings/AppearanceSettings';
 
-type SettingsTab = 'general' | 'telnyx' | 'calendar';
+type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'appearance';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
   { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com, and booked meetings', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
+  { id: 'appearance', label: 'Appearance', hint: 'Theme, brand colour & buttons', icon: Palette },
 ];
 
 const isTab = (value: string | null): value is SettingsTab => TABS.some((t) => t.id === value);
@@ -141,7 +144,7 @@ const LeadAssignmentCard: React.FC = () => {
           }`}
         >
           <span
-            className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+            className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-on-accent shadow flex items-center justify-center transition-transform ${
               enabled ? 'translate-x-[18px]' : ''
             }`}
           >
@@ -232,7 +235,7 @@ const DailySummaryCard: React.FC<{
             }`}
           >
             <span
-              className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow flex items-center justify-center transition-transform ${
+              className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-on-accent shadow flex items-center justify-center transition-transform ${
                 enabled ? 'translate-x-[18px]' : ''
               }`}
             >
@@ -259,28 +262,18 @@ const DailySummaryCard: React.FC<{
                   onChange={(e) => setDraft(e.target.value)}
                   disabled={busy || !canEdit}
                   required
-                  className="h-11 w-40 bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 text-xs text-white tabular-nums focus:outline-none focus:border-emerald-500 hover:border-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="h-10 w-40 bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 text-xs text-white tabular-nums focus:outline-none focus:border-emerald-500 hover:border-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
             </label>
             {timeChanged && (
               <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="h-11 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-on-accent cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
-                >
-                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                <Button type="submit" size="lg" loading={busy} icon={<Save />}>
                   Save time
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDraft(time)}
-                  disabled={busy}
-                  className="h-11 px-3 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 cursor-pointer disabled:opacity-60 transition-colors"
-                >
+                </Button>
+                <Button variant="secondary" size="lg" onClick={() => setDraft(time)} disabled={busy}>
                   Cancel
-                </button>
+                </Button>
               </div>
             )}
             <p className="basis-full text-2xs text-slate-500">
@@ -345,13 +338,9 @@ const GeneralSettings: React.FC = () => {
           <div className="font-semibold text-rose-100">Settings could not be loaded</div>
           {loadError}
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-100 bg-rose-500/20 hover:bg-rose-500/30 cursor-pointer transition-colors"
-        >
+        <Button variant="danger-soft" size="sm" onClick={() => void load()}>
           Retry
-        </button>
+        </Button>
       </div>
     );
   }
@@ -432,7 +421,6 @@ const GeneralSettings: React.FC = () => {
                 disabled={!canEdit || saving}
                 className="w-full h-11 appearance-none bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-9 text-xs text-white truncate focus:outline-none focus:border-emerald-500 hover:border-slate-700 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               />
-              <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
 
@@ -450,15 +438,10 @@ const GeneralSettings: React.FC = () => {
         </div>
 
         {canEdit && device && device !== timezone && (
-          <button
-            type="button"
-            onClick={() => setTimezone(device)}
-            disabled={saving}
-            className="mt-3 inline-flex items-center gap-1.5 text-2xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer disabled:opacity-60"
-          >
+          <Button variant="link" className="mt-3" onClick={() => setTimezone(device)} disabled={saving} icon={<LocateFixed />}>
             <LocateFixed className="w-3 h-3" />
             Use this device’s timezone ({device.replace(/_/g, ' ')})
-          </button>
+          </Button>
         )}
       </Card>
 
@@ -502,24 +485,12 @@ const GeneralSettings: React.FC = () => {
             <span className="text-xs text-slate-200 flex-1">
               {badDay ? 'Fix the highlighted day to save.' : 'You have unsaved changes'}
             </span>
-            <button
-              type="button"
-              onClick={discard}
-              disabled={saving}
-              className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
+            <Button variant="ghost" size="sm" onClick={discard} disabled={saving} icon={<RotateCcw />}>
               Discard
-            </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving || badDay}
-              className="h-8 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            </Button>
+            <Button size="sm" onClick={() => void save()} disabled={badDay} loading={saving} icon={<Save />}>
               Save changes
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -603,6 +574,8 @@ export const SettingsView: React.FC = () => {
           )}
 
           {tab === 'calendar' && <ConnectCalendar />}
+
+          {tab === 'appearance' && <AppearanceSettings />}
         </div>
       </div>
     </div>

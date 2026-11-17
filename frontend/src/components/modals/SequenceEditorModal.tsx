@@ -33,6 +33,7 @@ import { SEQUENCE_PRESETS, fitSteps } from '../../utils/journey';
 import { AlwaysOnRules, StepRules } from '../journey/StepRules';
 import { SmsPreview } from '../journey/SmsPreview';
 import { getBusinessDetails, type BusinessDetailsView } from '../../utils/smsConversationApi';
+import { IconButton, Button } from '../common/Button';
 
 /**
  * Author a nurture sequence.
@@ -239,7 +240,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
     // so `sticky bottom-0` pinned it to the bottom of the SCREEN and it floated
     // across the middle of the steps. A flex column with one scrolling child is
     // what actually keeps a footer at the bottom of a tall dialog.
-    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-3 md:p-6">
+    <div className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px] flex items-center justify-center p-3 md:p-6">
       <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col max-h-full">
         {/* Header */}
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-800">
@@ -272,13 +273,7 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
               Steps run in order. Each delay is measured from the step before it.
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 cursor-pointer shrink-0"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <IconButton onClick={onClose} aria-label="Close" className="shrink-0" icon={<X />} />
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-5 md:p-6 space-y-5">
@@ -624,13 +619,9 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                   </option>
                 ))}
               </select>
-              <button
-                onClick={() => setSteps((p) => [...p, blankStep()])}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
+              <Button variant="outline" size="sm" onClick={() => setSteps((p) => [...p, blankStep()])} icon={<Plus />}>
                 Add step
-              </button>
+              </Button>
             </div>
 
             <AlwaysOnRules className="mb-3" />
@@ -671,30 +662,16 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
                       lands day {Math.round((cumulative[i] / DAY) * 10) / 10}
                     </span>
 
-                    <button
-                      onClick={() => move(i, -1)}
-                      disabled={i === 0}
-                      className="text-slate-500 hover:text-slate-300 disabled:opacity-30 cursor-pointer"
-                      aria-label="Move up"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => move(i, 1)}
-                      disabled={i === steps.length - 1}
-                      className="text-slate-500 hover:text-slate-300 disabled:opacity-30 cursor-pointer"
-                      aria-label="Move down"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    <IconButton size="sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up" icon={<ArrowUp />} />
+                    <IconButton size="sm" onClick={() => move(i, 1)} disabled={i === steps.length - 1} aria-label="Move down" icon={<ArrowDown />} />
+                    <IconButton
+                      size="sm"
+                      className="hover:text-rose-300!"
                       onClick={() => setSteps((p) => p.filter((_, idx) => idx !== i))}
                       disabled={steps.length === 1}
-                      className="text-rose-500 hover:text-rose-400 disabled:opacity-30 cursor-pointer"
                       aria-label="Remove step"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      icon={<Trash2 />}
+                    />
                   </div>
 
                   <StepRules
@@ -796,19 +773,12 @@ export const SequenceEditorModal: React.FC<Props> = ({ sequence, onClose, onSave
             )}
           </p>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 cursor-pointer"
-            >
+            <Button variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              onClick={() => void save()}
-              disabled={saving || !name.trim() || (isNew && !code.trim()) || !closeOutValid}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
-            >
+            </Button>
+            <Button onClick={() => void save()} disabled={!name.trim() || (isNew && !code.trim()) || !closeOutValid} loading={saving}>
               {saving ? 'Saving…' : isNew ? 'Create sequence' : 'Save changes'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

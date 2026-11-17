@@ -3,8 +3,8 @@ import {
   AlertTriangle,
   Ban,
   CalendarClock,
-  ChevronDown,
   ChevronRight,
+  ClipboardList,
   Contact,
   FileSpreadsheet,
   FileUp,
@@ -12,14 +12,10 @@ import {
   Hourglass,
   Pause,
   PenLine,
-  Plus,
   Radio,
-  RefreshCw,
   Rocket,
   Search,
   ShieldAlert,
-  Snowflake,
-  Sun,
   Users,
   Webhook,
   X,
@@ -37,8 +33,10 @@ import { NewLeadModal } from '../modals/NewLeadModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import { Lead, LeadTemperature } from '../../types';
-import { followUpReasonLabel, normalizeStatus, statusLabel, statusTone } from '../../lib/leadStatus';
+import { followUpReasonLabel, normalizeStatus, statusDot, statusLabel, statusTone } from '../../lib/leadStatus';
 import { formatDateTime } from '../../lib/datetime';
+import { Button, IconButton } from '../common/Button';
+import { Select } from '../common/Select';
 
 /**
  * Lead pipeline — live rows only.
@@ -64,12 +62,6 @@ const humanize = (v: string | null | undefined) => (v ? v.replace(/_/g, ' ') : n
 const fullName = (l: LiveLead) =>
   [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead';
 
-/** "SP" for "Sunny Patel"; the first two letters of a one-word name. */
-const initialsOf = (name: string) => {
-  const parts = name.trim().split(/\s+/);
-  return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase();
-};
-
 const thousands = (n: number) => `$${(n / 1000).toFixed(0)}k`;
 
 /** "$250k – $400k", "$250k+", "up to $400k"; null when the lead gave no budget. */
@@ -81,26 +73,27 @@ const budgetRange = (l: LiveLead): string | null => {
   return null;
 };
 
+/** A webhook and nothing more: there is no product to name, so "webhook" IS the answer. */
+const GENERIC_WEBHOOK_PROVIDERS = new Set(['WEBHOOK', 'CUSTOM']);
+
 /**
  * What the row is badged with: where the lead actually came from.
  *
- * `source.type` is the transport and is 'webhook' for every ingested lead,
- * which makes it useless as a label the moment a second integration exists —
- * a form we connected through Tally's API read "webhook" exactly like a URL
- * pasted by hand. So an API-connected source is badged with its provider
- * ("tally") and only a manually pasted URL keeps "webhook", which is the same
- * rule the Lead Sources list uses for its connection pill. The customer's own
- * label for the form ("Buyer Inquiry") stays on hover.
+ * This column answers "which form did this person fill in", so it is keyed off
+ * the PROVIDER, never off `connectionMethod`. Connection method is how we were
+ * wired up, which belongs on the Lead Sources page's connection pill — reading
+ * it here badged every `MANUAL` source "webhook", so a Google Form (connected
+ * through Google, but delivering via a script the owner installs rather than a
+ * webhook we create over Google's API) read exactly like a pasted URL.
+ *
+ * The customer's own label for the form ("Buyer Inquiry") stays on hover.
  */
 const sourceLabel = (l: LiveLead): string => {
   const s = l.source;
   if (!s) return 'manual';
-  // API (Tally), SYNC (Google Sheets) and UPLOAD (a file) name their provider.
-  const method = (s.connectionMethod ?? '').toUpperCase();
-  if ((method === 'API' || method === 'SYNC' || method === 'UPLOAD') && s.provider) return s.provider.toLowerCase().replace(/_/g, ' ');
-  // MANUAL means a webhook URL the owner set up by hand (the Webhook card, a pasted form URL), not a lead typed in;
-  // `type` is the provider ("custom", "tally"), so it is not used here.
-  return 'webhook';
+  const provider = (s.provider ?? '').toUpperCase();
+  if (!provider || GENERIC_WEBHOOK_PROVIDERS.has(provider)) return 'webhook';
+  return provider.toLowerCase().replace(/_/g, ' ');
 };
 
 /**
@@ -112,8 +105,11 @@ const sourceLabel = (l: LiveLead): string => {
  */
 const sourceIcon = (l: LiveLead): LucideIcon => {
   const s = l.source;
-  // Only a lead typed in has no source: the pen. A MANUAL source is a hand-set webhook URL, so it falls to the webhook glyph.
+  // Only a lead typed in has no source: the pen.
   if (!s) return PenLine;
+  // A form keeps its own glyph whatever the transport — the same one the Google
+  // Forms card uses — because the reader is looking for the form, not the wiring.
+  if ((s.provider ?? '').toUpperCase() === 'GOOGLE_FORMS') return ClipboardList;
   switch ((s.connectionMethod ?? '').toUpperCase()) {
     case 'API':
       return Radio;
@@ -336,7 +332,7 @@ export const LeadsView: React.FC = () => {
   // only runs after render, by when `invalidate` below exists, and useLiveEvents
   // reads it through a ref, so an inline handler costs no reconnect.
   const { connected } = useLiveEvents((e) => {
-    if (e.type === 'lead.created' || e.type === 'lead.assigned') invalidate();
+    if (e.type === 'lead.created' || e.type === 'lead.assigned' || e.type === 'lead.updated') invalidate();
   });
 
   // Stream up: it reports every change as it happens, so the poll is only a
@@ -423,45 +419,16 @@ export const LeadsView: React.FC = () => {
       {/* Top Header & Search Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-white tracking-tight">Leads</h2>
-            {/*
-              Says which mechanism is actually feeding the table. "Live" means the
-              event stream is open and a new lead lands here the moment it is
-              created; "Polling" means we fell back and it may take up to a
-              minute. Worth showing, because the difference is visible to the
-              user as latency and would otherwise look like a bug.
-            */}
-            <span
-              title={
-                connected
-                  ? 'Connected to the live event stream — new leads appear as they arrive.'
-                  : 'Event stream not connected; falling back to periodic refresh.'
-              }
-              className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 ${
-                connected
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
-              }`}
-            >
-              <Radio className={`w-3 h-3 ${connected ? '' : 'opacity-60'}`} />
-              {connected ? 'Live' : 'Polling'}
-            </span>
-          </div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Leads</h2>
           <p className="text-xs text-slate-400">
-            {stats?.total ?? rows.length} total buyer leads ingested from your connected forms
+            {(() => {
+              const total = stats?.total ?? rows.length;
+              return `${total.toLocaleString()} ${total === 1 ? 'lead' : 'leads'} from all your sources`;
+            })()}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={refresh}
-            title="Refresh"
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          </button>
-
           {isOwner && (
             <div
               className="relative"
@@ -469,17 +436,13 @@ export const LeadsView: React.FC = () => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAddMenu(false);
               }}
             >
-              <button
-                type="button"
+              <Button
                 onClick={() => setAddMenu((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={addMenu}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-xl text-xs font-semibold shadow-md shadow-emerald-950 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
-                <span>Add leads</span>
-                <ChevronDown className="w-3.5 h-3.5" />
-              </button>
+                Add Leads
+              </Button>
               {addMenu && (
                 <div
                   role="menu"
@@ -566,9 +529,9 @@ export const LeadsView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
           {[
             { id: 'all', icon: null, label: `All Leads${tabCount(stats?.total)}` },
-            { id: 'hot', icon: <Flame className="w-3.5 h-3.5" />, label: `Hot${tabCount(stats?.byTemperature.hot)}` },
-            { id: 'warm', icon: <Sun className="w-3.5 h-3.5" />, label: `Warm${tabCount(stats?.byTemperature.warm)}` },
-            { id: 'cold', icon: <Snowflake className="w-3.5 h-3.5" />, label: `Cold${tabCount(stats?.byTemperature.cold)}` },
+            { id: 'hot', icon: null, label: `Hot${tabCount(stats?.byTemperature.hot)}` },
+            { id: 'warm', icon: null, label: `Warm${tabCount(stats?.byTemperature.warm)}` },
+            { id: 'cold', icon: null, label: `Cold${tabCount(stats?.byTemperature.cold)}` },
             { id: 'new', icon: null, label: `New Inbound${tabCount(stats?.byStatus.new)}` },
             { id: 'booked', icon: null, label: `Appointments${tabCount(stats?.byStatus.appointment_booked)}` },
           ].map(tab => (
@@ -612,7 +575,7 @@ export const LeadsView: React.FC = () => {
           </div>
 
           <div className="md:col-span-3">
-            <select
+            <Select
               value={sourceFilter}
               onChange={(e) => setSourceFilter(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
@@ -621,11 +584,11 @@ export const LeadsView: React.FC = () => {
               {sourceOptions.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div className="md:col-span-3">
-            <select
+            <Select
               value={agentFilter}
               onChange={(e) => setAgentFilter(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 focus:outline-none focus:border-emerald-500"
@@ -638,7 +601,7 @@ export const LeadsView: React.FC = () => {
               {agentOptions.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
 
         </div>
@@ -720,7 +683,6 @@ export const LeadsView: React.FC = () => {
                           title={lead.temperature ? undefined : 'Not classified yet — the AI call classifies the lead'}
                           className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap ${temperatureTone(lead.temperature)}`}
                         >
-                          {lead.temperature === 'hot' && <Flame className="w-3 h-3 text-rose-400" />}
                           {lead.temperature ?? 'Not classified'}
                         </span>
                       </td>
@@ -750,21 +712,15 @@ export const LeadsView: React.FC = () => {
                       {/* Agent — the current assignment, or honestly unassigned. */}
                       <td className="px-4 py-3.5">
                         {lead.assignedAgent ? (
-                          <div className="flex items-center gap-1.5" title={`Assigned ${lead.assignedAgent.assignmentType} · ${formatDateTime(lead.assignedAgent.assignedAt)}`}>
-                            <div className="w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-2xs font-bold text-emerald-300 flex items-center justify-center">
-                              {initialsOf(lead.assignedAgent.name)}
-                            </div>
-                            <span className="text-slate-200 font-medium">
-                              {lead.assignedAgent.id === user?.id ? 'You' : lead.assignedAgent.name}
-                            </span>
-                          </div>
+                          <span
+                            className="text-slate-200 font-medium whitespace-nowrap"
+                            title={`Assigned ${lead.assignedAgent.assignmentType} · ${formatDateTime(lead.assignedAgent.assignedAt)}`}
+                          >
+                            {lead.assignedAgent.name}
+                            {lead.assignedAgent.id === user?.id && <span className="text-slate-500 font-normal"> (You)</span>}
+                          </span>
                         ) : (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-5 h-5 rounded-full border border-dashed border-slate-700 text-2xs font-bold text-slate-600 flex items-center justify-center">
-                              {DASH}
-                            </div>
-                            <span className="text-slate-500">Unassigned</span>
-                          </div>
+                          <span className="text-slate-500">Unassigned</span>
                         )}
                       </td>
 
@@ -772,8 +728,9 @@ export const LeadsView: React.FC = () => {
                       <td className="px-4 py-3.5">
                         <span
                           title={lead.statusReason || undefined}
-                          className={`inline-block whitespace-nowrap text-xs px-2 py-0.5 rounded-md font-mono uppercase ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2' : ''}`}
+                          className={`inline-flex items-center gap-1.5 whitespace-nowrap text-2xs font-semibold pl-2 pr-2.5 py-1 rounded-full ${statusTone(lead.status)}${lead.statusReason ? ' cursor-help' : ''}`}
                         >
+                          <span aria-hidden className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot(lead.status)}`} />
                           {statusLabel(lead.status)}
                         </span>
                         {followUpReasonLabel(lead.status, lead.followUpReason) && (
@@ -796,22 +753,24 @@ export const LeadsView: React.FC = () => {
                       <td className="px-4 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                           {lead.temperature === 'hot' && (
-                            <button
+                            <IconButton
+                              variant="outline"
+                              size="sm"
                               onClick={() => setPreCallLeadId(lead.id)}
-                              title="Agent Pre-Call Briefing"
-                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition cursor-pointer"
-                            >
-                              <Flame className="w-3.5 h-3.5 text-rose-400" />
-                            </button>
+                              aria-label="Agent Pre-Call Briefing"
+                              className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                              icon={<Flame className="text-rose-400" />}
+                            />
                           )}
 
-                          <button
+                          <IconButton
+                            variant="secondary"
+                            size="sm"
                             onClick={() => openLead(lead)}
-                            title="Open Full Dossier"
-                            className="h-7 w-7 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition cursor-pointer"
-                          >
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
+                            aria-label="Open Full Dossier"
+                            className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                            icon={<ChevronRight />}
+                          />
                         </div>
                       </td>
                     </tr>

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Loader2, PhoneCall, Plus, Settings2 } from 'lucide-react';
 import { getTelnyxStatus, type TelnyxStatus } from '../../utils/assistantApi';
-import { PanelClose } from '../leadsources/ManualWebhookPanel';
 import { IntegrationCard } from './IntegrationCard';
 import { ProviderConnect } from './ProviderConnect';
 
@@ -42,14 +41,17 @@ const TelnyxConnectModal: React.FC<{
   // there the overlay would only cover the card's own corner of the screen.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-6"
       onClick={onClose}
     >
-      <div className="w-full max-w-2xl my-8" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end mb-2">
-          <PanelClose onClose={onClose} />
-        </div>
-        <ProviderConnect status={status} onChange={onChange} />
+      {/* Capped to the viewport: the dialog's own body scrolls, never the page behind it. */}
+      <div
+        className="w-full max-w-3xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-3rem)] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ProviderConnect status={status} onChange={onChange} onClose={onClose} />
       </div>
     </div>,
     document.body,
@@ -108,7 +110,7 @@ export const TelnyxCard: React.FC = () => {
                 : 'Connect Telnyx',
           icon: connected ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
           onClick: () => setOpen(true),
-          className: 'bg-violet-600 hover:bg-violet-500 text-on-accent shadow-md shadow-violet-950',
+          variant: 'primary',
         }}
       >
         {error && (

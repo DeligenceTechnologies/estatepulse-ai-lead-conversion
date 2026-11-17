@@ -8,6 +8,7 @@ import {
   getInCallBooking,
   type InCallBookingStatus,
 } from '../../utils/inCallBookingApi';
+import { Button } from '../common/Button';
 
 /**
  * In-call booking: when a caller asks for a meeting, the AI checks real open
@@ -135,25 +136,14 @@ export const InCallBookingCard: React.FC = () => {
 
           <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
             {status.enabled && (
-              <button
-                type="button"
-                onClick={() => void run(disableInCallBooking)}
-                disabled={busy}
-                className="px-4 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold cursor-pointer disabled:opacity-40"
-              >
+              <Button variant="outline" size="sm" onClick={() => void run(disableInCallBooking)} disabled={busy}>
                 Turn off
-              </button>
+              </Button>
             )}
             {(!status.enabled || changed) && (
-              <button
-                type="button"
-                onClick={() => void run(() => enableInCallBooking(choice))}
-                disabled={busy || !!blocker || !choice}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
-              >
-                {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <Button size="sm" onClick={() => void run(() => enableInCallBooking(choice))} disabled={!!blocker || !choice} loading={busy}>
                 {status.enabled ? 'Switch event type' : 'Turn on'}
-              </button>
+              </Button>
             )}
           </div>
         </>

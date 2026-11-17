@@ -9,6 +9,7 @@ import { Drawer } from '../shared/Drawer';
 import { SyncButton } from '../shared/SyncButton';
 import { Empty, Notice, PROVIDERS } from '../shared/ui';
 import { CalendarMembers } from './CalendarMembers';
+import { Button } from '../../common/Button';
 
 /**
  * The Team Members page's second view of people: everyone in the connected
@@ -58,13 +59,9 @@ export const CalendarMembersDrawer: React.FC<{ onAdded: () => void; onClose: () 
           ? (connection?.lastError ?? 'The connection stopped working.')
           : 'Connect Calendly or Cal.com to see its members here and add them to your team.'}
         {can('organization.update') ? (
-          <button
-            type="button"
-            onClick={openCalendarSettings}
-            className="block mx-auto mt-4 h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          >
+          <Button onClick={openCalendarSettings} className="flex! mx-auto mt-4">
             {broken ? 'Reconnect calendar' : 'Connect calendar'}
-          </button>
+          </Button>
         ) : (
           ' Ask your owner to do it.'
         )}

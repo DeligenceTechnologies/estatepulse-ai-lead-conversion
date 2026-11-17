@@ -45,6 +45,10 @@ export interface TeamMember {
   maxActiveLeads: number;
   /** Seven days, wall-clock in `timezone` (server default Mon-Fri 09:00-18:00). */
   workingHours: WorkingDay[];
+  /** Live call transfers: hot leads on an AI call may be put through to their phone. */
+  acceptsLiveTransfers: boolean;
+  /** ZIP codes or city names they cover, lowercased; empty = everywhere. */
+  serviceAreas: string[];
   /**
    * Leads currently assigned to them. Not sent by the server until lead
    * assignment is built on this backend; the UI shows "—" while absent.
@@ -127,13 +131,18 @@ export interface NewMemberInput {
   firstName: string;
   lastName: string;
   email: string;
-  phone?: string | null;
+  /** Required, with its country code. */
+  phone: string;
   /** IANA time zone; the server defaults to Asia/Kolkata when omitted. */
   timezone?: string;
   /** 0-1000; the server defaults to 25 when omitted. */
   maxActiveLeads?: number;
   /** All seven days; the server defaults to Mon-Fri 09:00-18:00 when omitted. */
   workingHours?: WorkingDay[];
+  /** Needs a phone number with its country code. */
+  acceptsLiveTransfers?: boolean;
+  /** ZIP codes or cities they cover; at least one. */
+  serviceAreas: string[];
   /** At least one; the member gets every permission of each. */
   roleIds: string[];
 }

@@ -14,6 +14,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { QuickReportModal } from '../modals/QuickReportModal';
 import { generateMonthlyPerformancePDF, ReportConfig, ReportData } from '../../utils/pdfExport';
+import { Button } from '../common/Button';
 
 export const AnalyticsView: React.FC = () => {
   const { leads, appointments, calls, orgSettings, addAuditLog } = useApp();
@@ -174,33 +175,23 @@ export const AnalyticsView: React.FC = () => {
           </div>
 
           {/* Quick Reports Primary Action */}
-          <button
+          <Button
             id="btn-open-quick-reports-modal"
+            variant="secondary"
             onClick={() => setIsReportModalOpen(true)}
-            className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold border border-slate-700 hover:border-slate-600 transition-all flex items-center gap-2 shadow-sm"
+            icon={<FileText className="text-emerald-400" />}
           >
-            <FileText className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Quick Reports</span>
-          </button>
+            Quick Reports
+          </Button>
 
-          <button
+          <Button
             id="btn-quick-export-current-month"
             onClick={() => handleQuickExport('full')}
-            disabled={isQuickExporting}
-            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-950/40 disabled:opacity-50"
+            loading={isQuickExporting}
+            icon={<Download />}
           >
-            {isQuickExporting ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-on-accent border-t-transparent rounded-full animate-spin" />
-                <span>Exporting...</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                <span>Export Sep 2026 PDF</span>
-              </>
-            )}
-          </button>
+            {isQuickExporting ? 'Exporting...' : 'Export Sep 2026 PDF'}
+          </Button>
         </div>
       </div>
 
@@ -229,14 +220,16 @@ export const AnalyticsView: React.FC = () => {
             </div>
           </div>
 
-          <button
+          <Button
             id="btn-configure-quick-reports"
+            variant="secondary"
+            size="sm"
+            className="self-start sm:self-auto"
             onClick={() => setIsReportModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white text-xs font-semibold transition-all flex items-center justify-center gap-1.5 self-start sm:self-auto shrink-0"
+            icon={<Sparkles className="text-emerald-400" />}
           >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Customize Report &amp; Options</span>
-          </button>
+            Customize Report &amp; Options
+          </Button>
         </div>
 
         {/* 3 Quick Export Tiles */}
@@ -253,15 +246,17 @@ export const AnalyticsView: React.FC = () => {
             <p className="text-xs text-slate-400 line-clamp-2">
               All core KPIs: 92% autonomous contact rate, 38s speed-to-lead SLA, appointment volume, and added GCI.
             </p>
-            <button
+            <Button
               id="btn-export-exec-brief"
+              variant="outline"
+              size="sm"
+              fullWidth
               onClick={() => handleQuickExport('full')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
+              icon={<ArrowDownToLine />}
             >
-              <ArrowDownToLine className="w-3.5 h-3.5" />
-              <span>1-Click Download PDF</span>
-            </button>
+              1-Click Download PDF
+            </Button>
           </div>
 
           <div className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3 rounded-xl space-y-2 transition-all">
@@ -275,15 +270,17 @@ export const AnalyticsView: React.FC = () => {
             <p className="text-xs text-slate-400 line-clamp-2">
               Breakdown across Meta Ads, Zillow Premier, Google PPC, and Website IDX forms with temperature funnel.
             </p>
-            <button
+            <Button
               id="btn-export-channels-brief"
+              variant="outline"
+              size="sm"
+              fullWidth
               onClick={() => handleQuickExport('marketing')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-cyan-600/20 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
+              icon={<ArrowDownToLine />}
             >
-              <ArrowDownToLine className="w-3.5 h-3.5" />
-              <span>Download Marketing PDF</span>
-            </button>
+              Download Marketing PDF
+            </Button>
           </div>
 
           <div className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3 rounded-xl space-y-2 transition-all">
@@ -297,15 +294,17 @@ export const AnalyticsView: React.FC = () => {
             <p className="text-xs text-slate-400 line-clamp-2">
               Economic conversion funnel forecasting inbound volume, qualification, appointments, and gross commission.
             </p>
-            <button
+            <Button
               id="btn-export-roi-brief"
+              variant="outline"
+              size="sm"
+              fullWidth
               onClick={() => handleQuickExport('roi')}
               disabled={isQuickExporting}
-              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-amber-600/20 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/40 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
+              icon={<ArrowDownToLine />}
             >
-              <ArrowDownToLine className="w-3.5 h-3.5" />
-              <span>Download Revenue PDF</span>
-            </button>
+              Download Revenue PDF
+            </Button>
           </div>
 
         </div>

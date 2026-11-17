@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { formatDateTime } from '../../lib/datetime';
 import { getLeadMemory, setLeadAnswer, type LeadMemory, type QuestionStatus } from '../../utils/qualificationApi';
+import { IconButton } from '../common/Button';
 
 /** Shown by the lead's own cards above (budget, location, timeline, bedrooms, financing). */
 const SHOWN_ABOVE = new Set(['timeline', 'location', 'budget', 'bedrooms', 'financing']);
@@ -86,18 +87,17 @@ export const LeadQualificationMemory: React.FC<{ leadId: string }> = ({ leadId }
                 </span>
               )}
               {!q.builtin && !isEditing && (
-                <button
-                  type="button"
+                <IconButton
+                  size="sm"
+                  className="ml-auto"
                   onClick={() => {
                     const v = s.answer?.value;
                     setDraft(v == null ? '' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v));
                     setEditing(q.key);
                   }}
-                  className="ml-auto p-0.5 text-slate-500 hover:text-slate-300 shrink-0"
-                  title="Edit answer"
-                >
-                  <Pencil className="w-3 h-3" />
-                </button>
+                  aria-label="Edit answer"
+                  icon={<Pencil />}
+                />
               )}
             </div>
             {isEditing ? (
@@ -120,18 +120,14 @@ export const LeadQualificationMemory: React.FC<{ leadId: string }> = ({ leadId }
                     className={inputClass}
                   />
                 )}
-                <button
-                  type="button"
-                  disabled={saving}
+                <IconButton
+                  size="sm"
+                  loading={saving}
                   onClick={() => void save(s, draft)}
-                  className="p-1 text-emerald-400 hover:text-emerald-300"
-                  title="Save"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                </button>
-                <button type="button" onClick={() => setEditing(null)} className="p-1 text-slate-500 hover:text-slate-300" title="Cancel">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                  aria-label="Save"
+                  icon={<Check className="text-emerald-400" />}
+                />
+                <IconButton size="sm" onClick={() => setEditing(null)} aria-label="Cancel" icon={<X />} />
               </div>
             ) : s.value != null ? (
               <div className="text-sm font-semibold text-slate-100 truncate" title={s.value}>

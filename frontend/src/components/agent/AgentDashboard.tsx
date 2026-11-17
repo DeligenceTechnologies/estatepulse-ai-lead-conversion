@@ -6,6 +6,7 @@ import { messageFor } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../lib/datetime';
 import { getAgentDashboard, getMyConversations, type AgentDashboard as Stats, type ConversationRow } from '../../utils/agentMeApi';
+import { Button } from '../common/Button';
 
 const RECENT_THREADS = 5;
 
@@ -78,13 +79,9 @@ export const AgentDashboard: React.FC = () => {
             </span>
           </p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${stats === null ? 'animate-spin' : ''}`} />
+        <Button variant="outline" onClick={() => void load()} icon={<RefreshCw className={stats === null ? 'animate-spin' : ''} />}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -130,12 +127,9 @@ export const AgentDashboard: React.FC = () => {
         title="Recent conversations"
         icon={<MessageSquare className="w-4 h-4 text-emerald-400" />}
         aside={
-          <button
-            onClick={() => navigate('/conversations')}
-            className="text-xs text-emerald-400 font-semibold hover:text-emerald-300 cursor-pointer shrink-0"
-          >
+          <Button variant="link" onClick={() => navigate('/conversations')}>
             View all
-          </button>
+          </Button>
         }
         className="min-h-56 max-h-80"
       >

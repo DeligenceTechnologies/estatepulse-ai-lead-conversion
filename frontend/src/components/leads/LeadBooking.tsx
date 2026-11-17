@@ -14,6 +14,7 @@ import {
   type LeadBookingOptions,
 } from "../../utils/calendarApi";
 import { formatDateTime } from '../../lib/datetime';
+import { Button } from '../common/Button';
 
 /**
  * Booking a meeting for one lead, and the lead's real appointments.
@@ -267,14 +268,15 @@ export const LeadAppointments: React.FC<{
         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
           Appointments
         </h4>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={load}
           disabled={loading}
-          className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          icon={<RotateCw className={loading ? "animate-spin" : ""} />}
         >
-          <RotateCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />{" "}
           Refresh
-        </button>
+        </Button>
       </div>
 
       {error && <p className="text-xs text-rose-300">{error}</p>}

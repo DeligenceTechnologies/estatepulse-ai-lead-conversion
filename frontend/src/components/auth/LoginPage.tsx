@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ApiError, consumeSessionEndReason, messageFor, type SessionEndReason } from '../../lib/api';
 import type { CheckEmailState } from './CheckEmailPage';
 import { AuthLayout, Checkbox, Field, FormNotice, PasswordField, SubmitButton } from './AuthLayout';
+import { Button } from '../common/Button';
 
 interface FromState {
   from?: { pathname?: string; search?: string };
@@ -72,9 +73,9 @@ export const LoginPage: React.FC = () => {
       {restoreError && (
         <div role="alert" className="mb-4 px-3 py-2.5 rounded-lg bg-amber-950/40 border border-amber-900/60 text-sm text-amber-200">
           {restoreError}{' '}
-          <button type="button" onClick={retryRestore} className="underline font-medium cursor-pointer">
+          <Button variant="link" onClick={retryRestore}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
       <FormNotice message={notice} />

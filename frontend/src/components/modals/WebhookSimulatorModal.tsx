@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Zap, Copy, Check, Play, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useApp } from '../../context/AppContext';
+import { IconButton, Button } from '../common/Button';
 
 interface WebhookSimulatorModalProps {
   isOpen: boolean;
@@ -99,7 +100,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-150">
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]">
         
         {/* Header */}
@@ -114,12 +115,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <IconButton onClick={onClose} aria-label="Close" icon={<X />} />
         </div>
 
         {/* Body */}
@@ -147,13 +143,9 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
           <div>
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
               <span>Request JSON Body:</span>
-              <button
-                onClick={handleCopyCurl}
-                className="flex items-center gap-1 text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copied cURL' : 'Copy as cURL'}</span>
-              </button>
+              <Button variant="ghost" size="sm" onClick={handleCopyCurl} icon={copied ? <Check className="text-emerald-400" /> : <Copy />}>
+                {copied ? 'Copied cURL' : 'Copy as cURL'}
+              </Button>
             </div>
             <textarea
               value={rawJson}
@@ -183,19 +175,12 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({ is
 
         {/* Footer */}
         <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-          >
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={handleExecuteWebhook}
-            className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md shadow-amber-950"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Send Webhook POST</span>
-          </button>
+          </Button>
+          <Button onClick={handleExecuteWebhook} icon={<Play className="fill-current" />}>
+            Send Webhook POST
+          </Button>
         </div>
 
       </div>

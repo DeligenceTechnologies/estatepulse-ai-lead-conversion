@@ -303,6 +303,22 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     return claimed ? this.run(claimed, approve) : null;
   }
 
+  /**
+   * Re-reads one sheet now, as "Sync now" does, and waits for it: after a row was written from
+   * Import Review, its pending lead is refreshed from what the sheet now says. `ran: false` when
+   * a sync of it is already running; it is then due, and the next pass picks it up.
+   */
+  async syncSourceNow(orgId: string, sourceId: string): Promise<{ ran: boolean }> {
+    await this.prisma.leadSource.updateMany({ where: { id: sourceId, orgId }, data: { syncNextAt: new Date(), remoteSyncedAt: null } });
+    if (!this.enabled || this.stopped) return { ran: false };
+    const claimed = await this.claim({ orgId, sourceId });
+    if (!claimed) {
+      this.nudge();
+      return { ran: false };
+    }
+    return { ran: (await this.run(claimed)).ok };
+  }
+
   private async importOnce(orgId: string, sourceId: string, stats: RunStats, approve: Approval | null): Promise<RunResult> {
     stats.dbStatements += 1;
     const source = await this.prisma.leadSource.findFirst({
@@ -343,10 +359,19 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const mappings = toStored(mappingRows);
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
 
-    let orphans = 0;
+    // Drive's file version lags minutes behind in-cell Sheets edits, so a probe skip can leave Import
+    // Review showing values the sheet no longer has — and the owner applies those into the lead. Never
+    // skip the read while a row is still the owner's to decide, or not yet linked to a lead.
+    let undecided = 0;
     if (this.config.get('SHEETS_VERSION_PROBE', { infer: true })) {
       stats.dbStatements += 1;
-      orphans = await this.prisma.sheetImportRow.count({ where: { orgId, leadSourceId: sourceId, leadId: null } });
+      undecided = await this.prisma.sheetImportRow.count({
+        where: {
+          orgId,
+          leadSourceId: sourceId,
+          OR: [{ leadId: null }, { reviewState: 'pending' }, { changedAfterReviewAt: { not: null } }],
+        },
+      });
     }
     const sheet = await this.readTab(
       orgId,
@@ -356,7 +381,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       mappings,
       identity,
       stats,
-      rebaseline || orphans > 0 ? null : lastVersion || null,
+      rebaseline || undecided > 0 ? null : lastVersion || null,
       source.remoteSyncedAt,
     );
     const versionToken = sheet.version === null ? null : `${sheet.version}:${source.mappingVersion}`;
@@ -598,6 +623,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           lastName: true,
           phone: true,
           email: true,
+          timezone: true,
           location: true,
           minBudget: true,
           maxBudget: true,
@@ -613,6 +639,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
             last_name: l.lastName,
             phone: l.phone,
             email: l.email,
+            timezone: l.timezone,
             location: l.location,
             min_budget: l.minBudget,
             max_budget: l.maxBudget,

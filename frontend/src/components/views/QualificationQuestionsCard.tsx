@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, ListChecks, Loader2, Plus, Trash2 } from 'lucide-re
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { getQuestions, keyFor, saveQuestions, type Question, type QuestionType } from '../../utils/qualificationApi';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * The questions the AI asks this office's leads, in order.
@@ -141,22 +142,16 @@ export const QualificationQuestionsCard: React.FC = () => {
                     </select>
                   )}
                   <div className="flex items-center gap-1 ml-auto">
-                    <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 text-slate-400" title="Move up">
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => move(i, 1)}
-                      disabled={i === questions.length - 1}
-                      className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 text-slate-400"
-                      title="Move down"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
+                    <IconButton size="sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up" icon={<ArrowUp />} />
+                    <IconButton size="sm" onClick={() => move(i, 1)} disabled={i === questions.length - 1} aria-label="Move down" icon={<ArrowDown />} />
                     {!q.builtin && (
-                      <button type="button" onClick={() => update(questions.filter((_, k) => k !== i))} className="p-1.5 rounded hover:bg-rose-950/50 text-rose-400" title="Delete">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <IconButton
+                        size="sm"
+                        className="hover:text-rose-300!"
+                        onClick={() => update(questions.filter((_, k) => k !== i))}
+                        aria-label="Delete"
+                        icon={<Trash2 />}
+                      />
                     )}
                   </div>
                 </div>
@@ -180,20 +175,14 @@ export const QualificationQuestionsCard: React.FC = () => {
           </ul>
 
           <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-            <button type="button" onClick={add} className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-emerald-200 cursor-pointer">
-              <Plus className="w-3.5 h-3.5" />
+            <Button variant="link" onClick={add} icon={<Plus />}>
               Add question
-            </button>
+            </Button>
             <div className="flex items-center gap-3 min-w-0">
               {invalid && <span className="text-xs text-amber-300 truncate">Every question needs a label and text; choices need options.</span>}
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={saving || !dirty || !!invalid}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer shrink-0"
-              >
+              <Button size="sm" onClick={() => void save()} disabled={!dirty || !!invalid} loading={saving}>
                 {saving ? 'Saving…' : 'Save questions'}
-              </button>
+              </Button>
             </div>
           </div>
         </>
