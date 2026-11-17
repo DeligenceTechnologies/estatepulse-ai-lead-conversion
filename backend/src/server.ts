@@ -31,6 +31,7 @@ const ROOT_ROUTES = [
   'ingest/v1/webhook/:token',
   'ingest/v1/custom/:token',
   'ingest/v1/crm/hubspot/webhook',
+  'ingest/v1/airtable/webhook',
   'webhooks/leads/:token',
   'webhooks/telnyx/voice',
   'webhooks/telnyx/messaging',

@@ -17,6 +17,7 @@ import { LeadSourceModule } from './lead-source/lead-source.module';
 import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import { FileImportModule } from './file-import/file-import.module';
 import { CrmModule } from './crm/crm.module';
+import { AirtableModule } from './airtable/airtable.module';
 import { CustomWebhookModule } from './custom-webhook/custom-webhook.module';
 import { TelnyxModule } from './telnyx/telnyx.module';
 import { FollowupModule } from './followup/followup.module';
@@ -47,6 +48,7 @@ import {QueueModule} from "@/queue/queue.module";
     FileImportModule,
     CustomWebhookModule,
     CrmModule,
+    AirtableModule,
     TelnyxModule,
     FollowupModule,
     OutreachModule,

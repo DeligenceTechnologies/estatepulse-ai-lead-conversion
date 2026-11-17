@@ -25,6 +25,7 @@ import { SourceStatusPill } from '../leadsources/StatusPills';
 import { CustomWebhookCard } from './CustomWebhookCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { HubSpotCard } from './HubSpotCard';
+import { AirtableCard } from './AirtableCard';
 import { IntegrationCard } from './IntegrationCard';
 
 /**
@@ -372,6 +373,10 @@ export const ConnectionCards: React.FC = () => {
         />
         {/* HubSpot — self-loading too; hidden where the server has it switched off. */}
         <HubSpotCard />
+
+        {/* Airtable — self-loading; hidden where the server has it switched off.
+            The account is not a lead source: bases and tables are picked after connecting. */}
+        <AirtableCard />
 
         {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
         {formProviderCard(

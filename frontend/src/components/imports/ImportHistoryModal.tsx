@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Contact, FileSpreadsheet, FileUp, History, Loader2 } from 'lucide-react';
+import { Contact, FileSpreadsheet, FileUp, History, Loader2, Table2 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { importHistory, removeImport, type ImportBatch } from '../../utils/fileImportApi';
 import type { ImportKind } from '../../utils/googleSheetsApi';
@@ -14,6 +14,7 @@ const BADGE: Record<ImportKind, { icon: typeof FileUp; cls: string; name: string
   google_sheets: { icon: FileSpreadsheet, cls: 'bg-green-500/15 text-green-300 border-green-500/30', name: 'Google Sheet', word: 'sheet' },
   file_upload: { icon: FileUp, cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30', name: 'Uploaded file', word: 'file' },
   hubspot: { icon: Contact, cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30', name: 'HubSpot', word: 'crm' },
+  airtable: { icon: Table2, cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30', name: 'Airtable', word: 'airtable' },
 };
 
 export const SourceBadge: React.FC<{ kind: ImportKind; label?: boolean; title?: string }> = ({ kind, label = true, title }) => {

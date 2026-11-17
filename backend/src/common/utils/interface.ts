@@ -85,6 +85,17 @@ export interface IntegrationEnv {
   HUBSPOT_RETRY_BASE_MS: number;
   CRM_POLL_MS: number;
   CRM_RECONCILE_INTERVAL_MS: number;
+  AIRTABLE_ENABLED: boolean;
+  AIRTABLE_CLIENT_ID?: string;
+  AIRTABLE_CLIENT_SECRET?: string;
+  AIRTABLE_REDIRECT_URI?: string;
+  AIRTABLE_SCOPES?: string;
+  AIRTABLE_API_BASE_URL: string;
+  AIRTABLE_AUTH_BASE_URL: string;
+  AIRTABLE_RETRY_BASE_MS: number;
+  AIRTABLE_MIN_REQUEST_GAP_MS: number;
+  AIRTABLE_POLL_MS: number;
+  AIRTABLE_RECONCILE_INTERVAL_MS: number;
   NODE_ENV: 'development' | 'test' | 'production';
 }
 

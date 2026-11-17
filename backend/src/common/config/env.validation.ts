@@ -176,4 +176,27 @@ export const envValidationSchema = Joi.object({
     // connection is reconciled against the CRM's modified dates to catch a lost webhook.
     CRM_POLL_MS: Joi.number().integer().min(0).default(30_000),
     CRM_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
+
+    // Airtable two-way sync. Off unless AIRTABLE_ENABLED: its endpoints answer 404 and nothing syncs.
+    // Unset client id/secret = the card says "not configured" instead of failing at boot.
+    AIRTABLE_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    AIRTABLE_CLIENT_ID: Joi.string().empty('').optional(),
+    AIRTABLE_CLIENT_SECRET: Joi.string().empty('').optional(),
+    // Defaults to ${APP_URL}/oauth/airtable-callback.html. Airtable requires HTTPS (localhost
+    // excepted) and no wildcards, and it must match the integration's redirect URL exactly.
+    AIRTABLE_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Space-separated. Must be a subset of the scopes enabled on the Airtable integration, and
+    // must include schema.bases:read and data.records:read. Drop schema.bases:write here to run
+    // without column creation; record sync keeps working.
+    AIRTABLE_SCOPES: Joi.string().empty('').optional(),
+    AIRTABLE_API_BASE_URL: Joi.string().uri().default('https://api.airtable.com'),
+    AIRTABLE_AUTH_BASE_URL: Joi.string().uri().default('https://airtable.com'),
+    AIRTABLE_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
+    // Airtable allows 5 requests a second per base, so 200ms between requests is
+    // exactly that ceiling. 0 switches the pacing off.
+    AIRTABLE_MIN_REQUEST_GAP_MS: Joi.number().integer().min(0).default(200),
+    // How often the worker looks for due Airtable work (0 = only when nudged), and how often a
+    // table is re-read in full to catch anything a webhook missed.
+    AIRTABLE_POLL_MS: Joi.number().integer().min(0).default(30_000),
+    AIRTABLE_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');
