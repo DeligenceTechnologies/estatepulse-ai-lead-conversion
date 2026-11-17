@@ -6,6 +6,7 @@ import { messageFor } from '../../lib/api';
 import { editCrmRow, editReviewRow, type EditableField, type ImportKind, type ReviewItem } from '../../utils/googleSheetsApi';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { SourceBadge } from './ImportHistoryModal';
+import { IconButton, Button } from '../common/Button';
 
 /** What a row's source is called when it is named in full. */
 export const KIND_NAME: Record<ImportKind, string> = {
@@ -160,20 +161,13 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="review-lead-title">
-      <div className="absolute inset-0 bg-slate-950/80 animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
 
       <aside className="relative w-full sm:max-w-lg h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col animate-slide-in-right">
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           {/* Who the row is, and where it came from */}
           <div className="relative border-b border-slate-800 bg-slate-950/40">
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute top-3 right-3 w-8 h-8 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center justify-center cursor-pointer transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <IconButton onClick={onClose} aria-label="Close" className="absolute top-3 right-3" icon={<X />} />
 
             <div className="px-5 pt-6 pb-5 pr-12">
               <h3 id="review-lead-title" className="text-lg font-bold text-white tracking-tight truncate">
@@ -281,22 +275,13 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
         </div>
 
         <div className="border-t border-slate-800 px-5 py-3 bg-slate-950/40 flex gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-          >
+          <Button variant="secondary" onClick={onClose} className="flex-1">
             {editable ? 'Cancel' : 'Close'}
-          </button>
+          </Button>
           {editable && (
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving || dirty.length === 0}
-              className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
+            <Button onClick={() => void save()} disabled={dirty.length === 0} loading={saving} className="flex-1">
               {saving ? 'Saving…' : `Save to ${toCrm ? target : 'sheet'}`}
-            </button>
+            </Button>
           )}
         </div>
       </aside>

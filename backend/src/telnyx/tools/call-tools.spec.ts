@@ -55,7 +55,7 @@ describe('call tools', () => {
       expect(Object.keys(tool.webhook.body_parameters.properties)).not.toContain('lead_id');
       expect(tool.webhook.headers[0].value).toContain('ep_calltools_x');
     }
-    expect(outcome.webhook.body_parameters.properties.outcome?.enum).toEqual(['not_interested', 'do_not_contact', 'wrong_number']);
+    expect((outcome.webhook.body_parameters.properties as { outcome?: { enum: string[] } }).outcome?.enum).toEqual(['not_interested', 'do_not_contact', 'wrong_number']);
   });
 
   it('tell the AI a text later is schedule_text and a call later is schedule_callback', () => {
@@ -76,5 +76,17 @@ describe('call tools', () => {
       "Thanks Ana! I'll call you back on Wednesday, October 28 at 5:00 PM. If another time suits you better, just reply here.",
     );
     expect(fillTemplate('Hi {{firstName}}, this is {{brokerage}}.', { firstName: 'Ana' })).toBe('Hi Ana, this is.');
+  });
+
+  it('add the transfer tool and its rules only when live transfer is on, with only the triggers chosen', () => {
+    const names = (transfer: boolean) => callToolDefinitions('https://api.example.com', 'ep_calltools_x', true, transfer).map((t) => t.webhook.name);
+    expect(names(false)).not.toContain('transfer_to_agent');
+    expect(names(true)).toContain('transfer_to_agent');
+    expect(callToolDefinitions('https://api.example.com', 'ep_calltools_x', false, true).map((t) => t.webhook.name)).toEqual(['record_outcome']);
+    expect(callToolsSection()).not.toContain('transfer_to_agent');
+    const onRequest = callToolsSection(true, { onHotLead: false, onRequest: true });
+    expect(onRequest).toContain('call transfer_to_agent');
+    expect(onRequest).toContain('asks to speak with a real person');
+    expect(onRequest).not.toContain('pre-approved');
   });
 });

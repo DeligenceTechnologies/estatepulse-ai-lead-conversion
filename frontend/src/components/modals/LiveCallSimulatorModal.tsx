@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TranscriptTurn } from '../../types';
+import { Button, IconButton } from '../common/Button';
 
 export const LiveCallSimulatorModal: React.FC = () => {
   const {
@@ -200,7 +201,7 @@ export const LiveCallSimulatorModal: React.FC = () => {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-200">
       <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Top Header: Voice Call State */}
@@ -229,21 +230,14 @@ export const LiveCallSimulatorModal: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
+            <IconButton
+              variant={soundEnabled ? 'outline' : 'secondary'}
               onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                soundEnabled ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : 'bg-slate-800 text-slate-400 border-slate-700'
-              }`}
-              title={soundEnabled ? 'Mute synthesized speech' : 'Enable synthesized voice'}
-            >
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={closeLiveCallSimulation}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-            >
-              <PhoneOff className="w-4 h-4 text-rose-400" />
-            </button>
+              aria-label={soundEnabled ? 'Mute synthesized speech' : 'Enable synthesized voice'}
+              className={soundEnabled ? 'text-emerald-300! border-emerald-500/40!' : ''}
+              icon={soundEnabled ? <Volume2 /> : <VolumeX />}
+            />
+            <IconButton variant="danger-soft" onClick={closeLiveCallSimulation} aria-label="End call" icon={<PhoneOff />} />
           </div>
         </div>
 
@@ -320,13 +314,7 @@ export const LiveCallSimulatorModal: React.FC = () => {
                     placeholder="Speak/type as the lead..."
                     className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
-                  <button
-                    type="submit"
-                    disabled={!userInput.trim()}
-                    className="p-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
+                  <IconButton variant="primary" type="submit" disabled={!userInput.trim()} aria-label="Send" icon={<Send />} />
                 </form>
               </div>
             )}
@@ -338,12 +326,9 @@ export const LiveCallSimulatorModal: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <span>Consultation Booked for 10:00 AM Tomorrow! CRM & Agent notified.</span>
                 </div>
-                <button
-                  onClick={closeLiveCallSimulation}
-                  className="px-3 py-1 bg-emerald-600 text-on-accent text-xs font-semibold rounded-lg hover:bg-emerald-500 transition-colors"
-                >
+                <Button size="sm" onClick={closeLiveCallSimulation}>
                   View Lead in Dashboard
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -414,13 +399,9 @@ export const LiveCallSimulatorModal: React.FC = () => {
 
             {/* One Click Booking / Complete Call */}
             {callStatus === 'connected' && (
-              <button
-                onClick={handleCompleteCallAndBook}
-                className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-on-accent text-xs font-bold shadow-lg shadow-emerald-950 flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <Calendar className="w-4 h-4" />
-                <span>Lock Appointment & Finalize Score (87)</span>
-              </button>
+              <Button fullWidth size="lg" onClick={handleCompleteCallAndBook} icon={<Calendar />}>
+                Lock Appointment & Finalize Score (87)
+              </Button>
             )}
 
           </div>

@@ -42,7 +42,7 @@ export const ConnectModal: React.FC<{
   // it was opened from.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div

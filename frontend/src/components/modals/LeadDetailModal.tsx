@@ -36,6 +36,7 @@ import {
 import { OUTCOME_STYLES, duration } from '../views/CallsView';
 import { messageFor } from '../../lib/api';
 import { formatDateTime } from '../../lib/datetime';
+import { IconButton, Button } from '../common/Button';
 
 const HELD_TEXT = {
   DO_NOT_CONTACT: 'the lead is on the do-not-contact list',
@@ -289,18 +290,11 @@ export const LeadDetailModal: React.FC = () => {
 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-slate-950/80 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 md:p-6 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-slate-900 sm:border border-slate-700/80 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] text-slate-100">
         {/* Pinned to the corner, outside the header's wrapping rows, so it is
             always in the same place however the actions wrap. */}
-        <button
-          onClick={() => setSelectedLeadId(null)}
-          aria-label="Close"
-          title="Close (Esc)"
-          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <IconButton onClick={() => setSelectedLeadId(null)} aria-label="Close" title="Close (Esc)" className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10" icon={<X />} />
 
         {/* Header */}
         <div className="p-4 pr-14 sm:p-5 sm:pr-16 bg-slate-950 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 shrink-0">
@@ -353,15 +347,15 @@ export const LeadDetailModal: React.FC = () => {
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-2 lg:justify-end lg:shrink-0">
             {isLive && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setEditing({})}
                 title="Correct the lead's name, contact details and what they are looking for"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                icon={<Pencil />}
               >
-                <Pencil className="w-3.5 h-3.5" />
-                <span>Edit lead</span>
-              </button>
+                Edit lead
+              </Button>
             )}
 
             {isLive && (
@@ -371,25 +365,21 @@ export const LeadDetailModal: React.FC = () => {
             {/* Only offered while the strategy has not started: once it has, the
                 server ignores a second enrol, so the button would do nothing. */}
             {flow?.phase === 'not_started' && (
-              <button
+              <Button
+                size="sm"
                 onClick={() => void startOutreach()}
-                disabled={enrolling}
+                loading={enrolling}
                 title={enrollError ?? 'Start the outbound strategy (AI call / SMS) for this lead now'}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                icon={<Phone />}
               >
-                <Phone className="w-3.5 h-3.5" />
-                <span>{enrolling ? 'Starting…' : enrollError ? 'Retry AI Outreach' : 'Start AI Outreach'}</span>
-              </button>
+                {enrolling ? 'Starting…' : enrollError ? 'Retry AI Outreach' : 'Start AI Outreach'}
+              </Button>
             )}
 
             {lead.temperature === 'hot' && (
-              <button
-                onClick={() => setPreCallLeadId(lead.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-medium transition-colors cursor-pointer"
-              >
-                <Flame className="w-3.5 h-3.5 text-rose-400" />
-                <span>Pre-Call Screen</span>
-              </button>
+              <Button variant="outline" size="sm" onClick={() => setPreCallLeadId(lead.id)} icon={<Flame className="text-rose-400" />}>
+                Pre-Call Screen
+              </Button>
             )}
 
           </div>
@@ -523,24 +513,19 @@ export const LeadDetailModal: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {/* Approving a bad number only holds it again (NO_DIALABLE_PHONE): fix it first. */}
                     {(lead.reviewReasons ?? []).some(isPhoneProblem) && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setEditing({ focus: 'phone' })}
                         disabled={approving}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
+                        icon={<Pencil />}
                       >
-                        <Pencil className="w-3.5 h-3.5" />
                         Fix phone
-                      </button>
+                      </Button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => void approveReview()}
-                      disabled={approving}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40"
-                    >
+                    <Button size="sm" onClick={() => void approveReview()} loading={approving}>
                       {approving ? 'Approving…' : 'Approve and start outreach'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -568,14 +553,9 @@ export const LeadDetailModal: React.FC = () => {
                     </div>
                   </div>
                   {!tz.hasPhone && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing({ focus: 'phone' })}
-                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
+                    <Button variant="secondary" size="sm" onClick={() => setEditing({ focus: 'phone' })} icon={<Phone />}>
                       {lead.phone ? 'Fix phone' : 'Add phone'}
-                    </button>
+                    </Button>
                   )}
                   {tz.hasPhone && (
                     <div className="flex items-center gap-2 shrink-0">
@@ -588,14 +568,9 @@ export const LeadDetailModal: React.FC = () => {
                         className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white max-w-[230px] focus:outline-none focus:border-emerald-600 disabled:opacity-40"
                       />
                       {tz.source === 'provided' && (
-                        <button
-                          type="button"
-                          onClick={() => void saveZone(null)}
-                          disabled={savingZone}
-                          className="text-2xs text-slate-400 hover:text-white underline underline-offset-2 cursor-pointer disabled:opacity-40"
-                        >
+                        <Button variant="link" onClick={() => void saveZone(null)} disabled={savingZone}>
                           Use phone's
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}

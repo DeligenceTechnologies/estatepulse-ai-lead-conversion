@@ -5,12 +5,13 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  Loader2,
   MailWarning,
   Save,
   Clock,
   Gauge,
   Globe,
+  MapPin,
+  PhoneForwarded,
   ShieldCheck,
   UserCog,
   UserPlus,
@@ -29,6 +30,7 @@ import {
 import { DEFAULT_WORKING_HOURS, normalizeWeek, type WorkingDay } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
+import { IconButton, Button } from '../common/Button';
 
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_MAX_LEADS = 25;
@@ -42,6 +44,19 @@ const browserTimeZone = (): string => {
     return 'Asia/Kolkata';
   }
 };
+
+/** "Austin, 78704; round rock" → ['austin', '78704', 'round rock']: what the server keeps. */
+const parseAreas = (text: string): string[] => [
+  ...new Set(
+    text
+      .split(/[,;\n]/)
+      .map((a) => a.trim().toLowerCase().replace(/\s+/g, ' '))
+      .filter(Boolean),
+  ),
+];
+const sameAreas = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+/** Enough digits, country code first, for a phone the transfer can ring. */
+const dialable = (phone: string): boolean => phone.trim().startsWith('+') && phone.replace(/\D/g, '').length >= 8;
 
 const sameWeek = (a: readonly WorkingDay[], b: readonly WorkingDay[]): boolean =>
   JSON.stringify(normalizeWeek(a)) === JSON.stringify(normalizeWeek(b));
@@ -107,6 +122,8 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
   const [timezone, setTimezone] = useState(member?.timezone ?? defaults?.timezone ?? browserTimeZone());
   const [maxLeads, setMaxLeads] = useState(String(member?.maxActiveLeads ?? DEFAULT_MAX_LEADS));
   const [workingHours, setWorkingHours] = useState<WorkingDay[]>(normalizeWeek(member?.workingHours ?? defaults?.workingHours ?? DEFAULT_WORKING_HOURS));
+  const [liveTransfers, setLiveTransfers] = useState(member?.acceptsLiveTransfers ?? false);
+  const [areasText, setAreasText] = useState((member?.serviceAreas ?? []).join(', '));
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -137,10 +154,12 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
     if (firstName.trim() !== member.firstName) out.firstName = firstName.trim();
     if (lastName.trim() !== member.lastName) out.lastName = lastName.trim();
     if (email.trim().toLowerCase() !== member.email.toLowerCase()) out.email = email.trim();
-    if (phone.trim() !== (member.phone ?? '')) out.phone = phone.trim() || null;
+    if (phone.trim() !== (member.phone ?? '')) out.phone = phone.trim();
     if (timezone !== member.timezone) out.timezone = timezone;
     if (leadCapValid && leadCap !== member.maxActiveLeads) out.maxActiveLeads = leadCap;
     if (!sameWeek(workingHours, member.workingHours ?? DEFAULT_WORKING_HOURS)) out.workingHours = workingHours;
+    if (liveTransfers !== (member.acceptsLiveTransfers ?? false)) out.acceptsLiveTransfers = liveTransfers;
+    if (!sameAreas(parseAreas(areasText), member.serviceAreas ?? [])) out.serviceAreas = parseAreas(areasText);
     const current = member.roles.map((r) => r.id);
     if (roleIds.length !== current.length || roleIds.some((id) => !current.includes(id))) out.roleIds = roleIds;
     if (password) out.password = password;
@@ -170,6 +189,14 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
       setError('Every working day must end after it starts.');
       return;
     }
+    if (!dialable(phone)) {
+      setError('Add a phone number with its country code (e.g. +1 512 555 0100).');
+      return;
+    }
+    if (parseAreas(areasText).length === 0) {
+      setError('Add at least one area (ZIP code or city) they cover.');
+      return;
+    }
     if (editing && password && password.length < MIN_PASSWORD_LENGTH) {
       setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
@@ -189,10 +216,12 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        phone: phone.trim(),
         timezone,
         maxActiveLeads: leadCap,
         workingHours,
+        acceptsLiveTransfers: liveTransfers,
+        serviceAreas: parseAreas(areasText),
         roleIds,
       });
       onSaved(result);
@@ -212,7 +241,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="member-form-title"
@@ -234,14 +263,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={close}
-            disabled={saving}
-            aria-label="Close"
-            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <IconButton onClick={close} disabled={saving} aria-label="Close" className="shrink-0" icon={<X />} />
         </div>
 
         {created ? (
@@ -303,7 +325,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                 </div>
                 <div>
                   <label className={label} htmlFor="member-phone">
-                    Phone <span className="font-normal text-slate-500">(optional)</span>
+                    Phone
                   </label>
                   <input
                     id="member-phone"
@@ -314,8 +336,11 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                     autoComplete="off"
                     maxLength={50}
                     placeholder="+91 98765 43210"
+                    required
+                    aria-required="true"
                     disabled={saving}
                   />
+                  <p className="text-slate-500 mt-1">With the country code, e.g. +1 512 555 0100.</p>
                 </div>
               </div>
             </Section>
@@ -360,6 +385,42 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                   </div>
                   <p className="text-slate-500 mt-1">The most leads they hold at once. 0 = they take none.</p>
                 </div>
+              </div>
+            </Section>
+
+            <Section title="Live call transfers" hint="Hot leads put through to their phone during an AI call">
+              <label className="flex items-start gap-2 text-slate-300 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={liveTransfers}
+                  onChange={(e) => setLiveTransfers(e.target.checked)}
+                  disabled={saving}
+                  className="accent-emerald-500 mt-0.5"
+                />
+                <span>
+                  <PhoneForwarded className="inline w-3 h-3 mr-1 -mt-0.5 text-slate-500" />
+                  Takes live transfers
+                  <span className="block text-slate-500 font-normal">
+                    Their phone rings, inside their working hours, when a ready lead is on an AI call. Picking up puts them straight through to the lead.
+                  </span>
+                </span>
+              </label>
+              <div>
+                <label className={label} htmlFor="member-areas">
+                  <MapPin className="inline w-3 h-3 mr-1 -mt-0.5 text-slate-500" />
+                  Areas they cover
+                </label>
+                <input
+                  id="member-areas"
+                  className={field}
+                  value={areasText}
+                  onChange={(e) => setAreasText(e.target.value)}
+                  placeholder="78704, 78745, Austin, Round Rock"
+                  required
+                  aria-required="true"
+                  disabled={saving}
+                />
+                <p className="text-slate-500 mt-1">ZIP codes or cities, separated by commas. At least one.</p>
               </div>
             </Section>
 
@@ -425,23 +486,18 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
             </Section>
 
             <div className="sticky bottom-0 -mx-5 px-5 py-3 bg-slate-900 border-t border-slate-800 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={close}
-                disabled={saving}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
+              <Button variant="secondary" onClick={close} disabled={saving}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                disabled={saving || nothingToSave}
+                disabled={nothingToSave}
+                loading={saving}
                 title={nothingToSave ? 'Nothing has changed yet' : undefined}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                icon={<Save />}
               >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {editing ? 'Save changes' : 'Add Member'}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -539,14 +595,9 @@ const CreatedResult: React.FC<{ member: CreatedMember; onDone: () => void }> = (
         </div>
       </div>
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onDone}
-          autoFocus
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold transition-colors cursor-pointer"
-        >
+        <Button onClick={onDone} autoFocus>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );

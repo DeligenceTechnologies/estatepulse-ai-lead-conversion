@@ -39,13 +39,13 @@ export const SEGMENT_STYLE: Record<SegmentKind, { label: string; fill: string; t
   },
 };
 
-const SEGMENT_EDGE = 'shadow-[inset_0_1px_0_rgb(255_255_255/0.28),inset_-1px_0_0_rgb(2_6_23/0.35)]';
+const SEGMENT_EDGE = 'shadow-(--timeline-edge)';
 
 export const UNAVAILABLE_SWATCH = 'bg-slate-800';
 
 /** Their working hours: the band free time and meetings sit on, so the hours show even where nothing is free. */
 export const WORKING_SWATCH = 'bg-slate-600 ring-1 ring-inset ring-sky-400/50';
-const WORKING_FILL = 'bg-slate-600/90 shadow-[inset_0_2px_0_rgb(56_189_248/0.55),inset_0_-2px_0_rgb(56_189_248/0.55)]';
+const WORKING_FILL = 'bg-slate-600/90 shadow-(--timeline-working)';
 
 /** Their working hours that fall on this day, clipped to it. Null when the calendar gives none. */
 const workingOn = (member: MemberAvailability, day: AvailabilityReportDay): TimeRange[] | null =>
@@ -218,7 +218,7 @@ const Bar: React.FC<{
       {nowAt && (
         <span
           aria-hidden
-          className="absolute inset-y-0 w-[3px] -ml-[1.5px] rounded-full bg-sky-400 shadow-[0_0_8px_rgb(56_189_248/0.9)] z-10 pointer-events-none"
+          className="absolute inset-y-0 w-[3px] -ml-[1.5px] rounded-full bg-sky-400 shadow-(--timeline-now-glow) z-10 pointer-events-none"
           style={{ left: `${nowAt.left}%` }}
         />
       )}

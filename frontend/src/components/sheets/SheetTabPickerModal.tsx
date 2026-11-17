@@ -9,6 +9,7 @@ import {
 } from '../../utils/googleSheetsApi';
 import { SheetError, SheetModal, errorText } from './SheetModal';
 import { TimezoneNotice } from '../common/TimezoneNotice';
+import { Button } from '../common/Button';
 
 /**
  * Step two of adding a sheet: the owner picked a spreadsheet in Google's
@@ -91,15 +92,9 @@ export const SheetTabPickerModal: React.FC<{
             The first row must be the column headings. Nothing is imported until you map the columns and switch it on.
           </p>
           <TimezoneNotice tone="hint" />
-          <button
-            type="button"
-            onClick={create}
-            disabled={busy || tabId === null}
-            className="w-full px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5"
-          >
-            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          <Button fullWidth onClick={create} disabled={tabId === null} loading={busy}>
             Use this tab
-          </button>
+          </Button>
         </div>
       )}
     </SheetModal>

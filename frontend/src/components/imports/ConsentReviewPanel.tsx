@@ -4,9 +4,7 @@ import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { approveConsent, listConsentReview, rejectConsent, type ConsentReviewItem } from '../../utils/consentReviewApi';
 import { errorText } from '../sheets/SheetModal';
-
-const btn =
-  'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5';
+import { Button, type ButtonVariant } from '../common/Button';
 
 const plural = (n: number) => `${n} lead${n === 1 ? '' : 's'}`;
 
@@ -77,17 +75,17 @@ export const ConsentReviewPanel: React.FC<{ onTotal: (n: number) => void }> = ({
       return next;
     });
 
-  const decisionButton = (what: 'approve' | 'reject', label: string, cls: string) => (
-    <button
-      type="button"
-      className={`${btn} ${armed === what ? 'bg-amber-500 text-slate-950' : cls}`}
-      disabled={selected.size === 0 || busy !== null}
+  const decisionButton = (what: 'approve' | 'reject', label: string, variant: ButtonVariant) => (
+    <Button
+      size="sm"
+      variant={armed === what && what === 'reject' ? 'danger' : variant}
+      disabled={selected.size === 0 || (busy !== null && busy !== what)}
+      loading={busy === what}
       onClick={() => void decide(what)}
       onBlur={() => armed === what && setArmed(null)}
     >
-      {busy === what && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
       {armed === what ? `Click again to ${label.toLowerCase()} for ${selected.size}` : `${label} (${selected.size})`}
-    </button>
+    </Button>
   );
 
   return (
@@ -101,17 +99,17 @@ export const ConsentReviewPanel: React.FC<{ onTotal: (n: number) => void }> = ({
             </span>
           )}
         </p>
-        {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
-        {decisionButton('approve', 'Mark consent given', 'bg-green-600 text-white hover:bg-green-500')}
+        {decisionButton('reject', 'Reject', 'danger-soft')}
+        {decisionButton('approve', 'Mark consent given', 'primary')}
       </div>
 
       {error && (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-300">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span className="flex-1">{error}</span>
-          <button type="button" onClick={() => void load()} className="font-bold underline cursor-pointer">
+          <Button variant="link" onClick={() => void load()}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
 

@@ -30,6 +30,7 @@ import {
   type PermissionGroup,
   type Role,
 } from '../../utils/usersApi';
+import { Button } from '../common/Button';
 
 /** What the editor holds: a role being edited, or a new one (`id` null). */
 interface Draft {
@@ -270,9 +271,9 @@ export const RolesView: React.FC = () => {
           <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
             <div className="text-xs text-rose-200 flex-1">{loadError}</div>
-            <button onClick={() => void load()} className="text-xs font-semibold text-rose-200 hover:text-white cursor-pointer">
+            <Button variant="danger-soft" size="sm" onClick={() => void load()}>
               Retry
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -336,16 +337,18 @@ export const RolesView: React.FC = () => {
             <>
               {/* Identity */}
               <div className="shrink-0 p-5 border-b border-slate-800 bg-slate-950/40 space-y-4">
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="lg:hidden"
                   onClick={async () => {
                     if (isNew && !(await confirmDiscard())) return;
                     setMobileEditor(false);
                   }}
-                  className="lg:hidden inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 cursor-pointer"
+                  icon={<ArrowLeft />}
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" />
                   All roles
-                </button>
+                </Button>
 
                 {isOwnerRole && (
                   <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-lg p-3 flex items-start gap-2.5">
@@ -413,20 +416,12 @@ export const RolesView: React.FC = () => {
                   </div>
                   {!readOnly && (
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => setPermissions([...allKeys])}
-                        disabled={busy || granted === total}
-                        className="h-8 px-3 rounded-lg text-2xs font-semibold bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
+                      <Button variant="secondary" size="sm" onClick={() => setPermissions([...allKeys])} disabled={busy || granted === total}>
                         Select all
-                      </button>
-                      <button
-                        onClick={() => setPermissions([])}
-                        disabled={busy || granted === 0}
-                        className="h-8 px-3 rounded-lg text-2xs font-semibold bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => setPermissions([])} disabled={busy || granted === 0}>
                         Clear
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -459,42 +454,33 @@ export const RolesView: React.FC = () => {
               {!isOwnerRole && (
                 <div className="shrink-0 px-5 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center gap-2">
                   {selected && canDelete && (
-                    <button
+                    <Button
+                      variant="danger-soft"
                       onClick={() => void handleDelete()}
                       disabled={busy || selected._count.users > 0}
+                      loading={deleting}
                       title={
                         selected._count.users > 0
                           ? `Assigned to ${selected._count.users} member(s) — remove it from them first`
                           : 'Delete this role'
                       }
-                      className="h-9 px-3 rounded-lg text-xs font-semibold text-rose-300 hover:bg-rose-600/15 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      icon={<Trash2 />}
                     >
-                      {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                       <span className="hidden sm:inline">Delete role</span>
-                    </button>
+                    </Button>
                   )}
                   <div className="ml-auto flex items-center gap-2">
                     {dirty && !isNew && <span className="hidden sm:inline text-2xs text-amber-300">Unsaved changes</span>}
                     {!readOnly && (
                       <>
                         {!isNew && (
-                          <button
-                            onClick={discard}
-                            disabled={busy || !dirty}
-                            className="h-9 px-3 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
+                          <Button variant="secondary" onClick={discard} disabled={busy || !dirty} icon={<RotateCcw />}>
                             Discard
-                          </button>
+                          </Button>
                         )}
-                        <button
-                          onClick={() => void handleSave()}
-                          disabled={busy || !dirty || !draft.name.trim()}
-                          className="h-9 px-4 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-on-accent flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        <Button onClick={() => void handleSave()} disabled={busy || !dirty || !draft.name.trim()} loading={saving} icon={isNew ? undefined : <Save />}>
                           {isNew ? 'Create role' : 'Save changes'}
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -515,13 +501,9 @@ const Header: React.FC<{ canCreate: boolean; onNew: () => void }> = ({ canCreate
       <p className="text-xs text-slate-400">Create roles and decide exactly what each one can see and do.</p>
     </div>
     {canCreate && (
-      <button
-        onClick={onNew}
-        className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-      >
-        <Plus className="w-4 h-4" />
+      <Button onClick={onNew}>
         New Role
-      </button>
+      </Button>
     )}
   </div>
 );
@@ -643,7 +625,7 @@ const Switch: React.FC<{ checked: boolean; disabled: boolean; onChange: () => vo
     } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
   >
     <span
-      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-on-accent shadow transition-transform ${
         checked ? 'translate-x-4' : ''
       }`}
     />

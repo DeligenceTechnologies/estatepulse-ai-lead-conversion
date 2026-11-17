@@ -3,7 +3,7 @@ import { Link2, Loader2 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../../lib/api';
 import { openCalendlyPopup, startCalendlyConnect } from '../../../utils/calendarApi';
-import { PROVIDERS, PrimaryButton } from '../shared/ui';
+import { Button } from '../../common/Button';
 
 export const CalendlyConnect: React.FC<{ onConnected: () => Promise<boolean>; reconnect?: boolean }> = ({
   onConnected,
@@ -46,13 +46,12 @@ export const CalendlyConnect: React.FC<{ onConnected: () => Promise<boolean>; re
         <li>Sign in with the Calendly account that owns or administers your organization.</li>
         <li>Approve access. The window closes on its own when it is done.</li>
       </ol>
-      <PrimaryButton
+      <Button
         onClick={() => void connect()}
-        className={PROVIDERS.calendly.button}
-        icon={busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+        icon={busy ? <Loader2 className="animate-spin" /> : <Link2 />}
       >
         {busy ? 'Waiting for Calendly… (cancel)' : reconnect ? 'Reconnect Calendly' : 'Connect with Calendly'}
-      </PrimaryButton>
+      </Button>
     </div>
   );
 };

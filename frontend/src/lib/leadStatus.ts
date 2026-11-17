@@ -33,19 +33,41 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
   invalid: 'Invalid',
 };
 
-/** Badge colours, in the palette the table already used. */
+/**
+ * Badge colours: a soft tint, a hairline border and readable text of one hue,
+ * so a badge reads the same on the dark and the light theme. Hues follow the
+ * journey: blues while reaching out, amber when waiting, green when keen,
+ * violet once an appointment is in play, rose for a no, greys when it is over.
+ * Green, not emerald, for "Interested": emerald is the brand colour and moves
+ * with Settings → Appearance.
+ */
 export const STATUS_TONES: Record<LeadStatus, string> = {
-  new: 'bg-slate-800 text-slate-300 border border-slate-700',
-  contacting: 'bg-sky-950 text-sky-300 border border-sky-800/40',
-  engaged: 'bg-cyan-950 text-cyan-300 border border-cyan-800/40',
-  follow_up: 'bg-orange-950 text-orange-300 border border-orange-800/40',
-  interested: 'bg-emerald-950 text-emerald-300 border border-emerald-800/40',
-  appointment_requested: 'bg-violet-950 text-violet-300 border border-violet-800/40',
-  appointment_booked: 'bg-purple-950 text-purple-300 border border-purple-800/40',
-  not_interested: 'bg-rose-950 text-rose-300 border border-rose-800/40',
-  unresponsive: 'bg-stone-900 text-stone-400 border border-stone-700',
-  closed: 'bg-slate-900 text-slate-400 border border-slate-700',
-  invalid: 'bg-zinc-900 text-zinc-400 border border-zinc-700',
+  new: 'bg-blue-500/10 text-blue-300 border border-blue-500/25',
+  contacting: 'bg-sky-500/10 text-sky-300 border border-sky-500/25',
+  engaged: 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/25',
+  follow_up: 'bg-amber-500/10 text-amber-300 border border-amber-500/25',
+  interested: 'bg-green-500/10 text-green-300 border border-green-500/25',
+  appointment_requested: 'bg-violet-500/10 text-violet-300 border border-violet-500/25',
+  appointment_booked: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+  not_interested: 'bg-rose-500/10 text-rose-300 border border-rose-500/25',
+  unresponsive: 'bg-stone-500/10 text-stone-400 border border-stone-500/25',
+  closed: 'bg-slate-500/10 text-slate-300 border border-slate-500/25',
+  invalid: 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/25',
+};
+
+/** The small dot at the start of a status badge, in the badge's hue. */
+export const STATUS_DOTS: Record<LeadStatus, string> = {
+  new: 'bg-blue-400',
+  contacting: 'bg-sky-400',
+  engaged: 'bg-cyan-400',
+  follow_up: 'bg-amber-400',
+  interested: 'bg-green-400',
+  appointment_requested: 'bg-violet-400',
+  appointment_booked: 'bg-purple-400',
+  not_interested: 'bg-rose-400',
+  unresponsive: 'bg-stone-400',
+  closed: 'bg-slate-400',
+  invalid: 'bg-zinc-400',
 };
 
 /** leads.follow_up_reason — the backend's FollowUpReason. */
@@ -81,6 +103,7 @@ export function normalizeStatus(status: string | null | undefined): LeadStatus {
 
 export const statusLabel = (status: string | null | undefined): string => STATUS_LABELS[normalizeStatus(status)];
 export const statusTone = (status: string | null | undefined): string => STATUS_TONES[normalizeStatus(status)];
+export const statusDot = (status: string | null | undefined): string => STATUS_DOTS[normalizeStatus(status)];
 
 /** The reason label for a follow_up lead; null for any other status. */
 export function followUpReasonLabel(status: string | null | undefined, reason: string | null | undefined): string | null {

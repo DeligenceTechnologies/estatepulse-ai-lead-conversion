@@ -23,10 +23,12 @@ import { CustomWebhookWizard } from '../customwebhook/CustomWebhookWizard';
 import { ConnectModal } from '../leadsources/ConnectModal';
 import { SourceStatusPill } from '../leadsources/StatusPills';
 import { CustomWebhookCard } from './CustomWebhookCard';
+import { GoogleFormsCard } from './GoogleFormsCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { HubSpotCard } from './HubSpotCard';
 import { AirtableCard } from './AirtableCard';
 import { IntegrationCard } from './IntegrationCard';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * Lead Integrations: every connection the account has, one card each.
@@ -52,9 +54,9 @@ const BROKEN = ['UNINSTALLED', 'ORPHANED', 'ERROR', 'DRIFTED'];
 const CopyButton: React.FC<{ value: string; title: string }> = ({ value, title }) => {
   const [done, setDone] = useState(false);
   return (
-    <button
-      type="button"
-      title={title}
+    <IconButton
+      size="sm"
+      aria-label={title}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(value);
@@ -64,10 +66,8 @@ const CopyButton: React.FC<{ value: string; title: string }> = ({ value, title }
           toast.error('Could not copy — select the URL on Lead Sources instead.');
         }
       }}
-      className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-    >
-      {done ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-    </button>
+      icon={done ? <Check className="text-emerald-400" /> : <Copy />}
+    />
   );
 };
 
@@ -116,18 +116,9 @@ const SourceRow: React.FC<{
           <CopyButton value={source.webhookUrl} title="Copy webhook URL" />
         )}
 
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onDisconnect(source)}
-          className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
-            confirming
-              ? 'bg-rose-600 border-rose-500 text-on-accent hover:bg-rose-500'
-              : 'border-slate-800 text-slate-400 hover:text-rose-300 hover:border-rose-900/60'
-          }`}
-        >
+        <Button variant={confirming ? 'danger' : 'danger-soft'} size="sm" disabled={busy} onClick={() => onDisconnect(source)}>
           {confirming ? 'Confirm' : 'Disconnect'}
-        </button>
+        </Button>
       </div>
 
       {/* A webhook that vanished on the provider's side is silent data loss, so
@@ -136,26 +127,16 @@ const SourceRow: React.FC<{
         <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-2">
           <div className="text-xs text-rose-200 leading-relaxed">
             {source.remoteErrorMessage ??
-              'The webhook is no longer on the form. Submissions since then were never sent to us.'}
+              'This form is no longer linked. New entries are not reaching us.'}
           </div>
           {isApi && (
             <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onRepair(source, 'resync')}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
-              >
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => onRepair(source, 'resync')}>
                 Re-sync
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onRepair(source, 'reinstall')}
-                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
-              >
+              </Button>
+              <Button size="sm" disabled={busy} onClick={() => onRepair(source, 'reinstall')}>
                 Reinstall webhook
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -314,7 +295,7 @@ export const ConnectionCards: React.FC = () => {
           </div>
         }
         title={title}
-        blurb="Pick a form — we install the webhook for you"
+        blurb="Pick a form and we set it up for you"
         connected={mine.length > 0 || conns.length > 0}
         loading={loading}
         accent="border-emerald-500/40"
@@ -324,7 +305,7 @@ export const ConnectionCards: React.FC = () => {
           label: mine.length > 0 ? 'Manage / add form' : conns.length > 0 ? 'Add a form' : `Connect ${title}`,
           icon: mine.length > 0 ? <Settings2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />,
           onClick: () => setConnect(code),
-          className: 'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-md shadow-emerald-950',
+          variant: 'primary',
         }}
       >
         {loading ? (
@@ -334,7 +315,7 @@ export const ConnectionCards: React.FC = () => {
         ) : conns.length > 0 ? (
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
             <strong className="text-slate-200">{conns[0].label || conns[0].accountEmail || 'Account'}</strong> is
-            connected, but no form is selected yet. Add one and its submissions start creating leads.
+            connected. Add a form to start getting leads.
           </div>
         ) : (
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-400 leading-relaxed">
@@ -351,7 +332,7 @@ export const ConnectionCards: React.FC = () => {
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
           <div className="text-xs text-rose-200 leading-relaxed">
-            <div className="font-semibold text-rose-100">Can't reach the backend</div>
+            <div className="font-semibold text-rose-100">Couldn't load your connections</div>
             {error}
           </div>
         </div>
@@ -362,6 +343,11 @@ export const ConnectionCards: React.FC = () => {
         {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings.
             Google Sheets is self-loading: its account is not a lead source. */}
         <GoogleSheetsCard />
+
+        {/* Google Forms — same Google account as Sheets, but the owner pastes a
+            short Apps Script into their form because Google Forms has no
+            webhook of its own. Hidden where the server has it switched off. */}
+        <GoogleFormsCard />
 
         {/* Webhook — one URL for any app or form; the owner maps the first payload's fields. Hidden when the server has it off. */}
         <CustomWebhookCard
@@ -382,12 +368,12 @@ export const ConnectionCards: React.FC = () => {
         {formProviderCard(
           'TALLY',
           'Tally',
-          'Paste your Tally API key once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+          'Add your Tally API key, pick your forms, and we do the rest.',
         )}
         {formProviderCard(
           'TYPEFORM',
           'Typeform',
-          'Paste a Typeform personal access token once, pick the forms you want, and we install the webhook on each of them — nothing to copy by hand.',
+          'Add your Typeform token, pick your forms, and we do the rest.',
         )}
 
         {/* Website & Other Forms — sources made with the plain webhook URL before
@@ -401,7 +387,7 @@ export const ConnectionCards: React.FC = () => {
               </div>
             }
             title="Website & Other Forms"
-            blurb="Your website, Zapier, Make or any tool that can send a webhook"
+            blurb="Your website, Zapier, Make or any webhook"
             connected
             loading={loading}
             accent="border-amber-500/40"
@@ -409,7 +395,7 @@ export const ConnectionCards: React.FC = () => {
               label: 'Add webhook',
               icon: <Plus className="w-4 h-4" />,
               onClick: () => setWebhookWizard({ sourceId: null }),
-              className: 'bg-slate-800 hover:bg-slate-700 text-slate-100',
+              variant: 'secondary',
             }}
           >
             {legacyWebhookSources.map((s) => (

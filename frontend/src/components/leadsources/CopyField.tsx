@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { Button } from '../common/Button';
 
 /**
  * A read-only value with a copy button.
@@ -26,17 +27,18 @@ export const CopyField: React.FC<{ label: string; value: string; mono?: boolean 
         >
           {value}
         </div>
-        <button
+        <Button
+          variant="secondary"
+          className="h-auto! self-stretch"
           onClick={() => {
             navigator.clipboard.writeText(value).catch(() => toast.error('Could not copy — select the text instead.'));
             setCopied(true);
             setTimeout(() => setCopied(false), 1800);
           }}
-          className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          icon={copied ? <Check className="text-emerald-400" /> : <Copy />}
         >
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? 'Copied' : 'Copy'}
-        </button>
+        </Button>
       </div>
     </div>
   );

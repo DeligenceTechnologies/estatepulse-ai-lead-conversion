@@ -52,7 +52,9 @@ export class LeadSourcesService {
           ? 'typeform'
           : provider === LeadSourceProvider.CUSTOM
             ? 'custom'
-            : 'webhook';
+            : provider === LeadSourceProvider.GOOGLE_FORMS
+              ? 'google-forms'
+              : 'webhook';
     return `${this.publicBase}/ingest/v1/${route}/${token}`;
   }
 
@@ -287,6 +289,20 @@ export class LeadSourcesService {
     if (!row.ingestTokenEnc) return null;
     try {
       return this.secrets.open(row.ingestTokenEnc, aad.ingestToken(row.orgId, row.id));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The source's signing secret in the clear. Only ever for showing an owner
+   * the credential of their own source — the generated Google Apps Script has
+   * to carry it, the way a Tally webhook form carries it.
+   */
+  decryptSigningSecret(row: Pick<LeadSource, 'id' | 'orgId' | 'signingSecretEnc'>): string | null {
+    if (!row.signingSecretEnc) return null;
+    try {
+      return this.secrets.open(row.signingSecretEnc, aad.signingSecret(row.orgId, row.id));
     } catch {
       return null;
     }

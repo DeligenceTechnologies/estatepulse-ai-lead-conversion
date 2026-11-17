@@ -70,6 +70,9 @@ export interface IntegrationEnv {
   SHEETS_SYNC_INTERVAL_MS: number;
   SHEETS_VERSION_PROBE: boolean;
   SHEETS_FULL_READ_MAX_AGE_MS: number;
+  GOOGLE_FORMS_ENABLED: boolean;
+  FORMS_POLL_MS: number;
+  FORMS_SYNC_INTERVAL_MS: number;
   FILE_IMPORT_ENABLED: boolean;
   FILE_IMPORT_MAX_BYTES: number;
   CUSTOM_WEBHOOK_ENABLED: boolean;

@@ -19,6 +19,7 @@ import {
 import { errorText, timeAgo } from '../sheets/SheetModal';
 import { AirtableSetupModal } from './AirtableSetupModal';
 import { AirtableSyncPanel } from './AirtableSyncPanel';
+import { buttonClass } from '../common/Button';
 import { IntegrationCard } from './IntegrationCard';
 
 /**
@@ -59,7 +60,7 @@ const Permissions: React.FC<{ permissions: AirtablePermissions }> = ({ permissio
   );
 };
 
-const link = 'text-2xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default';
+const link = buttonClass({ variant: 'ghost', size: 'sm' });
 
 export const AirtableCard: React.FC = () => {
   const [config, setConfig] = useState<AirtableConfig | null>(null);
@@ -171,21 +172,31 @@ export const AirtableCard: React.FC = () => {
         label: 'Not configured on this server',
         icon: <X className="w-3.5 h-3.5" />,
         onClick: () => undefined,
-        className: 'bg-slate-800 text-slate-500 cursor-default',
+        variant: 'secondary' as const,
+        disabled: true,
       }
     : busy === 'connect'
       ? {
           label: `Waiting for ${NAME}… (cancel)`,
           icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
           onClick: connect,
-          className: 'bg-slate-800 text-slate-300 hover:bg-slate-700',
+          variant: 'secondary' as const,
         }
-      : {
-          label: broken.length ? `Reconnect ${NAME}` : connected ? `Connect another ${NAME} account` : `Connect ${NAME}`,
-          icon: broken.length ? <RefreshCw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />,
-          onClick: connect,
-          className: broken.length ? 'bg-amber-600 text-white hover:bg-amber-500' : 'bg-sky-600 text-white hover:bg-sky-500',
-        };
+      : broken.length || !connected
+        ? {
+            label: broken.length ? `Reconnect ${NAME}` : `Connect ${NAME}`,
+            icon: broken.length ? <RefreshCw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />,
+            onClick: connect,
+            variant: 'primary' as const,
+          }
+        : {
+            // Already connected: adding a second account is not the main thing
+            // an owner came to this card for, so it does not look like it is.
+            label: `Connect another ${NAME} account`,
+            icon: <Plus className="w-3.5 h-3.5" />,
+            onClick: connect,
+            variant: 'secondary' as const,
+          };
 
   return (
     <>

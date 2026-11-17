@@ -19,13 +19,12 @@ import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/Sheet
 import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch } from './OutreachPicker';
 import { PreviewRowsTable, flagged } from './PreviewRowsTable';
 import { TimezoneNotice } from '../common/TimezoneNotice';
+import { Button, buttonClass } from '../common/Button';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
-const primary =
-  'px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5';
-const secondary =
-  'px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-100 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5';
+const primary = buttonClass();
+const secondary = buttonClass({ variant: 'secondary' });
 
 /** A mapping as a comparable string: the same pairs in any order are the same mapping. */
 const mappingKey = (columns: ColumnMapping[]): string =>
@@ -295,13 +294,9 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                 Only a name and a phone or email are required; the template shows every column we read, including the optional Time Zone.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={downloadTemplate}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-100 hover:bg-slate-700 border border-slate-700 cursor-pointer flex items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" /> Download the template
-            </button>
+            <Button variant="secondary" size="sm" onClick={downloadTemplate} icon={<Download />}>
+              Download the template
+            </Button>
           </div>
           <TimezoneNotice tone="hint" />
           <div

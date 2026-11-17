@@ -10,6 +10,7 @@ import {
   weeklyHours,
   type WorkingDay,
 } from '../../utils/workingHours';
+import { Button } from '../common/Button';
 
 interface WorkingHoursEditorProps {
   value: WorkingDay[];
@@ -53,24 +54,12 @@ export const WorkingHoursEditor: React.FC<WorkingHoursEditorProps> = ({ value, o
           <span className="text-slate-500"> · {weeklyHours(week)} h / week</span>
         </p>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={copyMonday}
-            disabled={disabled}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-semibold text-slate-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <CopyCheck className="w-3 h-3" />
+          <Button variant="ghost" size="sm" onClick={copyMonday} disabled={disabled} icon={<CopyCheck />}>
             Copy Mon to all
-          </button>
-          <button
-            type="button"
-            onClick={() => onChange(DEFAULT_WORKING_HOURS)}
-            disabled={disabled}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-semibold text-slate-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RotateCcw className="w-3 h-3" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onChange(DEFAULT_WORKING_HOURS)} disabled={disabled} icon={<RotateCcw />}>
             Reset to Mon–Fri 9–6
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -95,7 +84,7 @@ export const WorkingHoursEditor: React.FC<WorkingHoursEditorProps> = ({ value, o
                 }`}
               >
                 <span
-                  className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${
+                  className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-on-accent shadow transition-transform ${
                     day.isAvailable ? 'translate-x-3.5' : ''
                   }`}
                 />

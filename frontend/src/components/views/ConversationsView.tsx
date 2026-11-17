@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Ban, RotateCw, Search, UserRound } from 'lucide-react';
+import { AlertTriangle, Ban, Search, UserRound } from 'lucide-react';
 import { useLiveQuery } from '../../lib/useLiveQuery';
 import {
   listConversations,
@@ -73,13 +73,6 @@ export const ConversationsView: React.FC = () => {
             Every SMS thread — what we sent, what came back, and who asked us to stop.
           </p>
         </div>
-        <button
-          onClick={threadsQuery.refresh}
-          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <RotateCw className={`w-3.5 h-3.5 ${threadsQuery.refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
       </div>
 
       {threadsQuery.stale && (

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { MailCheck } from 'lucide-react';
 import { api, messageFor } from '../../lib/api';
 import { AuthLayout, Field, FormError, SubmitButton } from './AuthLayout';
+import { Button } from '../common/Button';
 
 /**
  * Asks for a reset link. The server answers the same for every address, so
@@ -49,13 +50,9 @@ export const ForgotPasswordPage: React.FC = () => {
               link to reset the password. The link works once and expires in 30 minutes.
             </p>
             <p className="text-slate-400">Not there after a few minutes? Check your spam folder, or try again.</p>
-            <button
-              type="button"
-              onClick={() => setSentTo(null)}
-              className="text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-            >
+            <Button variant="link" className="text-sm!" onClick={() => setSentTo(null)}>
               Send another link
-            </button>
+            </Button>
           </div>
         </div>
       </AuthLayout>

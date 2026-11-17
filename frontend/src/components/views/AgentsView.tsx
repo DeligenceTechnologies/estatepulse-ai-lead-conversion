@@ -9,7 +9,6 @@ import {
   CalendarArrowUp,
   LayoutGrid,
   List,
-  Plus,
   Search,
   ShieldCheck,
   Users,
@@ -35,6 +34,7 @@ import { MemberFormModal } from '../modals/MemberFormModal';
 import { MemberDrawer } from '../team/MemberDrawer';
 import { getOrgSettings, type OrgSettings } from '../../utils/orgSettingsApi';
 import { MemberActions, MemberCard, MemberRow } from '../team/MemberParts';
+import { Button } from '../common/Button';
 
 const PAGE_SIZES = PAGE_SIZE_OPTIONS;
 const PAGE_SIZE_KEY = 'ep_agents_page_size';
@@ -311,27 +311,24 @@ export const AgentsView: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             {can('organization.read') && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
                 onClick={() => setCalendarOpen(true)}
                 aria-haspopup="dialog"
                 title="Everyone in your connected Calendly or Cal.com, to add to the team"
-                className="h-9 px-3.5 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:border-slate-600 hover:text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                icon={<Contact />}
               >
-                <Contact className="w-4 h-4" />
                 Calendar members
-              </button>
+              </Button>
             )}
             {canCreate && (
-              <button
+              <Button
                 onClick={() => setForm('new')}
                 disabled={roles.length === 0}
                 title={roles.length === 0 ? 'Roles could not be loaded' : undefined}
-                className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Plus className="w-4 h-4" />
                 Add Member
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -382,13 +379,9 @@ export const AgentsView: React.FC = () => {
               />
               {/* Phones have no column headers to click. */}
               {hasFilters && (
-                <button
-                  onClick={clearFilters}
-                  className="h-9 px-2.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-rose-300 transition-colors cursor-pointer flex items-center gap-1"
-                >
-                  <X className="w-3.5 h-3.5" />
+                <Button variant="ghost" className="hover:text-rose-300!" onClick={clearFilters} icon={<X />}>
                   Clear all
-                </button>
+                </Button>
               )}
             </div>
 
@@ -489,9 +482,9 @@ export const AgentsView: React.FC = () => {
               {hasFilters ? (
                 <>
                   No members match these filters.{' '}
-                  <button onClick={clearFilters} className="text-emerald-400 hover:text-emerald-300 font-semibold cursor-pointer">
+                  <Button variant="link" onClick={clearFilters}>
                     Clear filters
-                  </button>
+                  </Button>
                 </>
               ) : (
                 'No team members yet. Add your first member to get started.'
