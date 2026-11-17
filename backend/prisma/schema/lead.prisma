@@ -78,6 +78,7 @@ model Lead {
   ingestEvents    IngestEvent[]
   sheetImportRows SheetImportRow[]
   meetings        CalendarMeeting[]
+  callTransfers   CallTransfer[]
   outreachItems   OutreachBatchLead[]
   events          LeadEvent[]
 

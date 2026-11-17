@@ -20,6 +20,7 @@ import { FileImportModule } from './file-import/file-import.module';
 import { CrmModule } from './crm/crm.module';
 import { CustomWebhookModule } from './custom-webhook/custom-webhook.module';
 import { TelnyxModule } from './telnyx/telnyx.module';
+import { TransferModule } from './transfer/transfer.module';
 import { FollowupModule } from './followup/followup.module';
 import { OutreachModule } from './outreach/outreach.module';
 import { HistoryModule } from './history/history.module';
@@ -50,6 +51,7 @@ import {QueueModule} from "@/queue/queue.module";
     CustomWebhookModule,
     CrmModule,
     TelnyxModule,
+    TransferModule,
     FollowupModule,
     OutreachModule,
     HistoryModule,
