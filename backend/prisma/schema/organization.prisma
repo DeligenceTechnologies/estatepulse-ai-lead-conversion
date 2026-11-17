@@ -55,6 +55,8 @@ model OrganizationSetting {
   voicemail             Json?   @map("voicemail")
   /// The AI's call-outcome tools on Telnyx (callback, outcome), as provisioned there.
   callTools             Json?   @map("call_tools")
+  /// Live call transfer to an agent ({ enabled, ringSeconds, agentsPerTransfer, … }); unset means off.
+  liveTransfer          Json?   @map("live_transfer")
   /// What is texted to a lead when an agent takes their chat over ({ enabled, message }); unset means on, with the default text.
   chatTakeover          Json?   @map("chat_takeover")
   /// Who the organization is in its texts ({ legalName, mailingAddress, email, website }); CASL wants the address for Canadian leads. Unset is all empty.

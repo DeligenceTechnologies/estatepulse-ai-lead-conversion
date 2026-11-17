@@ -8,6 +8,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { ROOT_ROUTES } from './root-routes';
 import { AppError } from './common/errors/app-error';
 import { sha256Hex } from './common/utils/crypto';
 

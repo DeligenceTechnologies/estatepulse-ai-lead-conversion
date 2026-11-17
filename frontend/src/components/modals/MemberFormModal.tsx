@@ -11,6 +11,8 @@ import {
   Clock,
   Gauge,
   Globe,
+  MapPin,
+  PhoneForwarded,
   ShieldCheck,
   UserCog,
   UserPlus,
@@ -42,6 +44,19 @@ const browserTimeZone = (): string => {
     return 'Asia/Kolkata';
   }
 };
+
+/** "Austin, 78704; round rock" → ['austin', '78704', 'round rock']: what the server keeps. */
+const parseAreas = (text: string): string[] => [
+  ...new Set(
+    text
+      .split(/[,;\n]/)
+      .map((a) => a.trim().toLowerCase().replace(/\s+/g, ' '))
+      .filter(Boolean),
+  ),
+];
+const sameAreas = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+/** Enough digits, country code first, for a phone the transfer can ring. */
+const dialable = (phone: string): boolean => phone.trim().startsWith('+') && phone.replace(/\D/g, '').length >= 8;
 
 const sameWeek = (a: readonly WorkingDay[], b: readonly WorkingDay[]): boolean =>
   JSON.stringify(normalizeWeek(a)) === JSON.stringify(normalizeWeek(b));
@@ -107,6 +122,8 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
   const [timezone, setTimezone] = useState(member?.timezone ?? defaults?.timezone ?? browserTimeZone());
   const [maxLeads, setMaxLeads] = useState(String(member?.maxActiveLeads ?? DEFAULT_MAX_LEADS));
   const [workingHours, setWorkingHours] = useState<WorkingDay[]>(normalizeWeek(member?.workingHours ?? defaults?.workingHours ?? DEFAULT_WORKING_HOURS));
+  const [liveTransfers, setLiveTransfers] = useState(member?.acceptsLiveTransfers ?? false);
+  const [areasText, setAreasText] = useState((member?.serviceAreas ?? []).join(', '));
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -137,10 +154,12 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
     if (firstName.trim() !== member.firstName) out.firstName = firstName.trim();
     if (lastName.trim() !== member.lastName) out.lastName = lastName.trim();
     if (email.trim().toLowerCase() !== member.email.toLowerCase()) out.email = email.trim();
-    if (phone.trim() !== (member.phone ?? '')) out.phone = phone.trim() || null;
+    if (phone.trim() !== (member.phone ?? '')) out.phone = phone.trim();
     if (timezone !== member.timezone) out.timezone = timezone;
     if (leadCapValid && leadCap !== member.maxActiveLeads) out.maxActiveLeads = leadCap;
     if (!sameWeek(workingHours, member.workingHours ?? DEFAULT_WORKING_HOURS)) out.workingHours = workingHours;
+    if (liveTransfers !== (member.acceptsLiveTransfers ?? false)) out.acceptsLiveTransfers = liveTransfers;
+    if (!sameAreas(parseAreas(areasText), member.serviceAreas ?? [])) out.serviceAreas = parseAreas(areasText);
     const current = member.roles.map((r) => r.id);
     if (roleIds.length !== current.length || roleIds.some((id) => !current.includes(id))) out.roleIds = roleIds;
     if (password) out.password = password;
@@ -170,6 +189,14 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
       setError('Every working day must end after it starts.');
       return;
     }
+    if (!dialable(phone)) {
+      setError('Add a phone number with its country code (e.g. +1 512 555 0100).');
+      return;
+    }
+    if (parseAreas(areasText).length === 0) {
+      setError('Add at least one area (ZIP code or city) they cover.');
+      return;
+    }
     if (editing && password && password.length < MIN_PASSWORD_LENGTH) {
       setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
@@ -189,10 +216,12 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        phone: phone.trim(),
         timezone,
         maxActiveLeads: leadCap,
         workingHours,
+        acceptsLiveTransfers: liveTransfers,
+        serviceAreas: parseAreas(areasText),
         roleIds,
       });
       onSaved(result);
@@ -303,7 +332,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                 </div>
                 <div>
                   <label className={label} htmlFor="member-phone">
-                    Phone <span className="font-normal text-slate-500">(optional)</span>
+                    Phone
                   </label>
                   <input
                     id="member-phone"
@@ -314,8 +343,11 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                     autoComplete="off"
                     maxLength={50}
                     placeholder="+91 98765 43210"
+                    required
+                    aria-required="true"
                     disabled={saving}
                   />
+                  <p className="text-slate-500 mt-1">With the country code, e.g. +1 512 555 0100.</p>
                 </div>
               </div>
             </Section>
@@ -360,6 +392,42 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
                   </div>
                   <p className="text-slate-500 mt-1">The most leads they hold at once. 0 = they take none.</p>
                 </div>
+              </div>
+            </Section>
+
+            <Section title="Live call transfers" hint="Hot leads put through to their phone during an AI call">
+              <label className="flex items-start gap-2 text-slate-300 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={liveTransfers}
+                  onChange={(e) => setLiveTransfers(e.target.checked)}
+                  disabled={saving}
+                  className="accent-emerald-500 mt-0.5"
+                />
+                <span>
+                  <PhoneForwarded className="inline w-3 h-3 mr-1 -mt-0.5 text-slate-500" />
+                  Takes live transfers
+                  <span className="block text-slate-500 font-normal">
+                    Their phone rings, inside their working hours, when a ready lead is on an AI call. Picking up puts them straight through to the lead.
+                  </span>
+                </span>
+              </label>
+              <div>
+                <label className={label} htmlFor="member-areas">
+                  <MapPin className="inline w-3 h-3 mr-1 -mt-0.5 text-slate-500" />
+                  Areas they cover
+                </label>
+                <input
+                  id="member-areas"
+                  className={field}
+                  value={areasText}
+                  onChange={(e) => setAreasText(e.target.value)}
+                  placeholder="78704, 78745, Austin, Round Rock"
+                  required
+                  aria-required="true"
+                  disabled={saving}
+                />
+                <p className="text-slate-500 mt-1">ZIP codes or cities, separated by commas. At least one.</p>
               </div>
             </Section>
 
