@@ -193,7 +193,7 @@ export class TelnyxController {
     if (!publicKey) {
       throw new AppError(
         'VALIDATION_ERROR',
-        'A Telnyx public key is required to verify webhooks. Copy it from Telnyx → Account Settings → Keys & Credentials → Public Key.',
+        'A Telnyx public key is required to verify webhooks. Copy it from Telnyx → Account Settings → API Keys → Public Key.',
       );
     }
     // Stored the one way the webhooks look it up, so "+1 (202) 555-0123" still routes.
