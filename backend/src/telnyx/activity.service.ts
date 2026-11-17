@@ -587,6 +587,38 @@ export class ActivityService {
     this.pendingRecordings.delete(ccid);
   }
 
+  /** A Call Control command on any call of the organization (a transfer's agent leg too); false when Telnyx refused it. */
+  async command(orgId: string, ccid: string, name: string, body: object = {}): Promise<boolean> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey) return false;
+    return this.action(ccid, c.apiKey, name, body);
+  }
+
+  /** The voice the organization's assistant speaks with, for our own prompts on a call; a stock voice when it cannot be read. */
+  async voiceOf(orgId: string): Promise<string> {
+    return (await this.assistants.voiceFor(orgId).catch(() => null)) ?? FALLBACK_TTS_VOICE;
+  }
+
+  /** Stops the assistant on a live call, for a transfer: the lead is put on hold and agents are rung. */
+  async pauseAssistant(orgId: string, ccid: string): Promise<boolean> {
+    const stopped = await this.command(orgId, ccid, 'ai_assistant_stop');
+    if (stopped) this.started.delete(ccid);
+    return stopped;
+  }
+
+  /**
+   * Starts the assistant again on a call it was stopped on for a transfer that no agent took.
+   * `context` tells it why it is back (it reads {{call_context}}) and `greeting` is the first thing
+   * the lead hears. False when it would not start: the caller then decides what the lead hears.
+   */
+  async resumeAssistant(orgId: string, leadId: string, ccid: string, context: string, greeting: string): Promise<boolean> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return false;
+    const variables = { ...(await this.leadVariables(orgId, leadId)), call_context: context };
+    this.started.add(ccid);
+    return this.action(ccid, c.apiKey, 'ai_assistant_start', { assistant: { id: c.assistantId }, dynamic_variables: variables, greeting });
+  }
+
   /** A Call Control command; false (logged) when Telnyx refused it or could not be reached. */
   private async action(ccid: string, apiKey: string, name: string, body: object): Promise<boolean> {
     try {

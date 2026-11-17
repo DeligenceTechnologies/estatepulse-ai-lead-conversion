@@ -45,10 +45,21 @@ export interface CallToolsTelnyx {
   version?: number;
   /** Every tool (the switch on), or only the opt-out (off); unset is from before the switch kept one. */
   full?: boolean;
+  /** The live-transfer triggers the transfer tool was provisioned with ('hot', 'request', both), or '' / unset for none. */
+  transfer?: string;
 }
 
+/** When the AI puts a lead through to an agent: a ready ("hot") lead, one who asks for a person, or both. */
+export interface TransferTriggers {
+  onHotLead: boolean;
+  onRequest: boolean;
+}
+
+/** The triggers as stored with what was provisioned; '' when the transfer tool is off. */
+export const transferKey = (t: TransferTriggers | null): string => (t ? [t.onHotLead ? 'hot' : '', t.onRequest ? 'request' : ''].filter(Boolean).join(',') : '');
+
 /** Bump when callToolDefinitions or the prompt section changes, so every assistant gets the new ones. */
-export const CALL_TOOLS_VERSION = 7;
+export const CALL_TOOLS_VERSION = 8;
 
 export type StoredCallTools = Partial<CallToolsSettings> & { telnyx?: CallToolsTelnyx | null };
 
@@ -90,7 +101,23 @@ function optOutSection(): string {
   ].join('\n');
 }
 
-export function callToolsSection(full = true): string {
+/** The live-transfer rules; only with the transfer tool on the assistant. */
+function transferLines(t: TransferTriggers): string[] {
+  const when = [
+    t.onHotLead
+      ? 'the lead is ready to move: pre-approved or paying cash with a budget, and wanting to see a home or meet an agent soon (for example "pre-approved for 600k, can I see it Saturday?")'
+      : '',
+    t.onRequest ? 'the lead asks to speak with a real person or an agent' : '',
+  ].filter(Boolean);
+  return [
+    '# Live transfer to an agent (phone calls only)',
+    `- On a phone call, when ${when.join(', or when ')}, call transfer_to_agent with what you learned (budget, location, pre_approved, showing, a one-line summary). Do not ask for permission first; just say you will connect them.`,
+    '- If it returns ok, say nothing more: the lead is put on hold and an agent is rung. If it returns not ok, do what its "say" tells you: usually, offer to book a time with an agent, and if booking is not possible, a callback.',
+    '- Never call it in a text chat, never more than once on a call, and never promise that an agent will answer.',
+  ];
+}
+
+export function callToolsSection(full = true, transfer: TransferTriggers | null = null): string {
   if (!full) return optOutSection();
   return [
     CALL_TOOLS_PROMPT_START,
@@ -101,6 +128,7 @@ export function callToolsSection(full = true): string {
     '- If the lead clearly says they are not interested or have already bought, call record_outcome with not_interested. If they ask us to stop calling or texting them, use do_not_contact. If this is not the person we wanted, or they never asked about buying a home, use wrong_number. Only on a clear statement, never on a guess. Then say one short, polite goodbye. Never argue or try to change their mind after do_not_contact.',
     '- If {{callback_due}} is yes, this call is the callback they asked for ({{callback_time}}). They have just heard that you are calling back, so go straight to helping them.',
     '- If {{call_context}} is not empty, it is why we are calling them this time. Let it guide the conversation, without reading it out.',
+    ...(transfer && transferKey(transfer) ? transferLines(transfer) : []),
     CALL_TOOLS_PROMPT_END,
   ].join('\n');
 }
@@ -115,13 +143,14 @@ export function withoutCallToolsSection(instructions: string): string {
   return after ? `${before}\n${after}` : before;
 }
 
-export function withCallToolsSection(instructions: string, full = true): string {
+export function withCallToolsSection(instructions: string, full = true, transfer: TransferTriggers | null = null): string {
   const base = withoutCallToolsSection(instructions ?? '').replace(/\s+$/, '');
-  return base ? `${base}\n\n${callToolsSection(full)}` : callToolsSection(full);
+  const section = callToolsSection(full, transfer);
+  return base ? `${base}\n\n${section}` : section;
 }
 
 /** The names our call tools go by on the assistant; Telnyx allows one webhook tool per name. */
-export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome', 'get_meeting'];
+export const CALL_TOOL_NAMES = ['schedule_callback', 'schedule_text', 'record_outcome', 'get_meeting', 'transfer_to_agent'];
 
 export const OUTCOMES = ['not_interested', 'do_not_contact', 'wrong_number'] as const;
 export type Outcome = (typeof OUTCOMES)[number];
@@ -131,7 +160,7 @@ export type Outcome = (typeof OUTCOMES)[number];
  * end_user are preset: filled by Telnyx, out of the model's reach, which is
  * what ties a request to one live call or one chat.
  */
-export function callToolDefinitions(apiUrl: string, secretIdentifier: string, full = true) {
+export function callToolDefinitions(apiUrl: string, secretIdentifier: string, full = true, transfer = false) {
   const shared = {
     method: 'POST',
     headers: [{ name: 'Authorization', value: `Bearer {{#integration_secret}}${secretIdentifier}{{/integration_secret}}` }],
@@ -162,7 +191,34 @@ export function callToolDefinitions(apiUrl: string, secretIdentifier: string, fu
       },
     ];
   }
+  const transferTool = {
+    type: 'webhook',
+    display_name: 'EstatePulse: transfer to an agent',
+    timeout_ms: 15000,
+    webhook: {
+      ...shared,
+      name: 'transfer_to_agent',
+      description:
+        'On a phone call only: put the lead through to one of our agents now, when they are ready to move or ask for a ' +
+        'person. Pass `reason` and what you learned. On ok, say nothing more: the lead is put on hold while agents are ' +
+        'rung. On not ok, do what `say` tells you.',
+      url: `${apiUrl}/tools/telnyx/outcome/transfer`,
+      body_parameters: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', enum: ['hot_lead', 'requested_agent'], description: 'hot_lead: ready to move; requested_agent: asked for a person.' },
+          budget: { type: 'string', description: 'Their budget or price range as they said it, e.g. "$600k".' },
+          location: { type: 'string', description: 'Where they want to buy: city, neighborhood or ZIP code.' },
+          pre_approved: { type: 'boolean', description: 'They said they are pre-approved for a mortgage, or paying cash.' },
+          showing: { type: 'string', description: 'When they want to see a home, as they said it, e.g. "Saturday morning".' },
+          summary: { type: 'string', description: 'One short sentence on what they want, for the agent.' },
+        },
+        required: ['reason'],
+      },
+    },
+  };
   return [
+    ...(transfer ? [transferTool] : []),
     {
       type: 'webhook',
       display_name: 'EstatePulse: schedule a callback',

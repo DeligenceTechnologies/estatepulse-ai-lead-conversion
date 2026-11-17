@@ -3,6 +3,7 @@ import {
   DeliveryOutcome,
   IngestStatus,
   LeadSourceProvider,
+  MappingStatus,
   QueueState,
   SignatureState,
   type LeadSource,
@@ -13,6 +14,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad, looksLikeIngestToken, sha256Hex, verifyTallySignature, verifyTypeformSignature } from '@/common/utils/crypto';
 import { EventsBus } from '@/events/events.bus';
+import { GOOGLE_FORMS_EVENT_TYPE, GOOGLE_FORMS_SIGNATURE_HEADER, RESPONSE_EDITED_REASON } from '@/google-forms/constants';
 import { adapterFor } from './adapters/generic.adapter';
 import { InvalidPayloadError } from './adapters/types';
 
@@ -25,9 +27,9 @@ export type IngestResult =
   | { kind: 'unknown_token' }
   | { kind: 'archived' };
 
-export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WEBHOOK'>;
+export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WEBHOOK' | 'GOOGLE_FORMS'>;
 
-const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature']);
+const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature', GOOGLE_FORMS_SIGNATURE_HEADER]);
 const ALLOWED_HEADERS = new Set(['content-type', 'content-length', 'user-agent', 'x-forwarded-for', ...SIGNATURE_HEADERS]);
 /** A paused source keeps its deliveries queued, far in the future, until it is resumed. */
 export const HELD_UNTIL = new Date('9999-12-31T00:00:00Z');
@@ -82,8 +84,20 @@ export class IngestService {
       this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
       return { kind: 'unknown_token' };
     }
+    // Same binding for Google Forms: its token works on its own route only, so
+    // a leaked Apps Script token cannot be replayed against the generic
+    // webhook route to dodge the signature this route insists on.
+    if ((route === LeadSourceProvider.GOOGLE_FORMS) !== (source.provider === LeadSourceProvider.GOOGLE_FORMS)) {
+      this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
+      return { kind: 'unknown_token' };
+    }
 
-    const verify = route === LeadSourceProvider.TYPEFORM ? verifyTypeformSignature : verifyTallySignature;
+    // Google Forms signs as Typeform does — `sha256=` and a base64 HMAC-SHA256
+    // of the raw body — which is what Apps Script's Utilities can produce.
+    const verify =
+      route === LeadSourceProvider.TYPEFORM || route === LeadSourceProvider.GOOGLE_FORMS
+        ? verifyTypeformSignature
+        : verifyTallySignature;
     const sig = this.evaluateSignature(source, rawBody, signature, verify);
     let payload: unknown = null;
     let invalid: string | null = null;
@@ -98,6 +112,14 @@ export class IngestService {
     const payloadHash = sha256Hex(rawBody);
     const dedupeKey = preview?.providerEventId ? `${route}:${preview.providerEventId}` : `sha256:${payloadHash}`;
     const paused = source.ingestStatus === IngestStatus.PAUSED || !source.isActive;
+    // A Google Forms response that arrives before the owner has finished
+    // mapping the form is kept, not dropped and not turned into a lead:
+    // activation releases it, flagged, exactly as a custom webhook's backlog is
+    // (GoogleFormsService.activate). Resuming a merely paused source does not
+    // release these — releaseHeld() skips this reason on purpose.
+    const awaitingMapping =
+      source.provider === LeadSourceProvider.GOOGLE_FORMS && source.mappingStatus !== MappingStatus.CONFIGURED;
+    const held = paused || awaitingMapping;
     const outcome = sig.quarantine
       ? DeliveryOutcome.QUARANTINED_SIGNATURE
       : invalid
@@ -127,9 +149,10 @@ export class IngestService {
           usedPreviousSecret: sig.usedPrevious,
           queueState: outcome ? QueueState.FAILED : QueueState.PENDING,
           outcome,
-          outcomeReason: sig.quarantine ?? (invalid ? 'invalid_payload' : paused ? 'source_paused' : null),
+          outcomeReason:
+            sig.quarantine ?? (invalid ? 'invalid_payload' : awaitingMapping ? AWAITING_MAPPING : paused ? 'source_paused' : null),
           errorMessage: invalid,
-          availableAt: paused ? HELD_UNTIL : new Date(),
+          availableAt: held ? HELD_UNTIL : new Date(),
         },
       ],
       skipDuplicates: true,
@@ -138,8 +161,26 @@ export class IngestService {
     if (created.count === 0) {
       const existing = await this.prisma.ingestEvent.findUnique({
         where: { leadSourceId_dedupeKey: { leadSourceId: source.id, dedupeKey } },
-        select: { id: true },
+        select: { id: true, payloadHash: true, leadId: true, eventType: true },
       });
+      // Google Forms lets a respondent edit an answer after submitting, and the
+      // edit arrives under the SAME response id. The lead is never rewritten
+      // underneath an owner who has already read it — it is flagged and its
+      // automation paused, which is what the review mechanism is for.
+      //
+      // Only compared when the stored delivery came from the Apps Script too.
+      // A response the recovery poller fetched was rebuilt from the Forms API
+      // and never hashes identically to the script's own body, so comparing
+      // across the two would call every recovered response an edit. The
+      // poller does its own edit check, on Google's lastSubmittedTime.
+      if (
+        source.provider === LeadSourceProvider.GOOGLE_FORMS &&
+        existing?.leadId &&
+        existing.eventType === GOOGLE_FORMS_EVENT_TYPE &&
+        existing.payloadHash !== payloadHash
+      ) {
+        await this.flagEditedResponse(existing.leadId, eventId);
+      }
       return { kind: 'duplicate', eventId: existing?.id ?? eventId };
     }
 
@@ -151,8 +192,27 @@ export class IngestService {
       return { kind: 'quarantined', eventId, reason: sig.quarantine };
     }
     if (invalid) return { kind: 'invalid_payload', eventId, detail: invalid };
-    if (paused) return { kind: 'held', eventId };
+    if (held) return { kind: 'held', eventId };
     return { kind: 'accepted', eventId };
+  }
+
+  /**
+   * A response that changed after we made a lead from it: flag the lead and
+   * pause its automation, leaving its values alone. Said once — a respondent
+   * who edits an answer three times should not leave three identical notes.
+   */
+  async flagEditedResponse(leadId: string, deliveryId: string): Promise<void> {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { reviewReasons: true } });
+    if (!lead || lead.reviewReasons.includes(RESPONSE_EDITED_REASON)) return;
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        needsReview: true,
+        automationPaused: true,
+        reviewReasons: { set: [...lead.reviewReasons, RESPONSE_EDITED_REASON] },
+      },
+    });
+    this.logger.log(`Lead ${leadId} flagged: its Google Forms response was edited (delivery ${deliveryId})`);
   }
 
   /**

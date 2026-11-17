@@ -66,6 +66,7 @@ import { QualificationQuestionsCard } from './QualificationQuestionsCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
 import { CallToolsCard } from './CallToolsCard';
+import { LiveTransferCard } from './LiveTransferCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { BusinessDetailsCard } from './BusinessDetailsCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
@@ -1055,6 +1056,8 @@ export const AISettingsView: React.FC = () => {
         <InCallBookingCard />
 
         <CallToolsCard />
+
+        <LiveTransferCard />
         </section>
 
         <section role="tabpanel" aria-label={TAB_LABEL.data} className={tab === 'data' ? 'space-y-6' : 'hidden'}>

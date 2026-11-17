@@ -66,6 +66,34 @@ export class VoiceService {
     return res.data ?? {};
   }
 
+  /**
+   * Rings an agent for a live transfer, from the organization's number, for `timeoutSecs`. The lead
+   * is bridged as soon as the agent answers, so answering-machine detection runs on this call: a
+   * voicemail greeting is hung up on instead of put through. Its webhooks carry `clientState`,
+   * which names the transfer attempt.
+   */
+  async dialAgent(orgId: string, to: string, clientState: Record<string, unknown>, timeoutSecs: number): Promise<{ call_control_id?: string }> {
+    const c = await this.creds.getCreds(orgId);
+    if (!c?.apiKey) throw new Error('No provider connected');
+    if (!c.fromNumber) throw new Error('No from number configured');
+    const connectionId = await this.creds.ensureConnectionId(orgId, c);
+    if (!connectionId) throw new Error('No Call Control application found on the Telnyx account for outbound calls');
+    await this.assertWebhookReachable();
+    const res = await telnyx<{ data?: { call_control_id?: string } }>(c.apiKey, '/calls', {
+      method: 'POST',
+      body: JSON.stringify({
+        connection_id: connectionId,
+        to,
+        from: c.fromNumber,
+        timeout_secs: timeoutSecs,
+        answering_machine_detection: 'premium',
+        client_state: Buffer.from(JSON.stringify(clientState)).toString('base64'),
+        webhook_url: `${this.publicUrl}/webhooks/telnyx/voice`,
+      }),
+    });
+    return res.data ?? {};
+  }
+
   /** Probes this API's health route through its public URL (the tunnel or load balancer Telnyx posts to). */
   private async assertWebhookReachable(): Promise<void> {
     if (!this.publicUrl) throw new Error(`${WEBHOOK_UNREACHABLE}: PUBLIC_API_URL is not set, so Telnyx has nowhere to send call events`);
