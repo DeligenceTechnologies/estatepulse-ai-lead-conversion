@@ -60,8 +60,17 @@ export class SyncError extends Error {
 }
 
 export interface Approval {
-  rule: (row: BuiltRow) => boolean;
-  by: { userId: string };
+  /**
+   * Whether this row may be approved without a person looking at it.
+   *
+   * `flags` carries what only the engine knows: whether the row collides with
+   * another lead, and whether it inherited do-not-contact. Both are worked out
+   * in persistBatch anyway, so passing them costs nothing and spares a rule
+   * from guessing at what it cannot see.
+   */
+  rule: (row: BuiltRow, flags: { dnc: boolean; duplicate: boolean }) => boolean;
+  /** null for a sync approving on its own: recorded as the system, not as a person. */
+  by: { userId: string | null };
   /** Scheduling on: approved leads join this outreach batch instead of being released at once. */
   outreach?: OutreachRequest;
 }
@@ -722,7 +731,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       });
       const existing = relink.get(b.key!);
       const trackingId = existing ?? randomUUID();
-      if (approve?.rule(b)) toApprove.push(trackingId);
+      if (approve?.rule(b, { dnc, duplicate })) toApprove.push(trackingId);
       if (existing) {
         relinks.push(Prisma.sql`(${existing}::uuid, ${leadId}::uuid, ${b.hash!}::varchar, ${b.rowNumber}::int)`);
         continue;

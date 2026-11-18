@@ -37,6 +37,7 @@ const IMPORT_REASONS = [
   'Imported from Google Sheets — awaiting owner approval',
   'Imported from a file — awaiting owner approval',
   'Imported from HubSpot — awaiting owner approval',
+  'Imported from Airtable — awaiting owner approval',
 ];
 
 /** The API decides at most this many rows per request. */
@@ -626,7 +627,12 @@ export const ImportReviewView: React.FC = () => {
                         <SourceBadge
                           kind={i.source?.kind ?? 'google_sheets'}
                           label={false}
-                          title={`${KIND_NAME[i.source?.kind ?? 'google_sheets']}: ${i.source?.name ?? '—'}${i.source?.kind === 'hubspot' ? '' : ` · row ${i.rowNumber}`}`}
+                          title={`${KIND_NAME[i.source?.kind ?? 'google_sheets']}: ${i.source?.name ?? '—'}${
+                            // A row number means something in a sheet or a file.
+                            // A HubSpot contact and an Airtable record have no
+                            // position, so naming one would be inventing it.
+                            i.source?.kind === 'hubspot' || i.source?.kind === 'airtable' ? '' : ` · row ${i.rowNumber}`
+                          }`}
                         />
                       </td>
                       {tab === 'rejected' ? (
@@ -666,7 +672,7 @@ export const ImportReviewView: React.FC = () => {
                                     ? 'Deleted, archived or merged in HubSpot — the lead is kept; reject it if it should not be worked'
                                     : 'Removed from the sheet — the lead is kept; reject it if it should not be worked'
                                 }
-                                aria-label={i.source?.kind === 'hubspot' ? 'No longer in HubSpot' : 'Removed from the sheet'}
+                                aria-label={`No longer in ${KIND_NAME[i.source?.kind ?? 'google_sheets']}`}
                               >
                                 <FileX className="w-3 h-3" />
                               </span>

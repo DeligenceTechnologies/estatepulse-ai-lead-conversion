@@ -82,6 +82,17 @@ export class CrmConnectionsService {
   private readonly accessTokens = new Map<string, { token: string; expiresAt: number }>();
   /** credential id -> the refresh in flight: concurrent callers share one refresh instead of racing. */
   private readonly refreshing = new Map<string, Promise<string>>();
+  /**
+   * OAuth states already redeemed, so one cannot be spent twice.
+   *
+   * ponytail: in process memory, so a second API instance would not know what
+   * this one has seen. It is defence in depth rather than the control that
+   * matters — a state is sealed to one organization, user and session, and the
+   * provider invalidates its own authorization code after a single use, so a
+   * replay needs the victim's session and still dies at the provider. Move it
+   * to shared storage (and do it for Airtable, HubSpot and Google together, as
+   * all three carry this same map) before running more than one instance.
+   */
   private readonly usedNonces = new Map<string, number>();
 
   constructor(

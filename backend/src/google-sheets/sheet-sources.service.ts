@@ -62,9 +62,15 @@ const REVIEW_SOURCE_PROVIDER = {
   google_sheets: LeadSourceProvider.GOOGLE_SHEETS,
   file_upload: LeadSourceProvider.FILE_UPLOAD,
   hubspot: LeadSourceProvider.HUBSPOT,
+  airtable: LeadSourceProvider.AIRTABLE,
 } as const;
 type ReviewKind = keyof typeof REVIEW_SOURCE_PROVIDER;
 
+/**
+ * Every provider whose rows reach this queue must be listed above. The fallback
+ * below is a last resort, not a default: a row labelled with the wrong source
+ * sends an owner to the wrong place to fix it.
+ */
 function reviewKind(provider: LeadSourceProvider): ReviewKind {
   return (Object.keys(REVIEW_SOURCE_PROVIDER) as ReviewKind[]).find((k) => REVIEW_SOURCE_PROVIDER[k] === provider) ?? 'google_sheets';
 }

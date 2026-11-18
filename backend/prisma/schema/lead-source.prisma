@@ -50,6 +50,11 @@ model LeadSource {
   /// secret itself stays in signingSecretEnc. NULL on every other source.
   customConfig Json? @map("custom_config")
 
+  /// Airtable sources only (provider AIRTABLE): which way records flow and what
+  /// happens when both sides changed. See airtable/sync-config.ts. NULL on
+  /// every other source.
+  syncConfig Json? @map("sync_config")
+
   lastEventAt   DateTime? @map("last_event_at") @db.Timestamptz(6)
   lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
   lastFailureAt DateTime? @map("last_failure_at") @db.Timestamptz(6)
@@ -185,6 +190,18 @@ model SheetImportRow {
   lastSeenAt           DateTime?   @map("last_seen_at") @db.Timestamptz(6)
   /// CRM rows only: the CRM-owned values last accepted, the base of the three-way merge (crm-records.ts).
   syncedValues         Json?       @map("synced_values")
+
+  /// Two-way sources (Airtable) only: the outbound half of the sync.
+  /// pushedHash is the fingerprint of the lead values last WRITTEN to the
+  /// provider — comparing it to what the provider now holds is what tells our
+  /// own echo apart from a real edit, so no change loops.
+  pushedHash           String?     @map("pushed_hash") @db.VarChar(64)
+  pushedAt             DateTime?   @map("pushed_at") @db.Timestamptz(6)
+  /// Consecutive failed pushes, and when the next one may be tried; drives backoff.
+  pushAttempts         Int         @default(0) @map("push_attempts")
+  pushAvailableAt      DateTime?   @map("push_available_at") @db.Timestamptz(6)
+  pushErrorCode        String?     @map("push_error_code") @db.VarChar(50)
+  pushError            String?     @map("push_error") @db.VarChar(500)
   createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 

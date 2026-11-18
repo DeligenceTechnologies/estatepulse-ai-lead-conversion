@@ -1,12 +1,18 @@
 import { LeadStatus, Prisma } from '@prisma/client';
 import type { AuditService } from '@/audit/audit.service';
+import { AIRTABLE_IMPORT_REVIEW_REASON } from '@/airtable/airtable-records';
 import { CRM_IMPORT_REVIEW_REASONS } from '@/crm/crm-records';
 import { enqueueOutreach } from '@/outreach/batches';
 import { summaryOf, type OutreachRequest, type OutreachSummary } from '@/outreach/schedule';
 import { FILE_IMPORT_REVIEW_REASON, IMPORT_REVIEW_REASON } from './sheet-rows';
 
 /** Every reason an import starts with (a sheet, a file, each connected CRM); a decision spends whichever one the lead carries. */
-export const IMPORT_REASONS_SPENT_ON_DECISION: string[] = [IMPORT_REVIEW_REASON, FILE_IMPORT_REVIEW_REASON, ...CRM_IMPORT_REVIEW_REASONS];
+export const IMPORT_REASONS_SPENT_ON_DECISION: string[] = [
+  IMPORT_REVIEW_REASON,
+  FILE_IMPORT_REVIEW_REASON,
+  AIRTABLE_IMPORT_REVIEW_REASON,
+  ...CRM_IMPORT_REVIEW_REASONS,
+];
 
 export type HoldReason = 'DO_NOT_CONTACT' | 'NO_DIALABLE_PHONE' | 'STATUS_CHANGED';
 

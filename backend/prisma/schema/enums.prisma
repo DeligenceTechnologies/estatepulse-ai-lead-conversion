@@ -135,6 +135,8 @@ enum IntegrationProvider {
   google
   typeform
   hubspot
+  airtable
+  retell
 
   @@map("integration_provider")
 }
@@ -157,6 +159,8 @@ enum LeadSourceProvider {
   HUBSPOT
   /// A custom webhook: any app posts JSON, the owner maps the first payload's fields.
   CUSTOM
+  /// One Airtable table, synced in one or both directions.
+  AIRTABLE
   /// A Google Form. An Apps Script on the form posts each response to our
   /// webhook; backend polling of forms.responses.list recovers what it missed.
   GOOGLE_FORMS

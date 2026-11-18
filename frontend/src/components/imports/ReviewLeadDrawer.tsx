@@ -13,6 +13,7 @@ export const KIND_NAME: Record<ImportKind, string> = {
   google_sheets: 'Google Sheet',
   file_upload: 'Uploaded file',
   hubspot: 'HubSpot',
+  airtable: 'Airtable',
 };
 
 /** Where the owner has to go to change anything shown here. */
@@ -20,6 +21,7 @@ const FIX_AT: Record<ImportKind, string> = {
   google_sheets: 'Edit the row in the sheet and sync again.',
   file_upload: 'Fix the row in the file and upload it again.',
   hubspot: 'Change the record in HubSpot and sync again.',
+  airtable: 'Change the record in Airtable and sync again.',
 };
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
