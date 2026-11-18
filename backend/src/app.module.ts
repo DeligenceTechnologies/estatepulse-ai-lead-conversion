@@ -18,6 +18,7 @@ import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import { GoogleFormsModule } from './google-forms/google-forms.module';
 import { FileImportModule } from './file-import/file-import.module';
 import { CrmModule } from './crm/crm.module';
+import { AirtableModule } from './airtable/airtable.module';
 import { CustomWebhookModule } from './custom-webhook/custom-webhook.module';
 import { TelnyxModule } from './telnyx/telnyx.module';
 import { TransferModule } from './transfer/transfer.module';
@@ -50,6 +51,7 @@ import {QueueModule} from "@/queue/queue.module";
     FileImportModule,
     CustomWebhookModule,
     CrmModule,
+    AirtableModule,
     TelnyxModule,
     TransferModule,
     FollowupModule,

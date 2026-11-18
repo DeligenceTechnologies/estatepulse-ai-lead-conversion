@@ -14,6 +14,8 @@ export const ROOT_ROUTES = [
   // The URL baked into the Apps Script on an owner's Google Form.
   'ingest/v1/google-forms/:token',
   'ingest/v1/crm/hubspot/webhook',
+  // Where Airtable sends a base's change notifications.
+  'ingest/v1/airtable/webhook',
   'webhooks/leads/:token',
   'webhooks/telnyx/voice',
   'webhooks/telnyx/messaging',
