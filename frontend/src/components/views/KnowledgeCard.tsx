@@ -22,6 +22,10 @@ import { Button, IconButton } from '../common/Button';
  * Typed answers ride in the assistant's prompt; documents and websites live in
  * the organization's Telnyx knowledge base. The owner does not need to know the
  * difference, so this card does not show it.
+ *
+ * The card is rendered inside the AI Settings page's own form element, so it holds no
+ * form and no submit button: either would save and reload the whole page. Enter
+ * in one of its fields is caught for the same reason.
  */
 
 const FALLBACK_LIMITS: KnowledgeLimits = { maxEntries: 25, titleMaxChars: 80, bodyMaxChars: 400, totalMaxChars: 4000 };
@@ -36,7 +40,15 @@ const inputClass =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-600';
 const rowClass = 'border border-slate-800 bg-slate-950/60 rounded-xl px-3 py-2.5 flex items-center gap-3';
 
-export const KnowledgeCard: React.FC = () => {
+/** Enter in a single-line field adds the item instead of submitting the settings page around this card. */
+const onEnter = (run: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  run();
+};
+
+/** `onChanged` fires after anything is added, edited or removed, so the page around the card can re-read the assistant. */
+export const KnowledgeCard: React.FC<{ onChanged?: () => void }> = ({ onChanged }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
@@ -90,6 +102,7 @@ export const KnowledgeCard: React.FC = () => {
       setForm(null);
       if (r.warning) toast.warn(r.warning);
       else toast.success(done);
+      onChanged?.();
     } catch (e) {
       toast.error(messageFor(e));
     } finally {
@@ -110,6 +123,7 @@ export const KnowledgeCard: React.FC = () => {
       setForm(null);
       toast.success('Website added. Its pages appear here as they are read.');
       setWatching(true);
+      onChanged?.();
     } catch (e) {
       toast.error(messageFor(e));
     } finally {
@@ -130,6 +144,7 @@ export const KnowledgeCard: React.FC = () => {
       setDocs(await uploadKnowledgeFile(file, setUploading));
       toast.success('Document uploaded. The AI can use it in a moment.');
       setWatching(true);
+      onChanged?.();
     } catch (e) {
       toast.error(messageFor(e));
     } finally {
@@ -151,6 +166,7 @@ export const KnowledgeCard: React.FC = () => {
 
   const size = form?.kind === 'answer' ? knowledgeSize(entries.filter((_, i) => i !== form.index).concat({ title: form.title, body: form.body })) : 0;
   const overBudget = size > limits.totalMaxChars;
+  const answerReady = form?.kind === 'answer' && Boolean(form.title.trim() && form.body.trim()) && !overBudget && busy === null;
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
@@ -201,17 +217,12 @@ export const KnowledgeCard: React.FC = () => {
           )}
 
           {form?.kind === 'answer' && (
-            <form
-              className="border border-emerald-800/50 bg-slate-950/60 rounded-xl p-3 space-y-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitAnswer(form);
-              }}
-            >
+            <div className="border border-emerald-800/50 bg-slate-950/60 rounded-xl p-3 space-y-2">
               <input
                 autoFocus
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
+                onKeyDown={onEnter(() => answerReady && submitAnswer(form))}
                 placeholder="Question or topic — e.g. Which areas do you cover?"
                 maxLength={limits.titleMaxChars}
                 className={`${inputClass} font-semibold`}
@@ -229,26 +240,21 @@ export const KnowledgeCard: React.FC = () => {
                 <Button variant="ghost" size="sm" onClick={() => setForm(null)}>
                   Cancel
                 </Button>
-                <Button size="sm" type="submit" loading={busy === 'form'} disabled={!form.title.trim() || !form.body.trim() || overBudget}>
+                <Button size="sm" onClick={() => submitAnswer(form)} loading={busy === 'form'} disabled={!answerReady}>
                   {form.index === null ? 'Add' : 'Save'}
                 </Button>
               </div>
-            </form>
+            </div>
           )}
 
           {form?.kind === 'website' && (
-            <form
-              className="border border-emerald-800/50 bg-slate-950/60 rounded-xl p-3 space-y-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submitWebsite(form.url);
-              }}
-            >
+            <div className="border border-emerald-800/50 bg-slate-950/60 rounded-xl p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <input
                   autoFocus
                   value={form.url}
                   onChange={(e) => setForm({ ...form, url: e.target.value })}
+                  onKeyDown={onEnter(() => form.url.trim() && busy === null && void submitWebsite(form.url))}
                   placeholder="https://www.yourbrokerage.com"
                   maxLength={2000}
                   className={inputClass}
@@ -256,12 +262,12 @@ export const KnowledgeCard: React.FC = () => {
                 <Button variant="ghost" size="sm" onClick={() => setForm(null)}>
                   Cancel
                 </Button>
-                <Button size="sm" type="submit" loading={busy === 'form'} disabled={!form.url.trim()}>
+                <Button size="sm" onClick={() => void submitWebsite(form.url)} loading={busy === 'form'} disabled={!form.url.trim()}>
                   Add
                 </Button>
               </div>
               <p className="text-[11px] text-slate-500">The AI reads this page and the pages it links to on your site.</p>
-            </form>
+            </div>
           )}
 
           {empty && !form ? (
