@@ -86,15 +86,26 @@ describe('syncing the knowledge section to the assistant', () => {
     expect(s.patches()).toHaveLength(0);
   });
 
-  it('takes the section out when the org clears its facts', async () => {
+  it('drops the facts but keeps the never-guess rule when the org clears them', async () => {
     const already = `# Role\nBe nice.\n\n${knowledgeSection(FACTS)}`;
     const s = setup({ instructions: already }, { knowledge: [] });
     await s.service.syncKnowledge('org-1');
 
     expect(s.patches()).toHaveLength(1);
     const { instructions } = s.patches()[0].body;
-    expect(instructions).not.toContain(KNOWLEDGE_PROMPT_START);
-    expect(instructions).toBe('# Role\nBe nice.');
+    expect(instructions).not.toContain('- Commission: 3% on the listing side.');
+    expect(instructions).toContain(KNOWLEDGE_PROMPT_START);
+    expect(instructions).toMatch(/have an agent confirm/);
+    expect(instructions).toContain('# Role\nBe nice.');
+    expect(instructions).toBe(`# Role\nBe nice.\n\n${knowledgeSection([])}`);
+  });
+
+  it('writes the never-guess rule onto an assistant that has no knowledge section yet', async () => {
+    const s = setup({ instructions: '# Role\nBe nice.' }, { knowledge: null });
+    await s.service.syncKnowledge('org-1');
+
+    expect(s.patches()).toHaveLength(1);
+    expect(s.patches()[0].body.instructions).toMatch(/have an agent confirm/);
   });
 
   it('does nothing at all when no assistant is connected', async () => {
@@ -160,36 +171,42 @@ describe('an owner saving the base prompt from AI Settings', () => {
   });
 });
 
+/**
+ * Both memos (call setup and knowledge) are per assistant, so these drive the
+ * same service twice to see whether the second run actually happens.
+ */
+function setupRetryHarness(knowledgePatchFails: () => boolean, options: { assistantId?: string } = {}) {
+  const calls: { method: string; body?: any }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(init.body) : undefined;
+      calls.push({ method, body });
+      const isKnowledgeWrite = method === 'PATCH' && typeof body?.instructions === 'string' && body.instructions.includes(KNOWLEDGE_PROMPT_START);
+      if (isKnowledgeWrite && knowledgePatchFails()) return { ok: false, status: 502, json: async () => ({}), text: async () => 'upstream down' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { instructions: '# Role\nBe nice.', tools: [{ type: 'hangup' }], telephony_settings: {} } }),
+        text: async () => '',
+      };
+    }),
+  );
+  const assistantId = options.assistantId ?? 'assistant-1';
+  const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', assistantId })) };
+  const prisma = {
+    organizationSetting: {
+      findUnique: vi.fn(async () => ({ callRecordingEnabled: false, inCallBooking: null, callTools: null, knowledge: FACTS })),
+      updateMany: vi.fn(async () => ({})),
+    },
+  };
+  const service = new AssistantService(creds as any, prisma as any, { isEnabled: vi.fn(async () => false) } as any, { get: vi.fn(async () => questions) } as any);
+  return { service, calls };
+}
+
 describe('recovering from a failed sync', () => {
-  /** ensureCallSetup memoizes per assistant; these drive it twice to see whether the second run happens. */
-  function setupRetry(knowledgePatchFails: () => boolean) {
-    const calls: { method: string; body?: any }[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
-        const method = init?.method ?? 'GET';
-        const body = init?.body ? JSON.parse(init.body) : undefined;
-        calls.push({ method, body });
-        const isKnowledgeWrite = method === 'PATCH' && typeof body?.instructions === 'string' && body.instructions.includes(KNOWLEDGE_PROMPT_START);
-        if (isKnowledgeWrite && knowledgePatchFails()) return { ok: false, status: 502, json: async () => ({}), text: async () => 'upstream down' };
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: { instructions: '# Role\nBe nice.', tools: [{ type: 'hangup' }], telephony_settings: {} } }),
-          text: async () => '',
-        };
-      }),
-    );
-    const creds = { getCreds: vi.fn(async () => ({ apiKey: 'KEY', assistantId: 'assistant-1' })) };
-    const prisma = {
-      organizationSetting: {
-        findUnique: vi.fn(async () => ({ callRecordingEnabled: false, inCallBooking: null, callTools: null, knowledge: FACTS })),
-        updateMany: vi.fn(async () => ({})),
-      },
-    };
-    const service = new AssistantService(creds as any, prisma as any, { isEnabled: vi.fn(async () => false) } as any, { get: vi.fn(async () => questions) } as any);
-    return { service, calls };
-  }
+  const setupRetry = setupRetryHarness;
 
   it('does the setup work only once while everything succeeds', async () => {
     const s = setupRetry(() => false);
@@ -217,6 +234,53 @@ describe('recovering from a failed sync', () => {
     const afterSecond = s.calls.length;
     await s.service.ensureCallSetup('org-1');
     expect(s.calls.length).toBe(afterSecond);
+  });
+});
+
+describe('recovery for an org that never places an outbound call', () => {
+  it('syncs knowledge the first time, then costs nothing on later texts', async () => {
+    const s = setupRetryHarness(() => false);
+    await s.service.ensureKnowledge('org-1');
+    const afterFirst = s.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    await s.service.ensureKnowledge('org-1');
+    await s.service.ensureKnowledge('org-1');
+    // Memoized per assistant: a busy chat must not re-read the prompt per message.
+    expect(s.calls.length).toBe(afterFirst);
+  });
+
+  it('retries on the next text after a failed sync, then settles', async () => {
+    let failing = true;
+    const s = setupRetryHarness(() => failing);
+    await s.service.ensureKnowledge('org-1');
+    const afterFailure = s.calls.length;
+
+    failing = false;
+    await s.service.ensureKnowledge('org-1');
+    expect(s.calls.length).toBeGreaterThan(afterFailure);
+
+    const afterRecovery = s.calls.length;
+    await s.service.ensureKnowledge('org-1');
+    expect(s.calls.length).toBe(afterRecovery);
+  });
+
+  it('never rejects, so an inbound text is never failed by it', async () => {
+    const s = setupRetryHarness(() => true);
+    await expect(s.service.ensureKnowledge('org-1')).resolves.toBeUndefined();
+  });
+
+  it('collapses concurrent texts into one sync', async () => {
+    const s = setupRetryHarness(() => false);
+    await Promise.all([s.service.ensureKnowledge('org-1'), s.service.ensureKnowledge('org-1'), s.service.ensureKnowledge('org-1')]);
+    const writes = s.calls.filter((c) => c.method === 'PATCH');
+    expect(writes).toHaveLength(1);
+  });
+
+  it('does nothing when no assistant is connected', async () => {
+    const s = setupRetryHarness(() => false, { assistantId: '' });
+    await s.service.ensureKnowledge('org-1');
+    expect(s.calls).toHaveLength(0);
   });
 });
 

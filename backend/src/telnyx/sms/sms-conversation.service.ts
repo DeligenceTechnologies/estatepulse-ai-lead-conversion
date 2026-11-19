@@ -12,7 +12,8 @@ import { withSmsSection, withoutSmsSection } from './sms-prompt';
 
 /** Where Telnyx asks for a conversation's variables (the lead's details). Kept at the root, outside /api. */
 export const ASSISTANT_VARIABLES_PATH = '/webhooks/telnyx/assistant-variables';
-const VARIABLES_TIMEOUT_MS = 3000;
+/** How long Telnyx waits for the variables webhook before the assistant goes on without them. */
+export const VARIABLES_TIMEOUT_MS = 3000;
 const ENABLED_CACHE_MS = 30_000;
 
 /** What was linked on Telnyx when the AI started answering texts, so it can be undone exactly. */

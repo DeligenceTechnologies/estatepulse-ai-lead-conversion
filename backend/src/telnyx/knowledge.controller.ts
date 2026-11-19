@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Put } from '@nestjs/common';
+import { Body, Controller, Get, Put } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
@@ -15,8 +15,6 @@ import { ASSISTANT_NOT_UPDATED } from './portal.controller';
  */
 @Controller('knowledge')
 export class KnowledgeController {
-  private readonly logger = new Logger(KnowledgeController.name);
-
   constructor(
     private readonly knowledge: KnowledgeService,
     private readonly assistants: AssistantService,
@@ -39,8 +37,9 @@ export class KnowledgeController {
     const orgId = auth.organizationId;
     const status = await this.knowledge.set(orgId, body.entries);
     let warning: string | null = null;
-    await this.assistants.syncKnowledge(orgId).catch((error) => {
-      this.logger.warn(`knowledge sync for org ${orgId}: ${(error as Error).message}`);
+    // syncKnowledge logs the failure itself, with timings; here it only decides
+    // what the owner is told.
+    await this.assistants.syncKnowledge(orgId).catch(() => {
       warning = ASSISTANT_NOT_UPDATED;
     });
     return { ...status, warning };

@@ -400,6 +400,21 @@ export class KnowledgeEntryDto {
   body!: string;
 }
 
+export class KnowledgeWebsiteDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty({ message: 'Enter a website address' })
+  @MaxLength(2000)
+  url!: string;
+}
+
+export class KnowledgeSourceNameDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1024)
+  name!: string;
+}
+
 export class KnowledgeDto {
   @IsArray()
   @ArrayMaxSize(MAX_ENTRIES)

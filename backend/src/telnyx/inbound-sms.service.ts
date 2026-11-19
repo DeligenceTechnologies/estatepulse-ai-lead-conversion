@@ -5,6 +5,7 @@ import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { DNC_REVIEW_REASON, isSuppressed, startsDoNotContact } from '@/lead/contact-suppression';
 import { LeadStateService } from '@/lead/lead-state.service';
+import { AssistantService } from './assistant.service';
 import { EngineService } from './engine.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { OptOutService } from './opt-out.service';
@@ -66,6 +67,7 @@ export class InboundSmsService {
     private readonly memory: LeadMemoryService,
     private readonly optOuts: OptOutService,
     private readonly sms: SmsService,
+    private readonly assistants: AssistantService,
   ) {}
 
   async onMessageReceived(payload: any): Promise<void> {
@@ -292,6 +294,12 @@ export class InboundSmsService {
   private async onChatReply(orgId: string, leadId: string, from: string, text: string, isFirst: boolean, receivedAt: Date): Promise<void> {
     // The AI may need a callback or a text later in this chat; a no-op when its tools are already on.
     void this.callTools.ensure(orgId);
+    // An org that only takes inbound texts never places an outbound call, so it
+    // never reaches ensureCallSetup: this is its only chance to recover a
+    // knowledge sync that failed when the owner saved. Memoized per assistant,
+    // and fired without awaiting — this runs after Telnyx has already answered,
+    // so it is off the reply path and must not delay recording the message.
+    void this.assistants.ensureKnowledge(orgId);
     await this.prisma.lead.update({ where: { id: leadId }, data: { lastContactAt: new Date(), ...(isFirst ? { firstResponseAt: new Date() } : {}) } });
     await this.state.move(leadId, LeadStatus.engaged, { source: 'sms_reply', reason: 'Replied by SMS; the AI is answering', channel: 'sms' });
 
