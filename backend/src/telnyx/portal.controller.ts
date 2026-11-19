@@ -20,7 +20,7 @@ import { LeadScoringService } from './lead-scoring.service';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
-const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+export const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',

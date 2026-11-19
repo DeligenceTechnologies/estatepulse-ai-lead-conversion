@@ -69,6 +69,7 @@ import { CallToolsCard } from './CallToolsCard';
 import { LiveTransferCard } from './LiveTransferCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { BusinessDetailsCard } from './BusinessDetailsCard';
+import { KnowledgeCard } from './KnowledgeCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
 import { Button, IconButton } from '../common/Button';
@@ -94,6 +95,7 @@ const HASH_TAB: Record<string, TabId> = {
   'call-pacing': 'outreach',
   'qualification-questions': 'qualify',
   voicemail: 'voice',
+  knowledge: 'data',
 };
 
 /** A tab's heading: what this section is for, in one line. */
@@ -1210,6 +1212,10 @@ export const AISettingsView: React.FC = () => {
             <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;leadId&#125;&#125;/qualified</span>, so the agent reports
             hot/warm/cold and hands the lead off by itself.
           </p>
+        </div>
+
+        <div id="knowledge" className="scroll-mt-24">
+          <KnowledgeCard />
         </div>
 
         {/* Dynamic Variables */}

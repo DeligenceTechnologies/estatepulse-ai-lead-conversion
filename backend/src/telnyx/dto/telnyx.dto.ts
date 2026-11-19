@@ -20,6 +20,7 @@ import {
 } from 'class-validator';
 import { StepConditionsDto } from '@/followup/dto/sequence.dto';
 import { CALL_CONTEXT_MAX_CHARS, STEP_VOICEMAILS, type StepVoicemail } from '@/followup/journey';
+import { BODY_MAX_CHARS, MAX_ENTRIES, TITLE_MAX_CHARS } from '../knowledge';
 import { BUSINESS_DETAILS_MAX } from '../sms/sms-compliance';
 import { CONFIRM_MESSAGE_MAX_CHARS, RETRY_ATTEMPTS_MAX, RETRY_MINUTES_MAX, RETRY_MINUTES_MIN } from '../tools/call-tools';
 import { VOICEMAIL_MAX_CHARS } from '../voicemail/voicemail';
@@ -381,4 +382,28 @@ export class QualificationQuestionsDto {
 export class QualificationAnswerDto {
   @IsOptional()
   value?: string | number | boolean | null;
+}
+
+export class KnowledgeEntryDto {
+  /** A question ("Do you handle rentals?") or a topic ("Areas served"). */
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty({ message: 'Every knowledge entry needs a title' })
+  @MaxLength(TITLE_MAX_CHARS)
+  title!: string;
+
+  /** What the AI should say about it. */
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty({ message: 'Every knowledge entry needs an answer' })
+  @MaxLength(BODY_MAX_CHARS)
+  body!: string;
+}
+
+export class KnowledgeDto {
+  @IsArray()
+  @ArrayMaxSize(MAX_ENTRIES)
+  @ValidateNested({ each: true })
+  @Type(() => KnowledgeEntryDto)
+  entries!: KnowledgeEntryDto[];
 }
