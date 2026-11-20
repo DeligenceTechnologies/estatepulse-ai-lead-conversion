@@ -25,6 +25,7 @@ import { prebuildMappings, schemaFingerprint, toSyntheticAnswers } from '@/lead-
 import { generateAppsScript } from './apps-script';
 import { GOOGLE_FORMS_EVENT_TYPE, GOOGLE_FORMS_PROVIDER, SCHEMA_CHANGED_CODE } from './constants';
 import { describeGoogleForm, formTitle, type GoogleForm, type GoogleFormsField } from './forms-schema';
+import { googleFailure } from './google-failure';
 import type { SaveFormMappingDto } from './dto/google-forms.dto';
 
 /**
@@ -450,7 +451,7 @@ export class GoogleFormsService {
       await this.readForm(orgId, source.integrationId ?? '', source.externalFormId ?? '');
       readable = true;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = googleFailure(e).message;
     }
 
     const [byType, lastDelivery] = await Promise.all([
