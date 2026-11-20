@@ -88,6 +88,7 @@ function setup(
   const intents = { classify: vi.fn(opts.classify ?? (async () => ({ intent: opts.intent ?? 'continue', reason: 'test' }))) };
   const textBacks = { onLeadTexted: vi.fn(async () => undefined) };
   const callTools = { ensure: vi.fn(async () => undefined) };
+  const assistants = { ensureKnowledge: vi.fn(async () => undefined) };
   const bus = { publish: vi.fn() };
   const memory = { onLeadText: vi.fn() };
   const sms = { sendSms: vi.fn(async (_org: string, _to: string, text: string) => ({ id: 'sent-1', text })) };
@@ -106,6 +107,7 @@ function setup(
     memory as any,
     new OptOutService(prisma as any, state, followup as any),
     sms as any,
+    assistants as any,
   );
   const receive = (text: string, extra: Record<string, unknown> = {}) =>
     service.onMessageReceived({ id: 'm-1', text, from: { phone_number: PHONE }, to: [{ phone_number: OUR_NUMBER }], ...extra });
@@ -116,7 +118,7 @@ function setup(
   const notices = () => sms.sendSms.mock.calls.map((c: any[]) => c[2] as string);
   const finalize = (id: string, status = 'delivered', text = 'Great, when are you hoping to move?') =>
     service.onMessageFinalized('org-1', { id, text, from: { phone_number: OUR_NUMBER }, to: [{ phone_number: PHONE, status }] });
-  return { receive, finalize, service, prisma, followup, engine, intents, lead, leads, events, optedIn, optedOut, notices, suppressed, sms, textBacks, callTools, conversations, bus, memory };
+  return { receive, finalize, service, prisma, followup, engine, intents, lead, leads, events, optedIn, optedOut, notices, suppressed, sms, textBacks, callTools, assistants, conversations, bus, memory };
 }
 
 describe('InboundSmsService', () => {
@@ -274,6 +276,19 @@ describe('InboundSmsService', () => {
     await s.receive('ok I am free now');
     expect(s.textBacks.onLeadTexted).toHaveBeenCalledWith('org-1', 'lead-1');
     expect(s.callTools.ensure).toHaveBeenCalledWith('org-1');
+  });
+
+  it('brings the knowledge section up to date from a chat, so an SMS-only org recovers without ever calling', async () => {
+    const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+    await s.receive('do you cover Plano?');
+    expect(s.assistants.ensureKnowledge).toHaveBeenCalledWith('org-1');
+  });
+
+  it('still records the text when the knowledge sync is failing', async () => {
+    const s = setup({ status: 'engaged', dncStatus: false }, { ai: true });
+    s.assistants.ensureKnowledge.mockRejectedValueOnce(new Error('Telnyx unreachable'));
+    await expect(s.receive('do you cover Plano?')).resolves.toBeUndefined();
+    expect(s.prisma.message.create).toHaveBeenCalled();
   });
 
   it("remembers what the lead texts, whoever answers it", async () => {

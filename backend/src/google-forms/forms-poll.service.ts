@@ -16,9 +16,11 @@ import {
   LEASE_STUCK_SECONDS,
   POLL_OVERLAP_MS,
   POLL_PAGE_SIZE,
+  SCHEMA_CHANGED_CODE,
 } from './constants';
 import { formTitle } from './forms-schema';
 import { fieldsOf, responsePayload, wasEdited, type GoogleFormResponsePage } from './forms-responses';
+import { googleFailure } from './google-failure';
 import { GoogleFormsService } from './google-forms.service';
 
 interface Claimed {
@@ -183,6 +185,13 @@ export class FormsPollService implements OnModuleInit, OnModuleDestroy {
           ...(stats.recovered > 0 ? { lastEventAt: new Date() } : {}),
         },
       });
+      // A read that worked ends whatever the last failed one said. Without this the card kept its
+      // "delivery problem" for good, since nothing else clears it. A changed set of questions is the
+      // exception: that is about the mapping, and stays until an owner has looked at it.
+      await this.prisma.leadSource.updateMany({
+        where: { id: c.id, remoteErrorCode: { not: SCHEMA_CHANGED_CODE } },
+        data: { remoteErrorCode: null, remoteErrorMessage: null },
+      });
       if (stats.recovered > 0) {
         this.logger.log(`Form ${c.id}: recovered ${stats.recovered} response(s) the Apps Script never delivered`);
         this.worker.nudge();
@@ -305,7 +314,7 @@ export class FormsPollService implements OnModuleInit, OnModuleDestroy {
   /** A failed poll backs off and says why, in words an owner can act on. */
   private async fail(c: Claimed, error: unknown): Promise<void> {
     const failures = c.sync_failures + 1;
-    const message = error instanceof Error ? error.message : String(error);
+    const { code, message } = googleFailure(error);
     const backoff = Math.min(2 ** failures * 60_000, 6 * 60 * 60_000);
     this.logger.warn(`Form ${c.id} poll failed (attempt ${failures}): ${message}`);
     await this.prisma.leadSource.updateMany({
@@ -316,16 +325,9 @@ export class FormsPollService implements OnModuleInit, OnModuleDestroy {
         syncFailures: failures,
         syncNextAt: new Date(Date.now() + backoff),
         lastFailureAt: new Date(),
-        remoteErrorCode: codeOf(error),
+        remoteErrorCode: code.slice(0, 50),
         remoteErrorMessage: message.slice(0, 500),
       },
     });
   }
-}
-
-function codeOf(error: unknown): string {
-  const e = error as { code?: unknown; response?: { error?: { code?: unknown } } };
-  if (typeof e?.code === 'string') return e.code.slice(0, 50);
-  const nested = (error as { error?: { code?: unknown } })?.error?.code;
-  return typeof nested === 'string' ? nested.slice(0, 50) : 'POLL_FAILED';
 }
