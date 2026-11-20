@@ -140,6 +140,17 @@ describe('the section for an assistant that also has documents to search', () =>
     }
   });
 
+  it('has the assistant ask what was meant when a call misheard the question', () => {
+    // Live: "pet policy" was heard as tax, tech and text policy, and each search returned the pet policy passage.
+    expect(knowledgeSection(SAMPLE, { documents: true })).toMatch(/ask whether that is what they meant, for example "Did you mean our pet policy\?"/);
+    expect(knowledgeSection(SAMPLE)).not.toMatch(/Did you mean/);
+  });
+
+  it('has the assistant fill the silence of a search on a call', () => {
+    expect(knowledgeSection(SAMPLE, { documents: true })).toMatch(/On a phone call, say a short "one moment, let me check" before you search/);
+    expect(knowledgeSection(SAMPLE)).not.toMatch(/one moment, let me check/);
+  });
+
   it('is replaced cleanly when the documents come or go', () => {
     const plain = withKnowledgeSection(BASE_PROMPT, SAMPLE);
     const searching = withKnowledgeSection(plain, SAMPLE, { documents: true });
@@ -147,6 +158,17 @@ describe('the section for an assistant that also has documents to search', () =>
     expect(searching).toContain(OTHER_SECTION);
     expect(withKnowledgeSection(searching, SAMPLE)).toBe(plain);
     expect(withKnowledgeSection(searching, SAMPLE, { documents: true })).toBe(searching);
+  });
+});
+
+describe('what the assistant does after answering', () => {
+  it('hands the turn back instead of adding its next question, whatever the organization has entered', () => {
+    for (const section of [knowledgeSection([]), knowledgeSection(SAMPLE), knowledgeSection([], { documents: true }), knowledgeSection(SAMPLE, { documents: true })]) {
+      expect(section).toMatch(/do not add your own next question or an offer to the same reply/);
+      expect(section).toMatch(/Ask only whether there is anything else they would like to know/);
+      expect(section).toMatch(/Never repeat an offer the lead has already passed over/);
+      expect(section.endsWith(KNOWLEDGE_PROMPT_END)).toBe(true);
+    }
   });
 });
 
