@@ -142,8 +142,17 @@ describe('the section for an assistant that also has documents to search', () =>
 
   it('has the assistant ask what was meant when a call misheard the question', () => {
     // Live: "pet policy" was heard as tax, tech and text policy, and each search returned the pet policy passage.
-    expect(knowledgeSection(SAMPLE, { documents: true })).toMatch(/ask whether that is what they meant, for example "Did you mean our pet policy\?"/);
+    const section = knowledgeSection(SAMPLE, { documents: true });
+    // Live again: told only that words "can be misheard", it said it had no tax policy. It is told what to compare.
+    expect(section).toMatch(/compare the topic you heard with what the search returned/);
+    expect(section).toMatch(/do not say you do not have it: ask "Did you mean our pet policy\?" and wait for their answer/);
     expect(knowledgeSection(SAMPLE)).not.toMatch(/Did you mean/);
+  });
+
+  it('keeps a search for facts, never for something the assistant has to do', () => {
+    // Live: a lead said yes to a consultation and the assistant searched the documents for "book appointment".
+    expect(knowledgeSection(SAMPLE, { documents: true })).toMatch(/Search only for facts about the business\. Never search to book a meeting/);
+    expect(knowledgeSection(SAMPLE)).not.toMatch(/Search only for facts/);
   });
 
   it('has the assistant fill the silence of a search on a call', () => {
@@ -167,6 +176,25 @@ describe('what the assistant does after answering', () => {
       expect(section).toMatch(/do not add your own next question or an offer to the same reply/);
       expect(section).toMatch(/Ask only whether there is anything else they would like to know/);
       expect(section).toMatch(/Never repeat an offer the lead has already passed over/);
+      expect(section.endsWith(KNOWLEDGE_PROMPT_END)).toBe(true);
+    }
+  });
+});
+
+describe('what the assistant offers and returns to', () => {
+  const sections = [knowledgeSection([]), knowledgeSection(SAMPLE), knowledgeSection([], { documents: true }), knowledgeSection(SAMPLE, { documents: true })];
+
+  it('returns to the question the lead talked over', () => {
+    // Live: asked which area, the lead asked about pets instead; the area was never asked again.
+    for (const section of sections) expect(section).toMatch(/that one is still unanswered: ask it again first/);
+  });
+
+  it('never offers a booking the assistant has no tool to make', () => {
+    // Live: with in-call booking off it offered a consultation, the lead said yes, and it had nothing to book with.
+    for (const section of sections) {
+      expect(section).toMatch(/You can book a meeting only with the check_availability and book_appointment tools/);
+      expect(section).toMatch(/never offer to book a meeting or a consultation and never mention a booking link/);
+      expect(section).toMatch(/tell them an agent will call them to arrange a time/);
       expect(section.endsWith(KNOWLEDGE_PROMPT_END)).toBe(true);
     }
   });
