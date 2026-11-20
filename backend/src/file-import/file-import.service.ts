@@ -10,7 +10,7 @@ import { outreachRequest, type OutreachChoice } from '@/outreach/batches';
 import { summaryOf } from '@/outreach/schedule';
 import type { ApprovalResult } from '@/google-sheets/approval';
 import type { SessionIdentity } from '@/google-sheets/google-connections.service';
-import { RunStats, SheetImportService, contactFlags, type Approval } from '@/google-sheets/sheet-import.service';
+import { ALREADY_A_LEAD_NOTE, RunStats, SheetImportService, contactFlags, type Approval } from '@/google-sheets/sheet-import.service';
 import { SheetReviewService } from '@/google-sheets/sheet-review.service';
 import {
   FILE_IMPORT_REVIEW_REASON,
@@ -92,6 +92,8 @@ export class FileImportService {
         errors: Object.values(a.skipped).reduce((n, x) => n + (x ?? 0), 0),
         skipped: a.skipped,
         possibleDuplicates: dup.possible,
+        /** Rows whose phone or email is already a lead's: added to that lead, not imported as new ones. */
+        alreadyLeads: dup.existing,
         optedOut: dup.optedOut,
       },
       errorSample: a.errorSample,
@@ -138,7 +140,9 @@ export class FileImportService {
     let flaggedLeftOut = 0;
     if (onlyClean) {
       const dup = await contactFlags(this.prisma, orgId, a.candidates);
-      toImport = a.candidates.filter((b) => b.reviewReasons.length === 0 && !dup.reasons.has(b.rowNumber));
+      // A row that is already a lead is not a problem: it only adds to that lead's history.
+      const flagged = (row: number) => (dup.reasons.get(row) ?? []).some((r) => r !== ALREADY_A_LEAD_NOTE);
+      toImport = a.candidates.filter((b) => b.reviewReasons.length === 0 && !flagged(b.rowNumber));
       flaggedLeftOut = a.candidates.length - toImport.length;
       if (toImport.length === 0) throw httpError(400, 'NO_CLEAN_ROWS', 'Every importable row in this file is flagged, so there is nothing to import this way.');
     }
@@ -227,6 +231,7 @@ export class FileImportService {
             approved: stats.autoApproved,
             skipped: a.skipped,
             possibleDuplicates: stats.possibleDuplicates,
+            attached: stats.attached,
             dncInherited: stats.dncInherited,
           },
           errorSample: a.errorSample,

@@ -51,7 +51,7 @@ const runner = newRunner();
 const orgs: string[] = [];
 
 const fileImports = () =>
-  new FileImportService(prisma, new SheetImportService(prisma, {} as never, {} as never, new EventsBus(), audit, env(true)), reviewsOn, new EventsBus(), audit, env(true));
+  new FileImportService(prisma, new SheetImportService(prisma, {} as never, {} as never, new EventsBus(), audit, env(true), {} as never), reviewsOn, new EventsBus(), audit, env(true));
 const csvFile = (rows: string[]) => {
   const buffer = Buffer.from(['First Name,Last Name,Phone', ...rows].join('\n') + '\n');
   return { originalname: 'leads.csv', size: buffer.length, buffer };

@@ -768,6 +768,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
               await this.prisma.lead.findMany({
                 where: {
                   orgId,
+                  mergedIntoId: null,
                   OR: [
                     ...(emails.length ? [{ normalizedEmail: { in: emails } }] : []),
                     ...(phones.length ? [{ normalizedPhone: { in: phones } }] : []),
@@ -970,6 +971,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
     const sharing = await this.prisma.lead.findMany({
       where: {
         orgId,
+        mergedIntoId: null,
         OR: [
           { normalizedPhone: { in: clean.map((p) => p.lead!.normalizedPhone!) } },
           { normalizedEmail: { in: clean.map((p) => p.lead!.normalizedEmail!) } },

@@ -79,7 +79,7 @@ export class AgentController {
       }),
       this.prisma.lead.groupBy({
         by: ['assignedToId'],
-        where: { orgId, assignedToId: { not: null }, status: { notIn: INACTIVE_STATUSES } },
+        where: { orgId, mergedIntoId: null, assignedToId: { not: null }, status: { notIn: INACTIVE_STATUSES } },
         _count: { _all: true },
       }),
       this.calendarEmails(orgId),
@@ -113,7 +113,7 @@ export class AgentController {
 
   @Get('me/dashboard')
   async dashboard(@CurrentAuth() auth: AuthContext) {
-    const mine = { orgId: auth.organizationId, assignedToId: auth.userId };
+    const mine = { orgId: auth.organizationId, assignedToId: auth.userId, mergedIntoId: null };
     const [total, active, fresh, upcoming] = await Promise.all([
       this.prisma.lead.count({ where: mine }),
       this.prisma.lead.count({ where: { ...mine, status: { notIn: INACTIVE_STATUSES } } }),
@@ -134,7 +134,7 @@ export class AgentController {
   @Get('me/leads')
   async leads(@CurrentAuth() auth: AuthContext) {
     const rows = await this.prisma.lead.findMany({
-      where: { orgId: auth.organizationId, assignedToId: auth.userId },
+      where: { orgId: auth.organizationId, assignedToId: auth.userId, mergedIntoId: null },
       orderBy: { createdAt: 'desc' },
       take: 200,
       select: AGENT_LEAD_FIELDS,

@@ -561,7 +561,7 @@ export const leadsApi = {
   stats: () => request<LeadStats>('/v1/leads/stats'),
   /** Owner-only. One lead typed in by hand; a phone or an email is required. */
   create: (input: NewLeadInput) =>
-    request<{ id: string }>('/v1/leads', { method: 'POST', body: JSON.stringify(input) }),
+    request<{ id: string; matchedBy: 'phone' | 'email' | null }>('/v1/leads', { method: 'POST', body: JSON.stringify(input) }),
   /** One lead, fresh: what the edit form starts from. Needs lead.update; an assigned-only agent sees their own. */
   get: (leadId: string) => request<LiveLead>(`/v1/leads/${leadId}`),
   /** Corrects the lead's own details. Status, consent, DNC, assignment and time zone have their own routes. Needs lead.update. */

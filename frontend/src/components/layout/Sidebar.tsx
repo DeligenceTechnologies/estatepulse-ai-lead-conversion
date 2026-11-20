@@ -15,11 +15,13 @@ import {
   ShieldCheck,
   Settings,
   ClipboardCheck,
+  Copy,
 } from 'lucide-react';
 import { isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
 import { consentReviewCount } from '../../utils/consentReviewApi';
+import { duplicateCount } from '../../utils/duplicatesApi';
 import { importReviewEnabled } from '../../utils/fileImportApi';
 import type { NavGroup, NavItem } from './DashboardSidebar';
 
@@ -65,6 +67,17 @@ export function useOwnerNav(): NavGroup[] {
     };
   }, []);
 
+  // Duplicates to review, for the badge; only for someone who sees every lead (merging moves history between them).
+  const canMerge = can('lead.read');
+  const [duplicates, setDuplicates] = useState(0);
+  useEffect(() => {
+    if (!canMerge) return;
+    const load = () => void duplicateCount().then(setDuplicates);
+    load();
+    window.addEventListener(LEADS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, load);
+  }, [canMerge]);
+
   const canReadOrg = can('organization.read');
 
   const groups: { label?: string; items: OwnerNavItem[] }[] = [
@@ -84,6 +97,9 @@ export function useOwnerNav(): NavGroup[] {
         { id: 'calls', label: 'AI Calls', icon: PhoneCall },
         { id: 'followups', label: 'Follow-ups', icon: Repeat },
         ...(sheetsOn ? [{ id: 'import_review' as const, label: 'Import Review', icon: ClipboardCheck }] : []),
+        ...(canMerge
+          ? [{ id: 'duplicates' as const, label: 'Duplicates', icon: Copy, badge: duplicates, badgeTitle: `${duplicates} possible duplicate${duplicates === 1 ? '' : 's'} to review` }]
+          : []),
       ],
     },
     {

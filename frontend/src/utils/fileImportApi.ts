@@ -41,6 +41,8 @@ export interface FilePreview {
     errors: number;
     skipped: Partial<Record<RowIssue, number>>;
     possibleDuplicates: number;
+    /** Rows whose phone or email is already a lead's: added to that lead's history, not imported as new leads. */
+    alreadyLeads?: number;
     optedOut: number;
   };
   errorSample: { row: number; code: RowIssue }[];
@@ -65,6 +67,8 @@ export interface ImportBatch {
     withWarnings?: number;
     skipped?: Partial<Record<RowIssue, number>>;
     possibleDuplicates?: number;
+    /** Rows added to a lead that already had their phone or email, instead of becoming new leads. */
+    attached?: number;
     dncInherited?: number;
     /** "Only clean" imports: flagged rows that were not imported at all. */
     flaggedLeftOut?: number;

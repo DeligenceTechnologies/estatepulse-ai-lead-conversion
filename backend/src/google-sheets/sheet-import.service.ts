@@ -27,7 +27,12 @@ import {
 } from './sheet-rows';
 
 export const DNC_REASON = 'This contact previously opted out — imported as do-not-contact';
-export const DUPLICATE_REASON = 'Possible duplicate: another lead has the same phone or email';
+export { DUPLICATE_REASON } from '@/lead/duplicates/duplicate-reasons';
+import { DUPLICATE_REASON } from '@/lead/duplicates/duplicate-reasons';
+import { LeadIntakeService, decideMatch } from '@/lead/duplicates/lead-intake.service';
+import { withSurvivors } from '@/lead/duplicates/merged-redirect';
+/** Preview note on a row whose phone or email is already a lead's. */
+export const ALREADY_A_LEAD_NOTE = 'Already a lead — this row will be added to that lead\'s history, not imported as a new lead';
 export const READ_CHUNK_ROWS = 2_000;
 
 const DB_BATCH = 500;
@@ -101,6 +106,8 @@ export class RunStats {
   reappeared = 0;
   dncInherited = 0;
   possibleDuplicates = 0;
+  /** Rows whose phone or email was already a lead's: attached to that lead, no new lead made. */
+  attached = 0;
   autoApproved = 0;
   autoReleased = 0;
   autoHeld: { rowId: string; leadId: string; reason: string }[] = [];
@@ -136,6 +143,7 @@ export class RunStats {
       skipped: this.skipped,
       dncInherited: this.dncInherited,
       possibleDuplicates: this.possibleDuplicates,
+      attached: this.attached,
       autoApproved: this.autoApproved,
       autoReleased: this.autoReleased,
       relinked: this.relinked,
@@ -210,6 +218,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     private readonly events: EventsBus,
     private readonly audit: AuditService,
     private readonly config: ConfigService<IntegrationEnv, true>,
+    private readonly intake: LeadIntakeService,
   ) {}
 
   private get enabled(): boolean {
@@ -672,7 +681,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const phones = [...new Set(needContact.map((b) => b.lead!.normalized_phone).filter((p): p is string => !!p))];
     const emails = [...new Set(needContact.map((b) => b.lead!.normalized_email).filter((e): e is string => !!e))];
     const ownLeadIds = refresh.map((r) => r.tracked.leadId).filter((id): id is string => !!id);
-    let contacts: { id: string; normalizedPhone: string | null; normalizedEmail: string | null; dncStatus: boolean }[] = [];
+    let contacts: { id: string; normalizedPhone: string | null; normalizedEmail: string | null; dncStatus: boolean; mergedIntoId: string | null }[] = [];
     if (phones.length || emails.length || ownLeadIds.length) {
       stats.dbStatements += 1;
       contacts = await this.prisma.lead.findMany({
@@ -684,8 +693,11 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
             ...(ownLeadIds.length ? [{ id: { in: ownLeadIds } }] : []),
           ],
         },
-        select: { id: true, normalizedPhone: true, normalizedEmail: true, dncStatus: true },
+        orderBy: [{ mergedAt: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
+        select: { id: true, normalizedPhone: true, normalizedEmail: true, dncStatus: true, mergedIntoId: true },
       });
+      // A merged lead's other number or address stands for its survivor.
+      contacts = await withSurvivors(this.prisma, contacts);
     }
     const ownDnc = new Map(contacts.map((c) => [c.id, c.dncStatus]));
     const optedOut = await suppressedPhones(this.prisma, orgId, phones);
@@ -709,14 +721,48 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const leads: Prisma.LeadCreateManyInput[] = [];
     const tracking: Prisma.SheetImportRowCreateManyInput[] = [];
     const relinks: Prisma.Sql[] = [];
+    const attachRelinks: Prisma.Sql[] = [];
     const toApprove: string[] = [];
+    // One lead per person: a new row whose phone or email is already a lead's is tracked against that
+    // lead (decided, so it neither hides nor closes it) and folded into it after the batch commits.
+    const attach: { row: BuiltRow; trackingId: string; leadId: string; by: 'phone' | 'email' }[] = [];
+    const conflicts: { leadId: string; others: string[] }[] = [];
     let dncCount = 0;
     let dupCount = 0;
     for (const b of fresh) {
+      const p = b.lead!.normalized_phone;
+      const e = b.lead!.normalized_email;
+      // `contacts` holds leads already in the database only, so a repeat of a row this run is creating
+      // still comes out as a flagged possible duplicate (assess) rather than attaching to an unsaved lead.
+      const match = decideMatch(p, e, contacts);
+      if (match?.kind === 'match') {
+        if (p) runPhones.add(p);
+        if (e) runEmails.add(e);
+        const existing = relink.get(b.key!);
+        const trackingId = existing ?? randomUUID();
+        attach.push({ row: b, trackingId, leadId: match.leadId, by: match.by });
+        if (existing) {
+          attachRelinks.push(Prisma.sql`(${existing}::uuid, ${match.leadId}::uuid, ${b.hash!}::varchar, ${b.rowNumber}::int)`);
+        } else {
+          tracking.push({
+            id: trackingId,
+            orgId,
+            leadSourceId: sourceId,
+            rowKey: b.key!,
+            leadId: match.leadId,
+            contentHash: b.hash!,
+            rowNumber: b.rowNumber,
+            reviewState: 'approved',
+            reviewedAt: new Date(),
+          });
+        }
+        continue;
+      }
       const { dnc, duplicate } = assess(b.lead!, null);
       if (dnc) dncCount += 1;
       if (duplicate) dupCount += 1;
       const leadId = randomUUID();
+      if (match?.kind === 'conflict') conflicts.push({ leadId, others: match.leadIds });
       leads.push({
         id: leadId,
         orgId,
@@ -771,6 +817,15 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           FROM (VALUES ${Prisma.join(relinks)}) AS v(id, lead_id, hash, row_number)
          WHERE r.id = v.id AND r.organization_id = ${orgId}::uuid AND r.lead_id IS NULL`);
     }
+    if (attachRelinks.length) {
+      statements.push(this.prisma.$executeRaw`
+        UPDATE sheet_import_rows AS r
+           SET lead_id = v.lead_id, content_hash = v.hash, row_number = v.row_number,
+               review_state = 'approved', reviewed_by = NULL, reviewed_at = now(),
+               changed_after_review_at = NULL, changed_values = NULL, missing_since = NULL, updated_at = now()
+          FROM (VALUES ${Prisma.join(attachRelinks)}) AS v(id, lead_id, hash, row_number)
+         WHERE r.id = v.id AND r.organization_id = ${orgId}::uuid AND r.lead_id IS NULL`);
+    }
     if (refreshValues.length) {
       statements.push(this.prisma.$executeRaw`
         UPDATE leads AS l
@@ -820,12 +875,50 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       }
       throw error;
     }
-    stats.inserted += fresh.length;
+    stats.inserted += fresh.length - attach.length;
+    stats.attached += attach.length;
     stats.relinked += relinks.length;
     stats.updated += refreshValues.length;
     stats.flagged += flag.length;
     stats.dncInherited += dncCount;
     stats.possibleDuplicates += dupCount;
+
+    for (const c of conflicts) {
+      await this.intake.openCandidates(this.prisma, orgId, c.leadId, c.others, ['Same phone or email as another lead']);
+    }
+    for (const a of attach) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const l = a.row.lead!;
+          await this.intake.lock(tx, orgId, l.normalized_phone, l.normalized_email);
+          await this.intake.attach(tx, a.leadId, a.by, {
+            orgId,
+            leadSourceId: sourceId,
+            channel: a.row.crmPrefix ? 'crm' : 'import',
+            normalizedPhone: l.normalized_phone,
+            normalizedEmail: l.normalized_email,
+            values: {
+              firstName: l.first_name,
+              lastName: l.last_name,
+              email: l.email,
+              phone: l.phone,
+              timezone: l.timezone,
+              location: l.location,
+              minBudget: l.min_budget,
+              maxBudget: l.max_budget,
+              bedrooms: l.bedrooms,
+              motivation: l.motivation,
+            },
+            customFields: l.custom_fields,
+            submittedAt: new Date(),
+            sheetImportRowId: a.trackingId,
+          });
+        });
+      } catch (error) {
+        // The row is tracked against the lead either way; only the fill-in and history line are missing.
+        this.logger.warn(`row ${a.trackingId}: could not attach to lead ${a.leadId}: ${(error as Error).message}`);
+      }
+    }
 
     if (toApprove.length > 0 && approve) {
       stats.dbStatements += 1;
@@ -917,14 +1010,14 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
   const known = { phones: new Map<string, boolean>(), emails: new Map<string, boolean>() };
   for (let i = 0; i < phones.length; i += CONTACT_CHUNK) {
     const found = await prisma.lead.findMany({
-      where: { orgId, normalizedPhone: { in: phones.slice(i, i + CONTACT_CHUNK) } },
+      where: { orgId, mergedIntoId: null, normalizedPhone: { in: phones.slice(i, i + CONTACT_CHUNK) } },
       select: { normalizedPhone: true, dncStatus: true },
     });
     for (const f of found) if (f.normalizedPhone) known.phones.set(f.normalizedPhone, (known.phones.get(f.normalizedPhone) ?? false) || f.dncStatus);
   }
   for (let i = 0; i < emails.length; i += CONTACT_CHUNK) {
     const found = await prisma.lead.findMany({
-      where: { orgId, normalizedEmail: { in: emails.slice(i, i + CONTACT_CHUNK) } },
+      where: { orgId, mergedIntoId: null, normalizedEmail: { in: emails.slice(i, i + CONTACT_CHUNK) } },
       select: { normalizedEmail: true, dncStatus: true },
     });
     for (const f of found) if (f.normalizedEmail) known.emails.set(f.normalizedEmail, (known.emails.get(f.normalizedEmail) ?? false) || f.dncStatus);
@@ -935,20 +1028,24 @@ export async function contactFlags(prisma: PrismaService, orgId: string, candida
   const inFile = { phones: new Set<string>(), emails: new Set<string>() };
   const reasons = new Map<number, string[]>();
   let possible = 0;
+  let existing = 0;
   let optedOut = 0;
   for (const b of candidates) {
     const p = b.lead!.normalized_phone;
     const e = b.lead!.normalized_email;
     const dnc = Boolean((p && (known.phones.get(p) || suppressed.has(p))) || (e && known.emails.get(e)));
-    const duplicate = Boolean((p && (known.phones.has(p) || inFile.phones.has(p))) || (e && (known.emails.has(e) || inFile.emails.has(e))));
+    // Already a lead: the import attaches the row to it (LeadIntakeService) instead of making another.
+    const isLead = Boolean((p && known.phones.has(p)) || (e && known.emails.has(e)));
+    const duplicate = !isLead && Boolean((p && inFile.phones.has(p)) || (e && inFile.emails.has(e)));
     if (p) inFile.phones.add(p);
     if (e) inFile.emails.add(e);
     if (dnc) optedOut += 1;
+    if (isLead) existing += 1;
     if (duplicate) possible += 1;
-    const why = [...(dnc ? [DNC_REASON] : []), ...(duplicate ? [DUPLICATE_REASON] : [])];
+    const why = [...(dnc ? [DNC_REASON] : []), ...(isLead ? [ALREADY_A_LEAD_NOTE] : []), ...(duplicate ? [DUPLICATE_REASON] : [])];
     if (why.length) reasons.set(b.rowNumber, why);
   }
-  return { possible, optedOut, reasons };
+  return { possible, existing, optedOut, reasons };
 }
 
 export function leadColumns(l: LeadFields, externalId: string | null) {
