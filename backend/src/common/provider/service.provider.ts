@@ -5,6 +5,9 @@ import { AuditService } from '@/audit/audit.service';
 import { AccountEmailService } from '@/auth/account-email.service';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { LeadStateService } from '@/lead/lead-state.service';
+import { LeadIntakeService } from '@/lead/duplicates/lead-intake.service';
+import { DuplicateScannerService } from '@/lead/duplicates/duplicate-scanner.service';
+import { LeadMergeService } from '@/lead/duplicates/lead-merge.service';
 import { MailService } from '@/common/service/mail.service';
 import { RedisService } from '@/common/service/redis.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
@@ -20,6 +23,9 @@ const SERVICES: Provider[] = [
   UserService,
   AuditService,
   LeadStateService,
+  LeadIntakeService,
+  DuplicateScannerService,
+  LeadMergeService,
   AccountEmailService,
   ConnectionAlertService,
 ];

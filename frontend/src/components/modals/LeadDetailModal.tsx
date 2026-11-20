@@ -23,6 +23,7 @@ import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
+import { LeadSourcesPanel } from '../leads/LeadSourcesPanel';
 import { NewLeadModal } from './NewLeadModal';
 import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
 import {
@@ -529,6 +530,9 @@ export const LeadDetailModal: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* The same person under another lead, every source they came from, and merges (with undo). */}
+              {isLive && <LeadSourcesPanel leadId={lead.id} />}
 
               {/* The clock calls and texts keep to: the source's or an agent's zone, else the phone's area code. */}
               {isLive && tz && (

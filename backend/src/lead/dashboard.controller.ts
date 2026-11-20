@@ -58,6 +58,7 @@ export class DashboardController {
       WITH l AS (
         SELECT * FROM leads
          WHERE organization_id = ${org}::uuid
+           AND merged_into_id IS NULL
            AND NOT EXISTS (SELECT 1 FROM sheet_import_rows r
                             WHERE r.lead_id = leads.id
                               AND r.review_state IN ('pending','rejected'))
@@ -163,6 +164,7 @@ export class DashboardController {
           SELECT (created_at AT TIME ZONE (SELECT z FROM tz))::date AS d, count(*)::int AS n
             FROM leads
            WHERE organization_id = ${org}::uuid AND created_at >= now() - interval '15 days'
+             AND merged_into_id IS NULL
              -- Same rule as the summary: rows still in (or rejected from) Import Review are not leads yet.
              AND NOT EXISTS (SELECT 1 FROM sheet_import_rows r
                               WHERE r.lead_id = leads.id AND r.review_state IN ('pending','rejected'))

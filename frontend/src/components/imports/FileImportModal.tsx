@@ -254,6 +254,8 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
               {done.rows?.imported ?? 0} lead{done.rows?.imported === 1 ? '' : 's'} imported from {done.name}.
               {done.approval ? ` ${approveMessage(done.approval)}` : ''}
               {done.review.pending > 0 && ` ${done.review.pending} wait in Import Review.`}
+              {(done.rows?.attached ?? 0) > 0 &&
+                ` ${done.rows!.attached} row${done.rows!.attached === 1 ? ' was' : 's were'} already a lead and ${done.rows!.attached === 1 ? 'was' : 'were'} added to that lead's history.`}
               {(done.rows?.flaggedLeftOut ?? 0) > 0 &&
                 ` ${done.rows!.flaggedLeftOut} flagged row${done.rows!.flaggedLeftOut === 1 ? ' was' : 's were'} left out, as asked.`}
             </span>
@@ -368,11 +370,12 @@ export const FileImportModal: React.FC<{ onClose: () => void; onImported: (batch
                 </label>
               )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                 <Stat label="rows in file" value={preview.counts.total} />
                 <Stat label="will be imported" value={preview.counts.importable} tone="ok" />
                 <Stat label="with warnings" value={preview.counts.withWarnings} tone={preview.counts.withWarnings ? 'warn' : undefined} />
                 <Stat label="cannot be imported" value={preview.counts.errors} tone={preview.counts.errors ? 'bad' : undefined} />
+                <Stat label="already leads (added to them)" value={preview.counts.alreadyLeads ?? 0} />
                 <Stat
                   label="possible duplicates"
                   value={preview.counts.possibleDuplicates}

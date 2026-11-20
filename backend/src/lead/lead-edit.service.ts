@@ -10,6 +10,8 @@ import { startsDoNotContact } from './contact-suppression';
 import type { UpdateLeadDto } from './dto/update-lead.dto';
 import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from './lead-scope';
 import { LeadStateService } from './lead-state.service';
+import { DuplicateScannerService } from './duplicates/duplicate-scanner.service';
+import { normalizeEmail } from './duplicates/identity';
 import { LeadTimezoneService } from './lead-timezone.service';
 import { PHONE_CORRECTED_REASON, isPhoneReason } from './review-reasons';
 
@@ -79,6 +81,7 @@ export class LeadEditService {
     private readonly events: EventsBus,
     private readonly state: LeadStateService,
     private readonly timezones: LeadTimezoneService,
+    private readonly scanner: DuplicateScannerService,
   ) {}
 
   async update(auth: AuthContext, leadId: string, input: UpdateLeadDto): Promise<LeadEditResult> {
@@ -117,7 +120,7 @@ export class LeadEditService {
         data.phoneValid = Boolean(normalizedPhone);
       }
       if (emailChanged) {
-        normalizedEmail = next.email ? (next.email as string).toLowerCase() : null;
+        normalizedEmail = normalizeEmail(next.email as string | null);
         data.normalizedEmail = normalizedEmail;
         data.emailValid = Boolean(normalizedEmail);
       }
@@ -180,6 +183,8 @@ export class LeadEditService {
     });
     // The zone is worked out from the phone: queued calls and texts are measured against the new one now.
     if (phoneChanged) await this.timezones.wake(leadId);
+    // A corrected number, address or name can make it look like (or no longer like) another lead.
+    this.scanner.scanLeadQuietly(orgId, leadId);
     this.logger.log(`lead edited org=${orgId} lead=${leadId} fields=${fields.join(',')} dnc=${becameDoNotContact}`);
     this.events.publish({ organizationId: orgId, type: 'lead.updated', leadSourceId: null, leadId });
     return { changed, becameDoNotContact };

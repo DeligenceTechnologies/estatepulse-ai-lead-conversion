@@ -39,11 +39,11 @@ export async function collectDailySummary(prisma: PrismaService, orgId: string, 
     needsReview,
     unassigned,
   ] = await Promise.all([
-    prisma.lead.count({ where: { orgId, createdAt: today } }),
-    prisma.lead.count({ where: { orgId, createdAt: today, temperature: LeadTemperature.hot } }),
+    prisma.lead.count({ where: { orgId, mergedIntoId: null, createdAt: today } }),
+    prisma.lead.count({ where: { orgId, mergedIntoId: null, createdAt: today, temperature: LeadTemperature.hot } }),
     prisma.lead.groupBy({
       by: ['leadSourceId'],
-      where: { orgId, createdAt: today },
+      where: { orgId, mergedIntoId: null, createdAt: today },
       _count: { _all: true },
     }),
     prisma.call.groupBy({ by: ['status'], where: { orgId, createdAt: today }, _count: { _all: true } }),
@@ -55,8 +55,8 @@ export async function collectDailySummary(prisma: PrismaService, orgId: string, 
     prisma.calendarMeeting.count({
       where: { orgId, startsAt: { gte: w.tomorrowFrom, lt: w.tomorrowTo }, status: { in: ['scheduled', 'pending'] } },
     }),
-    prisma.lead.count({ where: { orgId, needsReview: true, status: { notIn: INACTIVE_STATUSES } } }),
-    prisma.lead.count({ where: { orgId, assignedToId: null, status: { notIn: INACTIVE_STATUSES } } }),
+    prisma.lead.count({ where: { orgId, mergedIntoId: null, needsReview: true, status: { notIn: INACTIVE_STATUSES } } }),
+    prisma.lead.count({ where: { orgId, mergedIntoId: null, assignedToId: null, status: { notIn: INACTIVE_STATUSES } } }),
   ]);
 
   const sourceIds = bySource.map((row) => row.leadSourceId).filter((id): id is string => id !== null);

@@ -20,7 +20,9 @@ describe('manual lead consent review', () => {
     };
     const audit = { record: vi.fn(async () => undefined) };
     const events = { publish: vi.fn(), emit: vi.fn() };
-    await new ManualLeadService(prisma as any, audit as any, events as any).create(ORG, 'user-1', {
+    // No existing lead has the phone: the intake runs the create.
+    const intake = { intake: vi.fn(async (_s: unknown, make: (t: unknown, c: string[]) => Promise<string>) => ({ leadId: await make(tx, []), matchedBy: null, conflictWith: [] })) };
+    await new ManualLeadService(prisma as any, audit as any, events as any, intake as any, { scanLeadQuietly: vi.fn() } as any).create(ORG, 'user-1', {
       firstName: 'Ana',
       phone: '+15125550188',
       ...input,
