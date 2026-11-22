@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { isNoShow, NoShowButton } from "../roi/NoShowButton";
 import {
   AlertTriangle,
   Calendar,
@@ -321,6 +322,11 @@ export const LeadAppointments: React.FC<{
                     >
                       {appt.status.replace("_", " ").toUpperCase()}
                     </span>
+                    {isNoShow(appt) && (
+                      <span className="text-2xs px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300">
+                        NO-SHOW
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-slate-300 mt-0.5">
                     {formatDateTime(appt.startTime, {
@@ -335,6 +341,7 @@ export const LeadAppointments: React.FC<{
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0 sm:justify-end">
+                <NoShowButton appointment={appt} onChanged={load} />
                 {isWebLink(appt.rescheduleUrl) && live && (
                   <a
                     href={appt.rescheduleUrl}

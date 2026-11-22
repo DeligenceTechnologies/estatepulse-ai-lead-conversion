@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CalendarMeetingStatus, type Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { fullName } from '@/lead/lead-scope';
+import { AppointmentSnapshotService } from '@/source-roi/appointment-snapshot.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_PAST_DAYS = 30;
@@ -36,6 +37,8 @@ export interface AppointmentDTO {
   cancelUrl: string | null;
   rescheduleUrl: string | null;
   canceledReason: string | null;
+  /** When someone recorded that the lead did not show up; null when nobody did. */
+  noShowAt: string | null;
   createdAt: string;
 }
 
@@ -50,7 +53,10 @@ type Row = Prisma.CalendarMeetingGetPayload<{ include: typeof INCLUDE }>;
 /** Calendar meetings booked by a lead, as appointments. */
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly snapshots: AppointmentSnapshotService,
+  ) {}
 
   async listInRange(orgId: string, q: AppointmentRange): Promise<AppointmentDTO[]> {
     const now = Date.now();
@@ -69,7 +75,7 @@ export class AppointmentsService {
       take: MAX_ROWS,
       include: INCLUDE,
     });
-    return rows.map(toDto);
+    return this.toDtos(orgId, rows);
   }
 
   async upcomingFor(orgId: string, userId: string): Promise<AppointmentDTO[]> {
@@ -79,7 +85,7 @@ export class AppointmentsService {
       take: 50,
       include: INCLUDE,
     });
-    return rows.map(toDto);
+    return this.toDtos(orgId, rows);
   }
 
   async forLead(orgId: string, leadId: string): Promise<AppointmentDTO[]> {
@@ -89,11 +95,17 @@ export class AppointmentsService {
       take: 50,
       include: INCLUDE,
     });
-    return rows.map(toDto);
+    return this.toDtos(orgId, rows);
+  }
+
+  /** The no-show mark lives on the lasting copy of the meeting, not on the synced row. */
+  private async toDtos(orgId: string, rows: Row[]): Promise<AppointmentDTO[]> {
+    const noShows = await this.snapshots.noShows(orgId, rows.map((row) => row.id));
+    return rows.map((row) => toDto(row, noShows.get(row.id) ?? null));
   }
 }
 
-function toDto(row: Row): AppointmentDTO {
+function toDto(row: Row, noShowAt: Date | null): AppointmentDTO {
   const lead = row.lead;
   return {
     id: row.id,
@@ -115,6 +127,7 @@ function toDto(row: Row): AppointmentDTO {
     cancelUrl: row.cancelUrl,
     rescheduleUrl: row.rescheduleUrl,
     canceledReason: row.canceledReason,
+    noShowAt: noShowAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

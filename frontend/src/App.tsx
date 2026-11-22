@@ -16,7 +16,7 @@ import { LeadsView } from './components/views/LeadsView';
 import { AgentsView } from './components/views/AgentsView';
 import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
-import { ComingSoonView } from './components/views/ComingSoonView';
+import { SourceRoiView } from './components/views/SourceRoiView';
 import { LeadSourcesView } from './components/views/LeadSourcesView';
 import { ImportReviewView } from './components/views/ImportReviewView';
 import { AppointmentsView } from './components/views/AppointmentsView';
@@ -57,7 +57,7 @@ const AppContent: React.FC = () => {
         {activeView === 'import_review' && <ImportReviewView />}
         {activeView === 'ai_settings' && <AISettingsView />}
         {activeView === 'settings' && <SettingsView />}
-        {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
+        {activeView === 'analytics' && <SourceRoiView />}
       </AppShell>
 
       {/* Global Modals */}

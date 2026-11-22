@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { LeadModule } from '@/lead/lead.module';
+import { AppointmentSnapshotModule } from '@/source-roi/appointment-snapshot.module';
 import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AppointmentsController } from './appointments/appointments.controller';
 import { AppointmentsService } from './appointments/appointments.service';
@@ -25,7 +26,7 @@ import { CalendarSyncService } from './sync/calendar-sync.service';
 import { CalendarWebhookController } from './sync/calendar-webhook.controller';
 
 @Module({
-  imports: [TelnyxModule, LeadModule],
+  imports: [TelnyxModule, LeadModule, AppointmentSnapshotModule],
   controllers: [
     CalendarConnectionController,
     CalendarMembersController,

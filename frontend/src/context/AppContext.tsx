@@ -94,7 +94,8 @@ const LOCKED_VIEWS: readonly AppView[] = [
   // 'dashboard' is live: it reads GET /api/dashboard and GET /api/agents.
   // 'appointments' is live: it reads the real appointments table, populated by
   // the calendar sync from agents' connected Calendly accounts.
-  'analytics',
+  // 'analytics' is live: Source ROI (SourceRoiView), which shows Coming Soon
+  // by itself where the server has the feature switched off.
 ];
 
 export const isLockedView = (view: AppView): boolean => LOCKED_VIEWS.includes(view);

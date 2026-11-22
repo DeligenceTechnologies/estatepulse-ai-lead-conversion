@@ -65,6 +65,12 @@ model Lead {
   submissionCount  Int       @default(1) @map("submission_count")
   lastSubmissionAt DateTime? @map("last_submission_at") @db.Timestamptz(6)
 
+  /// How the deal ended, set by a person: won | lost. NULL = still open. Not a lead status: the status says where outreach stands.
+  dealOutcome  String?   @map("deal_outcome") @db.VarChar(10)
+  /// What a won deal was worth to the business.
+  dealValue    Decimal?  @map("deal_value") @db.Decimal(12, 2)
+  dealClosedAt DateTime? @map("deal_closed_at") @db.Timestamptz(6)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -81,6 +87,8 @@ model Lead {
   callTransfers   CallTransfer[]
   outreachItems   OutreachBatchLead[]
   events          LeadEvent[]
+  usageRecords    UsageRecord[]
+  appointments    LeadAppointment[]
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])

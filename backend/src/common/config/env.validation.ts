@@ -167,6 +167,12 @@ export const envValidationSchema = Joi.object({
     // the card is hidden. Switching it off changes no data.
     CUSTOM_WEBHOOK_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
 
+    // Source ROI: monthly marketing spend per lead source, and what each source
+    // costs per appointment and per closing. Off unless SOURCE_ROI_ENABLED: its
+    // routes answer 404, the page and its controls are hidden, and no usage is
+    // costed. Switching it off changes no data.
+    SOURCE_ROI_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+
     // HubSpot CRM import. Off unless HUBSPOT_ENABLED: its endpoints answer 404 and nothing syncs.
     // Unset client id/secret = the card says "not configured" instead of failing at boot.
     HUBSPOT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
