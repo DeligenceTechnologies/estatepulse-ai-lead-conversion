@@ -15,12 +15,14 @@ import {
   ShieldCheck,
   Settings,
   ClipboardCheck,
+  TrendingUp,
 } from 'lucide-react';
 import { isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
 import { consentReviewCount } from '../../utils/consentReviewApi';
 import { importReviewEnabled } from '../../utils/fileImportApi';
+import { sourceRoiEnabled } from '../../utils/sourceRoiApi';
 import type { NavGroup, NavItem } from './DashboardSidebar';
 
 type OwnerNavItem = NavItem & { id: AppView };
@@ -67,11 +69,24 @@ export function useOwnerNav(): NavGroup[] {
 
   const canReadOrg = can('organization.read');
 
+  // Source ROI is listed only where the server has it switched on, for people who may read reports.
+  const canReadReports = can('report.read');
+  const [roiOn, setRoiOn] = useState(false);
+  useEffect(() => {
+    if (!canReadReports) return;
+    let alive = true;
+    void sourceRoiEnabled().then((on) => alive && setRoiOn(on));
+    return () => {
+      alive = false;
+    };
+  }, [canReadReports]);
+
   const groups: { label?: string; items: OwnerNavItem[] }[] = [
     {
       label: 'Overview',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        ...(canReadReports && roiOn ? [{ id: 'analytics' as const, label: 'Source ROI', icon: TrendingUp }] : []),
       ],
     },
     {

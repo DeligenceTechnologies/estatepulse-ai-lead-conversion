@@ -21,6 +21,7 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadTimezone } from '../../api/clie
 import { useApp } from '../../context/AppContext';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
+import { DealOutcomeControl } from '../leads/DealOutcomeControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
 import { NewLeadModal } from './NewLeadModal';
@@ -361,6 +362,8 @@ export const LeadDetailModal: React.FC = () => {
             {isLive && (
               <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
             )}
+
+            {isLive && <DealOutcomeControl leadId={lead.id} />}
 
             {/* Only offered while the strategy has not started: once it has, the
                 server ignores a second enrol, so the button would do nothing. */}

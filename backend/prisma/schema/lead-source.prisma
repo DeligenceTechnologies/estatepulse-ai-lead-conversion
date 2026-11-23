@@ -70,6 +70,7 @@ model LeadSource {
   leads           Lead[]
   sheetImportRows SheetImportRow[]
   crmSyncRuns     CrmSyncRun[]
+  spend           LeadSourceSpend[]
 
   @@unique([orgId, code])
   @@index([orgId])

@@ -16,6 +16,7 @@ import { useLiveQuery } from '../../lib/useLiveQuery';
 import { listAppointments, type Appointment } from '../../utils/calendarApi';
 import { formatDate, formatTime } from '../../lib/datetime';
 import { Button } from '../common/Button';
+import { isNoShow, NoShowButton } from '../roi/NoShowButton';
 
 type Tab = 'upcoming' | 'past' | 'cancelled' | 'all';
 
@@ -34,6 +35,8 @@ function statusTone(status: string): string {
       return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
     case 'cancelled':
       return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+    case 'no_show':
+      return 'bg-orange-500/20 text-orange-300 border-orange-500/40';
     case 'completed':
       return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
     default:
@@ -203,9 +206,9 @@ export const AppointmentsView: React.FC = () => {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span
-                      className={`text-2xs uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${statusTone(appt.status)}`}
+                      className={`text-2xs uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${statusTone(isNoShow(appt) ? 'no_show' : appt.status)}`}
                     >
-                      {appt.status}
+                      {isNoShow(appt) ? 'No-show' : appt.status}
                     </span>
                     {appt.appointmentType && (
                       <span className="text-xs text-slate-400 truncate max-w-[55%]">
@@ -265,6 +268,8 @@ export const AppointmentsView: React.FC = () => {
                   <Button variant="link" onClick={() => setSelectedLeadId(appt.leadId)}>
                     View Lead Profile →
                   </Button>
+
+                  <NoShowButton appointment={appt} onChanged={refresh} />
 
                   {!cancelled && !ended && appt.meetingUrl && (
                     <a

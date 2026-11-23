@@ -14,3 +14,10 @@ describe('view <-> path', () => {
     }
   });
 });
+
+describe('Source ROI', () => {
+  it('lives at /analytics, where the Coming Soon page it replaced was', () => {
+    expect(pathForView('analytics')).toBe('/analytics');
+    expect(viewForPath('/analytics')).toBe('analytics');
+  });
+});

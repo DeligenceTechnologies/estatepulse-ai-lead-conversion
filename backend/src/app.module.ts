@@ -26,6 +26,7 @@ import { FollowupModule } from './followup/followup.module';
 import { OutreachModule } from './outreach/outreach.module';
 import { HistoryModule } from './history/history.module';
 import { DailySummaryModule } from './daily-summary/daily-summary.module';
+import { SourceRoiModule } from './source-roi/source-roi.module';
 import { HealthController } from './health.controller';
 import {QueueModule} from "@/queue/queue.module";
 
@@ -58,6 +59,7 @@ import {QueueModule} from "@/queue/queue.module";
     OutreachModule,
     HistoryModule,
     DailySummaryModule,
+    SourceRoiModule,
     QueueModule,
   ],
   controllers: [HealthController],

@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { isValidEmail } from '@/ingest/processing/transforms';
 import { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import { fullName } from '@/lead/lead-scope';
 import { nextMeeting } from '@/lead/upcoming-meeting';
+import { AppointmentSnapshotService } from '@/source-roi/appointment-snapshot.service';
 import { EngineService } from '@/telnyx/engine.service';
 import type { BookedMeeting } from '../calendar.types';
 import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
@@ -75,6 +76,7 @@ export class InCallBookingService {
     private readonly assignments: LeadAssignmentService,
     private readonly engine: EngineService,
     private readonly audit: AuditService,
+    @Optional() private readonly snapshots?: AppointmentSnapshotService,
   ) {}
 
   async availability(ctx: ToolContext, input: { day?: string; preferred_time?: string }, now = new Date()): Promise<AvailabilityResult> {
@@ -275,6 +277,7 @@ export class InCallBookingService {
       create: { orgId: ctx.orgId, connectionId: connection.id, ...data, ...linked, bookedVia },
       update: { ...data, ...linked, bookedVia },
     });
+    await this.snapshots?.syncMeeting(connection.id, data.externalId);
   }
 
   private async openTimes(token: string, ctx: ToolContext, window: { start: Date; end: Date } | null): Promise<Date[]> {

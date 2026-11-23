@@ -8,11 +8,13 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { CalendarProvider, CalendarWorkspaceType, Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
+import { AppointmentSnapshotService } from '@/source-roi/appointment-snapshot.service';
 import {
   PROVIDER_LABEL,
   type CalCredentials,
@@ -85,6 +87,7 @@ export class CalendarConnectionService implements OnModuleInit {
     private readonly access: CalendarAccessService,
     private readonly calendly: CalendlyClient,
     private readonly cal: CalClient,
+    @Optional() private readonly snapshots?: AppointmentSnapshotService,
   ) {}
 
   onModuleInit(): void {
@@ -290,6 +293,8 @@ export class CalendarConnectionService implements OnModuleInit {
     if (!connection) return;
 
     await this.access.removeWebhook(connection);
+    // Before the delete: the lasting copies are found through the meetings that are about to go.
+    await this.snapshots?.releaseConnection(connection.id);
     await this.prisma.calendarConnection.deleteMany({ where: { id: connection.id } });
     if (connection.provider === 'calendly') {
       await this.access.revokeStoredCalendly(connection.credentials);

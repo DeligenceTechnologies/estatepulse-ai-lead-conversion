@@ -1,0 +1,85 @@
+/// What the owner spent on a lead source in one calendar month. `month` is
+/// always the first day of that month.
+model LeadSourceSpend {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  orgId        String   @map("organization_id") @db.Uuid
+  leadSourceId String   @map("lead_source_id") @db.Uuid
+  month        DateTime @db.Date
+  amount       Decimal  @db.Decimal(12, 2)
+  /// The user who last set it (no foreign key: the amount outlives the user).
+  updatedById  String?  @map("updated_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource   LeadSource   @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, leadSourceId, month])
+  @@map("lead_source_spend")
+}
+
+/// The cost ledger: one row per costed thing (an AI call, a text). `sourceId`
+/// is the calls.id or messages.id it came from, and with `metric` it is unique,
+/// so costing the same thing twice is impossible. `amount` is an estimate
+/// (quantity × the rate at the time) while `isEstimated`; a real provider cost
+/// replaces it in place.
+model UsageRecord {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  orgId       String   @map("organization_id") @db.Uuid
+  leadId      String?  @map("lead_id") @db.Uuid
+  /// ai_call_minutes | sms_segments
+  metric      String   @db.VarChar(30)
+  sourceId    String   @map("source_id") @db.Uuid
+  quantity    Decimal  @db.Decimal(12, 4)
+  unitRate    Decimal? @map("unit_rate") @db.Decimal(12, 6)
+  amount      Decimal? @db.Decimal(12, 4)
+  isEstimated Boolean  @default(true) @map("is_estimated")
+  provider    String?  @db.VarChar(30)
+  occurredAt  DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([metric, sourceId])
+  @@index([orgId, metric, occurredAt])
+  @@index([leadId])
+  @@map("usage_records")
+}
+
+/// A lasting copy of a lead's meeting. calendar_meetings rows are pruned 90
+/// days after they end and deleted with their connection; this row is kept, so
+/// reports still know the meeting was booked and whether the lead showed up.
+/// `meetingId` is the calendar_meetings.id it was copied from (no foreign key:
+/// it outlives that row).
+model LeadAppointment {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  orgId      String    @map("organization_id") @db.Uuid
+  leadId     String    @map("lead_id") @db.Uuid
+  meetingId  String?   @map("meeting_id") @db.Uuid
+  provider   String    @db.VarChar(20)
+  externalId String    @map("external_id") @db.VarChar(500)
+  /// scheduled | pending | canceled | rescheduled, as on the meeting; or
+  /// disconnected: its calendar was disconnected before it took place.
+  status     String    @db.VarChar(20)
+  startsAt   DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt     DateTime  @map("ends_at") @db.Timestamptz(6)
+  bookedVia  String?   @map("booked_via") @db.VarChar(30)
+  hostUserId String?   @map("host_user_id") @db.Uuid
+  bookedAt   DateTime  @map("booked_at") @db.Timestamptz(6)
+  /// Set by a person: the meeting's time passed and the lead did not show up.
+  noShowAt   DateTime? @map("no_show_at") @db.Timestamptz(6)
+  noShowById String?   @map("no_show_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider, externalId])
+  @@index([leadId])
+  @@index([meetingId])
+  @@map("lead_appointments")
+}

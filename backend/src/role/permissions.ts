@@ -22,6 +22,9 @@ export const PERMISSIONS = {
 
   AUTOMATION_READ: 'automation.read',
   AUTOMATION_UPDATE: 'automation.update',
+
+  REPORT_READ: 'report.read',
+  REPORT_UPDATE: 'report.update',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -87,6 +90,14 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     permissions: [
       { key: PERMISSIONS.AUTOMATION_READ, label: 'View the AI assistant, outreach strategy and sequences' },
       { key: PERMISSIONS.AUTOMATION_UPDATE, label: 'Edit the AI assistant, outreach strategy and sequences' },
+    ],
+  },
+  {
+    module: 'report',
+    label: 'Reports',
+    permissions: [
+      { key: PERMISSIONS.REPORT_READ, label: 'View Source ROI: spend, costs and revenue per lead source' },
+      { key: PERMISSIONS.REPORT_UPDATE, label: 'Enter marketing spend and cost rates' },
     ],
   },
 ];

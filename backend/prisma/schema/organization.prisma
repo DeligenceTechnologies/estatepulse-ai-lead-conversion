@@ -25,6 +25,9 @@ model Organization {
   leadEvents          LeadEvent[]
   contactSuppressions ContactSuppression[]
   dailySummaryRuns    DailySummaryRun[]
+  leadSourceSpend     LeadSourceSpend[]
+  usageRecords        UsageRecord[]
+  leadAppointments    LeadAppointment[]
 
   @@map("organizations")
 }
@@ -67,6 +70,9 @@ model OrganizationSetting {
   dailySummaryEnabled   Boolean @default(true) @map("daily_summary_enabled")
   /// HH:MM in `timezone`. Before noon the email covers the previous day; from noon, the day so far.
   dailySummaryTime      String  @default("23:55") @map("daily_summary_time") @db.VarChar(5)
+  /// Source ROI's estimate of an AI call minute and a text segment, in USD; NULL = the built-in default (source-roi/cost-rates.ts).
+  callRatePerMinute     Decimal? @map("call_rate_per_minute") @db.Decimal(8, 4)
+  smsRatePerSegment     Decimal? @map("sms_rate_per_segment") @db.Decimal(8, 4)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)

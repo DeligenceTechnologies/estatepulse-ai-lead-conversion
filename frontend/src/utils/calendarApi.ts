@@ -169,6 +169,8 @@ export interface Appointment {
   cancelUrl: string | null;
   rescheduleUrl: string | null;
   canceledReason: string | null;
+  /** When someone recorded that the lead did not show up; null or absent when nobody did. */
+  noShowAt?: string | null;
   createdAt: string;
 }
 

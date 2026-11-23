@@ -16,6 +16,7 @@ import { isTimeZone } from '@/common/utils/zoned-time';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { mapLimit } from '@/common/utils/map-limit';
+import { AppointmentSnapshotService } from '@/source-roi/appointment-snapshot.service';
 import { EngineService } from '@/telnyx/engine.service';
 import { merge } from '../availability/intervals';
 import { CalendarAccessService, type UsableConnection } from '../connection/calendar-access.service';
@@ -137,6 +138,7 @@ export class CalendarSyncService implements OnModuleDestroy {
     private readonly cal: CalClient,
     private readonly engine: EngineService,
     config: ConfigService<IntegrationEnv, true>,
+    private readonly snapshots: AppointmentSnapshotService,
   ) {
     this.webhookBase = (
       config.get('CALENDAR_WEBHOOK_BASE_URL', { infer: true }) || config.get('PUBLIC_API_URL', { infer: true })
@@ -433,6 +435,9 @@ export class CalendarSyncService implements OnModuleDestroy {
         .appointmentBooked(connection.orgId, leadId)
         .catch((error) => this.logger.warn(`appointment booked for lead ${leadId}: ${(error as Error).message}`));
     }
+    // The lasting copy reports read: these rows are pruned and die with the connection.
+    // Last, so outreach hears of a booking before the copies are refreshed.
+    await this.snapshots.syncConnection(connection.id);
   }
 
   /**
