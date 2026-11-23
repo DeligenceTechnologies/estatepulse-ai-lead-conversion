@@ -229,91 +229,39 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                   className={`${field} w-32 text-center`}
                 />
               </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                In each lead's local time, from their phone's area code (a time zone field in your lead source is used
-                first). A lead whose time zone cannot be told is held until you set it. Legal calling hours for the
-                lead's country, state or province apply on top and cannot be switched off; where no such law is known, calls
-                and texts still keep to 08:00–21:00 on the lead's clock. A step falling inside this
-                window is sent when it reopens, never dropped — and the rest of the cadence shifts with it.
-              </p>
-            </div>
+              {!respect && (
+                <p className="text-2xs font-semibold text-rose-300">
+                  Off: your quiet hours are not applied. Legal calling hours still are, and where no law applies,
+                  08:00–21:00 on the lead&apos;s clock.
+                </p>
+              )}
+            </Tile>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Max AI call attempts <span className="text-slate-500 font-normal">— per lead</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={maxVoice}
-                onChange={(e) => setMaxVoice(Number(e.target.value))}
-                className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-600"
-              />
-              <p className="text-2xs text-slate-500 mt-1">
-                Applies to the strategy's calls. Do-not-contact is absolute and is not a setting.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Daily limits <span className="text-slate-500 font-normal">— per lead, 0 is no limit</span>
-              </label>
-              <div className="flex items-center gap-2 flex-wrap">
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={limits.callsPerDay}
-                  onChange={(e) => setLimit('callsPerDay', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">calls</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={limits.smsPerDay}
-                  onChange={(e) => setLimit('smsPerDay', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">texts, at least</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.minGapMinutes}
-                  onChange={(e) => setLimit('minGapMinutes', e.target.value)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min apart</span>
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                Shared by the strategy and every sequence. The gap is between two calls or two texts; a text can still
-                follow a call within minutes. A step over the limit waits for the next day&apos;s window. The AI&apos;s
-                chat replies and a callback the lead asked for are not held back.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Days off <span className="text-slate-500 font-normal">— nobody is contacted</span>
-              </label>
-              <div className="flex items-center gap-1 flex-wrap">
-                {WEEKDAYS.map((day, d) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => toggleDay(d)}
-                    className={`px-2 py-1.5 rounded-lg border text-2xs font-semibold cursor-pointer ${
-                      skipDays.includes(d) ? 'border-rose-700/60 bg-rose-900/30 text-rose-300' : 'border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    {day}
-                  </button>
-                ))}
+            <Tile
+              className="lg:col-span-3"
+              icon={<CalendarOff />}
+              title="Days off"
+              hint="Tap a day to turn it off. Steps move to the next open day."
+            >
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {WEEKDAYS.map((day, d) => {
+                  const off = skipDays.includes(d);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      aria-pressed={off}
+                      onClick={() => toggleDay(d)}
+                      className={`w-11 py-1.5 rounded-lg border text-2xs font-semibold cursor-pointer transition-colors ${
+                        off
+                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-300 line-through'
+                          : 'border-green-500/25 bg-green-500/10 text-green-300 hover:border-green-500/40'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
               </div>
             </Tile>
 
@@ -370,35 +318,10 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
             </Tile>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setRespect(!respect)}
-            className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
-          >
-            <span
-              className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${
-                respect ? 'bg-emerald-600' : 'bg-rose-700'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent transition-all ${
-                  respect ? 'left-[18px]' : 'left-0.5'
-                }`}
-              />
-            </span>
-            <span className="font-semibold">
-              {respect
-                ? 'Quiet hours enforced'
-                : "Your quiet hours OFF — legal calling hours still apply (08:00–21:00 on the lead's clock where no stricter law does)"}
-            </span>
-          </button>
-
-          <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-            <p className="text-xs text-slate-500 flex items-center gap-1.5 min-w-0">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">
-                One window for both the strategy and every follow-up sequence.
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
+            <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              Legal calling hours (08:00–21:00 on the lead's clock where no law applies) and do-not-contact always apply.
             </p>
             <Button size="sm" onClick={() => void save()} disabled={!valid} loading={saving}>
               {saving ? 'Saving…' : 'Save'}
