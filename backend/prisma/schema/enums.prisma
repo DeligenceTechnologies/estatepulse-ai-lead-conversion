@@ -302,3 +302,11 @@ enum EnrolledBy {
 
   @@map("enrolled_by")
 }
+
+enum DuplicateCandidateStatus {
+  open
+  merged
+  dismissed
+
+  @@map("duplicate_candidate_status")
+}

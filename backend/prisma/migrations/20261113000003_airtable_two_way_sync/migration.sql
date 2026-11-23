@@ -27,11 +27,11 @@ ALTER TABLE "sheet_import_rows" ADD COLUMN IF NOT EXISTS "push_error" VARCHAR(50
 -- Wrapped because PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, and every
 -- other statement in this file is idempotent. A migration that fails partway
 -- must be safe to run again.
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE "sheet_import_rows"
     ADD CONSTRAINT "sheet_import_rows_push_attempts_check" CHECK ("push_attempts" >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 -- The worker's queue: rows of one source whose push is due. Partial, so it
 -- stays small — a row is only in it while it is waiting to be written.

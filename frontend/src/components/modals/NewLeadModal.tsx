@@ -198,7 +198,14 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
       consent,
       startOutreach: consent && startOutreach,
     };
-    const { id } = await leadsApi.create(body);
+    const { id, matchedBy } = await leadsApi.create(body);
+    if (matchedBy) {
+      // Already a lead: the entry filled that lead's blanks and is in its sources; no second lead was made.
+      toast.info(`This ${matchedBy} already belongs to a lead — the details were added to that lead instead of creating a duplicate.`);
+      window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
+      if (!editing) props.onCreated(id);
+      return;
+    }
     // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
     // Without consent it waits in Import Review, out of the Leads list, until the owner marks it.
     toast.success(

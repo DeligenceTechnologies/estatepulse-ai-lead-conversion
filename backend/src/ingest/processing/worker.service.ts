@@ -21,11 +21,16 @@ import { toStoredMapping } from '@/custom-webhook/mapping';
 import { EventsBus } from '@/events/events.bus';
 import { CUSTOM_TARGET, PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
 import { DNC_REVIEW_REASON, startsDoNotContact } from '@/lead/contact-suppression';
+import { DUPLICATE_REASON } from '@/lead/duplicates/duplicate-reasons';
+import { normalizeEmail, normalizePhone } from '@/lead/duplicates/identity';
+import { DuplicateScannerService } from '@/lead/duplicates/duplicate-scanner.service';
+import { LeadIntakeService } from '@/lead/duplicates/lead-intake.service';
+import type { FillableValues } from '@/lead/duplicates/merge-rules';
 import { adapterFor } from '../adapters/generic.adapter';
 import type { NormalizedAnswer, NormalizedDelivery } from '../adapters/types';
 import { CANONICAL_FIELDS, IGNORE_TARGET } from './canonical-fields';
 import { suggestMappings } from './heuristics';
-import { applyTransform, isDialable, isValidEmail, type Transform } from './transforms';
+import { applyTransform, isDialable, type Transform } from './transforms';
 import { validateCanonicalValues } from './validators';
 
 interface ClaimedEvent {
@@ -80,6 +85,8 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService<IntegrationEnv, true>,
     private readonly events: EventsBus,
     private readonly audit: AuditService,
+    private readonly intake: LeadIntakeService,
+    private readonly scanner: DuplicateScannerService,
   ) {
     this.delay = this.config.get('WORKER_POLL_INTERVAL_MS', { infer: true });
   }
@@ -236,39 +243,74 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
       // Captured while a custom webhook was still being set up: the owner looks
       // at it before anyone contacts it (see CustomWebhookService.activate).
       if (capturedDuringSetup) reviewReasons.push(SETUP_REVIEW_REASON);
-      const leadId = await this.createLead({
-        orgId: event.organization_id,
-        leadSourceId: source.id,
-        defaultConsent: source.defaultConsentStatus,
-        values: mapped.values,
-        customFields: mapped.customFields,
-        phone,
-        email,
-        reviewReasons,
-        // Any reason to look at it holds it: nobody calls or texts a flagged lead
-        // until a person approves it (LeadReviewService) or fixes its phone.
-        automationPaused: reviewReasons.length > 0,
-        submittedAt: parsed.submittedAt ?? new Date(),
-      });
-
-      await this.prisma.ingestEvent.update({
-        where: { id: event.id },
-        data: {
-          leadId,
-          providerRespondentId: parsed.providerRespondentId,
-          normalizedAnswers: parsed.answers as unknown as Prisma.InputJsonValue,
-          mappedValues: mapped.values as Prisma.InputJsonValue,
-          unmappedKeys: Object.keys(mapped.customFields),
-          warnings: mapped.warnings,
+      const normalizedPhone = normalizePhone(phone);
+      const normalizedEmail = normalizeEmail(email);
+      const submittedAt = parsed.submittedAt ?? new Date();
+      // One lead per person: a phone or email that is already a lead's attaches this delivery to
+      // that lead (its source kept as a submission) instead of making a second one. The delivery is
+      // marked done in the same transaction, so a retry never attaches it twice.
+      const intake = await this.prisma.$transaction(
+        async (tx) => {
+          const result = await this.intake.intakeIn(
+            tx,
+            {
+              orgId: event.organization_id,
+              leadSourceId: source.id,
+              sourceName: source.name,
+              channel: 'webhook',
+              normalizedPhone,
+              normalizedEmail,
+              values: fillableFrom(mapped.values, phone, email),
+              customFields: mapped.customFields,
+              submittedAt,
+              ingestEventId: event.id,
+              actor: { type: 'webhook' },
+            },
+            (tx2, conflictWith) =>
+              this.createLead(tx2, {
+                orgId: event.organization_id,
+                leadSourceId: source.id,
+                defaultConsent: source.defaultConsentStatus,
+                values: mapped.values,
+                customFields: mapped.customFields,
+                phone,
+                email,
+                normalizedPhone,
+                normalizedEmail,
+                reviewReasons: conflictWith.length ? [...reviewReasons, DUPLICATE_REASON] : reviewReasons,
+                // Any reason to look at it holds it: nobody calls or texts a flagged lead
+                // until a person approves it (LeadReviewService) or fixes its phone.
+                automationPaused: reviewReasons.length > 0 || conflictWith.length > 0,
+                submittedAt,
+              }),
+          );
+          await tx.ingestEvent.update({
+            where: { id: event.id },
+            data: {
+              leadId: result.leadId,
+              providerRespondentId: parsed.providerRespondentId,
+              normalizedAnswers: parsed.answers as unknown as Prisma.InputJsonValue,
+              mappedValues: mapped.values as Prisma.InputJsonValue,
+              unmappedKeys: Object.keys(mapped.customFields),
+              warnings: mapped.warnings,
+            },
+          });
+          return result;
         },
-      });
+        { timeout: 20_000 },
+      );
+      const leadId = intake.leadId;
+      const attached = intake.matchedBy !== null;
+      // A new person: look for near matches (the same Gmail inbox, another country code) to suggest for review.
+      if (!attached) this.scanner.scanLeadQuietly(event.organization_id, leadId);
+
       await this.audit.record({
         orgId: event.organization_id,
         actorType: 'webhook',
-        action: 'lead.created',
+        action: attached ? 'lead.resubmitted' : 'lead.created',
         entityType: 'lead',
         entityId: leadId,
-        payload: { source: source.name, ingestEventId: event.id },
+        payload: { source: source.name, ingestEventId: event.id, ...(attached ? { matchedBy: intake.matchedBy } : {}) },
         durationMs: Date.now() - startedAt,
       });
       await this.prisma.leadSource.update({
@@ -283,8 +325,13 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         startedAt,
         mapped,
       );
-      this.events.publish({ organizationId: event.organization_id, type: 'lead.created', leadSourceId: source.id });
-      this.logger.log(`Created lead ${leadId} from delivery ${event.id}`);
+      this.events.publish({
+        organizationId: event.organization_id,
+        type: attached ? 'lead.updated' : 'lead.created',
+        leadSourceId: source.id,
+        ...(attached ? { leadId } : {}),
+      });
+      this.logger.log(attached ? `Attached delivery ${event.id} to lead ${leadId} (by ${intake.matchedBy})` : `Created lead ${leadId} from delivery ${event.id}`);
     } catch (error) {
       await this.fail(event, error, startedAt);
     }
@@ -384,7 +431,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  private async createLead(input: {
+  private async createLead(tx: Prisma.TransactionClient, input: {
     orgId: string;
     leadSourceId: string;
     defaultConsent: ConsentStatus;
@@ -392,20 +439,20 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
     customFields: Record<string, string>;
     phone: string | null;
     email: string | null;
+    normalizedPhone: string | null;
+    normalizedEmail: string | null;
     reviewReasons: string[];
     /** Start paused: the outreach pollers skip it until the owner resumes it. Default false. */
     automationPaused?: boolean;
     submittedAt: Date;
   }): Promise<string> {
-    const { values, phone, email } = input;
-    const normalizedPhone = isDialable(phone) ? phone : null;
-    const emailValid = email ? isValidEmail(email) : false;
-    const normalizedEmail = emailValid ? email!.trim().toLowerCase() : null;
+    const { values, phone, email, normalizedPhone, normalizedEmail } = input;
+    const emailValid = Boolean(normalizedEmail);
     const consentGranted = values.consent_status === true;
     // Someone who asked not to be contacted stays that way, however often they fill in a form.
-    const dnc = await startsDoNotContact(this.prisma, input.orgId, normalizedPhone, normalizedEmail);
+    const dnc = await startsDoNotContact(tx, input.orgId, normalizedPhone, normalizedEmail);
     const reviewReasons = dnc ? [...input.reviewReasons, DNC_REVIEW_REASON] : input.reviewReasons;
-    const lead = await this.prisma.lead.create({
+    const lead = await tx.lead.create({
       data: {
         orgId: input.orgId,
         leadSourceId: input.leadSourceId,
@@ -496,3 +543,25 @@ const int = (v: unknown): number | null => {
   const n = num(v);
   return n === null ? null : Math.round(n);
 };
+
+/** The lead columns a delivery may fill on a lead that already exists (merge-rules.fillBlanks). */
+function fillableFrom(values: Record<string, MappedValue>, phone: string | null, email: string | null): FillableValues {
+  return {
+    firstName: text(values.first_name),
+    lastName: text(values.last_name),
+    email,
+    phone,
+    timezone: text(values.timezone),
+    location: text(values.location),
+    timeline: text(values.timeline),
+    buyingIntent: text(values.buying_intent),
+    financingStatus: text(values.financing_status),
+    minBudget: num(values.min_budget),
+    maxBudget: num(values.max_budget),
+    bedrooms: int(values.bedrooms),
+    motivation: text(values.motivation),
+    utmSource: text(values.utm_source),
+    utmMedium: text(values.utm_medium),
+    utmCampaign: text(values.utm_campaign),
+  };
+}

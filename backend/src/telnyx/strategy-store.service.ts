@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { isQuietHours } from '@/common/utils/quiet-hours';
 import { DEFAULT_LIMITS, fitConditions, limitsOf, skipDaysOf, type StepConditions, type StepVoicemail } from '@/followup/journey';
 
 export interface StrategyStep {
@@ -101,6 +103,13 @@ export class StrategyStoreService {
     const current = await this.getStrategy(orgId);
     const next: Strategy = { ...current, ...set };
     if (set.guardrails) {
+      // Quiet hours only narrow the legal window, so a value that cannot be read is refused rather than stored as "never quiet".
+      if ('quietHours' in set.guardrails && !isQuietHours(set.guardrails.quietHours)) {
+        throw new AppError('VALIDATION_ERROR', 'Quiet hours need a start and an end as HH:MM, 00:00 to 23:59.');
+      }
+      if ('respectQuietHours' in set.guardrails && typeof set.guardrails.respectQuietHours !== 'boolean') {
+        throw new AppError('VALIDATION_ERROR', 'respectQuietHours must be true or false.');
+      }
       const g = { ...current.guardrails, ...set.guardrails };
       next.guardrails = { ...g, limits: limitsOf(g.limits), skipDays: skipDaysOf(g.skipDays) };
     }

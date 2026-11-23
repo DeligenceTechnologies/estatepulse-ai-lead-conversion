@@ -69,7 +69,7 @@ export class LeadSourcesController {
     return this.service.get(auth.organizationId, id);
   }
 
-  @Get(':id/deliveries')
+  @Get(':id/deliveries') 
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
   deliveries(
     @CurrentAuth() auth: AuthContext,

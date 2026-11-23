@@ -29,6 +29,17 @@ describe('StrategyStoreService', () => {
     expect(saved.guardrails.quietHours).toEqual({ start: '21:00', end: '08:00' });
   });
 
+  it('refuses quiet hours that are not HH:MM, so a bad value can never mean "never quiet" (FU-01)', async () => {
+    for (const quietHours of [{ start: 'x', end: 'y' }, { start: '25:00', end: '08:00' }, { start: '9:00', end: '08:00' }, null, '21:00']) {
+      const { service, prisma } = store(defaultStrategy());
+      await expect(service.saveStrategy('org-1', { guardrails: { quietHours } })).rejects.toThrow(/HH:MM/);
+      expect(prisma.organizationSetting.upsert).not.toHaveBeenCalled();
+    }
+    const { service, prisma } = store(defaultStrategy());
+    await service.saveStrategy('org-1', { guardrails: { quietHours: { start: '20:00', end: '09:30' } } });
+    expect((prisma.organizationSetting.upsert.mock.calls[0] as any)[0].update.outreachStrategy.guardrails.quietHours).toEqual({ start: '20:00', end: '09:30' });
+  });
+
   it('fills in what a saved strategy lost, without overriding what it has', async () => {
     const lost = await store({ steps: STEPS }).service.getStrategy('org-1');
     expect(lost.steps).toEqual(STEPS);

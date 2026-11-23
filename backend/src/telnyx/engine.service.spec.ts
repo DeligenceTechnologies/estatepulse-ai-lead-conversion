@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadStateService } from '@/lead/lead-state.service';
-import { EngineService, ZONE_HELD_REVIEW, remainingSteps } from './engine.service';
+import { EngineService, NO_SENDER_HOLD, SENDER_RECHECK_MS, ZONE_HELD_REVIEW, remainingSteps } from './engine.service';
 import { OptedOutError } from './sms.service';
 import type { Strategy, StrategyStep } from './strategy-store.service';
 
@@ -72,7 +72,9 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
   const state = new LeadStateService(prisma as any);
   const conversations = { appendOurMessage: vi.fn(async () => undefined) };
   const optOuts = { optOut: vi.fn(async () => [LEAD]) };
-  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any, optOuts as any);
+  // An organization that can send: a Telnyx key and a from-number. Tests of the wait override it.
+  const creds = { getCreds: vi.fn(async (): Promise<{ apiKey: string; fromNumber: string } | null> => ({ apiKey: 'KEY', fromNumber: '+14155550123' })) };
+  const engine = new EngineService(prisma as any, strategies as any, smsService as any, queue as any, activity as any, followup as any, state, conversations as any, optOuts as any, creds as any);
   const text = (direction: 'inbound' | 'outbound') => texts.push({ direction, createdAt: new Date() });
   const dial = (status: string, durationSeconds: number | null = null, disposition?: string) => {
     const ended = !['ringing', 'in_progress', 'queued'].includes(status);
@@ -80,7 +82,7 @@ function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, un
     calls.push(row);
     return row;
   };
-  return { engine, lead, prisma, conversations, text, smsService, queue, activity, followup, optOuts, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
+  return { engine, lead, prisma, creds, conversations, text, smsService, queue, activity, followup, optOuts, dial, texts: () => smsService.sendSms.mock.calls.map((c: unknown[]) => c[2]) };
 }
 
 describe('remainingSteps', () => {
@@ -388,6 +390,92 @@ describe('EngineService journey rules', () => {
       expect.objectContaining({ source: 'strategy', voicemail: 'leave', context: 'They asked about 3-bed homes in Austin' }),
       expect.anything(),
     );
+  });
+});
+
+describe('EngineService with nothing to send from', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const events = (s: ReturnType<typeof setup>, type: string) =>
+    (s.prisma.leadEvent.create.mock.calls as any[]).map((c) => c[0].data).filter((d) => d.type === type);
+  const NO_NUMBER = { apiKey: 'KEY', fromNumber: '' };
+
+  it('does not start a lead while the organization has no number: not claimed, not "contacting", nothing sent or failed', async () => {
+    // What happened live: SMS, call and SMS each "failed: No from number configured" and the lead sat in Contacting.
+    const s = setup();
+    s.creds.getCreds.mockResolvedValue(NO_NUMBER);
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(30 * MIN);
+
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+    expect(s.prisma.lead.updateMany).not.toHaveBeenCalled();
+    expect(s.lead.status).toBe('new');
+    expect(s.texts()).toEqual([]);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.activity.recordSms).not.toHaveBeenCalled();
+    expect(s.activity.recordCallFailed).not.toHaveBeenCalled();
+    expect(events(s, 'step_failed')).toEqual([]);
+  });
+
+  it('starts the same lead, from its first step, once a number is connected', async () => {
+    const s = setup();
+    s.creds.getCreds.mockResolvedValue(NO_NUMBER);
+    await s.engine.enroll(ORG, LEAD);
+    expect(s.texts()).toEqual([]);
+
+    s.creds.getCreds.mockResolvedValue({ apiKey: 'KEY', fromNumber: '+14155550123' });
+    // The watcher offers an unstarted lead again on every poll.
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
+    expect(s.lead.status).toBe('contacting');
+  });
+
+  it('waits the same way with no Telnyx account at all', async () => {
+    for (const none of [null, { apiKey: '', fromNumber: '+14155550123' }]) {
+      const s = setup();
+      s.creds.getCreds.mockResolvedValue(none);
+      await s.engine.enroll(ORG, LEAD);
+      expect(s.engine.isRunning(LEAD)).toBe(false);
+      expect(s.texts()).toEqual([]);
+    }
+  });
+
+  it('holds a step, unspent, when the number goes away mid-strategy, and sends it once there is one again', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
+
+    // The number is disconnected before the call is due.
+    s.creds.getCreds.mockResolvedValue(NO_NUMBER);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.activity.recordCallFailed).not.toHaveBeenCalled();
+    expect(events(s, 'step_failed')).toEqual([]);
+    expect(events(s, 'step_held').map((d) => d.reason)).toEqual([NO_SENDER_HOLD]);
+
+    // Still none an hour later: looked at again, said once.
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(events(s, 'step_held')).toHaveLength(1);
+
+    // Connected: the very step that waited goes out on the next look.
+    s.creds.getCreds.mockResolvedValue({ apiKey: 'KEY', fromNumber: '+14155550123' });
+    await vi.advanceTimersByTimeAsync(SENDER_RECHECK_MS);
+    expect(s.queue.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('does not hold every lead over an account row it could not read', async () => {
+    const s = setup();
+    s.creds.getCreds.mockRejectedValue(new Error('database unreachable'));
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.texts()).toEqual(['text s1']);
   });
 });
 

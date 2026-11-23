@@ -15,29 +15,29 @@ model Lead {
   /// IANA zone the lead source provided or an agent set. Null = worked out from the phone number on every read (common/utils/lead-timezone.ts).
   timezone        String? @db.VarChar(100)
 
-  status          LeadStatus       @default(new)
-  followUpReason  FollowUpReason?  @map("follow_up_reason")
+  status         LeadStatus       @default(new)
+  followUpReason FollowUpReason?  @map("follow_up_reason")
   /// When the lead asked to be called back; nothing else contacts them before it. Cleared once the callback is done.
-  callbackAt      DateTime?        @map("callback_at") @db.Timestamptz(6)
+  callbackAt     DateTime?        @map("callback_at") @db.Timestamptz(6)
   /// When the lead asked to be texted ("message me in 10 minutes"); nothing else contacts them before it. Cleared if it is cancelled or dropped; kept once sent.
-  textBackAt      DateTime?        @map("text_back_at") @db.Timestamptz(6)
+  textBackAt     DateTime?        @map("text_back_at") @db.Timestamptz(6)
   temperature    LeadTemperature? @default(cold)
-  score           Decimal?         @db.Decimal(5, 2)
-  aiSummary       String?          @map("ai_summary")
-  lostReason      String?          @map("lost_reason") @db.VarChar(255)
+  score          Decimal?         @db.Decimal(5, 2)
+  aiSummary      String?          @map("ai_summary")
+  lostReason     String?          @map("lost_reason") @db.VarChar(255)
 
-  buyingIntent    String?  @map("buying_intent") @db.VarChar(100)
-  timeline        String?  @db.VarChar(100)
-  minBudget       Decimal? @map("min_budget") @db.Decimal(12, 2)
-  maxBudget       Decimal? @map("max_budget") @db.Decimal(12, 2)
-  financingStatus String?  @map("financing_status") @db.VarChar(100)
-  location        String?  @db.VarChar(255)
-  bedrooms        Int?
-  motivation      String?
-  utmSource       String?  @map("utm_source") @db.VarChar(255)
-  utmMedium       String?  @map("utm_medium") @db.VarChar(255)
-  utmCampaign     String?  @map("utm_campaign") @db.VarChar(255)
-  customFields    Json     @default("{}") @map("custom_fields")
+  buyingIntent         String?   @map("buying_intent") @db.VarChar(100)
+  timeline             String?   @db.VarChar(100)
+  minBudget            Decimal?  @map("min_budget") @db.Decimal(12, 2)
+  maxBudget            Decimal?  @map("max_budget") @db.Decimal(12, 2)
+  financingStatus      String?   @map("financing_status") @db.VarChar(100)
+  location             String?   @db.VarChar(255)
+  bedrooms             Int?
+  motivation           String?
+  utmSource            String?   @map("utm_source") @db.VarChar(255)
+  utmMedium            String?   @map("utm_medium") @db.VarChar(255)
+  utmCampaign          String?   @map("utm_campaign") @db.VarChar(255)
+  customFields         Json      @default("{}") @map("custom_fields")
   /// Answers to the org's custom qualification questions: key -> { value, at, source, refId? }. Overwritten, never appended.
   qualificationAnswers Json      @default("{}") @map("qualification_answers")
   /// A short note of what the lead said across calls and texts that no question covers. Rewritten after each conversation.
@@ -65,6 +65,11 @@ model Lead {
   submissionCount  Int       @default(1) @map("submission_count")
   lastSubmissionAt DateTime? @map("last_submission_at") @db.Timestamptz(6)
 
+  /// Set when this lead was merged into another (LeadMergeService). A merged lead is kept for undo and history,
+  /// but is hidden from every list, lookup and automation: everything about the person lives on mergedInto.
+  mergedIntoId String?   @map("merged_into_id") @db.Uuid
+  mergedAt     DateTime? @map("merged_at") @db.Timestamptz(6)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -81,6 +86,11 @@ model Lead {
   callTransfers   CallTransfer[]
   outreachItems   OutreachBatchLead[]
   events          LeadEvent[]
+  mergedInto      Lead?                @relation("LeadMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedLeads     Lead[]               @relation("LeadMergedInto")
+  submissions     LeadSubmission[]
+  duplicatesAsA   DuplicateCandidate[] @relation("DuplicateLeadA")
+  duplicatesAsB   DuplicateCandidate[] @relation("DuplicateLeadB")
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])
@@ -89,6 +99,7 @@ model Lead {
   @@index([orgId, normalizedEmail])
   @@index([orgId, assignedToId])
   @@index([leadSourceId])
+  @@index([orgId, mergedIntoId])
   @@map("leads")
 }
 
@@ -119,26 +130,26 @@ model Message {
 }
 
 model Call {
-  id               String     @id @default(uuid(7)) @db.Uuid
-  orgId            String     @map("organization_id") @db.Uuid
-  leadId           String     @map("lead_id") @db.Uuid
-  provider         String     @default("telnyx") @db.VarChar(30)
-  providerCallId   String?    @map("provider_call_id") @db.VarChar(255)
-  direction        String     @default("outbound") @db.VarChar(10)
-  status           CallStatus @default(queued)
-  startedAt        DateTime?  @map("started_at") @db.Timestamptz(6)
-  endedAt          DateTime?  @map("ended_at") @db.Timestamptz(6)
-  durationSeconds  Int?       @map("duration_seconds")
-  recordingUrl     String?    @map("recording_url")
+  id               String           @id @default(uuid(7)) @db.Uuid
+  orgId            String           @map("organization_id") @db.Uuid
+  leadId           String           @map("lead_id") @db.Uuid
+  provider         String           @default("telnyx") @db.VarChar(30)
+  providerCallId   String?          @map("provider_call_id") @db.VarChar(255)
+  direction        String           @default("outbound") @db.VarChar(10)
+  status           CallStatus       @default(queued)
+  startedAt        DateTime?        @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime?        @map("ended_at") @db.Timestamptz(6)
+  durationSeconds  Int?             @map("duration_seconds")
+  recordingUrl     String?          @map("recording_url")
   transcript       String?
-  aiSummary        String?    @map("ai_summary")
-  extractedIntel   Json?      @map("extracted_intel")
-  handoffRequested Boolean    @default(false) @map("handoff_requested")
-  dncDetected      Boolean    @default(false) @map("dnc_detected")
+  aiSummary        String?          @map("ai_summary")
+  extractedIntel   Json?            @map("extracted_intel")
+  handoffRequested Boolean          @default(false) @map("handoff_requested")
+  dncDetected      Boolean          @default(false) @map("dnc_detected")
   /// How the call ended for the lead; set at hangup (or when the dial fails).
   disposition      CallDisposition?
-  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -212,4 +223,82 @@ model AuditLog {
   @@index([orgId, createdAt(sort: Desc)])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+/// One row per time a person reached the org: every form, webhook, import row or manual entry, including the
+/// ones that matched an existing lead and were attached to it instead of creating a new one. The isOriginal row
+/// is the source the lead first came from; a merge moves the other lead's rows here too.
+model LeadSubmission {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  orgId            String   @map("organization_id") @db.Uuid
+  leadId           String   @map("lead_id") @db.Uuid
+  leadSourceId     String?  @map("lead_source_id") @db.Uuid
+  /// webhook, manual, import, crm, sms, backfill
+  channel          String   @db.VarChar(20)
+  ingestEventId    String?  @map("ingest_event_id") @db.Uuid
+  sheetImportRowId String?  @map("sheet_import_row_id") @db.Uuid
+  /// What matched it to an existing lead: phone or email. Null when it created the lead.
+  matchedBy        String?  @map("matched_by") @db.VarChar(10)
+  isOriginal       Boolean  @default(false) @map("is_original")
+  /// The mapped values this submission carried, for the lead's source history.
+  values           Json     @default("{}")
+  submittedAt      DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadSource   LeadSource?  @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, submittedAt])
+  @@index([orgId, leadSourceId])
+  @@map("lead_submissions")
+}
+
+/// A merge of mergedId into survivorId, with everything needed to undo it: the survivor's fields before, the
+/// child rows moved (by table) and the rows dropped or stopped because both leads had one.
+model LeadMerge {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  orgId          String    @map("organization_id") @db.Uuid
+  survivorId     String    @map("survivor_id") @db.Uuid
+  mergedId       String    @map("merged_id") @db.Uuid
+  actorType      ActorType @map("actor_type")
+  actorId        String?   @map("actor_id") @db.Uuid
+  reasons        String[]  @default([])
+  survivorBefore Json      @map("survivor_before")
+  movedRows      Json      @map("moved_rows")
+  removedRows    Json      @default("{}") @map("removed_rows")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  undoneAt       DateTime? @map("undone_at") @db.Timestamptz(6)
+  undoneById     String?   @map("undone_by_id") @db.Uuid
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([survivorId, createdAt(sort: Desc)])
+  @@index([mergedId])
+  @@map("lead_merges")
+}
+
+/// Two leads that look like the same person, waiting for someone to merge or dismiss them.
+/// leadAId < leadBId, so a pair has one row and a dismissed pair is never suggested again.
+model DuplicateCandidate {
+  id           String                   @id @default(uuid(7)) @db.Uuid
+  orgId        String                   @map("organization_id") @db.Uuid
+  leadAId      String                   @map("lead_a_id") @db.Uuid
+  leadBId      String                   @map("lead_b_id") @db.Uuid
+  score        Int
+  reasons      String[]                 @default([])
+  status       DuplicateCandidateStatus @default(open)
+  resolvedById String?                  @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?                @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadA        Lead         @relation("DuplicateLeadA", fields: [leadAId], references: [id], onDelete: Cascade)
+  leadB        Lead         @relation("DuplicateLeadB", fields: [leadBId], references: [id], onDelete: Cascade)
+
+  @@unique([leadAId, leadBId])
+  @@index([orgId, status, score(sort: Desc)])
+  @@index([leadBId])
+  @@map("duplicate_candidates")
 }

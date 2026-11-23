@@ -1,5 +1,6 @@
 import { Injectable, Logger, type RawBodyRequest } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { survivorOf } from '@/lead/duplicates/merged-redirect';
 import type { Request } from 'express';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
@@ -128,11 +129,18 @@ export class AssistantToolAuth {
 
     const phone = normalizePhone(filled(req.endUser));
     if (!phone) return null;
-    const leads = await this.prisma.lead.findMany({ where: { normalizedPhone: phone }, orderBy: { createdAt: 'desc' }, take: 20, select });
+    // Live leads only: a merged lead's number is resolved to its survivor once the org is known (below).
+    const leads = await this.prisma.lead.findMany({ where: { normalizedPhone: phone }, orderBy: { createdAt: 'desc' }, take: 20, select: { ...select, mergedIntoId: true } });
     const hash = sha256Hex(token);
     for (const orgId of [...new Set(leads.map((l) => l.orgId))]) {
       const own = await hashFor(orgId);
-      if (own && safeEqual(hash, own)) return leads.find((l) => l.orgId === orgId) ?? null;
+      if (own && safeEqual(hash, own)) {
+        const mine = leads.filter((l) => l.orgId === orgId);
+        const hit = mine.find((l) => !l.mergedIntoId) ?? mine[0];
+        if (!hit?.mergedIntoId) return hit ? { id: hit.id, orgId: hit.orgId, normalizedPhone: hit.normalizedPhone } : null;
+        const survivor = await survivorOf(this.prisma, hit.id);
+        return survivor ? this.prisma.lead.findUnique({ where: { id: survivor }, select }) : null;
+      }
     }
     return null;
   }

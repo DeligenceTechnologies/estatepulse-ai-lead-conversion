@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { messageFor, type OrganizationType } from '../../lib/api';
 import type { CheckEmailState } from './CheckEmailPage';
 import { TimezoneSelect } from '../common/TimezoneSelect';
-import { AuthLayout, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton, inputClass } from './AuthLayout';
+import { AuthLayout, Checkbox, Field, FormError, MIN_PASSWORD_LENGTH, PasswordField, SubmitButton, inputClass } from './AuthLayout';
 import { Button, IconButton } from '../common/Button';
 
 /** Offered first: the leads EstatePulse calls are in North America. The owner changes it here or later in Settings. */
@@ -50,6 +50,7 @@ export const SignupPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -265,6 +266,28 @@ export const SignupPage: React.FC = () => {
             required
             maxLength={128}
             error={mismatch ? 'Passwords do not match.' : null}
+          />
+          {/* Required, so the browser stops the submit and points at the box.
+              The links open new tabs: reading either one must not throw away
+              the filled-in form. The tick is not sent to the server. */}
+          <Checkbox
+            checked={agreed}
+            onChange={setAgreed}
+            disabled={busy}
+            required
+            label={
+              <>
+                I have read and agree to the{' '}
+                <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 font-medium">
+                  Terms & Conditions
+                </Link>{' '}
+                and{' '}
+                <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 font-medium">
+                  Privacy Policy
+                </Link>
+                .
+              </>
+            }
           />
           <div className="flex gap-2">
             <IconButton

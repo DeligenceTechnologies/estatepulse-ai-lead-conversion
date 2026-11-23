@@ -130,10 +130,10 @@ const sourceIcon = (l: LiveLead): LucideIcon => {
  */
 const attentionReasons = (l: LiveLead): string[] => [
   ...(l.needsReview ? l.reviewReasons : []),
-  // Submissions are not folded into one lead — a public form is filled in by
-  // different people — so a repeated contact is surfaced and a human decides.
+  // A known phone or email is attached to its lead on arrival; what is left sharing one (older leads, a
+  // phone that is one lead's and an email that is another's) waits on the Duplicates screen to be merged.
   ...(l.contactLeadCount > 1
-    ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email. Each submission is kept as its own lead — check the others before calling.`]
+    ? [`${l.contactLeadCount} leads in your pipeline share this phone number or email — review them under Leads → Duplicates to merge them into one.`]
     : []),
   // Such a lead must never be auto-dialed. Only said here when the lead carries no warning of
   // its own about the number — otherwise this is the same news twice.
@@ -170,7 +170,7 @@ const temperatureTone = (t: string | null) => {
  * table never renders from this shape: `budgetMin: 0` cannot be told apart from
  * a lead that genuinely has no budget yet.
  */
-const toLead = (l: LiveLead): Lead => ({
+export const toLead = (l: LiveLead): Lead => ({
   id: l.id,
   organizationId: 'live',
   assignedAgentId: l.assignedAgent?.id ?? '',

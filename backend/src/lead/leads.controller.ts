@@ -271,7 +271,17 @@ export class LeadsController {
       where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW } as Prisma.LeadWhereInput,
       select: LEAD_FIELDS,
     });
-    if (!lead) throw new AppError('NOT_FOUND', 'No such lead');
+    if (!lead) {
+      // Merged into another lead: say where the person lives now, so an open screen can follow them.
+      const merged = await this.prisma.lead.findFirst({
+        where: { id: leadId, orgId: auth.organizationId, mergedIntoId: { not: null } },
+        select: { mergedIntoId: true },
+      });
+      if (merged?.mergedIntoId) {
+        throw new AppError('LEAD_MERGED', 'This lead was merged into another lead.', [{ path: 'mergedIntoId', message: merged.mergedIntoId }], 409);
+      }
+      throw new AppError('NOT_FOUND', 'No such lead');
+    }
     const [counts, outreach] = await Promise.all([
       this.contactLeadCounts(auth.organizationId, [lead]),
       this.outreachEntries(auth.organizationId, [lead.id]),
@@ -323,10 +333,10 @@ export class LeadsController {
     const emails = [...new Set(rows.filter((r) => !r.normalizedPhone).map((r) => r.normalizedEmail).filter((e): e is string => !!e))];
     const [byPhone, byEmail] = await Promise.all([
       phones.length
-        ? this.prisma.lead.groupBy({ by: ['normalizedPhone'], where: { orgId, normalizedPhone: { in: phones } }, _count: { _all: true } })
+        ? this.prisma.lead.groupBy({ by: ['normalizedPhone'], where: { orgId, mergedIntoId: null, normalizedPhone: { in: phones } }, _count: { _all: true } })
         : [],
       emails.length
-        ? this.prisma.lead.groupBy({ by: ['normalizedEmail'], where: { orgId, normalizedEmail: { in: emails } }, _count: { _all: true } })
+        ? this.prisma.lead.groupBy({ by: ['normalizedEmail'], where: { orgId, mergedIntoId: null, normalizedEmail: { in: emails } }, _count: { _all: true } })
         : [],
     ]);
     const phoneCount = new Map(byPhone.map((g) => [g.normalizedPhone, g._count._all]));
