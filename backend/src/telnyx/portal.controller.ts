@@ -20,7 +20,7 @@ import { LeadScoringService } from './lead-scoring.service';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
 
-const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
+export const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
 
 const OUTCOME_LABELS: Partial<Record<LeadStatus, string>> = {
   interested: 'Interested',
@@ -292,6 +292,10 @@ export class PortalLeadsController {
   async enroll(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     const lead = await this.prisma.lead.findFirst({ where: { id, orgId: auth.organizationId }, select: { id: true } });
     if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
+    // Started by hand, so the person is told why nothing would happen, rather than the lead quietly waiting.
+    if (!(await this.engine.canReachLeads(auth.organizationId))) {
+      throw new AppError('CONFLICT', 'Connect a phone number in AI Settings before starting outreach.');
+    }
     await this.engine.enroll(auth.organizationId, id);
     return { ok: true };
   }

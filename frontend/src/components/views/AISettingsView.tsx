@@ -69,6 +69,7 @@ import { CallToolsCard } from './CallToolsCard';
 import { LiveTransferCard } from './LiveTransferCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
 import { BusinessDetailsCard } from './BusinessDetailsCard';
+import { KnowledgeCard } from './KnowledgeCard';
 import { ToolEditorModal } from '../modals/ToolEditorModal';
 import { formatDate } from '../../lib/datetime';
 import { Button, IconButton } from '../common/Button';
@@ -94,6 +95,7 @@ const HASH_TAB: Record<string, TabId> = {
   'call-pacing': 'outreach',
   'qualification-questions': 'qualify',
   voicemail: 'voice',
+  knowledge: 'data',
 };
 
 /** A tab's heading: what this section is for, in one line. */
@@ -204,6 +206,28 @@ export const AISettingsView: React.FC = () => {
   // Prompt helpers
   const promptRef = React.useRef<HTMLTextAreaElement>(null);
 
+  /** The prompt as it was last read from the assistant, to tell an owner's unsaved typing from a stale copy. */
+  const loadedPrompt = useRef<string | null>(null);
+
+  /**
+   * A knowledge change rewrites the assistant's prompt section and can attach
+   * its knowledge base tool, so the copies held here are re-read. The prompt
+   * box is left alone if the owner has typed in it since it was loaded: the
+   * server keeps the knowledge section on their next save either way. The tool
+   * list is always refreshed, because saving a stale one would detach the
+   * knowledge base.
+   */
+  const refreshAfterKnowledge = () => {
+    getAssistant()
+      .then((a) => {
+        const next = stripTone(a.instructions);
+        setSystemPrompt((current) => (current === loadedPrompt.current ? next : current));
+        loadedPrompt.current = next;
+        setTools(a.tools || []);
+      })
+      .catch(() => undefined);
+  };
+
   // On mount, pull the live agent config so the UI reflects reality.
   const loadAgent = () => {
     setAgentLoading(true);
@@ -211,7 +235,8 @@ export const AISettingsView: React.FC = () => {
     getAssistant()
       .then((a) => {
         setAssistantName(a.name);
-        setSystemPrompt(stripTone(a.instructions));
+        loadedPrompt.current = stripTone(a.instructions);
+        setSystemPrompt(loadedPrompt.current);
         const t = extractTone(a.instructions);
         if (t) setTone(t as typeof tone);
         setGreeting(a.greeting);
@@ -1210,6 +1235,10 @@ export const AISettingsView: React.FC = () => {
             <span className="text-slate-300 font-mono"> /api/leads/&#123;&#123;leadId&#125;&#125;/qualified</span>, so the agent reports
             hot/warm/cold and hands the lead off by itself.
           </p>
+        </div>
+
+        <div id="knowledge" className="scroll-mt-24">
+          <KnowledgeCard onChanged={refreshAfterKnowledge} />
         </div>
 
         {/* Dynamic Variables */}

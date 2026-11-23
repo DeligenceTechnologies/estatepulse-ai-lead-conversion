@@ -64,6 +64,8 @@ model OrganizationSetting {
   chatTakeover           Json?   @map("chat_takeover")
   /// Who the organization is in its texts ({ legalName, mailingAddress, email, website }); CASL wants the address for Canadian leads. Unset is all empty.
   businessDetails        Json?   @map("business_details")
+  /// The business facts the AI answers a lead's questions from ([{ title, body }], e.g. areas served, commission); NULL means none entered.
+  knowledge             Json?   @map("knowledge")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots      Int     @default(1) @map("reserved_call_slots")
   /// The owners' end-of-day summary email.

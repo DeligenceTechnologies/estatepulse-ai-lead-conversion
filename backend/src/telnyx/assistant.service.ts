@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { withBookingSection } from '@/calendar/booking/booking-prompt';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { knowledgeEntries, withKnowledgeSection } from './knowledge';
 import { memoryVariables, qualificationSection, withQualificationSection } from './qualification';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { SmsConversationService } from './sms/sms-conversation.service';
@@ -13,6 +14,13 @@ import { callToolsSettings, withCallToolsSection } from './tools/call-tools';
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
 
 const authHeaders = (apiKey: string) => ({ Authorization: `Bearer ${apiKey}` });
+
+/** How many matching passages a new knowledge base hands the assistant per question; Telnyx's own default. */
+const RETRIEVAL_RESULTS = 3;
+
+/** The assistant's knowledge base tool, if it has one. Telnyx allows one per assistant. */
+const retrievalTool = (assistant: any): any | undefined =>
+  ((assistant?.tools ?? []) as any[]).find((t) => t?.type === 'retrieval' && t?.retrieval?.bucket_ids?.length);
 
 function shape(a: any) {
   const vs = a.voice_settings ?? {};
@@ -138,6 +146,9 @@ export class AssistantService {
 
   private readonly hangupReady = new Set<string>();
   private readonly hangupInflight = new Map<string, Promise<void>>();
+  /** Assistants whose knowledge section is already level, so a busy chat does not re-read the prompt from Telnyx per message. */
+  private readonly knowledgeReady = new Set<string>();
+  private readonly knowledgeInflight = new Map<string, Promise<void>>();
   /** The assistant's voice and greeting, read once per VOICE_CACHE_MS; a form save clears it. */
   private readonly voices = new Map<string, { voice: string | null; greeting: string | null; until: number }>();
 
@@ -202,6 +213,53 @@ export class AssistantService {
     return tools.telnyx ? withCallToolsSection(instructions, tools.enabled) : instructions;
   }
 
+  /**
+   * The org's business facts, written into the prompt. A settings row that
+   * cannot be read leaves the prompt exactly as it is: treating an unreadable
+   * row as "no knowledge" would silently delete the section the owner saved.
+   * A row that reads back as absent or empty does mean no knowledge, and the
+   * section is removed.
+   */
+  private async keepKnowledgeSection(orgId: string, instructions: string, documents = false): Promise<string> {
+    const row = await this.prisma.organizationSetting
+      .findUnique({ where: { orgId }, select: { knowledge: true } })
+      .catch(() => undefined);
+    if (row === undefined) return instructions;
+    return withKnowledgeSection(String(instructions), knowledgeEntries(row?.knowledge ?? null), { documents });
+  }
+
+  /**
+   * The assistant's knowledge base: the Telnyx bucket its `retrieval` tool
+   * searches. One made in the Telnyx portal is read the same way. `shared`
+   * marks one attached from the Telnyx tools library, which only Telnyx's own
+   * portal can change.
+   */
+  async retrieval(orgId: string): Promise<{ bucket: string; shared: boolean } | null> {
+    const tool = retrievalTool(await this.fetchRaw(orgId));
+    return tool ? { bucket: String(tool.retrieval.bucket_ids[0]), shared: Boolean(tool.shared) } : null;
+  }
+
+  /**
+   * Points the assistant at a knowledge base, replacing the one it has. Every
+   * other tool is sent back as it was, a result count set in the Telnyx portal
+   * is kept, and the prompt's knowledge section is rewritten so the assistant
+   * is told to search.
+   */
+  async setRetrieval(orgId: string, bucket: string): Promise<void> {
+    const cur = await this.fetchRaw(orgId);
+    const existing = retrievalTool(cur);
+    const kept = Number(existing?.retrieval?.max_num_results);
+    const maxResults = Number.isFinite(kept) && kept > 0 ? kept : RETRIEVAL_RESULTS;
+    if (existing?.shared) {
+      throw new AppError('CONFLICT', 'This assistant\'s knowledge base is a shared Telnyx tool. Change it in the Telnyx portal.');
+    }
+    const others = ((cur.tools ?? []) as any[]).filter((t) => !t?.shared && t?.type !== 'retrieval');
+    await this.setTools(orgId, [...others, { type: 'retrieval', retrieval: { bucket_ids: [bucket], max_num_results: maxResults } }]);
+    // The save stands if the prompt cannot be written now: syncKnowledge has
+    // cleared the memos, so the next call or text writes it.
+    await this.syncKnowledge(orgId).catch(() => undefined);
+  }
+
   private async keepBookingSection(orgId: string, instructions: string): Promise<string> {
     const settings = await this.prisma.organizationSetting
       .findUnique({ where: { orgId }, select: { inCallBooking: true } })
@@ -236,7 +294,8 @@ export class AssistantService {
     const texting = await this.conversations.isEnabled(orgId);
     const body: any = {};
     if (patch.instructions != null) {
-      const withBooking = await this.keepBookingSection(orgId, withQualificationSection(String(patch.instructions)));
+      const withKnowledge = await this.keepKnowledgeSection(orgId, String(patch.instructions), Boolean(retrievalTool(cur)));
+      const withBooking = await this.keepBookingSection(orgId, withQualificationSection(withKnowledge));
       const withTexting = texting ? withSmsSection(withBooking) : withBooking;
       body.instructions = await this.keepCallToolsSection(orgId, withTexting);
     }
@@ -410,6 +469,17 @@ export class AssistantService {
         this.logger.log(`assistant ${c.assistantId} now names the brokerage and says it is an AI`);
       }
       await this.syncQualification(orgId, cur);
+      // No `cur` here on purpose: syncQualification may have just rewritten the
+      // prompt, so the copy fetched above is stale and writing from it would
+      // drop the qualification section again. A knowledge sync that fails is
+      // logged and stepped over: turning the assistant's own recording and
+      // voicemail handling off below matters more than a prompt section, and
+      // the next call will try again.
+      // syncKnowledge logs its own outcome, with timings.
+      let knowledgeSynced = true;
+      await this.syncKnowledge(orgId).catch(() => {
+        knowledgeSynced = false;
+      });
       const ts = cur.telephony_settings ?? {};
       if (ts.recording_settings?.enabled || ts.voicemail_detection) {
         const res = await fetch(`${BASE}/${c.assistantId}`, {
@@ -426,7 +496,11 @@ export class AssistantService {
         if (!res.ok) throw new Error(`turning off the assistant's own recording or voicemail handling failed ${res.status}: ${await res.text()}`);
         this.logger.log(`assistant ${c.assistantId} no longer records or handles voicemail on its own; the call's settings cover both`);
       }
-      this.hangupReady.add(key);
+      // ponytail: setup is only memoized once the knowledge section is level
+      // too, so a failed sync is retried on the next call. While Telnyx is
+      // failing that repeats the (idempotent) setup checks once per call; if
+      // that ever costs too much, memoize the other steps separately.
+      if (knowledgeSynced) this.hangupReady.add(key);
     })()
       .catch((e) => this.logger.warn(`assistant call setup for org ${orgId}: ${(e as Error).message}`))
       .finally(() => this.hangupInflight.delete(key));
@@ -458,6 +532,91 @@ export class AssistantService {
     });
     if (!res.ok) throw new Error(`qualification prompt update failed ${res.status}: ${await res.text()}`);
     this.logger.log(`qualification questions synced to assistant ${c.assistantId}`);
+  }
+
+  /**
+   * Knowledge brought level for an organization that may never place an
+   * outbound call: an inbound-SMS-only org never reaches `ensureCallSetup`, so
+   * without this a failed save would never be retried.
+   *
+   * Memoized per assistant, so a busy chat costs one Telnyx read per process
+   * rather than one per message, and never blocks: callers fire and forget.
+   * `syncKnowledge` clears the memo when it fails, so the next text retries.
+   */
+  async ensureKnowledge(orgId: string): Promise<void> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return;
+    const key = `${orgId}:${c.assistantId}`;
+    if (this.knowledgeReady.has(key)) return;
+    const running = this.knowledgeInflight.get(key);
+    if (running) return running;
+    // syncKnowledge logs the outcome itself; swallowed here so a caller on the
+    // texting path never fails because of it.
+    const run = this.syncKnowledge(orgId)
+      .catch(() => undefined)
+      .finally(() => this.knowledgeInflight.delete(key));
+    this.knowledgeInflight.set(key, run);
+    return run;
+  }
+
+  /**
+   * The managed knowledge section, brought level with what the org has saved.
+   * Unlike the qualification section the content differs per organization, so
+   * the check is "is the prompt already what it should be", not "is the section
+   * present". Telnyx answers texts with these same instructions, so one write
+   * covers calls and chats.
+   */
+  async syncKnowledge(orgId: string, current?: any): Promise<void> {
+    const c = await this.creds.getCreds(orgId).catch(() => null);
+    if (!c?.apiKey || !c.assistantId) return;
+    const key = `${orgId}:${c.assistantId}`;
+    const startedAt = Date.now();
+    let entryCount = -1;
+    try {
+      const cur = current ?? (await this.fetchRaw(orgId));
+      const instructions = cur?.instructions;
+      // A prompt we could not read is never written over: coercing it to '' would
+      // replace the owner's instructions with nothing but the managed section.
+      if (typeof instructions !== 'string') {
+        throw new AppError('UPSTREAM_ERROR', 'Could not read the assistant prompt from Telnyx; it was left unchanged.');
+      }
+      const row = await this.prisma.organizationSetting
+        .findUnique({ where: { orgId }, select: { knowledge: true } })
+        .catch(() => undefined);
+      if (row === undefined) {
+        throw new AppError('UPSTREAM_ERROR', 'Could not read the saved knowledge; the assistant was left unchanged.');
+      }
+      const entries = knowledgeEntries(row?.knowledge ?? null);
+      entryCount = entries.length;
+      const next = withKnowledgeSection(instructions, entries, { documents: Boolean(retrievalTool(cur)) });
+      if (next === instructions) {
+        this.knowledgeReady.add(key);
+        return;
+      }
+      const res = await fetch(`${BASE}/${c.assistantId}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: next }),
+      });
+      if (!res.ok) throw new Error(`knowledge prompt update failed ${res.status}: ${await res.text()}`);
+      this.knowledgeReady.add(key);
+      this.logger.log(
+        `knowledge synced to assistant ${c.assistantId}: ok, ${entryCount} entries, ${next.length} prompt chars, ${Date.now() - startedAt}ms`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `knowledge sync to assistant ${c.assistantId}: failed after ${Date.now() - startedAt}ms` +
+          `${entryCount >= 0 ? ` (${entryCount} entries)` : ''} — ${(error as Error).message}`,
+      );
+      // The saved facts and the assistant's prompt are now out of step. Clear
+      // both memos, the way setTools clears the call-setup one, so the next
+      // outbound call AND the next inbound text retry — otherwise a failed save
+      // would leave a stale prompt until the process restarts, and the "it will
+      // be updated before the next call" message the owner sees would not be true.
+      this.knowledgeReady.delete(key);
+      this.hangupReady.delete(key);
+      throw error;
+    }
   }
 
   /** The memory variables for a lead we know nothing about: every question open. */
@@ -517,11 +676,16 @@ export class AssistantService {
     }
     let lastErr = 'AI agent create failed';
     const greeting = withoutRecordingNotice(overrides.greeting || DEFAULT_TEMPLATE.greeting);
+    // Built once, not per model attempt: an org that already saved its facts
+    // and is recreating its assistant gets them on the new one straight away.
+    const instructions = withQualificationSection(
+      await this.keepKnowledgeSection(orgId, overrides.instructions || DEFAULT_TEMPLATE.instructions),
+    );
     for (const model of candidates) {
       const body = {
         name: overrides.name || DEFAULT_TEMPLATE.name,
         model,
-        instructions: withQualificationSection(overrides.instructions || DEFAULT_TEMPLATE.instructions),
+        instructions,
         dynamic_variables: await this.memoryDefaults(orgId),
         greeting,
         tools: [HANGUP_TOOL],

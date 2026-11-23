@@ -230,7 +230,10 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                 />
               </div>
               {!respect && (
-                <p className="text-2xs font-semibold text-rose-300">Off: texts and calls can go out at any hour.</p>
+                <p className="text-2xs font-semibold text-rose-300">
+                  Off: your quiet hours are not applied. Legal calling hours still are, and where no law applies,
+                  08:00–21:00 on the lead&apos;s clock.
+                </p>
               )}
             </Tile>
 
@@ -318,7 +321,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
             <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              Legal calling hours and do-not-contact always apply.
+              Legal calling hours (08:00–21:00 on the lead's clock where no law applies) and do-not-contact always apply.
             </p>
             <Button size="sm" onClick={() => void save()} disabled={!valid} loading={saving}>
               {saving ? 'Saving…' : 'Save'}

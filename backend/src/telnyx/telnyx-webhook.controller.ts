@@ -9,6 +9,7 @@ import { callIntent } from './calls/call.types';
 import { InboundSmsService } from './inbound-sms.service';
 import { LeadScoringService } from './lead-scoring.service';
 import { normalizePhone } from './phone';
+import { VARIABLES_TIMEOUT_MS } from './sms/sms-conversation.service';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { CallbackService } from './tools/callback.service';
 import { TransferLegs } from './transfer-legs';
@@ -19,6 +20,9 @@ import { TransferLegs } from './transfer-legs';
  * Every event must carry a valid Telnyx signature for the account's saved
  * public key, or it is ignored.
  */
+/** Half the assistant's budget: past this the next slow query would lose the lead's details entirely. */
+const SLOW_VARIABLES_MS = Math.floor(VARIABLES_TIMEOUT_MS / 2);
+
 @Public()
 @Controller('webhooks/telnyx')
 export class TelnyxWebhookController {
@@ -117,6 +121,12 @@ export class TelnyxWebhookController {
     @Req() req: RawBodyRequest<Request>,
   ): Promise<{ dynamic_variables?: Record<string, string>; conversation?: { metadata: { ai_disabled: true } } }> {
     const p = body?.data?.payload ?? {};
+    // Telnyx waits on this before the assistant speaks or texts, so it is the
+    // one EstatePulse path on a conversation's critical path. Nothing here
+    // changes what is returned; it only records how long it took.
+    const startedAt = Date.now();
+    const ms = () => Date.now() - startedAt;
+    const convo = typeof p.telnyx_conversation_id === 'string' && p.telnyx_conversation_id ? ` conversation ${p.telnyx_conversation_id}` : '';
     try {
       let orgId: string | null = null;
       let leadId: string | null = null;
@@ -141,12 +151,17 @@ export class TelnyxWebhookController {
       }
       const channel = String(p.telnyx_conversation_channel ?? 'unknown');
       if (!orgId || !leadId) {
-        this.logger.warn(`assistant variables (${channel}): no lead for ${JSON.stringify({ keys: Object.keys(body?.data ?? body ?? {}), to: p.telnyx_end_user_target, from: p.telnyx_agent_target })}`);
+        this.logger.warn(`assistant variables (${channel})${convo}: no lead for ${JSON.stringify({ keys: Object.keys(body?.data ?? body ?? {}), to: p.telnyx_end_user_target, from: p.telnyx_agent_target })} after ${ms()}ms`);
         return {};
       }
       if (!(await this.signedFor(orgId, this.delivery(req), fromOurCall))) return {};
-      this.logger.log(`assistant variables (${channel}) for lead ${leadId}`);
       const variables = await this.activity.leadVariables(orgId, leadId);
+      const elapsed = ms();
+      // Ids and timing only — never a variable's value, which carries the
+      // lead's name, phone and the text being replied to.
+      const line = `assistant variables (${channel})${convo} for org ${orgId} lead ${leadId} in ${elapsed}ms`;
+      if (elapsed >= SLOW_VARIABLES_MS) this.logger.warn(`${line} — slow, the assistant gives up at ${VARIABLES_TIMEOUT_MS}ms`);
+      else this.logger.log(line);
       // On a call, the call's own context was given when the assistant started; an empty one here must not replace it.
       if (ccid) delete variables.call_context;
       // The prompt reads the chat log only on a call that follows texting, and the text being
@@ -156,7 +171,7 @@ export class TelnyxWebhookController {
       if (channel !== 'sms_chat') variables.last_outbound_sms = '';
       return { dynamic_variables: variables, ...(aiPaused ? { conversation: { metadata: { ai_disabled: true as const } } } : {}) };
     } catch (error) {
-      this.logger.error(`assistant variables (${p.telnyx_conversation_channel}): ${(error as Error).message}`);
+      this.logger.error(`assistant variables (${p.telnyx_conversation_channel})${convo}: failed after ${ms()}ms — ${(error as Error).message}`);
       return {};
     }
   }
