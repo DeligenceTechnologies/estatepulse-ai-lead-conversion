@@ -142,17 +142,21 @@ const FieldNote: React.FC<{ hint?: string; error?: string | null }> = ({ hint, e
   ) : null;
 
 export const Checkbox: React.FC<{
-  label: string;
+  /** Text, or text with links in it. */
+  label: React.ReactNode;
   hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
-}> = ({ label, hint, checked, onChange, disabled }) => (
+  /** The form will not submit until the box is ticked. */
+  required?: boolean;
+}> = ({ label, hint, checked, onChange, disabled, required }) => (
   <label className="flex items-start gap-2.5 cursor-pointer select-none">
     <input
       type="checkbox"
       checked={checked}
       disabled={disabled}
+      required={required}
       onChange={(e) => onChange(e.target.checked)}
       className="mt-0.5 w-4 h-4 rounded border-slate-700 bg-slate-950 accent-emerald-600 cursor-pointer"
     />
