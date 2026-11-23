@@ -36,6 +36,9 @@ export const STEP_RETRY_MAX_MS = 5 * 60_000;
 export const MAX_STEP_FAILURES = 5;
 /** The review flag on a lead whose strategy was parked because a step kept failing. */
 export const STEP_FAILED_REVIEW = 'Outreach stopped: a strategy step kept failing';
+/** A step held this long for a time zone nobody sets is handed to a person instead of re-checked forever. */
+const TZ_HOLD_MAX_MS = 3 * 24 * 60 * 60_000;
+export const ZONE_HELD_REVIEW = 'Outreach paused: the lead has no usable time zone';
 
 const OPEN_CALL: CallStatus[] = [CallStatus.queued, CallStatus.ringing, CallStatus.in_progress];
 
@@ -105,6 +108,8 @@ interface Enrollment {
   queue: StrategyStep[];
   /** Holds already logged, by step and reason, so a step re-checked every 30 s logs its hold once. */
   held: Set<string>;
+  /** When this lead's step was first held for a missing zone; cleared once the gate lets it through. Starts again after a restart. */
+  zoneHeldSince?: number;
   /** The step run last was skipped, so a condition on the next one has nothing to check. */
   previousSkipped: boolean;
   /** Steps whose text or call has gone out (or was being sent): a retry after an error never sends one twice. */
@@ -421,11 +426,14 @@ export class EngineService implements OnModuleDestroy {
     const zone = leadZone(lead);
     const window = nextLeadContactAt(zone, { quiet, skipDays: skipDaysOf(guardrails?.skipDays) }, new Date(now));
     if (!window.allowedAt) {
+      e.zoneHeldSince ??= now;
+      if (now - e.zoneHeldSince >= TZ_HOLD_MAX_MS) return this.parkForZone(e, window.reason);
       const first = hold(window.reason);
       this.logger[first ? 'log' : 'debug'](gateLine(e.orgId, e.leadId, zone, window, 'held'));
       this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), TZ_RECHECK_MS);
       return;
     }
+    e.zoneHeldSince = undefined;
     if (window.allowedAt.getTime() > now) {
       hold(`Waiting for the lead's contact window: ${window.reason}`);
       this.logger.log(gateLine(e.orgId, e.leadId, zone, window, 'deferred'));
@@ -682,6 +690,38 @@ export class EngineService implements OnModuleDestroy {
       await this.enrolOnFollowUp(e.orgId, e.leadId);
     } catch (err) {
       this.logger.error(`lead ${e.leadId}: could not park it either: ${(err as Error).message}`);
+    } finally {
+      this.stop(e);
+    }
+  }
+
+  /**
+   * Nobody set the zone: the strategy stops rather than re-checking hourly for
+   * ever. Automation is paused and the lead flagged for review, so the owner
+   * sets the zone and starts them again from the lead.
+   */
+  private async parkForZone(e: Enrollment, reason: string): Promise<void> {
+    const days = TZ_HOLD_MAX_MS / 86_400_000;
+    this.logger.warn(`lead ${e.leadId}: ${days} days without a usable time zone — outreach paused for review`);
+    try {
+      const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId }, select: { reviewReasons: true } });
+      await this.prisma.lead.update({
+        where: { id: e.leadId },
+        data: {
+          automationPaused: true,
+          needsReview: true,
+          ...(lead?.reviewReasons.includes(ZONE_HELD_REVIEW) ? {} : { reviewReasons: { push: ZONE_HELD_REVIEW } }),
+        },
+      });
+      await this.state.record({
+        orgId: e.orgId,
+        leadId: e.leadId,
+        type: 'strategy_stopped',
+        source: 'strategy',
+        reason: `No usable time zone after ${days} days: ${reason}`.slice(0, 500),
+      });
+    } catch (error) {
+      this.logger.error(`lead ${e.leadId}: could not pause it for review: ${(error as Error).message}`);
     } finally {
       this.stop(e);
     }

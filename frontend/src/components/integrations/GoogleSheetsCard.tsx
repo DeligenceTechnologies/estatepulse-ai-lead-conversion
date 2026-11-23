@@ -26,6 +26,7 @@ import { SheetRunsModal } from '../sheets/SheetRunsModal';
 import { SheetTabPickerModal } from '../sheets/SheetTabPickerModal';
 import { errorText, timeAgo } from '../sheets/SheetModal';
 import { IntegrationCard } from './IntegrationCard';
+import { Button, buttonClass } from '../common/Button';
 
 /**
  * Google Sheets — connect a Google account, add spreadsheet tabs, map them, and
@@ -51,7 +52,7 @@ function statusOf(s: SheetSource): { label: string; cls: string } {
   return { label: 'active', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
 }
 
-const link = 'text-2xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40';
+const link = buttonClass({ variant: 'ghost', size: 'sm' });
 
 const SourceRow: React.FC<{
   source: SheetSource;
@@ -89,9 +90,9 @@ const SourceRow: React.FC<{
         {source.pendingReview > 0 && (
           <>
             {' · '}
-            <button type="button" onClick={onReview} className="text-green-300 hover:text-green-200 font-bold cursor-pointer">
+            <Button variant="link" onClick={onReview}>
               {source.pendingReview} waiting for review
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -124,9 +125,9 @@ const SourceRow: React.FC<{
         <button type="button" className={link} onClick={onRuns}>
           History
         </button>
-        <button type="button" className={`${link} hover:text-rose-300`} disabled={busy} onClick={() => setConfirmRemove(true)}>
+        <Button variant="ghost" size="sm" className="hover:text-rose-300!" disabled={busy} onClick={() => setConfirmRemove(true)}>
           Remove
-        </button>
+        </Button>
         {busy && <Loader2 className="w-3 h-3 animate-spin text-slate-500" />}
       </div>
       {confirmRemove && (
@@ -137,14 +138,9 @@ const SourceRow: React.FC<{
             tab again brings it back with its mapping.
           </div>
           <div className="flex gap-3">
-            <button
-              type="button"
-              className="font-bold text-rose-300 hover:text-rose-200 cursor-pointer disabled:opacity-40"
-              disabled={busy}
-              onClick={() => act(() => removeSheetSource(source.id), 'Sheet removed.')}
-            >
+            <Button variant="danger" size="sm" disabled={busy} onClick={() => act(() => removeSheetSource(source.id), 'Sheet removed.')}>
               Remove sheet
-            </button>
+            </Button>
             <button type="button" className={link} disabled={busy} onClick={() => setConfirmRemove(false)}>
               Cancel
             </button>
@@ -286,21 +282,22 @@ export const GoogleSheetsCard: React.FC = () => {
   };
 
   const action = !config?.configured
-    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, className: 'bg-slate-800 text-slate-500 cursor-default' }
+    ? { label: 'Not configured on this server', icon: <X className="w-3.5 h-3.5" />, onClick: () => undefined, variant: 'secondary' as const, disabled: true }
     : busy === 'connect'
-      ? { label: 'Waiting for Google… (cancel)', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, className: 'bg-slate-800 text-slate-300 hover:bg-slate-700' }
+      ? { label: 'Waiting for Google… (cancel)', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, onClick: connect, variant: 'secondary' as const }
       : !connection || !live
         ? {
             label: connection ? 'Reconnect Google' : 'Connect Google',
             icon: connection ? <RefreshCw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />,
             onClick: connect,
-            className: 'bg-green-600 text-white hover:bg-green-500',
+            variant: 'primary' as const,
           }
         : {
             label: busy === 'pick' ? 'Choose a spreadsheet in Google…' : 'Add a spreadsheet',
             icon: busy === 'pick' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />,
             onClick: pickerConfigured && busy !== 'pick' ? addSheet : () => undefined,
-            className: pickerConfigured ? 'bg-slate-800 text-slate-100 hover:bg-slate-700' : 'bg-slate-800 text-slate-500 cursor-default',
+            variant: 'secondary' as const,
+            disabled: !pickerConfigured,
           };
 
   // Switched off on this server (GOOGLE_SHEETS_ENABLED): no card at all.
@@ -315,7 +312,7 @@ export const GoogleSheetsCard: React.FC = () => {
           </div>
         }
         title="Google Sheets"
-        blurb="Import leads from your spreadsheets, reviewed before anyone is contacted"
+        blurb="Import leads from a spreadsheet"
         connected={live}
         loading={loading}
         accent="border-green-500/40"
@@ -323,7 +320,7 @@ export const GoogleSheetsCard: React.FC = () => {
       >
         {!loading && !config?.configured && (
           <p className="text-xs text-slate-500">
-            The server has no Google OAuth client yet. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable this.
+            Not set up on the server yet (needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).
           </p>
         )}
 
@@ -333,7 +330,7 @@ export const GoogleSheetsCard: React.FC = () => {
             {!live && (
               <div className="flex items-start gap-1.5 text-xs text-amber-300">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                Google access was revoked or expired. Reconnect to keep syncing.
+                Google access expired. Reconnect to keep syncing.
               </div>
             )}
             {live && !pickerConfigured && (
@@ -343,7 +340,7 @@ export const GoogleSheetsCard: React.FC = () => {
         )}
 
         {!loading && config?.configured && !connection && (
-          <p className="text-xs text-slate-500">EstatePulse can only open the spreadsheets you choose.</p>
+          <p className="text-xs text-slate-400">We only open the sheets you pick. Leads are checked before anyone is contacted.</p>
         )}
 
         {sources.length > 0 && (
@@ -362,15 +359,16 @@ export const GoogleSheetsCard: React.FC = () => {
         )}
 
         {connection && (
-          <button
-            type="button"
+          <Button
+            variant={armed ? 'danger-soft' : 'ghost'}
+            size="sm"
             onClick={disconnect}
             onBlur={() => setArmed(false)}
             disabled={busy !== null}
-            className="text-2xs font-bold text-slate-500 hover:text-rose-300 transition-colors cursor-pointer disabled:opacity-40"
+            className={armed ? '' : 'hover:text-rose-300!'}
           >
-            {busy === 'disconnect' ? 'Disconnecting…' : armed ? 'Click again to disconnect Google — syncing stops' : 'Disconnect Google'}
-          </button>
+            {busy === 'disconnect' ? 'Disconnecting…' : armed ? 'Click again to disconnect Google' : 'Disconnect Google'}
+          </Button>
         )}
 
         {error && (

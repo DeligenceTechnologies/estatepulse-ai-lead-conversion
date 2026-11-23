@@ -12,6 +12,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { IconButton, Button } from '../common/Button';
 
 export const AgentPreCallModal: React.FC = () => {
   const { 
@@ -40,7 +41,7 @@ export const AgentPreCallModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-200">
       <div className="relative w-full max-w-2xl bg-slate-900 border-2 border-amber-500/60 rounded-2xl shadow-2xl shadow-amber-950/40 overflow-hidden text-slate-100">
         
         {/* Glow Accent Header */}
@@ -67,12 +68,7 @@ export const AgentPreCallModal: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={() => setPreCallLeadId(null)}
-            className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <IconButton onClick={() => setPreCallLeadId(null)} aria-label="Close" icon={<X />} />
         </div>
 
         {/* Core Briefing Content */}
@@ -161,22 +157,14 @@ export const AgentPreCallModal: React.FC = () => {
 
           {/* Action Row */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-            <button
-              onClick={handleOpenDossier}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 border border-slate-700 transition-colors cursor-pointer"
-            >
-              <span>View Full Lead Dossier</span>
-              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-            </button>
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={handleOpenDossier} iconRight={<ArrowRight />}>
+              View Full Lead Dossier
+            </Button>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                onClick={handleAcceptAndConnect}
-                className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-on-accent text-xs font-bold shadow-lg shadow-emerald-950 flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <Phone className="w-4 h-4" />
-                <span>Accept Call & Connect Now</span>
-              </button>
+              <Button className="flex-1 sm:flex-initial" onClick={handleAcceptAndConnect} icon={<Phone />}>
+                Accept Call & Connect Now
+              </Button>
             </div>
           </div>
 

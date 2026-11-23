@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { allTimeZones, utcOffset } from '../../utils/workingHours';
+import { Select } from './Select';
 
 interface TimezoneSelectProps {
   id?: string;
@@ -21,7 +22,7 @@ export const TimezoneSelect: React.FC<TimezoneSelectProps> = ({ id, value, onCha
     return allTimeZones().map((zone) => ({ zone, label: `${zone.replace(/_/g, ' ')} (${utcOffset(zone, now)})` }));
   }, []);
   return (
-    <select
+    <Select
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -34,6 +35,6 @@ export const TimezoneSelect: React.FC<TimezoneSelectProps> = ({ id, value, onCha
           {label}
         </option>
       ))}
-    </select>
+    </Select>
   );
 };

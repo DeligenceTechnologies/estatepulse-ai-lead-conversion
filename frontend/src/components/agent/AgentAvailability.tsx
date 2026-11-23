@@ -19,6 +19,7 @@ import {
   type CalendarStatus,
 } from '../../utils/calendarApi';
 import { formatDate } from '../../lib/datetime';
+import { Button } from '../common/Button';
 
 const field =
   'bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 ' +
@@ -301,14 +302,9 @@ export const AgentAvailability: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={saveHours}
-            disabled={!dirty || Boolean(invalidDay) || busy === 'hours'}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            {busy === 'hours' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          <Button onClick={saveHours} disabled={!dirty || Boolean(invalidDay)} loading={busy === 'hours'}>
             Save working hours
-          </button>
+          </Button>
           {dirty && !invalidDay && (
             <span className="text-xs text-slate-500">Unsaved changes</span>
           )}

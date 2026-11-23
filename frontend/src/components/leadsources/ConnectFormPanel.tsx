@@ -21,6 +21,7 @@ import { CopyField } from './CopyField';
 import { CredentialField } from './CredentialField';
 import { FormPicker } from './FormPicker';
 import { TimezoneNotice } from '../common/TimezoneNotice';
+import { IconButton, Button } from '../common/Button';
 
 /**
  * Connect a form through the provider's API.
@@ -275,12 +276,7 @@ export const ConnectFormPanel: React.FC<{
               : `We install the webhook on your ${provider?.displayName ?? 'provider'} form for you.`}
           </p>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+        <IconButton onClick={onClose} aria-label="Close" icon={<X />} />
       </div>
 
       {error && <ErrorBlock e={error} />}
@@ -288,7 +284,7 @@ export const ConnectFormPanel: React.FC<{
       {/* --- 1. credential ---------------------------------------------- */}
       {step.k === 'credential' && (
         <div className="space-y-3">
-          <TimezoneNotice tone="hint" source="form" />
+          <TimezoneNotice tone="hint" />
           <CredentialField
             label={provider?.capabilities.credentialLabel ?? 'API key'}
             value={apiKey}
@@ -309,20 +305,12 @@ export const ConnectFormPanel: React.FC<{
           </div>
 
           <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={onSetUpManually}
-              className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-            >
+            <Button variant="ghost" onClick={onSetUpManually}>
               Rather not share a key? Set it up manually →
-            </button>
-            <button
-              onClick={submitKey}
-              disabled={busy || !apiKey}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            </Button>
+            <Button onClick={submitKey} disabled={!apiKey} loading={busy}>
               Connect
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -340,17 +328,9 @@ export const ConnectFormPanel: React.FC<{
                 {connection.credentialPreview}
               </span>
             </div>
-            <button
-              onClick={forgetAccount}
-              disabled={busy}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 disabled:opacity-50 ${
-                confirmForget
-                  ? 'bg-rose-600 hover:bg-rose-500 text-on-accent'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-              }`}
-            >
+            <Button variant={confirmForget ? 'danger' : 'secondary'} size="sm" onClick={forgetAccount} disabled={busy}>
               {confirmForget ? 'Remove it anyway' : 'Use a different key'}
-            </button>
+            </Button>
           </div>
 
           <FormPicker
@@ -378,19 +358,12 @@ export const ConnectFormPanel: React.FC<{
           )}
 
           <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
+            <Button variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              onClick={submitForm}
-              disabled={!selectedForm || busy}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
+            </Button>
+            <Button onClick={submitForm} disabled={!selectedForm || busy}>
               Connect this form
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -450,7 +423,7 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
           </div>
         )}
       </div>
-      <TimezoneNotice source="form" />
+      {p?.timezoneMapped === false && <TimezoneNotice />}
 
       {needsReview > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
@@ -475,12 +448,9 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
       )}
 
       <div className="flex justify-end">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
-        >
+        <Button onClick={onClose}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );

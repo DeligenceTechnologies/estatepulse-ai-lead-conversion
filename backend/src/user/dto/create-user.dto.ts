@@ -1,8 +1,10 @@
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   ArrayNotEmpty,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNotEmpty,
@@ -39,11 +41,11 @@ export class CreateUserDto {
   @MaxLength(255)
   email!: string;
 
-  @IsOptional()
+  /** Required, with its country code; the service checks it can be dialed. */
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
-  @IsString()
+  @IsString({ message: 'Add a phone number with its country code (e.g. +1 512 555 0100).' })
   @MaxLength(50)
-  phone?: string | null;
+  phone!: string;
 
   /** IANA time zone, e.g. "Asia/Kolkata"; the database defaults to Asia/Kolkata. */
   @IsOptional()
@@ -63,6 +65,19 @@ export class CreateUserDto {
   @IsOptional()
   @IsWeeklySchedule()
   workingHours?: WorkingDayDto[];
+
+  /** Live call transfers: the AI may put a hot lead's call through to their phone (which must then be set). */
+  @IsOptional()
+  @IsBoolean()
+  acceptsLiveTransfers?: boolean;
+
+  /** ZIP codes or city names they cover, for routing live transfers; at least one. */
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Add at least one area (ZIP code or city) they cover.' })
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  serviceAreas!: string[];
 
   /** Every role the user holds; their permissions are the union of these. */
   @IsArray()

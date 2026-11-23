@@ -11,6 +11,9 @@ const OUR_CALL = 'ccid-we-placed';
 const CHAT_LOG = 'Us: Still looking? | Lead: Yes, north side only';
 const LAST_TEXT = 'Still looking?';
 
+/** No live transfer is ringing anyone: every call event is a lead's. */
+const NO_TRANSFERS = { findAgentLeg: async () => null, onLeadHangup: async () => undefined } as any;
+
 const controller = (savedKey: string): TelnyxWebhookController =>
   new TelnyxWebhookController(
     {
@@ -22,6 +25,7 @@ const controller = (savedKey: string): TelnyxWebhookController =>
     { getCreds: async () => ({ publicKey: savedKey }), orgForNumber: async () => ORG } as any,
     { lead: { findFirst: async () => ({ id: 'lead-1', takenOverById: null }) } } as any,
     {} as any,
+    NO_TRANSFERS,
   );
 
 /** An assistant asking for a lead's details — over the phone, or in a text chat. */
@@ -101,6 +105,7 @@ const texts = (savedKey: string, done: string[], known: boolean): TelnyxWebhookC
     // `known` is whether the event's message id is one we already have: true is the forger's best case.
     { message: { findFirst: async () => (known ? { id: 'our-text' } : null) } } as any,
     {} as any,
+    NO_TRANSFERS,
   );
 
 const textEvent = (event_type: string) => ({

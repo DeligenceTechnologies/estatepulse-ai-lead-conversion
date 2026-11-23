@@ -57,6 +57,18 @@ describe('legal windows for a day', () => {
     expect(legalWindows(est(null), 'Asia/Kolkata', 1).quiet).toEqual([]);
   });
 
+  it('a disputed zone never drops the rules the phone number already earned', () => {
+    const conflict = (country: string, region: string): Jurisdiction => ({ country, region, status: 'conflict' });
+    // Rhode Island bans Sunday calls; a Chicago zone on a Providence number must not open it.
+    expect(legalWindows(conflict('US', 'RI'), 'America/Chicago', 0).closedBy).toBe('US-RI');
+    // Florida closes at 20:00; the federal 21:00 must not replace it.
+    expect(legalWindows(conflict('US', 'FL'), 'America/Chicago', 2).quiet.map((w) => w.rule)).toEqual(['US', 'CA', 'US-FL']);
+    // A US number stored as a European zone still answers to US (and Canadian) hours, on that zone's clock.
+    expect(legalWindows(conflict('US', 'FL'), 'Europe/London', 2).quiet.map((w) => w.rule)).toEqual(['US', 'CA', 'US-FL']);
+    // The number decides whether North America applies: a Mexican number is not held to US hours (#14).
+    expect(legalWindows({ country: 'MX', region: null, status: 'conflict' }, 'America/Mexico_City', 2).quiet).toEqual([]);
+  });
+
   it('a country without rules has no legal window', () => {
     expect(legalWindows(est('IN'), 'Asia/Kolkata', 1)).toEqual({ closedBy: null, quiet: [] });
   });

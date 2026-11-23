@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { CheckCircle2, KeyRound, Loader2, X } from 'lucide-react';
+import { CheckCircle2, KeyRound, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { ApiError, api, type LeadSourceWithSecret } from '../../api/client';
 import { CopyField } from './CopyField';
+import { IconButton, Button } from '../common/Button';
 
 /**
  * Set a source up by hand: we mint the URL and secret, the customer pastes them
@@ -67,12 +68,9 @@ export const ManualWebhookPanel: React.FC<{
         </ol>
 
         <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent font-bold rounded-xl text-xs transition-colors cursor-pointer"
-          >
+          <Button onClick={onClose}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -99,20 +97,12 @@ export const ManualWebhookPanel: React.FC<{
       </div>
 
       <div className="flex justify-end gap-2">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-        >
+        <Button variant="secondary" onClick={onClose}>
           Cancel
-        </button>
-        <button
-          onClick={() => void handleCreate()}
-          disabled={creating || !name.trim()}
-          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        </Button>
+        <Button onClick={() => void handleCreate()} disabled={!name.trim()} loading={creating}>
           Create & show secret
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -120,10 +110,5 @@ export const ManualWebhookPanel: React.FC<{
 
 /** Shared close button for the modal header. */
 export const PanelClose: React.FC<{ onClose: () => void }> = ({ onClose }) => (
-  <button
-    onClick={onClose}
-    className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-  >
-    <X className="w-3.5 h-3.5" />
-  </button>
+  <IconButton onClick={onClose} aria-label="Close" icon={<X />} />
 );

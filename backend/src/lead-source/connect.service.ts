@@ -225,6 +225,8 @@ export class ConnectService implements OnApplicationBootstrap {
         mapped: prebuild.mappings.length,
         unmapped: prebuild.unmapped,
         needsReview: prebuild.withheld,
+        /** False means the form has no time-zone question mapped, and the done card says so. */
+        timezoneMapped: prebuild.mappings.some((m) => m.targetField === 'timezone'),
         mappingStatus: prebuild.mappings.length ? MappingStatus.NEEDS_REVIEW : MappingStatus.UNCONFIGURED,
       },
     };

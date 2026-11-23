@@ -1,8 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Loader2, ShieldCheck } from 'lucide-react';
+import {
+  CalendarOff,
+  Clock,
+  Gauge,
+  Loader2,
+  MessageSquare,
+  Moon,
+  PhoneCall,
+  PhoneOff,
+  ShieldCheck,
+  Timer,
+} from 'lucide-react';
 import { toast } from 'react-toastify';
 import { DEFAULT_LIMITS, WEEKDAYS, type ContactLimits } from '../../utils/journey';
 import { getStrategy, saveStrategy, type Guardrails } from '../../utils/strategiesApi';
+import { Button } from '../common/Button';
 
 /**
  * The contact window and safety limits, as one org-wide setting.
@@ -20,6 +32,54 @@ import { getStrategy, saveStrategy, type Guardrails } from '../../utils/strategi
  */
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const field =
+  'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-600 disabled:opacity-40';
+
+/** One setting: an icon, a short name, the control and a one-line hint. */
+const Tile: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  aside?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}> = ({ icon, title, hint, aside, className = '', children }) => (
+  <div className={`bg-slate-950/50 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 ${className}`}>
+    <div className="flex items-center gap-2.5">
+      <span className="w-7 h-7 rounded-lg bg-slate-500/10 border border-slate-500/20 text-slate-300 flex items-center justify-center shrink-0 [&>svg]:w-3.5 [&>svg]:h-3.5">
+        {icon}
+      </span>
+      <span className="text-xs font-bold text-slate-100 flex-1">{title}</span>
+      {aside}
+    </div>
+    {children}
+    <p className="text-2xs text-slate-400 leading-relaxed mt-auto">{hint}</p>
+  </div>
+);
+
+/** A number box with its unit after it ("3 calls"). */
+const NumberField: React.FC<{
+  id?: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (value: string) => void;
+}> = ({ id, value, min, max, unit, onChange }) => (
+  <label className="flex items-center gap-2 text-xs text-slate-300">
+    <input
+      id={id}
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`${field} w-20 text-center`}
+    />
+    {unit}
+  </label>
+);
 
 interface Props {
   /** Why this setting is on THIS page, phrased for the page it is on. */
@@ -49,7 +109,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
         if (g.limits) setLimits({ ...DEFAULT_LIMITS, ...g.limits });
         if (Array.isArray(g.skipDays)) setSkipDays(g.skipDays);
       })
-      .catch((e) => setError(e?.message || 'Could not load your contact window.'))
+      .catch((e) => setError(e?.message || 'Could not load your contact settings.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,7 +129,7 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
   const save = async () => {
     if (!valid) {
       setError(
-        'Times must be 24-hour HH:MM (e.g. 21:00), limits whole numbers (calls and texts up to 20 a day, the gaps and waits up to 1440 min), and at least one day open.',
+        'Check the values: limits are whole numbers (up to 20 a day, waits up to 1440 min) and at least one day must stay open.',
       );
       return;
     }
@@ -90,9 +150,9 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
           skipDays,
         },
       });
-      toast.success('Contact window saved.');
+      toast.success('Contact settings saved.');
     } catch (e: any) {
-      toast.error(e?.message || 'Could not save your contact window.');
+      toast.error(e?.message || 'Could not save your contact settings.');
     } finally {
       setSaving(false);
     }
@@ -100,47 +160,73 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-      <div>
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+      <div className="flex items-start gap-3">
+        <span className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center shrink-0">
           <Clock className="w-4 h-4 text-amber-400" />
-          Contact Window &amp; Safety Guardrails
-        </h3>
-        <p className="text-xs text-slate-400 mt-1">{blurb}</p>
+        </span>
+        <div>
+          <h3 className="text-sm font-bold text-white">Contact hours &amp; limits</h3>
+          <p className="text-xs text-slate-400 mt-0.5">{blurb}</p>
+        </div>
       </div>
 
       {error && (
-        <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-2">
-          {error}
-        </div>
+        <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">{error}</div>
       )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Loading your contact window…
+          Loading…
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Quiet hours <span className="text-slate-500 font-normal">— nothing sends</span>
-              </label>
-              <div className="flex items-center gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+            <Tile
+              className="lg:col-span-3"
+              icon={<Moon />}
+              title="Quiet hours"
+              hint="In the lead's local time. Anything due now waits until morning; nothing is skipped."
+              aside={
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={respect}
+                  aria-label="Quiet hours on"
+                  onClick={() => setRespect(!respect)}
+                  className="flex items-center gap-2 text-2xs font-semibold cursor-pointer"
+                >
+                  <span className={respect ? 'text-green-300' : 'text-rose-300'}>{respect ? 'On' : 'Off'}</span>
+                  <span
+                    className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${respect ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-on-accent shadow transition-all ${
+                        respect ? 'left-[18px]' : 'left-0.5'
+                      }`}
+                    />
+                  </span>
+                </button>
+              }
+            >
+              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-300">
+                <span>No contact from</span>
                 <input
                   type="time"
                   value={start}
                   onChange={(e) => setStart(e.target.value)}
                   disabled={!respect}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-32 text-center disabled:opacity-40 focus:outline-none focus:border-emerald-600"
+                  aria-label="Quiet hours start"
+                  className={`${field} w-32 text-center`}
                 />
-                <span className="text-slate-400">to</span>
+                <span>to</span>
                 <input
                   type="time"
                   value={end}
                   onChange={(e) => setEnd(e.target.value)}
                   disabled={!respect}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white w-32 text-center disabled:opacity-40 focus:outline-none focus:border-emerald-600"
+                  aria-label="Quiet hours end"
+                  className={`${field} w-32 text-center`}
                 />
               </div>
               <p className="text-2xs text-slate-500 mt-1">
@@ -229,59 +315,59 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                   </button>
                 ))}
               </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                A step due on a day off goes at the start of the next open day. A callback the lead asked for still
-                happens.
-              </p>
-            </div>
-          </div>
+            </Tile>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label htmlFor="redial-gap" className="block text-slate-300 font-semibold mb-1">
-                After a busy or declined call <span className="text-slate-500 font-normal">— 0 is no wait</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">wait</span>
-                <input
-                  id="redial-gap"
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.redialGapMinutes}
-                  onChange={(e) => setLimit('redialGapMinutes', e.target.value)}
-                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min before calling again</span>
+            <Tile className="lg:col-span-2" icon={<Gauge />} title="Daily limit per lead" hint="0 means no limit.">
+              <div className="flex items-center gap-4 flex-wrap">
+                <NumberField value={limits.callsPerDay} min={0} max={20} unit="calls" onChange={(v) => setLimit('callsPerDay', v)} />
+                <NumberField value={limits.smsPerDay} min={0} max={20} unit="texts" onChange={(v) => setLimit('smsPerDay', v)} />
               </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                Someone who just declined is not rung straight back. A callback the lead asked for is not held back.
-                Default 30 min.
-              </p>
-            </div>
+            </Tile>
 
-            <div>
-              <label htmlFor="chat-quiet" className="block text-slate-300 font-semibold mb-1">
-                While a lead is texting <span className="text-slate-500 font-normal">— follow-up sequences, 0 is no wait</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">wait</span>
-                <input
-                  id="chat-quiet"
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={limits.chatQuietMinutes}
-                  onChange={(e) => setLimit('chatQuietMinutes', e.target.value)}
-                  className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-emerald-600"
-                />
-                <span className="text-slate-400">min after their last text</span>
-              </div>
-              <p className="text-2xs text-slate-500 mt-1">
-                A sequence step never lands in the middle of a chat. The outreach strategy keeps its own rule: a call waits
-                until the chat has been quiet for that step&apos;s wait. Default 30 min.
-              </p>
-            </div>
+            <Tile
+              className="lg:col-span-2"
+              icon={<Timer />}
+              title="Gap between messages"
+              hint="Between two calls or two texts to the same lead."
+            >
+              <NumberField value={limits.minGapMinutes} min={0} max={1440} unit="min" onChange={(v) => setLimit('minGapMinutes', v)} />
+            </Tile>
+
+            <Tile className="lg:col-span-2" icon={<PhoneCall />} title="Max AI call attempts" hint="Per lead, in total.">
+              <NumberField value={maxVoice} min={1} max={10} unit="calls" onChange={(v) => setMaxVoice(Number(v))} />
+            </Tile>
+
+            <Tile
+              className="lg:col-span-3"
+              icon={<PhoneOff />}
+              title="After a declined call"
+              hint="Wait before calling again. Callbacks the lead asked for are not delayed."
+            >
+              <NumberField
+                id="redial-gap"
+                value={limits.redialGapMinutes}
+                min={0}
+                max={1440}
+                unit="min"
+                onChange={(v) => setLimit('redialGapMinutes', v)}
+              />
+            </Tile>
+
+            <Tile
+              className="lg:col-span-3"
+              icon={<MessageSquare />}
+              title="While a lead is texting"
+              hint="Wait after their last text, so a step never interrupts a chat."
+            >
+              <NumberField
+                id="chat-quiet"
+                value={limits.chatQuietMinutes}
+                min={0}
+                max={1440}
+                unit="min"
+                onChange={(v) => setLimit('chatQuietMinutes', v)}
+              />
+            </Tile>
           </div>
 
           <button
@@ -314,16 +400,9 @@ export const ContactWindowCard: React.FC<Props> = ({ blurb }) => {
                 One window for both the strategy and every follow-up sequence.
               </span>
             </p>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={saving || !valid}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-semibold cursor-pointer"
-              >
-                {saving ? 'Saving…' : 'Save window'}
-              </button>
-            </div>
+            <Button size="sm" onClick={() => void save()} disabled={!valid} loading={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
           </div>
         </>
       )}

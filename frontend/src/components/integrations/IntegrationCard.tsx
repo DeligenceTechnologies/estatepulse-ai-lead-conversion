@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, Loader2 } from 'lucide-react';
+import { Button, type ButtonVariant } from '../common/Button';
 
 /**
  * The shell every card on Lead Integrations is built from.
@@ -23,7 +24,14 @@ export const IntegrationCard: React.FC<{
   loading?: boolean;
   /** Border colour once connected, so a live card is identifiable at a glance. */
   accent: string;
-  action: { label: string; icon: React.ReactNode; onClick: () => void; className: string };
+  /** The card's one button. Primary for connect / add, secondary for everything after that. */
+  action: {
+    label: string;
+    icon: React.ReactElement<{ className?: string }>;
+    onClick: () => void;
+    variant?: ButtonVariant;
+    disabled?: boolean;
+  };
   children: React.ReactNode;
 }> = ({ icon, title, blurb, connected, loading, accent, action, children }) => (
   <div
@@ -36,14 +44,14 @@ export const IntegrationCard: React.FC<{
         {icon}
         <div className="min-w-0">
           <h3 className="text-base font-bold text-white">{title}</h3>
-          <p className="text-xs text-slate-400 truncate">{blurb}</p>
+          <p className="text-xs text-slate-400 line-clamp-2">{blurb}</p>
         </div>
       </div>
       <span
-        className={`text-2xs font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1 shrink-0 ${
+        className={`text-2xs font-semibold px-2.5 py-1 rounded-full border flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
           connected && !loading
-            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-            : 'bg-slate-800 text-slate-400 border-slate-700'
+            ? 'bg-green-500/10 text-green-300 border-green-500/25'
+            : 'bg-slate-500/10 text-slate-400 border-slate-500/25'
         }`}
       >
         {loading ? (
@@ -52,7 +60,7 @@ export const IntegrationCard: React.FC<{
           </>
         ) : (
           <>
-            {connected && <Check className="w-3 h-3" />}
+            {connected ? <Check className="w-3 h-3" /> : <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />}
             {connected ? 'Connected' : 'Not connected'}
           </>
         )}
@@ -62,14 +70,14 @@ export const IntegrationCard: React.FC<{
     {/* Scrolls when the card is given a height (Lead Integrations does) and its content outgrows it; otherwise it just grows. */}
     <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2 pr-1 -mr-1">{children}</div>
 
-    <button
-      type="button"
+    <Button
+      variant={action.variant ?? 'primary'}
+      fullWidth
       onClick={action.onClick}
-      disabled={loading}
-      className={`w-full px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${action.className}`}
+      disabled={loading || action.disabled}
+      icon={action.icon}
     >
-      {action.icon}
       {action.label}
-    </button>
+    </Button>
   </div>
 );

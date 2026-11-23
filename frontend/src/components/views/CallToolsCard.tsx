@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Loader2, PhoneForwarded } from 'lucide-rea
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
 import { RETRY_ATTEMPTS_MAX, RETRY_MINUTES_RANGE, getCallTools, updateCallTools, type CallToolsStatus } from '../../utils/callToolsApi';
+import { Button } from '../common/Button';
 
 /** Matches the server's limit: two SMS segments at most. */
 const MAX_CHARS = 320;
@@ -83,7 +84,8 @@ export const CallToolsCard: React.FC = () => {
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
           This adds four tools and a marked &ldquo;callbacks and outcomes&rdquo; section to the end of your AI prompt.
-          Turning it off removes just those; the rest of your prompt is never changed.
+          Turning it off removes the callbacks and texts but keeps &ldquo;don&apos;t contact me&rdquo;: an opt-out is always
+          recorded. The rest of your prompt is never changed.
         </p>
       </div>
 
@@ -168,14 +170,14 @@ export const CallToolsCard: React.FC = () => {
                 className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-emerald-600 disabled:opacity-50"
               />
               <span>minutes after each miss, then the no-answer follow-up.</span>
-              <button
-                type="button"
+              <Button
+                size="sm"
+                className="ml-auto"
                 onClick={() => void save({ retryMinutes, retryAttempts }, 'Callback retry saved.')}
                 disabled={busy || !status.enabled || !retryChanged || !retryValid}
-                className="ml-auto px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold cursor-pointer"
               >
                 Save
-              </button>
+              </Button>
             </div>
             {!retryValid && (
               <p className="text-[11px] text-rose-300">
@@ -206,24 +208,18 @@ export const CallToolsCard: React.FC = () => {
 
           <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
             {status.confirmMessage !== status.defaultConfirmMessage && (
-              <button
-                type="button"
-                onClick={() => void save({ confirmMessage: '' }, 'Default confirmation text restored.')}
-                disabled={!editable}
-                className="px-4 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold cursor-pointer disabled:opacity-40"
-              >
+              <Button variant="outline" size="sm" onClick={() => void save({ confirmMessage: '' }, 'Default confirmation text restored.')} disabled={!editable}>
                 Use default
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => void save({ confirmMessage: draft }, 'Confirmation text saved.')}
               disabled={!editable || !changed || !draft.trim()}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
+              loading={busy}
             >
-              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Save text
-            </button>
+            </Button>
           </div>
 
           <label className="flex items-center gap-2 text-xs text-slate-300 font-semibold cursor-pointer w-fit">
@@ -246,7 +242,8 @@ export const CallToolsCard: React.FC = () => {
             <label className="block text-slate-300 font-semibold">
               Text-back message{' '}
               <span className="text-slate-500 font-normal">
-                — {'{{firstName}}'} and {'{{brokerage}}'} are filled in for each lead; their answer goes on in the AI chat
+                — {'{{firstName}}'}, {'{{brokerage}}'} and {'{{nextQuestion}}'} (the next question they have not answered yet) are
+                filled in for each lead; their answer goes on in the AI chat
               </span>
             </label>
             <textarea
@@ -263,24 +260,23 @@ export const CallToolsCard: React.FC = () => {
 
           <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
             {status.textBackMessage !== status.defaultTextBackMessage && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => void save({ textBackMessage: '' }, 'Default text-back message restored.')}
                 disabled={!textBackEditable}
-                className="px-4 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs font-semibold cursor-pointer disabled:opacity-40"
               >
                 Use default
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => void save({ textBackMessage: textBackDraft }, 'Text-back message saved.')}
               disabled={!textBackEditable || !textBackChanged || !textBackDraft.trim()}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5"
+              loading={busy}
             >
-              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Save message
-            </button>
+            </Button>
           </div>
         </>
       )}

@@ -60,8 +60,17 @@ export class SyncError extends Error {
 }
 
 export interface Approval {
-  rule: (row: BuiltRow) => boolean;
-  by: { userId: string };
+  /**
+   * Whether this row may be approved without a person looking at it.
+   *
+   * `flags` carries what only the engine knows: whether the row collides with
+   * another lead, and whether it inherited do-not-contact. Both are worked out
+   * in persistBatch anyway, so passing them costs nothing and spares a rule
+   * from guessing at what it cannot see.
+   */
+  rule: (row: BuiltRow, flags: { dnc: boolean; duplicate: boolean }) => boolean;
+  /** null for a sync approving on its own: recorded as the system, not as a person. */
+  by: { userId: string | null };
   /** Scheduling on: approved leads join this outreach batch instead of being released at once. */
   outreach?: OutreachRequest;
 }
@@ -303,6 +312,22 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     return claimed ? this.run(claimed, approve) : null;
   }
 
+  /**
+   * Re-reads one sheet now, as "Sync now" does, and waits for it: after a row was written from
+   * Import Review, its pending lead is refreshed from what the sheet now says. `ran: false` when
+   * a sync of it is already running; it is then due, and the next pass picks it up.
+   */
+  async syncSourceNow(orgId: string, sourceId: string): Promise<{ ran: boolean }> {
+    await this.prisma.leadSource.updateMany({ where: { id: sourceId, orgId }, data: { syncNextAt: new Date(), remoteSyncedAt: null } });
+    if (!this.enabled || this.stopped) return { ran: false };
+    const claimed = await this.claim({ orgId, sourceId });
+    if (!claimed) {
+      this.nudge();
+      return { ran: false };
+    }
+    return { ran: (await this.run(claimed)).ok };
+  }
+
   private async importOnce(orgId: string, sourceId: string, stats: RunStats, approve: Approval | null): Promise<RunResult> {
     stats.dbStatements += 1;
     const source = await this.prisma.leadSource.findFirst({
@@ -343,10 +368,19 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
     const mappings = toStored(mappingRows);
     if (mappings.length === 0) throw new SyncError('NOT_CONFIGURED', 'Map the columns before importing.');
 
-    let orphans = 0;
+    // Drive's file version lags minutes behind in-cell Sheets edits, so a probe skip can leave Import
+    // Review showing values the sheet no longer has — and the owner applies those into the lead. Never
+    // skip the read while a row is still the owner's to decide, or not yet linked to a lead.
+    let undecided = 0;
     if (this.config.get('SHEETS_VERSION_PROBE', { infer: true })) {
       stats.dbStatements += 1;
-      orphans = await this.prisma.sheetImportRow.count({ where: { orgId, leadSourceId: sourceId, leadId: null } });
+      undecided = await this.prisma.sheetImportRow.count({
+        where: {
+          orgId,
+          leadSourceId: sourceId,
+          OR: [{ leadId: null }, { reviewState: 'pending' }, { changedAfterReviewAt: { not: null } }],
+        },
+      });
     }
     const sheet = await this.readTab(
       orgId,
@@ -356,7 +390,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       mappings,
       identity,
       stats,
-      rebaseline || orphans > 0 ? null : lastVersion || null,
+      rebaseline || undecided > 0 ? null : lastVersion || null,
       source.remoteSyncedAt,
     );
     const versionToken = sheet.version === null ? null : `${sheet.version}:${source.mappingVersion}`;
@@ -598,6 +632,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
           lastName: true,
           phone: true,
           email: true,
+          timezone: true,
           location: true,
           minBudget: true,
           maxBudget: true,
@@ -613,6 +648,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
             last_name: l.lastName,
             phone: l.phone,
             email: l.email,
+            timezone: l.timezone,
             location: l.location,
             min_budget: l.minBudget,
             max_budget: l.maxBudget,
@@ -695,7 +731,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
       });
       const existing = relink.get(b.key!);
       const trackingId = existing ?? randomUUID();
-      if (approve?.rule(b)) toApprove.push(trackingId);
+      if (approve?.rule(b, { dnc, duplicate })) toApprove.push(trackingId);
       if (existing) {
         relinks.push(Prisma.sql`(${existing}::uuid, ${leadId}::uuid, ${b.hash!}::varchar, ${b.rowNumber}::int)`);
         continue;
@@ -741,7 +777,7 @@ export class SheetImportService implements OnModuleInit, OnModuleDestroy {
            SET first_name = v.first_name, last_name = v.last_name,
                email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-               timezone = v.timezone, location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+               timezone = COALESCE(v.timezone, l.timezone), location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                external_lead_id = v.external_lead_id, review_reasons = v.review_reasons,
                needs_review = true, dnc_status = l.dnc_status OR v.dnc, updated_at = now()

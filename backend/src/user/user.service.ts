@@ -16,6 +16,12 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { welcomeEmail, type WelcomeEmailInput } from './templates/welcome-email';
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
+import { cleanServiceAreas } from '@/transfer/live-transfer';
+import { assertMemberAreas, assertMemberPhone } from './member-contact';
+
+
+/** A new member; phone and areas may be missing only for one imported from a calendar. */
+export type NewMember = Omit<CreateUserDto, 'phone' | 'serviceAreas'> & Partial<Pick<CreateUserDto, 'phone' | 'serviceAreas'>>;
 
 const OMIT_PASSWORD = { password: true } as const;
 const WITH_ROLES = {
@@ -57,7 +63,11 @@ export class UserService {
     this.loginUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/login` : undefined;
   }
 
-  async create(dto: CreateUserDto, source: UserSource = UserSource.web) {
+  /**
+   * A member added on Team (`web`) must come with a phone and areas. One brought in from a calendar
+   * (Calendly, Cal.com) has neither there; they are asked for the first time the member is edited.
+   */
+  async create(dto: NewMember, source: UserSource = UserSource.web) {
     const organization = await this.prisma.organization.findUnique({
       where: { id: dto.orgId },
       select: { id: true, name: true },
@@ -65,7 +75,11 @@ export class UserService {
     if (!organization) {
       throw new NotFoundException('Organization not found');
     }
-    const { roleIds, workingHours, ...fields } = dto;
+    const { roleIds, workingHours, serviceAreas, ...fields } = dto;
+    if (source === UserSource.web) {
+      assertMemberPhone(fields.phone);
+      assertMemberAreas(serviceAreas);
+    }
     await this.findRolesInOrg(roleIds, dto.orgId);
 
     const password = generatePassword();
@@ -76,6 +90,7 @@ export class UserService {
           data: {
             ...fields,
             ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
+            ...(serviceAreas ? { serviceAreas: cleanServiceAreas(serviceAreas) } : {}),
             password: await hashPassword(password),
             source,
             // The admin vouches for the address, and the password reaches them only through it.
@@ -146,17 +161,24 @@ export class UserService {
    * everywhere and emails them a notice (never the password). Changing your own
    * password this way keeps the session you are using.
    */
-  async update(id: string, orgId: string, { password, roleIds, workingHours, ...dto }: UpdateUserDto, actor?: AuthContext) {
+  async update(id: string, orgId: string, { password, roleIds, workingHours, serviceAreas, ...dto }: UpdateUserDto, actor?: AuthContext) {
     const current = await this.prisma.user.findFirst({
       where: { id, orgId },
       select: {
         orgId: true,
         status: true,
+        phone: true,
+        acceptsLiveTransfers: true,
         roles: { select: { role: { select: { isSystem: true } } } },
         organization: { select: { name: true } },
       },
     });
     if (!current) throw new NotFoundException('User not found');
+    // Phone and areas are required: an edit may leave them as they are, never clear them.
+    if (dto.phone !== undefined) assertMemberPhone(dto.phone);
+    if (serviceAreas !== undefined) assertMemberAreas(serviceAreas);
+    // A live transfer rings their phone, so turning it on needs one even on an older member without it.
+    if (dto.acceptsLiveTransfers && dto.phone === undefined) assertMemberPhone(current.phone);
 
     const newRoles = roleIds ? await this.findRolesInOrg(roleIds, current.orgId) : undefined;
     const isOwner = current.roles.some(({ role }) => role.isSystem);
@@ -177,6 +199,7 @@ export class UserService {
           data: {
             ...dto,
             ...(workingHours ? { workingHours: toWorkingHoursJson(workingHours) } : {}),
+            ...(serviceAreas ? { serviceAreas: cleanServiceAreas(serviceAreas) } : {}),
             ...(passwordHash ? { password: passwordHash, passwordChangedAt } : {}),
             // The given list replaces the user's roles entirely.
             ...(roleIds ? { roles: { deleteMany: {}, create: roleIds.map((roleId) => ({ roleId })) } } : {}),

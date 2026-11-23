@@ -1,5 +1,6 @@
-import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, IsTimeZone, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, IsTimeZone, MaxLength, MinLength } from 'class-validator';
+import { toCanonicalZone } from '@/common/utils/lead-timezone';
 
 /** Asked at sign-up only to pick the owner's starting roles; it is not stored. */
 export const ORGANIZATION_TYPES = ['individual', 'team'] as const;
@@ -48,7 +49,7 @@ export class RegisterDto {
   password!: string;
 
   /** The office's IANA time zone, for reports and calendars; North America when left out. Outreach follows each lead's own zone. */
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(toCanonicalZone)
   @IsOptional()
   @IsTimeZone({ message: 'timezone must be an IANA time zone such as America/New_York' })
   @MaxLength(100)

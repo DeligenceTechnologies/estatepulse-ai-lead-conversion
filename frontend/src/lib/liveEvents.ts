@@ -20,12 +20,12 @@ import { endSessionIfUnauthenticated, getFreshToken } from './api';
 
 const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
 
-export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned' | 'conversation.updated';
+export type LiveEventType = 'delivery.received' | 'lead.created' | 'lead.assigned' | 'lead.updated' | 'conversation.updated';
 
 export interface LiveEvent {
   type: LiveEventType;
   leadSourceId: string | null;
-  /** The lead whose text thread changed (conversation.updated). */
+  /** The lead whose text thread changed (conversation.updated) or whose details were edited (lead.updated). */
   leadId?: string;
   at: string;
 }

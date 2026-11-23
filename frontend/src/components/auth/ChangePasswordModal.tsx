@@ -5,6 +5,7 @@ import { AlertTriangle, KeyRound, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
 import { MIN_PASSWORD_LENGTH, PasswordField } from './AuthLayout';
+import { Button, IconButton } from '../common/Button';
 
 /**
  * Changing the password signs the user out everywhere, this browser included
@@ -66,7 +67,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-scrim backdrop-blur-[2px] animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="change-password-title"
@@ -84,15 +85,7 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
               <p className="text-xs text-slate-400">You will be signed out on all devices afterwards.</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            aria-label="Close"
-            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <IconButton onClick={onClose} disabled={saving} aria-label="Close" className="shrink-0" icon={<X />} />
         </div>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="p-5 space-y-4">
@@ -143,21 +136,12 @@ export const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose
           />
 
           <div className="flex justify-end gap-2 pt-1 text-xs">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
+            <Button variant="secondary" onClick={onClose} disabled={saving}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || mismatch}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
+            </Button>
+            <Button type="submit" loading={saving} disabled={mismatch}>
               {saving ? 'Saving…' : 'Change password'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

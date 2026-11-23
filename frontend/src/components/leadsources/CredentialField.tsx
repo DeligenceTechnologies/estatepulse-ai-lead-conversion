@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import { Button } from '../common/Button';
 
 /**
  * The first credential input in this app, so it sets the precedent.
@@ -51,14 +52,14 @@ export const CredentialField: React.FC<{
           disabled={disabled}
           className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono tracking-wider focus:outline-none focus:border-emerald-500 disabled:opacity-50"
         />
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          className="h-auto! self-stretch"
           onClick={() => setReveal((r) => !r)}
-          className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          icon={reveal ? <EyeOff /> : <Eye />}
         >
-          {reveal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           {reveal ? 'Hide' : 'Show'}
-        </button>
+        </Button>
       </div>
     </div>
   );

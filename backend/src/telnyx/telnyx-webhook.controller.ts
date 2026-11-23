@@ -10,6 +10,7 @@ import { LeadScoringService } from './lead-scoring.service';
 import { normalizePhone } from './phone';
 import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { CallbackService } from './tools/callback.service';
+import { TransferLegs } from './transfer-legs';
 
 /**
  * Call and messaging events from Telnyx. Always answered 200 at once so
@@ -29,6 +30,7 @@ export class TelnyxWebhookController {
     private readonly creds: TelnyxCredentialsService,
     private readonly prisma: PrismaService,
     private readonly callbacks: CallbackService,
+    private readonly legs: TransferLegs,
   ) {}
 
   @Post('voice')
@@ -40,6 +42,12 @@ export class TelnyxWebhookController {
     if (ccid && type) {
       const delivery = this.delivery(req);
       void (async () => {
+        // A leg we dialed to an agent for a live transfer is no call of a lead's: its events go to the transfer.
+        const leg = await this.legs.findAgentLeg(ccid, payload?.client_state);
+        if (leg) {
+          if (await this.signedFor(leg.orgId, delivery, true)) await this.legs.onAgentLegEvent(leg, ccid, type, payload);
+          return;
+        }
         const call = await this.activity.callByProvider(ccid);
         if (!call || !(await this.signedFor(call.orgId, delivery, true))) return;
         const intent = callIntent(payload?.client_state);
@@ -47,7 +55,10 @@ export class TelnyxWebhookController {
         else if (type === 'call.machine.premium.detection.ended') await this.activity.onMachineDetection(ccid, payload?.result, intent);
         else if (type === 'call.machine.premium.greeting.ended') await this.activity.onGreetingEnded(ccid, intent);
         else if (type === 'call.speak.ended') await this.activity.onSpeakEnded(ccid, payload?.status);
+        else if (type === 'call.conversation.created') await this.activity.onConversationStarted(ccid);
         else if (type === 'call.hangup') {
+          // First: agents still being rung for this lead are let go at once.
+          await this.legs.onLeadHangup(ccid).catch((error) => this.logger.error(`transfer on hangup ${ccid}: ${(error as Error).message}`));
           await this.activity.onCallHangup(ccid, payload);
           await this.callbacks.onCallEnded(ccid);
         }
@@ -55,6 +66,8 @@ export class TelnyxWebhookController {
         else if (type === 'call.recording.transcription.saved') {
           await this.activity.onTranscriptionSaved(ccid, payload);
           this.scoring.onTranscriptSaved(ccid);
+        } else if (type === 'call.conversation.ended') {
+          this.scoring.onConversationEnded(ccid, payload);
         } else if (type === 'call.conversation_insights.generated') {
           await this.scoring.onInsightsGenerated(ccid, payload, delivery);
         }

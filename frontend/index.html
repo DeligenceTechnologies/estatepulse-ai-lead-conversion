@@ -5,8 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EstatePulse AI</title>
     <script>
-      // Apply the saved theme before first paint (see src/lib/theme.ts).
-      try { if (localStorage.getItem('ep_theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+      // Apply the saved appearance before first paint (see src/lib/theme.ts).
+      try {
+        var d = document.documentElement.dataset;
+        var a = JSON.parse(localStorage.getItem('ep_appearance') || 'null');
+        if (!a && localStorage.getItem('ep_theme') === 'light') a = { mode: 'light' };
+        if (a) {
+          var light = a.mode === 'light' || (a.mode === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+          if (light) d.theme = 'light';
+          if (a.accent && a.accent !== 'emerald') d.accent = a.accent;
+          if (a.shape && a.shape !== 'rounded') d.shape = a.shape;
+          if (a.buttonStyle && a.buttonStyle !== 'solid') d.buttonStyle = a.buttonStyle;
+        }
+      } catch (e) {}
     </script>
     <meta name="description" content="AI-powered real estate lead conversion platform with instant response, voice qualification, lead scoring, follow-ups, and CRM sync." />
     <meta property="og:title" content="Remix EstatePulse AI - Lead Conversion System" />

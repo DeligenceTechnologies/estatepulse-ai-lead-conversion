@@ -59,6 +59,14 @@ describe('a provided time zone', () => {
     expect(lead('+919876543210', 'Asia/Calcutta')).toMatchObject({ zone: 'Asia/Kolkata', jurisdiction: { status: 'estimated' } });
   });
 
+  it('in a legacy or lower-case spelling is the same zone, not a conflict', () => {
+    expect(canonicalZone('america/chicago')).toBe('America/Chicago');
+    expect(canonicalZone('US/Eastern')).toBe('America/New_York');
+    // A sheet, webhook or CSV sending either spelling must still agree with the number's own zone.
+    expect(lead('+15125550100', 'america/chicago')).toMatchObject({ zone: 'America/Chicago', jurisdiction: { status: 'estimated' } });
+    expect(lead('+12125550100', 'US/Eastern')).toMatchObject({ zone: 'America/New_York', jurisdiction: { status: 'estimated' } });
+  });
+
   it('that contradicts the phone keeps the lead callable but marks the jurisdiction disputed', () => {
     const z = lead('+16045550199', 'America/Toronto');
     expect(z.status).toBe('verified');

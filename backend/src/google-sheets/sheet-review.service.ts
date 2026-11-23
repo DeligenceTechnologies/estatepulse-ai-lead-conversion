@@ -18,6 +18,7 @@ const DIFF_FIELDS = [
   ['last_name', 'lastName'],
   ['phone', 'phone'],
   ['email', 'email'],
+  ['timezone', 'timezone'],
   ['location', 'location'],
   ['min_budget', 'minBudget'],
   ['max_budget', 'maxBudget'],
@@ -101,6 +102,7 @@ export class SheetReviewService {
             lastName: true,
             phone: true,
             email: true,
+            timezone: true,
             location: true,
             minBudget: true,
             maxBudget: true,
@@ -125,6 +127,8 @@ export class SheetReviewService {
             current: normalize(prefix && field === 'custom_fields' ? ownCustom(current?.[column], prefix) : current?.[column]),
             incoming: normalize(incoming?.[field]),
           }))
+          // A blank timezone in the sheet leaves the lead's own one alone (COALESCE on apply): not a difference.
+          .filter((d) => !(d.field === 'timezone' && d.incoming == null))
           .filter((d) => JSON.stringify(d.current) !== JSON.stringify(d.incoming));
         return {
           rowId: r.id,
@@ -139,7 +143,16 @@ export class SheetReviewService {
     };
   }
 
-  resolve(who: SessionIdentity, rowIds: string[], action: 'apply' | 'keep') {
+  /**
+   * Settle flagged changes: take the incoming values ('apply') or keep what the
+   * lead already holds ('keep').
+   *
+   * `who.userId` may be null, for a sync settling a change by itself rather
+   * than a person clicking — an Airtable table being synced applies an edit the
+   * moment it arrives. Those are recorded as the system, as every other
+   * automatic decision is.
+   */
+  resolve(who: { organizationId: string; userId: string | null }, rowIds: string[], action: 'apply' | 'keep') {
     const orgId = who.organizationId;
     return this.prisma.$transaction(async (tx) => {
       const flagged = await tx.$queryRaw<{ id: string; lead_id: string | null; changed_values: ChangedValues }[]>`
@@ -161,7 +174,7 @@ export class SheetReviewService {
              SET first_name = v.first_name, last_name = v.last_name,
                  email = v.email, normalized_email = v.normalized_email, email_valid = v.email_valid,
                  phone = v.phone, normalized_phone = v.normalized_phone, phone_valid = v.phone_valid,
-                 timezone = v.timezone, location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
+                 timezone = COALESCE(v.timezone, l.timezone), location = v.location, min_budget = v.min_budget, max_budget = v.max_budget,
                  bedrooms = v.bedrooms, motivation = v.motivation, custom_fields = v.custom_fields,
                  external_lead_id = v.external_lead_id,
                  review_reasons = v.review_reasons, needs_review = cardinality(v.review_reasons) > 0,
@@ -187,8 +200,8 @@ export class SheetReviewService {
       await this.audit.recordMany(
         withLead.map((f) => ({
           orgId,
-          actorType: 'user' as const,
-          actorId: who.userId,
+          actorType: who.userId ? ('user' as const) : ('system' as const),
+          actorId: who.userId ?? undefined,
           action: action === 'apply' ? 'sheet_import.change_applied' : 'sheet_import.change_kept',
           entityType: 'lead',
           entityId: f.lead_id,

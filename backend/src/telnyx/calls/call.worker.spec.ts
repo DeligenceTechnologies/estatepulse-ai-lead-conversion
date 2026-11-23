@@ -73,6 +73,16 @@ describe('CallWorker', () => {
       expect(followup.holdOnce).toHaveBeenCalledWith(ORG, LEAD, expect.stringContaining('no valid phone number'), 'call_worker', 'voice');
     });
 
+    it('a callback promoted before its time waits for the time the lead asked for', async () => {
+      // Setting a lead's time zone promotes every delayed job they have; the callback hour is theirs.
+      const callbackAt = new Date(Date.now() + 2 * 60 * 60_000);
+      const { worker, job, voice } = setup({ lead: { phone: '+12895550100', status: 'contacting', dncStatus: false, automationPaused: false, callbackAt } });
+      job.data = { orgId: ORG, leadId: LEAD, source: 'callback', callbackAt: callbackAt.toISOString() };
+      await expect(worker.process(job as any, 'tok')).rejects.toBeInstanceOf(DelayedError);
+      expect(job.moveToDelayed).toHaveBeenCalledWith(callbackAt.getTime(), 'tok');
+      expect(voice.placeCall).not.toHaveBeenCalled();
+    });
+
     it('waits for the window to open when it is closed', async () => {
       const opens = new Date(Date.now() + 5 * 60 * 60_000);
       gate.verdict = { allowedAt: opens, reason: 'Legal calling hours (CA)' };

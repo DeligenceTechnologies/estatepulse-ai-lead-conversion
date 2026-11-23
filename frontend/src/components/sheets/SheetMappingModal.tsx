@@ -24,6 +24,7 @@ import { OutreachPicker, initialLaunch, launchChoice, launchProblem, type Launch
 import { PreviewRowsTable, flagged } from '../imports/PreviewRowsTable';
 import { SheetError, SheetModal, errorDetails, errorText } from './SheetModal';
 import { TimezoneNotice } from '../common/TimezoneNotice';
+import { Button } from '../common/Button';
 
 const select =
   'w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-green-500/60';
@@ -185,13 +186,9 @@ export const SheetMappingModal: React.FC<{
             The sheet now syncs on its own. Rows it adds later wait in Import Review; nobody is called or texted until you approve them.
           </p>
           <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 cursor-pointer"
-            >
+            <Button onClick={onClose}>
               Done
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -320,7 +317,7 @@ export const SheetMappingModal: React.FC<{
             </div>
           )}
 
-          {!Object.values(choices).includes('timezone') && <TimezoneNotice source="sheet" />}
+          {!Object.values(choices).includes('timezone') && <TimezoneNotice />}
 
           {/* Save / switch on */}
           {problems.length > 0 && (
@@ -331,34 +328,33 @@ export const SheetMappingModal: React.FC<{
             </ul>
           )}
           <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              className="flex-1"
               onClick={save}
-              disabled={busy !== null || problems.length > 0}
-              className="flex-1 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-100 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-default cursor-pointer flex items-center justify-center gap-1.5"
+              disabled={(busy !== null && busy !== 'save') || problems.length > 0}
+              loading={busy === 'save'}
             >
-              {busy === 'save' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Save mapping
-            </button>
+            </Button>
             {saved && ticking && (
-              <button
-                type="button"
+              <Button
+                className="flex-1"
                 onClick={enable}
-                disabled={busy !== null || launchBlock !== null}
+                disabled={(busy !== null && busy !== 'enable') || launchBlock !== null}
+                loading={busy === 'enable'}
                 title={
                   selected.size > 0
                     ? 'Imports every importable row; the ticked ones are approved right away, the rest wait in Import Review'
                     : 'Imports every importable row; all of them wait in Import Review'
                 }
-                className="flex-1 px-4 py-2 rounded-xl text-xs font-bold bg-green-600 text-white hover:bg-green-500 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                {busy === 'enable' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {busy === 'enable'
                   ? 'Importing…'
                   : `Import ${importable.length.toLocaleString('en-US')} lead${importable.length === 1 ? '' : 's'}${
                       selected.size > 0 ? ` · ${approvedNow(selected.size)}` : ' for review'
                     }`}
-              </button>
+              </Button>
             )}
           </div>
           <p className="text-2xs text-slate-500">

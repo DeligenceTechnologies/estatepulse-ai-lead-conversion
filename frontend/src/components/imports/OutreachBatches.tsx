@@ -14,6 +14,7 @@ import {
 } from '../../utils/outreachApi';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { errorText } from '../sheets/SheetModal';
+import { Button, IconButton } from '../common/Button';
 
 const BADGE: Record<OutreachBatchStatus, [string, string]> = {
   pending: ['Scheduled', 'bg-sky-500/15 text-sky-300 border-sky-500/30'],
@@ -22,7 +23,6 @@ const BADGE: Record<OutreachBatchStatus, [string, string]> = {
   cancelled: ['Cancelled', 'bg-rose-500/10 text-rose-300 border-rose-500/30'],
 };
 
-const btn = 'px-2.5 py-1 rounded-lg text-2xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1';
 const field = 'bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-2xs text-white focus:outline-none focus:border-emerald-600';
 
 /** Outreach batches launched from Import Review: when each starts, how far it got, and cancelling or moving one. */
@@ -41,9 +41,7 @@ export const OutreachBatches: React.FC<{ refreshKey: number }> = ({ refreshKey }
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-2xs text-slate-500">Counts follow the calls on record. Pending includes leads released and waiting for their first call.</p>
-        <button type="button" onClick={refresh} className={`${btn} text-slate-400 hover:text-white`} title="Refresh">
-          <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <IconButton size="sm" onClick={refresh} aria-label="Refresh" icon={<RefreshCw className={refreshing ? 'animate-spin' : ''} />} />
       </div>
       {error && <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">{error}</div>}
       {data && data.length === 0 && (
@@ -135,21 +133,21 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
         </span>
         <div className="flex-1" />
         {b.status === 'pending' && !editing && (
-          <button type="button" onClick={startEditing} disabled={busy !== null} className={`${btn} bg-slate-800 text-slate-200 hover:bg-slate-700`}>
+          <Button variant="secondary" size="sm" onClick={startEditing} disabled={busy !== null}>
             Reschedule
-          </button>
+          </Button>
         )}
         {(b.status === 'pending' || b.status === 'running') && (
-          <button
-            type="button"
+          <Button
+            variant={armed ? 'danger' : 'danger-soft'}
+            size="sm"
             onClick={() => void cancel()}
             onBlur={() => setArmed(false)}
-            disabled={busy !== null}
-            className={`${btn} ${armed ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200 hover:bg-rose-600/30'}`}
+            disabled={busy !== null && busy !== 'cancel'}
+            loading={busy === 'cancel'}
           >
-            {busy === 'cancel' && <Loader2 className="w-3 h-3 animate-spin" />}
             {armed ? 'Click again to cancel' : 'Cancel'}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -172,13 +170,17 @@ const BatchRow: React.FC<{ batch: OutreachBatch; onChanged: () => void }> = ({ b
             aria-label="New time"
           />
           <TimezoneSelect value={when.timeZone} onChange={(timeZone) => move({ timeZone })} className={`${field} max-w-[14rem]`} />
-          <button type="button" onClick={() => void reschedule()} disabled={busy !== null || past} className={`${btn} bg-green-600 text-white hover:bg-green-500`}>
-            {busy === 'reschedule' && <Loader2 className="w-3 h-3 animate-spin" />}
+          <Button
+            size="sm"
+            onClick={() => void reschedule()}
+            disabled={(busy !== null && busy !== 'reschedule') || past}
+            loading={busy === 'reschedule'}
+          >
             Save
-          </button>
-          <button type="button" onClick={() => setEditing(false)} disabled={busy !== null} className={`${btn} text-slate-400 hover:text-white`}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={busy !== null}>
             Keep
-          </button>
+          </Button>
           {past && <span className="text-2xs text-rose-300">That time has already passed.</span>}
         </div>
       )}

@@ -443,6 +443,8 @@ export interface ConnectFormResult extends LeadSourceConfig {
     unmapped: number;
     /** Targets deliberately left for a human — consent, in practice. */
     needsReview: string[];
+    /** False when no form question was mapped to the lead's time zone. */
+    timezoneMapped: boolean;
     mappingStatus: string;
   } | null;
 }
@@ -518,6 +520,33 @@ export interface NewLeadInput {
   startOutreach: boolean;
 }
 
+  /**
+ * What PATCH /v1/leads/:id takes: only the fields that changed. null clears a field;
+ * the first name can be changed but not cleared, and a phone or an email must remain.
+ */
+export interface LeadPatch {
+  firstName?: string;
+  lastName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  location?: string | null;
+  timeline?: string | null;
+  minBudget?: number | null;
+  maxBudget?: number | null;
+  bedrooms?: number | null;
+  financingStatus?: string | null;
+  notes?: string | null;
+}
+
+/** What PATCH /v1/leads/:id answers. */
+export interface LeadUpdateResult {
+  lead: LiveLead;
+  /** The fields that actually changed; empty when the form matched what was stored. */
+  changed: string[];
+  /** The new phone or email belongs to someone who opted out: the lead is now do-not-contact and paused. */
+  becameDoNotContact: boolean;
+}
+
 export const leadsApi = {
   /** One page of leads, newest first. Empty values are left out so the server's defaults apply. */
   list: (params: ListLeadsParams = {}) => {
@@ -533,6 +562,11 @@ export const leadsApi = {
   /** Owner-only. One lead typed in by hand; a phone or an email is required. */
   create: (input: NewLeadInput) =>
     request<{ id: string }>('/v1/leads', { method: 'POST', body: JSON.stringify(input) }),
+  /** One lead, fresh: what the edit form starts from. Needs lead.update; an assigned-only agent sees their own. */
+  get: (leadId: string) => request<LiveLead>(`/v1/leads/${leadId}`),
+  /** Corrects the lead's own details. Status, consent, DNC, assignment and time zone have their own routes. Needs lead.update. */
+  update: (leadId: string, patch: LeadPatch) =>
+    request<LeadUpdateResult>(`/v1/leads/${leadId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   /** Owner-only. Any of the 9 statuses; ends the strategy for an outcome. follow_up takes a reason. */
   setStatus: (leadId: string, status: string, reason?: string, followUpReason?: FollowUpReason) =>
     request<{ ok: true; status: string }>(`/leads/${leadId}/status`, {
@@ -545,6 +579,12 @@ export const leadsApi = {
       method: 'PUT',
       body: JSON.stringify({ agentId }),
     }),
+  /** Approves a lead held for review: its reasons clear and outreach starts, unless `held` says why it cannot. Needs lead.update. */
+  approveReview: (leadId: string) =>
+    request<{ released: boolean; held: 'DO_NOT_CONTACT' | 'NO_DIALABLE_PHONE' | 'NOT_RELEASABLE' | null }>(
+      `/v1/leads/${leadId}/review/approve`,
+      { method: 'POST' },
+    ),
   /** The lead's own time zone, or null to let their phone number decide again. Answers the zone as the list shows it. */
   setTimezone: (leadId: string, timezone: string | null) =>
     request<{ timezone: LeadTimezone }>(`/v1/leads/${leadId}/timezone`, {

@@ -17,7 +17,7 @@ export function telnyxErrorText(body: string): string {
     const parsed = JSON.parse(text) as { errors?: { code?: string; title?: string; detail?: string }[] };
     const lines = (parsed.errors ?? [])
       .map((e) => [e.title, e.detail].filter(Boolean).join(' — ') + (e.code ? ` (${e.code})` : ''))
-      .filter((l) => l.trim() && l.trim() !== `(${''})`);
+      .filter((l) => l.trim());
     if (lines.length) return lines.join('; ').slice(0, 300);
   } catch {
     // Not JSON: fall through to the raw text.

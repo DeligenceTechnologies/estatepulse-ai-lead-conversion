@@ -146,6 +146,18 @@ export const envValidationSchema = Joi.object({
     SHEETS_VERSION_PROBE: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     SHEETS_FULL_READ_MAX_AGE_MS: Joi.number().integer().positive().default(21_600_000),
 
+    // Google Forms. An Apps Script on the owner's form posts each response to
+    // ingest/v1/google-forms/:token (the primary delivery); polling
+    // forms.responses.list only recovers what the script failed to deliver.
+    // Off unless GOOGLE_FORMS_ENABLED: the ingest route and every management
+    // route answer 404 and the card is hidden. Reuses the Google OAuth client
+    // and the drive.file scope that Google Sheets already connects with.
+    GOOGLE_FORMS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    // How often the recovery poller looks for sources that are due.
+    FORMS_POLL_MS: Joi.number().integer().positive().default(60_000),
+    // How long after a successful poll a source is due again.
+    FORMS_SYNC_INTERVAL_MS: Joi.number().integer().positive().default(900_000),
+
     FILE_IMPORT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     FILE_IMPORT_MAX_BYTES: Joi.number().integer().positive().default(5 * 1024 * 1024),
 
@@ -176,4 +188,27 @@ export const envValidationSchema = Joi.object({
     // connection is reconciled against the CRM's modified dates to catch a lost webhook.
     CRM_POLL_MS: Joi.number().integer().min(0).default(30_000),
     CRM_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
+
+    // Airtable two-way sync. Off unless AIRTABLE_ENABLED: its endpoints answer 404 and nothing syncs.
+    // Unset client id/secret = the card says "not configured" instead of failing at boot.
+    AIRTABLE_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    AIRTABLE_CLIENT_ID: Joi.string().empty('').optional(),
+    AIRTABLE_CLIENT_SECRET: Joi.string().empty('').optional(),
+    // Defaults to ${APP_URL}/oauth/airtable-callback.html. Airtable requires HTTPS (localhost
+    // excepted) and no wildcards, and it must match the integration's redirect URL exactly.
+    AIRTABLE_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Space-separated. Must be a subset of the scopes enabled on the Airtable integration, and
+    // must include schema.bases:read and data.records:read. Drop schema.bases:write here to run
+    // without column creation; record sync keeps working.
+    AIRTABLE_SCOPES: Joi.string().empty('').optional(),
+    AIRTABLE_API_BASE_URL: Joi.string().uri().default('https://api.airtable.com'),
+    AIRTABLE_AUTH_BASE_URL: Joi.string().uri().default('https://airtable.com'),
+    AIRTABLE_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
+    // Airtable allows 5 requests a second per base, so 200ms between requests is
+    // exactly that ceiling. 0 switches the pacing off.
+    AIRTABLE_MIN_REQUEST_GAP_MS: Joi.number().integer().min(0).default(200),
+    // How often the worker looks for due Airtable work (0 = only when nudged), and how often a
+    // table is re-read in full to catch anything a webhook missed.
+    AIRTABLE_POLL_MS: Joi.number().integer().min(0).default(30_000),
+    AIRTABLE_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

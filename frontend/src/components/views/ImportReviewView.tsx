@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, PhoneOff } from 'lucide-react';
+import { AlertTriangle, Ban, Eye, FileSpreadsheet, FileUp, FileX, History, Inbox, Loader2, Pencil, PhoneOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { LEADS_CHANGED_EVENT } from '../../api/client';
 import { useLiveEvents } from '../../lib/liveEvents';
@@ -21,18 +21,23 @@ import {
 } from '../../utils/googleSheetsApi';
 import { getOutreachConfig, type OutreachChoice, type OutreachConfig } from '../../utils/outreachApi';
 import { FIELD_LABEL, approveMessage, formatValue, rejectMessage } from '../../utils/sheetMapping';
+import { consentReviewCount } from '../../utils/consentReviewApi';
 import { ApproveOutreachModal } from '../imports/ApproveOutreachModal';
+import { ConsentReviewPanel } from '../imports/ConsentReviewPanel';
 import { FileImportModal } from '../imports/FileImportModal';
 import { OutreachBatches } from '../imports/OutreachBatches';
 import { ImportHistoryModal, SourceBadge } from '../imports/ImportHistoryModal';
 import { KIND_NAME, ReviewLeadDrawer } from '../imports/ReviewLeadDrawer';
 import { errorText } from '../sheets/SheetModal';
+import { Button, IconButton, type ButtonVariant } from '../common/Button';
+import { Select } from '../common/Select';
 
 /** The review reasons every import starts with; shown as the screen itself, not as badges. */
 const IMPORT_REASONS = [
   'Imported from Google Sheets — awaiting owner approval',
   'Imported from a file — awaiting owner approval',
   'Imported from HubSpot — awaiting owner approval',
+  'Imported from Airtable — awaiting owner approval',
 ];
 
 /** The API decides at most this many rows per request. */
@@ -45,13 +50,9 @@ const DECISION_BATCH = 500;
 const clean = (i: ReviewItem): boolean =>
   !i.missing && !i.lead?.dncStatus && !!i.lead?.phone && (i.lead?.reviewReasons ?? []).every((r) => IMPORT_REASONS.includes(r));
 
-type Tab = 'pending' | 'rejected' | 'changes' | 'outreach';
+type Tab = 'pending' | 'rejected' | 'changes' | 'outreach' | 'consent';
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';
-const btn =
-  'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5';
-const toolBtn =
-  'px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default';
 
 /**
  * The source filter is ONE select: everything, one kind of import, or one
@@ -108,6 +109,8 @@ export const ImportReviewView: React.FC = () => {
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [totals, setTotals] = useState<{ pending?: number; rejected?: number }>({});
+  /** Manual leads added without consent (the "Consent needed" tab). */
+  const [consentTotal, setConsentTotal] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +128,7 @@ export const ImportReviewView: React.FC = () => {
   const [outreachKey, setOutreachKey] = useState(0);
 
   const { source, sourceId } = useMemo(() => parseFilter(filter), [filter]);
+  const importsOn = features.sheets || features.files || features.hubspot;
   // "Changed since review" is about one source that keeps syncing — a sheet or
   // the HubSpot account: the chosen one, or the only one.
   const sheetIds = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
@@ -136,14 +140,21 @@ export const ImportReviewView: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sheets, hist, hubspot, launch] = await Promise.all([
+      const [sheets, hist, hubspot, launch, awaitingConsent] = await Promise.all([
         listSheetSources().catch(unlessOff),
         importHistory().catch(unlessOff),
         getCrmStatus('hubspot').catch(unlessOff),
         getOutreachConfig(),
+        consentReviewCount(),
       ]);
+      setConsentTotal(awaitingConsent);
       setOutreach(launch);
       setFeatures({ sheets: sheets !== null, files: hist !== null, hubspot: hubspot !== null });
+      // With every import switched off, the page is only for manual leads awaiting consent.
+      if (sheets === null && hist === null && hubspot === null && tab !== 'consent') {
+        setTab('consent');
+        return;
+      }
       const list = sheets ?? [];
       setSources(list);
       const crmSource = hubspot?.sourceId ? { id: hubspot.sourceId, name: `HubSpot · ${hubspot.account?.name ?? hubspot.account?.id ?? 'account'}` } : null;
@@ -336,17 +347,17 @@ export const ImportReviewView: React.FC = () => {
     }
   };
 
-  const decisionButton = (what: 'approve' | 'reject' | 'apply' | 'keep', label: string, cls: string) => (
-    <button
-      type="button"
-      className={`${btn} ${armed === what ? 'bg-amber-500 text-slate-950' : cls}`}
-      disabled={selected.size === 0 || busy !== null}
+  const decisionButton = (what: 'approve' | 'reject' | 'apply' | 'keep', label: string, variant: ButtonVariant) => (
+    <Button
+      size="sm"
+      variant={armed === what && what === 'reject' ? 'danger' : variant}
+      disabled={selected.size === 0 || (busy !== null && busy !== what)}
+      loading={busy === what}
       onClick={() => void decide(what)}
       onBlur={() => armed === what && setArmed(null)}
     >
-      {busy === what && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
       {armed === what ? `Click again to ${label.toLowerCase()} ${selected.size}` : `${label} (${selected.size})`}
-    </button>
+    </Button>
   );
 
   return (
@@ -355,22 +366,17 @@ export const ImportReviewView: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Import Review</h2>
           <p className="text-xs text-slate-400">
-            Leads from your{' '}
-            {[features.sheets && 'Google Sheets', features.files && 'uploaded files', features.hubspot && 'HubSpot']
-              .filter(Boolean)
-              .join(', ')
-              .replace(/, ([^,]*)$/, ' and $1') || 'imports'}{' '}
-            wait here. Rows with a phone and no warning come already ticked, so one click approves them. Nobody is called or texted until you approve them.
+            Check imported leads before anyone is contacted. Clean rows are already selected.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <Select
             value={tab === 'changes' ? changeSource : filter}
             onChange={(e) => {
               setFilter(e.target.value);
               setSelected(new Set());
             }}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 max-w-[16rem]"
+            className="h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-xs text-slate-100 max-w-[16rem] focus:outline-none focus:border-emerald-600"
             aria-label="Which imports to show"
           >
             {tab === 'changes' ? (
@@ -406,24 +412,25 @@ export const ImportReviewView: React.FC = () => {
                 ))}
               </optgroup>
             )}
-          </select>
+          </Select>
           {features.files && (
-            <button type="button" onClick={() => setUpload(true)} className={toolBtn} title="Import leads from a CSV or Excel file">
-              <FileUp className="w-3.5 h-3.5" />
+            <Button variant="outline" size="sm" onClick={() => setUpload(true)} title="Import leads from a CSV or Excel file" icon={<FileUp />}>
               Upload a file
-            </button>
+            </Button>
           )}
           {features.files && (
-            <button type="button" onClick={() => setHistory(true)} className={toolBtn} title="Every import so far, and where its rows stand">
-              <History className="w-3.5 h-3.5" />
+            <Button variant="outline" size="sm" onClick={() => setHistory(true)} title="Every import so far, and where its rows stand" icon={<History />}>
               History
-            </button>
+            </Button>
           )}
           {features.sheets && (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => void sync()}
-              disabled={syncing || syncTargets.length === 0}
+              disabled={syncTargets.length === 0}
+              loading={syncing}
+              icon={<FileSpreadsheet />}
               title={
                 syncTargets.length === 0
                   ? source === 'file_upload' || (sourceId && !sheetIds.has(sourceId))
@@ -431,52 +438,72 @@ export const ImportReviewView: React.FC = () => {
                     : 'No sheet here is switched on. Switch one on in Integrations to sync it.'
                   : `Read ${sourceId ? 'this sheet' : 'every switched-on sheet'} from Google now`
               }
-              className={toolBtn}
             >
-              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
               {syncing ? 'Syncing…' : 'Sync now'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       <div className={`${card} p-4 space-y-3`}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
-          {(
-            [
-              ['pending', `Waiting for review${totals.pending !== undefined ? ` (${totals.pending})` : ''}`],
-              // Only a sheet or a CRM changes after review; an uploaded file is read once.
-              ...(features.sheets || features.hubspot
-                ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet']] as const)
-                : []),
-              ['rejected', `Rejected${totals.rejected !== undefined ? ` (${totals.rejected})` : ''}`],
-              ...(outreach ? ([['outreach', 'Outreach']] as const) : []),
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => switchTab(id)}
-              className={`${btn} ${tab === id ? 'bg-green-600/20 text-green-300 border border-green-500/40' : 'text-slate-400 hover:text-white'}`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-4">
+          <div role="tablist" className="flex flex-wrap items-center gap-1 p-1 bg-slate-950/70 border border-slate-800 rounded-xl">
+            {(
+              [
+                ...(importsOn ? ([['pending', 'Waiting for review', totals.pending]] as const) : []),
+                // Only a sheet or a CRM changes after review; an uploaded file is read once.
+                ...(features.sheets || features.hubspot
+                  ? ([['changes', features.hubspot ? 'Changed since review' : 'Changed in the sheet', undefined]] as const)
+                  : []),
+                ...(importsOn ? ([['rejected', 'Rejected', totals.rejected]] as const) : []),
+                ['consent', 'Consent needed', consentTotal],
+                ...(outreach ? ([['outreach', 'Outreach', undefined]] as const) : []),
+              ] as const
+            ).map(([id, label, count]) => {
+              const on = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => switchTab(id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    on ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+                >
+                  {label}
+                  {count !== undefined && (
+                    <span
+                      className={`min-w-5 px-1.5 rounded-full text-2xs font-bold text-center ${
+                        on && count > 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-500/15 text-slate-400'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
           <div className="flex-1" />
           {tab === 'pending' ? (
             <>
               {selected.size > 0 && (
-                <button type="button" className={`${btn} text-slate-400 hover:text-white`} disabled={busy !== null} onClick={() => setSelected(new Set())}>
-                  Clear selection
-                </button>
+                <>
+                  <span className="text-2xs font-semibold text-slate-400">{selected.size} selected</span>
+                  <Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => setSelected(new Set())}>
+                    Clear
+                  </Button>
+                </>
               )}
-              {decisionButton('reject', 'Reject', 'bg-slate-800 text-slate-200 hover:bg-rose-600/30')}
-              {decisionButton('approve', 'Approve', 'bg-green-600 text-white hover:bg-green-500')}
+              {decisionButton('reject', 'Reject', 'danger-soft')}
+              {decisionButton('approve', 'Approve', 'primary')}
             </>
-          ) : tab === 'rejected' || tab === 'outreach' ? null : (
+          ) : tab === 'rejected' || tab === 'outreach' || tab === 'consent' ? null : (
             <>
-              {decisionButton('keep', 'Keep current', 'bg-slate-800 text-slate-200 hover:bg-slate-700')}
-              {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'bg-green-600 text-white hover:bg-green-500')}
+              {decisionButton('keep', 'Keep current', 'secondary')}
+              {decisionButton('apply', crmChanges ? 'Apply HubSpot values' : 'Apply sheet values', 'primary')}
             </>
           )}
         </div>
@@ -485,15 +512,16 @@ export const ImportReviewView: React.FC = () => {
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-300">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span className="flex-1">{error}</span>
-            <button type="button" onClick={() => void load()} className="font-bold underline cursor-pointer">
+            <Button variant="link" onClick={() => void load()}>
               Retry
-            </button>
+            </Button>
           </div>
         )}
 
         {tab === 'outreach' && <OutreachBatches refreshKey={outreachKey} />}
+        {tab === 'consent' && <ConsentReviewPanel onTotal={setConsentTotal} />}
 
-        {loading && tab !== 'outreach' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
+        {loading && tab !== 'outreach' && tab !== 'consent' && (tab === 'changes' ? changes.length === 0 : items.length === 0) && (
           <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading…
           </div>
@@ -501,15 +529,20 @@ export const ImportReviewView: React.FC = () => {
 
         {/* Waiting for review, and rejected (read-only) */}
         {(tab === 'pending' || tab === 'rejected') && !loading && items.length === 0 && !error && (
-          <div className="text-center py-10 space-y-2">
-            <Inbox className="w-7 h-7 text-slate-600 mx-auto" />
-            <div className="text-xs text-slate-400">
-              {tab === 'pending' ? 'No imported leads are waiting for review.' : 'No imported leads have been rejected.'}
+          <div className="text-center py-14 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center mx-auto">
+              <Inbox className="w-5 h-5 text-emerald-400" />
             </div>
-            {tab === 'pending' && features.files && sources.length === 0 && batches.length === 0 && (
-              <button type="button" onClick={() => setUpload(true)} className="text-xs font-bold text-green-300 hover:text-green-200 cursor-pointer">
-                Upload a CSV or Excel file to get started
-              </button>
+            <div className="space-y-1">
+              <div className="text-sm font-bold text-white">{tab === 'pending' ? 'All caught up' : 'Nothing rejected'}</div>
+              <div className="text-xs text-slate-400">
+                {tab === 'pending' ? 'No imported leads are waiting for review.' : 'Leads you reject show up here.'}
+              </div>
+            </div>
+            {tab === 'pending' && features.files && (
+              <Button variant="outline" size="sm" onClick={() => setUpload(true)} icon={<FileUp />}>
+                Upload a file
+              </Button>
             )}
           </div>
         )}
@@ -521,10 +554,10 @@ export const ImportReviewView: React.FC = () => {
                 a larger share, and the other text columns split what is left equally. Long values
                 truncate, with the full text on hover. */}
             <table className="w-full table-fixed text-xs">
-              <thead className="text-2xs uppercase text-slate-500 text-left">
+              <thead className="text-2xs font-semibold text-slate-400 text-left bg-slate-950/60">
                 <tr>
                   {tab === 'pending' && (
-                    <th className="px-2 py-2 w-10">
+                    <th className="px-2.5 py-2.5 w-10">
                       <input
                         type="checkbox"
                         checked={allSelected}
@@ -533,13 +566,13 @@ export const ImportReviewView: React.FC = () => {
                       />
                     </th>
                   )}
-                  <th className="px-2 py-2">Name</th>
-                  <th className="px-2 py-2">Phone</th>
-                  <th className="px-2 py-2 w-[30%]">Email</th>
-                  <th className="px-2 py-2">Location</th>
-                  <th className="px-2 py-2">Budget</th>
-                  <th className="px-2 py-2 w-20 text-center">Source</th>
-                  <th className="px-2 py-2 w-24 text-center">{tab === 'pending' ? 'Warnings' : 'Rejected'}</th>
+                  <th className="px-2.5 py-2.5">Name</th>
+                  <th className="px-2.5 py-2.5">Phone</th>
+                  <th className="px-2.5 py-2.5 w-[30%]">Email</th>
+                  <th className="px-2.5 py-2.5">Location</th>
+                  <th className="px-2.5 py-2.5">Budget</th>
+                  <th className="px-2.5 py-2.5 w-20 text-center">Source</th>
+                  <th className="px-2.5 py-2.5 w-24 text-center">{tab === 'pending' ? 'Checks' : 'Rejected'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -547,9 +580,9 @@ export const ImportReviewView: React.FC = () => {
                   // Our checks on the row (a bad email, a possible duplicate) — not the file's own notes column.
                   const warnings = (i.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r));
                   return (
-                    <tr key={i.rowId} className={selected.has(i.rowId) ? 'bg-green-500/5' : ''}>
+                    <tr key={i.rowId} className={`transition-colors ${selected.has(i.rowId) ? 'bg-emerald-500/[0.06]' : 'hover:bg-slate-800/30'}`}>
                       {tab === 'pending' && (
-                        <td className="px-2 py-2">
+                        <td className="px-2.5 py-2.5">
                           <input
                             type="checkbox"
                             checked={selected.has(i.rowId)}
@@ -558,12 +591,12 @@ export const ImportReviewView: React.FC = () => {
                           />
                         </td>
                       )}
-                      <td className="px-2 py-2 text-slate-100">
+                      <td className="px-2.5 py-2.5 text-slate-100">
                         <span className="block truncate" title={[i.lead?.firstName, i.lead?.lastName].filter(Boolean).join(' ')}>
                           {[i.lead?.firstName, i.lead?.lastName].filter(Boolean).join(' ') || '—'}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-slate-300">
+                      <td className="px-2.5 py-2.5 text-slate-300">
                         {/* A number that cannot be rung is the reason most rows wait here, so the cell
                             itself says so rather than hiding it behind the warning icon. */}
                         <span
@@ -577,45 +610,49 @@ export const ImportReviewView: React.FC = () => {
                           {i.lead?.phone ?? '—'}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-slate-300">
+                      <td className="px-2.5 py-2.5 text-slate-300">
                         <span className="block truncate" title={i.lead?.email ?? undefined}>
                           {i.lead?.email ?? '—'}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-slate-400">
+                      <td className="px-2.5 py-2.5 text-slate-400">
                         <span className="block truncate" title={i.lead?.location ?? undefined}>
                           {i.lead?.location ?? '—'}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-slate-400">
+                      <td className="px-2.5 py-2.5 text-slate-400">
                         <span className="block truncate">{budget(i.lead?.minBudget ?? null, i.lead?.maxBudget ?? null)}</span>
                       </td>
-                      <td className="px-2 py-2 text-center">
+                      <td className="px-2.5 py-2.5 text-center">
                         <SourceBadge
                           kind={i.source?.kind ?? 'google_sheets'}
                           label={false}
-                          title={`${KIND_NAME[i.source?.kind ?? 'google_sheets']}: ${i.source?.name ?? '—'}${i.source?.kind === 'hubspot' ? '' : ` · row ${i.rowNumber}`}`}
+                          title={`${KIND_NAME[i.source?.kind ?? 'google_sheets']}: ${i.source?.name ?? '—'}${
+                            // A row number means something in a sheet or a file.
+                            // A HubSpot contact and an Airtable record have no
+                            // position, so naming one would be inventing it.
+                            i.source?.kind === 'hubspot' || i.source?.kind === 'airtable' ? '' : ` · row ${i.rowNumber}`
+                          }`}
                         />
                       </td>
                       {tab === 'rejected' ? (
-                        <td className="px-2 py-2 text-slate-500 whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 text-slate-500 whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1.5">
                             <span>{i.reviewedAt ? new Date(i.reviewedAt).toLocaleDateString() : '—'}</span>
                             {i.lead && (
-                              <button
-                                type="button"
+                              <IconButton
+                                variant="outline"
+                                size="sm"
                                 onClick={() => setViewing(i)}
                                 title="See everything this row brought in"
                                 aria-label="View details"
-                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
-                              >
-                                <Eye className="w-3 h-3" />
-                              </button>
+                                icon={<Eye />}
+                              />
                             )}
                           </div>
                         </td>
                       ) : (
-                        <td className="px-2 py-2">
+                        <td className="px-2.5 py-2.5">
                           {/* Icons only; what each means is on hover, like the source. */}
                           <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                             {i.lead?.dncStatus && (
@@ -635,7 +672,7 @@ export const ImportReviewView: React.FC = () => {
                                     ? 'Deleted, archived or merged in HubSpot — the lead is kept; reject it if it should not be worked'
                                     : 'Removed from the sheet — the lead is kept; reject it if it should not be worked'
                                 }
-                                aria-label={i.source?.kind === 'hubspot' ? 'No longer in HubSpot' : 'Removed from the sheet'}
+                                aria-label={`No longer in ${KIND_NAME[i.source?.kind ?? 'google_sheets']}`}
                               >
                                 <FileX className="w-3 h-3" />
                               </span>
@@ -659,15 +696,14 @@ export const ImportReviewView: React.FC = () => {
                               </span>
                             )}
                             {i.lead && (
-                              <button
-                                type="button"
+                              <IconButton
+                                variant="outline"
+                                size="sm"
                                 onClick={() => setViewing(i)}
-                                title="See everything this row brought in"
-                                aria-label="View details"
-                                className="p-1 rounded border inline-flex transition-colors cursor-pointer bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:bg-slate-700"
-                              >
-                                <Eye className="w-3 h-3" />
-                              </button>
+                                title={i.edit ? 'Edit the contact details — saved back to the sheet' : 'See everything this row brought in'}
+                                aria-label={i.edit ? 'Edit details' : 'View details'}
+                                icon={i.edit ? <Pencil /> : <Eye />}
+                              />
                             )}
                           </div>
                         </td>
@@ -678,15 +714,16 @@ export const ImportReviewView: React.FC = () => {
               </tbody>
             </table>
             {cursor && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => void more()}
-                disabled={busy !== null}
-                className={`${btn} mx-auto mt-3 text-slate-300 hover:text-white`}
+                disabled={busy !== null && busy !== 'more'}
+                loading={busy === 'more'}
+                className="flex! mx-auto mt-3"
               >
-                {busy === 'more' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Load more
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -694,15 +731,13 @@ export const ImportReviewView: React.FC = () => {
         {/* Changed in the sheet after review */}
         {tab === 'changes' && !changeSource && !loading && (
           <div className="text-center py-10 text-xs text-slate-400">
-            {crm ? 'Choose a source to see leads that changed there after you reviewed them.' : 'Choose a sheet to see rows that changed after you reviewed them.'}
+            {crm ? 'Pick a source above to see what changed.' : 'Pick a sheet above to see what changed.'}
           </div>
         )}
         {tab === 'changes' && changeSource && !loading && changes.length === 0 && !error && (
           <div className="text-center py-10 space-y-2">
             <Inbox className="w-7 h-7 text-slate-600 mx-auto" />
-            <div className="text-xs text-slate-400">
-              {crmChanges ? 'No reviewed leads have a HubSpot change waiting for you.' : 'No reviewed rows have changed in the sheet.'}
-            </div>
+            <div className="text-xs text-slate-400">No changes since your last review.</div>
           </div>
         )}
         {tab === 'changes' && changes.length > 0 && (
@@ -771,6 +806,13 @@ export const ImportReviewView: React.FC = () => {
           item={viewing}
           warnings={(viewing.lead?.reviewReasons ?? []).filter((r) => !IMPORT_REASONS.includes(r))}
           onClose={() => setViewing(null)}
+          onSaved={() => {
+            const crm = viewing.edit?.via === 'crm';
+            setViewing(null);
+            void load();
+            // A CRM contact is re-read by the sync worker in the background: look again once it has.
+            if (crm) window.setTimeout(() => void load(), 3000);
+          }}
         />
       )}
 

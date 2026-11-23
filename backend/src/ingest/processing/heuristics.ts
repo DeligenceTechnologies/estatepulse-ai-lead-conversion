@@ -47,7 +47,15 @@ function typeCompatible(target: CanonicalKey, providerType: string): boolean {
   return true;
 }
 
-function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer): Transform {
+/**
+ * The transform a canonical field needs, given the question it is fed from.
+ *
+ * Exported because an owner mapping a question by hand needs the same answer
+ * as the heuristics would have given: a "Timeline" dropdown must become an
+ * enum_map built from that question's own options whether we guessed it or
+ * they chose it, or their choice would write free text into an enum column.
+ */
+export function defaultTransform(target: CanonicalKey, answer: NormalizedAnswer): Transform {
   switch (target) {
     case 'phone':
       return { kind: 'phone_e164' };

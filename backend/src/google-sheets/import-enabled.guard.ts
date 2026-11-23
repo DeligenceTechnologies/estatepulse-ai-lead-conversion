@@ -44,8 +44,18 @@ export class ImportReviewEnabledGuard extends FeatureGuard {
     return (
       this.config.get('GOOGLE_SHEETS_ENABLED', { infer: true }) ||
       this.config.get('FILE_IMPORT_ENABLED', { infer: true }) ||
-      this.config.get('HUBSPOT_ENABLED', { infer: true })
+      this.config.get('HUBSPOT_ENABLED', { infer: true }) ||
+      this.config.get('AIRTABLE_ENABLED', { infer: true })
     );
+  }
+}
+
+@Injectable()
+export class AirtableEnabledGuard extends FeatureGuard {
+  protected readonly code = 'AIRTABLE_DISABLED';
+  protected readonly message = 'Airtable is not enabled on this server.';
+  protected enabled() {
+    return this.config.get('AIRTABLE_ENABLED', { infer: true });
   }
 }
 

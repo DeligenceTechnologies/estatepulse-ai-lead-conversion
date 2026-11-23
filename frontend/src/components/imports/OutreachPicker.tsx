@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { pathForView } from '../../context/AppContext';
 import { earliestStart, upcoming, wallClockNow, type OutreachChoice, type OutreachConfig, type OutreachMode } from '../../utils/outreachApi';
 import { TimezoneSelect } from '../common/TimezoneSelect';
+import { Button } from '../common/Button';
 
 const field = 'bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-600';
 
@@ -38,14 +39,13 @@ export const OutreachPicker: React.FC<{ config: OutreachConfig; value: Launch; o
   const navigate = useNavigate();
   /** A "Change" link to one AI Settings card: the page scrolls to it and points it out. */
   const change = (card: 'contact-window' | 'call-capacity' | 'call-pacing', where: string) => (
-    <button
-      type="button"
+    <Button
+      variant="link"
       onClick={() => navigate({ pathname: pathForView('ai_settings'), hash: card })}
       title={`Change in AI Settings → ${where}`}
-      className="font-bold text-emerald-300 hover:text-emerald-200 cursor-pointer"
     >
       Change
-    </button>
+    </Button>
   );
   const set = (patch: Partial<Launch>) => onChange({ ...value, ...patch });
   /** Clicks, zones and today picked as the date also move a past time up to now. A typed time stays as typed (snapping mid-keystroke fights the input) and is flagged. */

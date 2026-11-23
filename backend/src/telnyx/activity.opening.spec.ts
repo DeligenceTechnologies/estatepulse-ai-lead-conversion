@@ -112,6 +112,13 @@ describe('ActivityService call opening', () => {
       ]);
     });
 
+    it('hangs up when Telnyx refuses to start the assistant, instead of leaving the lead in silence', async () => {
+      const { service } = make({ waitMs: 0 });
+      refuse = (name) => name === 'ai_assistant_start';
+      await attach(service);
+      expect(names()).toEqual(['ai_assistant_start', 'hangup']);
+    });
+
     it('starts at once when the wait is switched off (0)', async () => {
       const { service } = make({ waitMs: 0 });
       await attach(service);
@@ -120,57 +127,75 @@ describe('ActivityService call opening', () => {
   });
 
   describe('recording notice', () => {
-    const announced = { ...plan, record: true, announce: true, voice: 'Telnyx.Ultra.v1' };
-    const NOTICE = { name: 'speak', body: { payload: 'Just so you know, this call is recorded for quality and training.', voice: 'Telnyx.Ultra.v1' } };
+    const NOTICE = 'Just so you know, this call is recorded for quality and training.';
+    const announced = { ...plan, record: true, announce: true, greeting: `${NOTICE} Hi Ana, this is an AI assistant.` };
 
-    it('is played first; the recording and then the assistant start only once it has been heard', async () => {
+    it('the assistant starts at once and says it first; the recording starts when it begins speaking', async () => {
       const { service } = make({ waitMs: 0 });
       await (service as any).attach('cc-1', announced);
-      expect(actions).toEqual([NOTICE]);
-      await service.onSpeakEnded('cc-1', 'completed');
-      expect(names()).toEqual(['speak', 'record_start', 'ai_assistant_start']);
-      await service.onSpeakEnded('cc-1', 'completed');
-      expect(count('record_start')).toBe(1);
+      expect(actions).toEqual([
+        { name: 'ai_assistant_start', body: { assistant: { id: 'assistant-1' }, dynamic_variables: plan.variables, greeting: announced.greeting } },
+      ]);
+      await service.onConversationStarted('cc-1');
+      await service.onConversationStarted('cc-1');
+      expect(names()).toEqual(['ai_assistant_start', 'record_start']);
     });
 
-    it('waits for a person like the assistant does: nothing plays or records before the verdict', async () => {
+    it('a lost conversation-started webhook still records, a little later', async () => {
+      const { service } = make({ waitMs: 0 });
+      await (service as any).attach('cc-1', announced);
+      vi.advanceTimersByTime(10_000);
+      await flush();
+      expect(names()).toEqual(['ai_assistant_start', 'record_start']);
+    });
+
+    it('waits for a person like the assistant does: nothing starts or records before the verdict', async () => {
       const { service } = make();
       await (service as any).attach('cc-1', announced);
       expect(names()).toEqual([]);
       await service.onMachineDetection('cc-1', 'human_residence');
-      expect(names()).toEqual(['speak']);
+      expect(names()).toEqual(['ai_assistant_start']);
     });
 
-    it('a notice cut short is not followed by a recording, but the assistant still talks', async () => {
-      const { service } = make({ waitMs: 0 });
-      await (service as any).attach('cc-1', announced);
-      await service.onSpeakEnded('cc-1', 'call_hangup');
-      expect(names()).toEqual(['speak', 'ai_assistant_start']);
-    });
-
-    it('a lost speak-ended webhook does not hold the call: it goes on after the notice time', async () => {
-      const { service } = make({ waitMs: 0 });
-      await (service as any).attach('cc-1', announced);
-      vi.advanceTimersByTime(12_000);
-      await flush();
-      expect(names()).toEqual(['speak', 'record_start', 'ai_assistant_start']);
-    });
-
-    it('a machine found while the notice plays gets neither a recording nor the assistant', async () => {
+    it('a machine found after the wait gets no recording', async () => {
       const { service } = make();
       await (service as any).attach('cc-1', announced);
       vi.advanceTimersByTime(5000);
       await flush();
       await service.onMachineDetection('cc-1', 'machine');
-      await service.onSpeakEnded('cc-1', 'completed');
+      vi.advanceTimersByTime(10_000);
+      await flush();
       expect(count('record_start')).toBe(0);
-      expect(count('ai_assistant_start')).toBe(0);
     });
 
     it('without announcing, the call records from the pick-up', async () => {
       const { service } = make({ waitMs: 0 });
       await (service as any).attach('cc-1', { ...plan, record: true, announce: false });
       expect(names()).toEqual(['record_start', 'ai_assistant_start']);
+    });
+
+    it("puts the notice in front of the assistant's own greeting, filled in for the lead", async () => {
+      const settings = { callRecordingEnabled: true, callRecordingAnnounce: true };
+      const service = new ActivityService(
+        { organizationSetting: { findUnique: vi.fn(async () => settings) } } as any,
+        { getCreds: vi.fn(async () => ({ apiKey: 'KEY', assistantId: 'assistant-1' })) } as any,
+        { ensureProvisioned: vi.fn(async () => undefined) } as any,
+        { ensureCallSetup: vi.fn(async () => undefined), greetingOf: vi.fn(async () => 'Hi {{firstName}}, this is {{brokerage}}.') } as any,
+        {} as any,
+        { get: vi.fn(() => 5000) } as any,
+        {} as any,
+        {} as any,
+        { ensure: vi.fn(async () => undefined) } as any,
+        { get: vi.fn(async () => []) } as any,
+      );
+      service.leadVariables = vi.fn(async () => ({ firstName: 'Ana', brokerage: 'Sunny Homes' }));
+      const p = await (service as any).prepareAttach('cc-1', 'org-1', 'lead-1');
+      expect(p).toMatchObject({ record: true, announce: true, greeting: `${NOTICE} Hi Ana, this is Sunny Homes.` });
+
+      settings.callRecordingAnnounce = false;
+      (service as any).prepared.clear();
+      const quiet = await (service as any).prepareAttach('cc-2', 'org-1', 'lead-1');
+      expect(quiet.greeting).toBeUndefined();
     });
   });
 

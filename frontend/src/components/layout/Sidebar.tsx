@@ -16,8 +16,10 @@ import {
   Settings,
   ClipboardCheck,
 } from 'lucide-react';
-import { useApp, isLockedView, type AppView } from '../../context/AppContext';
+import { isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
+import { consentReviewCount } from '../../utils/consentReviewApi';
 import { importReviewEnabled } from '../../utils/fileImportApi';
 import type { NavGroup, NavItem } from './DashboardSidebar';
 
@@ -31,13 +33,37 @@ type OwnerNavItem = NavItem & { id: AppView };
  * title. DashboardSidebar renders it.
  */
 export function useOwnerNav(): NavGroup[] {
-  const { leads } = useApp();
   const { role, agentProfileId, can } = useAuth();
   const isOwner = role === 'owner';
   const [sheetsOn, setSheetsOn] = useState(false);
+  // Import Review is open while an import is switched on, or while a lead added by hand waits there for its consent.
   useEffect(() => {
-    if (isOwner) void importReviewEnabled().then(setSheetsOn);
+    if (!isOwner) return;
+    const check = () => void Promise.all([importReviewEnabled(), consentReviewCount()]).then(([imports, awaiting]) => setSheetsOn(imports || awaiting > 0));
+    check();
+    window.addEventListener(LEADS_CHANGED_EVENT, check);
+    return () => window.removeEventListener(LEADS_CHANGED_EVENT, check);
   }, [isOwner]);
+
+  // The All Leads badge counts only leads still at New, across every lead (not just the page loaded),
+  // from the same stats the Leads tabs use. Kept current on every lead change and once a minute.
+  const [newLeads, setNewLeads] = useState(0);
+  useEffect(() => {
+    const load = () =>
+      void leadsApi
+        .stats()
+        .then((s) => setNewLeads(s.byStatus.new ?? 0))
+        .catch(() => undefined);
+    load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 60_000);
+    window.addEventListener(LEADS_CHANGED_EVENT, load);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener(LEADS_CHANGED_EVENT, load);
+    };
+  }, []);
 
   const canReadOrg = can('organization.read');
 
@@ -53,7 +79,7 @@ export function useOwnerNav(): NavGroup[] {
       // arrives, the AI messages and calls it, then nurtures it.
       label: 'Leads',
       items: [
-        { id: 'leads', label: 'All Leads', icon: Users, badge: leads.length },
+        { id: 'leads', label: 'All Leads', icon: Users, badge: newLeads, badgeTitle: `${newLeads} new lead${newLeads === 1 ? '' : 's'}` },
         { id: 'conversations', label: 'Conversations', icon: MessageSquare },
         { id: 'calls', label: 'AI Calls', icon: PhoneCall },
         { id: 'followups', label: 'Follow-ups', icon: Repeat },

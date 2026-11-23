@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Info, Zap } from 'lucide-react';
+import { Button } from '../common/Button';
 
 /** Shared chrome for the auth pages. */
 export const AuthLayout: React.FC<{
@@ -167,13 +168,9 @@ export const SubmitButton: React.FC<{ busy: boolean; children: React.ReactNode; 
   children,
   disabled,
 }) => (
-  <button
-    type="submit"
-    disabled={busy || disabled}
-    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:hover:bg-emerald-600 text-on-accent text-sm font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed"
-  >
+  <Button type="submit" size="lg" fullWidth loading={busy} disabled={disabled}>
     {busy ? 'Please wait…' : children}
-  </button>
+  </Button>
 );
 
 export const FormError: React.FC<{ message: string | null }> = ({ message }) =>

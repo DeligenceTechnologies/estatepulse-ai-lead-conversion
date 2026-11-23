@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
@@ -6,8 +6,9 @@ import { RequirePermissions } from '@/role/decorators/require-permissions.decora
 import { PERMISSIONS } from '@/role/permissions';
 import { CrmConnectionsService, type SessionIdentity } from './crm-connections.service';
 import { CrmRegistry } from './crm-registry';
+import { CrmRowEditService } from './crm-row-edit.service';
 import { CrmSyncService } from './crm-sync.service';
-import { CompleteCrmOAuthDto, CrmRunsQueryDto } from './dto/crm.dto';
+import { CompleteCrmOAuthDto, CrmRunsQueryDto, EditCrmContactDto } from './dto/crm.dto';
 
 const identity = (auth: AuthContext): SessionIdentity => ({
   organizationId: auth.organizationId,
@@ -33,7 +34,20 @@ export class CrmController {
     private readonly registry: CrmRegistry,
     private readonly connections: CrmConnectionsService,
     private readonly sync: CrmSyncService,
+    private readonly edits: CrmRowEditService,
   ) {}
+
+  /** Corrects a contact still waiting in Import Review: written to the CRM, then re-read so the lead follows. */
+  @Patch('review/rows/:rowId')
+  @RequirePermissions(PERMISSIONS.LEAD_IMPORT)
+  editRow(
+    @CurrentAuth() auth: AuthContext,
+    @Param('provider') provider: string,
+    @Param('rowId', ParseUUIDPipe) rowId: string,
+    @Body() body: EditCrmContactDto,
+  ) {
+    return this.edits.edit(identity(auth), this.registry.get(provider), rowId, body);
+  }
 
   @Get('config')
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
