@@ -45,6 +45,8 @@ const APP_VIEWS = [
   'lead_sources',
   // Leads imported from Google Sheets waiting for the owner. Live API.
   'import_review',
+  // Live API: leads that look like the same person, to merge or dismiss.
+  'duplicates',
   // An owner who also takes leads: their own working hours and calendar
   // status, the same screen an agent sees. Live API, like lead_sources.
   'my_availability',

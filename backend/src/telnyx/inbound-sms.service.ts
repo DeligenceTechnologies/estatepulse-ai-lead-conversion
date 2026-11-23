@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { DeliveryStatus, LeadStatus, LeadTemperature } from '@prisma/client';
+import { leadByPhone } from '@/lead/duplicates/merged-redirect';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
@@ -94,7 +95,7 @@ export class InboundSmsService {
       const seen = await this.prisma.message.findFirst({ where: { providerMessageId: providerId, direction: 'inbound' }, select: { id: true } });
       if (seen) return;
     }
-    let lead = await this.prisma.lead.findFirst({ where: { orgId, normalizedPhone: from }, orderBy: { createdAt: 'desc' }, select: LEAD_FIELDS });
+    let lead = await leadByPhone(this.prisma, orgId, from, LEAD_FIELDS);
     const word = smsKeyword(text, payload?.autoresponse_type);
     if (!lead) {
       if (word) return this.onStranger(orgId, from, to, word);
@@ -231,11 +232,7 @@ export class InboundSmsService {
     }
     const to = normalizePhone(recipient.phone_number);
     if (!to || !(await this.conversations.isEnabled(orgId))) return;
-    const lead = await this.prisma.lead.findFirst({
-      where: { orgId, normalizedPhone: to },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, takenOverById: true },
-    });
+    const lead = await leadByPhone(this.prisma, orgId, to, { id: true, takenOverById: true });
     if (!lead) return;
     await this.prisma.message.create({
       data: {

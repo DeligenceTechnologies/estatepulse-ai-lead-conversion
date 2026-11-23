@@ -169,6 +169,14 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
                                 {errors} skipped
                               </span>
                             ) : null}
+                            {r.attached ? (
+                              <span
+                                className="px-1.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/25"
+                                title="Already a lead: added to that lead's history instead of becoming a new lead"
+                              >
+                                {r.attached} added to existing leads
+                              </span>
+                            ) : null}
                             {r.possibleDuplicates ? (
                               <span className="px-1.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25">
                                 {r.possibleDuplicates} possible duplicate{r.possibleDuplicates === 1 ? '' : 's'}

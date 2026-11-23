@@ -9,8 +9,8 @@ model LeadSource {
   isActive         Boolean            @default(true) @map("is_active")
   archivedAt       DateTime?          @map("archived_at") @db.Timestamptz(6)
 
-  defaultConsentStatus ConsentStatus @default(pending) @map("default_consent_status")
-  ingestStatus         IngestStatus? @map("ingest_status")
+  defaultConsentStatus ConsentStatus  @default(pending) @map("default_consent_status")
+  ingestStatus         IngestStatus?  @map("ingest_status")
   mappingStatus        MappingStatus? @map("mapping_status")
   mappingVersion       Int            @default(0) @map("mapping_version")
   schemaFingerprint    String?        @map("schema_fingerprint") @db.VarChar(64)
@@ -69,6 +69,7 @@ model LeadSource {
   ingestEvents    IngestEvent[]
   leads           Lead[]
   sheetImportRows SheetImportRow[]
+  submissions     LeadSubmission[]
   crmSyncRuns     CrmSyncRun[]
 
   @@unique([orgId, code])
@@ -133,13 +134,13 @@ model IngestEvent {
   providerFormId       String?            @map("provider_form_id") @db.VarChar(255)
   providerCreatedAt    DateTime?          @map("provider_created_at") @db.Timestamptz(6)
 
-  rawBody            String?         @map("raw_body")
+  rawBody            String?        @map("raw_body")
   payload            Json
-  payloadHash        String          @map("payload_hash") @db.VarChar(64)
+  payloadHash        String         @map("payload_hash") @db.VarChar(64)
   headers            Json?
-  contentLength      Int?            @map("content_length")
-  signatureState     SignatureState  @map("signature_state")
-  usedPreviousSecret Boolean         @default(false) @map("used_previous_secret")
+  contentLength      Int?           @map("content_length")
+  signatureState     SignatureState @map("signature_state")
+  usedPreviousSecret Boolean        @default(false) @map("used_previous_secret")
 
   queueState    QueueState       @map("queue_state")
   availableAt   DateTime         @default(now()) @map("available_at") @db.Timestamptz(6)
@@ -195,15 +196,15 @@ model SheetImportRow {
   /// pushedHash is the fingerprint of the lead values last WRITTEN to the
   /// provider — comparing it to what the provider now holds is what tells our
   /// own echo apart from a real edit, so no change loops.
-  pushedHash           String?     @map("pushed_hash") @db.VarChar(64)
-  pushedAt             DateTime?   @map("pushed_at") @db.Timestamptz(6)
+  pushedHash      String?   @map("pushed_hash") @db.VarChar(64)
+  pushedAt        DateTime? @map("pushed_at") @db.Timestamptz(6)
   /// Consecutive failed pushes, and when the next one may be tried; drives backoff.
-  pushAttempts         Int         @default(0) @map("push_attempts")
-  pushAvailableAt      DateTime?   @map("push_available_at") @db.Timestamptz(6)
-  pushErrorCode        String?     @map("push_error_code") @db.VarChar(50)
-  pushError            String?     @map("push_error") @db.VarChar(500)
-  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  pushAttempts    Int       @default(0) @map("push_attempts")
+  pushAvailableAt DateTime? @map("push_available_at") @db.Timestamptz(6)
+  pushErrorCode   String?   @map("push_error_code") @db.VarChar(50)
+  pushError       String?   @map("push_error") @db.VarChar(500)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   leadSource   LeadSource   @relation(fields: [leadSourceId], references: [id], onDelete: Cascade)

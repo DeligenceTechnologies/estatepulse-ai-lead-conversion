@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Logger, Post, Req, type RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
+import { leadByPhone } from '@/lead/duplicates/merged-redirect';
 import { Public } from '@/auth/decorators/public.decorator';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { verifyTelnyxSignature } from '@/common/utils/crypto';
@@ -142,11 +143,7 @@ export class TelnyxWebhookController {
       if (!leadId) {
         orgId = await this.creds.orgForNumber(normalizePhone(p.telnyx_agent_target));
         const lead = orgId
-          ? await this.prisma.lead.findFirst({
-              where: { orgId, normalizedPhone: normalizePhone(p.telnyx_end_user_target) },
-              orderBy: { createdAt: 'desc' },
-              select: { id: true, takenOverById: true, dncStatus: true },
-            })
+          ? await leadByPhone(this.prisma, orgId, normalizePhone(p.telnyx_end_user_target), { id: true, takenOverById: true, dncStatus: true })
           : null;
         leadId = lead?.id ?? null;
         // Never on a call: a paused phone_call conversation would leave the lead in silence.

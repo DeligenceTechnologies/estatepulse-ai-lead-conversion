@@ -11,10 +11,12 @@ export const AGENT_ROLE_WHERE = {
 
 export const canReadAllLeads = (auth: AuthContext) => auth.permissions.includes(PERMISSIONS.LEAD_READ);
 
-/** Everyone with lead.read sees every lead; anyone else only the leads assigned to them. */
+/** Everyone with lead.read sees every lead (merged-away ones aside); anyone else only the leads assigned to them. */
 export const visibleLeads = (auth: AuthContext) =>
   ({
     orgId: auth.organizationId,
+    // A lead merged into another is kept only for undo and history; the person lives on the survivor.
+    mergedIntoId: null,
     ...(canReadAllLeads(auth) ? {} : { assignedToId: auth.userId }),
   }) satisfies Prisma.LeadWhereInput;
 

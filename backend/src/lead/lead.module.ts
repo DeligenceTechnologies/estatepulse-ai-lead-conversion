@@ -3,6 +3,7 @@ import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { ConsentReviewController } from './consent-review.controller';
 import { ConsentReviewService } from './consent-review.service';
 import { DashboardController } from './dashboard.controller';
+import { DuplicatesController } from './duplicates/duplicates.controller';
 import { LeadAssignmentNotifier } from './lead-assignment-notifier.service';
 import { LeadAssignmentService } from './lead-assignment.service';
 import { LeadEditService } from './lead-edit.service';
@@ -13,7 +14,7 @@ import { ManualLeadService } from './manual-lead.service';
 
 @Module({
   imports: [TelnyxModule],
-  controllers: [ConsentReviewController, LeadsController, DashboardController],
+  controllers: [ConsentReviewController, LeadsController, DashboardController, DuplicatesController],
   providers: [ConsentReviewService, LeadAssignmentService, LeadAssignmentNotifier, ManualLeadService, LeadTimezoneService, LeadReviewService, LeadEditService],
   exports: [LeadAssignmentService],
 })
