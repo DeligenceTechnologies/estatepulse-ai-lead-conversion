@@ -16,6 +16,7 @@ import {
   Settings,
   ClipboardCheck,
   Copy,
+  CreditCard,
 } from 'lucide-react';
 import { isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -143,6 +144,7 @@ export function useOwnerNav(): NavGroup[] {
       label: 'Setup',
       items: [
         { id: 'ai_settings', label: 'AI Assistant', icon: Bot },
+        ...(can('billing.read') ? [{ id: 'pricing' as const, label: 'Plans & Billing', icon: CreditCard }] : []),
         ...(canReadOrg ? [{ id: 'settings' as const, label: 'Settings', icon: Settings }] : []),
       ],
     },

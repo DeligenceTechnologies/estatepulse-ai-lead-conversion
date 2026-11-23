@@ -29,4 +29,6 @@ export const ROOT_ROUTES = [
   'tools/telnyx/outcome/meeting',
   'tools/telnyx/outcome/transfer',
   'org-settings/calendar/calendly/callback',
+  // Registered in the Stripe Dashboard as the billing webhook endpoint.
+  'billing/webhook',
 ];

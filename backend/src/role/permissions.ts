@@ -22,6 +22,9 @@ export const PERMISSIONS = {
 
   AUTOMATION_READ: 'automation.read',
   AUTOMATION_UPDATE: 'automation.update',
+
+  BILLING_READ: 'billing.read',
+  BILLING_MANAGE: 'billing.manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -87,6 +90,14 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     permissions: [
       { key: PERMISSIONS.AUTOMATION_READ, label: 'View the AI assistant, outreach strategy and sequences' },
       { key: PERMISSIONS.AUTOMATION_UPDATE, label: 'Edit the AI assistant, outreach strategy and sequences' },
+    ],
+  },
+  {
+    module: 'billing',
+    label: 'Billing',
+    permissions: [
+      { key: PERMISSIONS.BILLING_READ, label: 'View the plan, usage and invoices' },
+      { key: PERMISSIONS.BILLING_MANAGE, label: 'Subscribe, change plan, cancel and manage payment methods' },
     ],
   },
 ];

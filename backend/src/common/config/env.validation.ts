@@ -211,4 +211,42 @@ export const envValidationSchema = Joi.object({
     // table is re-read in full to catch anything a webhook missed.
     AIRTABLE_POLL_MS: Joi.number().integer().min(0).default(30_000),
     AIRTABLE_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
+
+    // Billing (Stripe). Without STRIPE_SECRET_KEY the app runs on the free plan for
+    // everyone and checkout answers "not configured"; it never fakes a payment.
+    // The key must belong to STRIPE_MODE: a live key in test mode (or the reverse)
+    // refuses to boot rather than charge the wrong account.
+    STRIPE_MODE: Joi.string().valid('test', 'live').default('test'),
+    STRIPE_SECRET_KEY: Joi.string().empty('').when('STRIPE_MODE', {
+        is: 'live',
+        then: Joi.string().pattern(/^(sk|rk)_live_\w+$/).messages({ 'string.pattern.base': 'STRIPE_SECRET_KEY must be a live key (sk_live_/rk_live_) when STRIPE_MODE=live' }),
+        otherwise: Joi.string().pattern(/^(sk|rk)_test_\w+$/).messages({ 'string.pattern.base': 'STRIPE_SECRET_KEY must be a test key (sk_test_/rk_test_) when STRIPE_MODE=test' }),
+    }).optional(),
+    STRIPE_PUBLISHABLE_KEY: Joi.string().pattern(/^pk_(test|live)_\w+$/).empty('').optional(),
+    STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_\w+$/).empty('').optional(),
+    STRIPE_PORTAL_CONFIGURATION_ID: Joi.string().pattern(/^bpc_\w+$/).empty('').optional(),
+    STRIPE_AUTOMATIC_TAX: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    STRIPE_ALLOW_PROMOTION_CODES: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    STRIPE_STARTER_MONTHLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    STRIPE_STARTER_YEARLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    STRIPE_PROFESSIONAL_YEARLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    STRIPE_BUSINESS_MONTHLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    STRIPE_BUSINESS_YEARLY_PRICE_ID: Joi.string().pattern(/^price_\w+$/).empty('').optional(),
+    // Must equal the currency of every configured Stripe Price; checkout checks it.
+    BILLING_CURRENCY: Joi.string().pattern(/^[a-zA-Z]{3}$/).default('inr'),
+    // Default ${APP_URL}/billing/success, /billing/cancel and /settings?tab=billing.
+    BILLING_SUCCESS_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    BILLING_CANCEL_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    BILLING_PORTAL_RETURN_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Free trial on an organization's FIRST paid subscription. 0 = none.
+    BILLING_TRIAL_DAYS: Joi.number().integer().min(0).max(730).default(0),
+    // How long a past_due subscription keeps its paid features while Stripe retries the card.
+    BILLING_PAST_DUE_GRACE_DAYS: Joi.number().integer().min(0).max(60).default(7),
+    // Off: plan features and limits are computed and logged ("would block") but not
+    // enforced, so turning billing on does not lock existing organizations out.
+    BILLING_ENFORCEMENT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    BILLING_ALLOW_IMMEDIATE_CANCEL: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    // Retries failed webhook events and re-reads stale subscriptions from Stripe.
+    BILLING_RECONCILE_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

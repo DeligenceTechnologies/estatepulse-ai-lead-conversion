@@ -28,6 +28,10 @@ model Organization {
   leadSubmissions     LeadSubmission[]
   leadMerges          LeadMerge[]
   duplicateCandidates DuplicateCandidate[]
+  subscription        Subscription?
+  payments            Payment[]
+  invoices            Invoice[]
+  billingEvents       BillingEvent[]
 
   @@map("organizations")
 }

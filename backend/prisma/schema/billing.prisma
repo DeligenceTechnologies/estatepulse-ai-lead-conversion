@@ -1,0 +1,201 @@
+// Billing: one subscription per organization, mirrored from Stripe.
+//
+// Stripe is the source of truth for money; these tables hold only the
+// references and the state the app needs to decide what an organization may
+// use. No card data is ever stored: payment methods live in Stripe, and the
+// most kept here is the method's type and brand/last4 for display.
+//
+// Plans, prices and limits are NOT in the database: they live in code
+// (src/billing/billing-plans.ts) with the Stripe Price IDs in env, so a price
+// change is a config change, never a migration.
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  BUSINESS
+
+  @@map("subscription_plan")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+
+  @@map("billing_interval")
+}
+
+/// Stripe's subscription statuses, verbatim, so a sync is a straight copy.
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  unpaid
+  canceled
+  incomplete
+  incomplete_expired
+  paused
+
+  @@map("subscription_status")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  requires_action
+
+  @@map("payment_status")
+}
+
+enum BillingEventStatus {
+  /// Stored, not yet handled (or the handler crashed before finishing).
+  pending
+  processing
+  processed
+  /// Handled and failed; Stripe's retry (or a replay) runs it again.
+  failed
+  /// A type we do not act on, or for a customer that is not ours.
+  ignored
+
+  @@map("billing_event_status")
+}
+
+/// The organization's plan. A row with no Stripe subscription is the free plan;
+/// an organization with no row at all is on the free plan too.
+model Subscription {
+  id    String @id @default(uuid(7)) @db.Uuid
+  orgId String @unique @map("organization_id") @db.Uuid
+
+  stripeCustomerId     String? @unique @map("stripe_customer_id") @db.VarChar(255)
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id") @db.VarChar(255)
+  stripePriceId        String? @map("stripe_price_id") @db.VarChar(255)
+
+  plan            SubscriptionPlan   @default(FREE)
+  billingInterval BillingInterval?   @map("billing_interval")
+  status          SubscriptionStatus @default(active)
+
+  currentPeriodStart DateTime? @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime? @map("current_period_end") @db.Timestamptz(6)
+  trialStart         DateTime? @map("trial_start") @db.Timestamptz(6)
+  trialEnd           DateTime? @map("trial_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd  Boolean   @default(false) @map("cancel_at_period_end")
+  canceledAt         DateTime? @map("canceled_at") @db.Timestamptz(6)
+  endedAt            DateTime? @map("ended_at") @db.Timestamptz(6)
+  /// When the subscription last went past_due; the grace period runs from here.
+  pastDueSince       DateTime? @map("past_due_since") @db.Timestamptz(6)
+
+  /// A downgrade booked for the end of the period (a Stripe subscription schedule).
+  pendingPlan      SubscriptionPlan? @map("pending_plan")
+  pendingInterval  BillingInterval?  @map("pending_interval")
+  pendingChangeAt  DateTime?         @map("pending_change_at") @db.Timestamptz(6)
+  stripeScheduleId String?           @map("stripe_schedule_id") @db.VarChar(255)
+
+  /// The open Checkout Session, so a second click reuses it instead of opening another.
+  checkoutSessionId String?           @map("checkout_session_id") @db.VarChar(255)
+  checkoutPlan      SubscriptionPlan? @map("checkout_plan")
+  checkoutInterval  BillingInterval?  @map("checkout_interval")
+  checkoutExpiresAt DateTime?         @map("checkout_expires_at") @db.Timestamptz(6)
+
+  /// `created` of the newest Stripe event applied, for monitoring and ordering.
+  lastStripeEventAt DateTime? @map("last_stripe_event_at") @db.Timestamptz(6)
+  /// When the row was last copied from Stripe's own state.
+  syncedAt          DateTime? @map("synced_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+  invoices     Invoice[]
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+/// One row per invoice payment attempt outcome (one per Stripe invoice).
+model Payment {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  orgId          String  @map("organization_id") @db.Uuid
+  subscriptionId String? @map("subscription_id") @db.Uuid
+
+  stripePaymentIntentId String? @unique @map("stripe_payment_intent_id") @db.VarChar(255)
+  stripeInvoiceId       String  @unique @map("stripe_invoice_id") @db.VarChar(255)
+
+  /// Minor units (paise for INR).
+  amount        Int
+  currency      String        @db.VarChar(3)
+  status        PaymentStatus @default(pending)
+  /// e.g. "card" or "card visa •••• 4242". Never the number.
+  paymentMethod String?       @map("payment_method") @db.VarChar(100)
+  failureReason String?       @map("failure_reason") @db.VarChar(500)
+  paidAt        DateTime?     @map("paid_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([subscriptionId])
+  @@map("payments")
+}
+
+model Invoice {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  orgId          String  @map("organization_id") @db.Uuid
+  subscriptionId String? @map("subscription_id") @db.Uuid
+
+  stripeInvoiceId String    @unique @map("stripe_invoice_id") @db.VarChar(255)
+  number          String?   @db.VarChar(100)
+  amountDue       Int       @map("amount_due")
+  amountPaid      Int       @map("amount_paid")
+  currency        String    @db.VarChar(3)
+  /// Stripe's: draft | open | paid | uncollectible | void
+  status          String    @db.VarChar(30)
+  invoiceUrl      String?   @map("invoice_url") @db.Text
+  invoicePdf      String?   @map("invoice_pdf") @db.Text
+  periodStart     DateTime? @map("period_start") @db.Timestamptz(6)
+  periodEnd       DateTime? @map("period_end") @db.Timestamptz(6)
+  dueDate         DateTime? @map("due_date") @db.Timestamptz(6)
+  paidAt          DateTime? @map("paid_at") @db.Timestamptz(6)
+  /// When Stripe created it; the history is sorted by this.
+  issuedAt        DateTime  @map("issued_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, issuedAt(sort: Desc)])
+  @@index([subscriptionId])
+  @@map("invoices")
+}
+
+/// Every Stripe webhook event received, once. The unique event id is what makes
+/// a redelivery a no-op; failed rows are retried when Stripe redelivers.
+model BillingEvent {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  stripeEventId    String             @unique @map("stripe_event_id") @db.VarChar(255)
+  eventType        String             @map("event_type") @db.VarChar(100)
+  orgId            String?            @map("organization_id") @db.Uuid
+  livemode         Boolean            @default(false)
+  /// Ids only (object, customer, subscription, invoice) — never the full payload.
+  metadata         Json               @default("{}")
+  processingStatus BillingEventStatus @default(pending) @map("processing_status")
+  attempts         Int                @default(0)
+  errorMessage     String?            @map("error_message") @db.VarChar(1000)
+  stripeCreatedAt  DateTime           @map("stripe_created_at") @db.Timestamptz(6)
+  processedAt      DateTime?          @map("processed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([processingStatus, updatedAt])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("billing_events")
+}

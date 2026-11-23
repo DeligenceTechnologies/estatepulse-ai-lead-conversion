@@ -26,6 +26,7 @@ import { ConversationsView } from './components/views/ConversationsView';
 import { FollowUpsView } from './components/views/FollowUpsView';
 import { RolesView } from './components/views/RolesView';
 import { SettingsView } from './components/views/SettingsView';
+import { PricingView } from './components/views/PricingView';
 import { CalendarView } from './components/views/CalendarView';
 import { AgentAvailability } from './components/agent/AgentAvailability';
 
@@ -59,6 +60,7 @@ const AppContent: React.FC = () => {
         {activeView === 'duplicates' && <DuplicatesView />}
         {activeView === 'ai_settings' && <AISettingsView />}
         {activeView === 'settings' && <SettingsView />}
+        {activeView === 'pricing' && <PricingView />}
         {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
       </AppShell>
 

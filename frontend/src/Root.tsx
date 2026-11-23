@@ -12,6 +12,7 @@ import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
 import { LandingPage } from './components/public/LandingPage';
 import { PrivacyPage } from './components/public/PrivacyPage';
 import { TermsPage } from './components/public/TermsPage';
+import { BillingCancelPage, BillingSuccessPage } from './components/billing/BillingReturnPage';
 import { useAuth } from './context/AuthContext';
 
 /**
@@ -76,6 +77,23 @@ export const Root: React.FC = () => (
     <Route path="/verify-email" element={<VerifyEmailPage />} />
     <Route path="/terms" element={<TermsPage />} />
     <Route path="/privacy" element={<PrivacyPage />} />
+    {/* Where Stripe Checkout returns to. Signed in, but outside the shells: no sidebar mid-checkout. */}
+    <Route
+      path="/billing/success"
+      element={
+        <RequireAuth>
+          <BillingSuccessPage />
+        </RequireAuth>
+      }
+    />
+    <Route
+      path="/billing/cancel"
+      element={
+        <RequireAuth>
+          <BillingCancelPage />
+        </RequireAuth>
+      }
+    />
     <Route
       path="*"
       element={
