@@ -11,6 +11,10 @@ import { InboundSmsService } from './inbound-sms.service';
 import { OptOutService } from './opt-out.service';
 import { BusinessDetailsService } from './sms/business-details.service';
 import { LeadInsightsService } from './lead-insights.service';
+import { KnowledgeController } from './knowledge.controller';
+import { KnowledgeSourcesController } from './knowledge-sources.controller';
+import { KnowledgeSourcesService } from './knowledge-sources.service';
+import { KnowledgeService } from './knowledge.service';
 import { LeadMemoryService } from './lead-memory.service';
 import { LeadScoringService } from './lead-scoring.service';
 import { LeadWatcherService } from './lead-watcher.service';
@@ -51,6 +55,8 @@ import { VoicemailService } from './voicemail/voicemail.service';
     TelnyxWebhookController,
     SmsConversationController,
     VoicemailController,
+    KnowledgeController,
+    KnowledgeSourcesController,
     CallOutcomeToolController,
     CallToolsSettingsController,
   ],
@@ -79,6 +85,8 @@ import { VoicemailService } from './voicemail/voicemail.service';
     StrategyStoreService,
     VoiceService,
     VoicemailService,
+    KnowledgeService,
+    KnowledgeSourcesService,
     AssistantToolAuth,
     CallToolsService,
     CallbackService,

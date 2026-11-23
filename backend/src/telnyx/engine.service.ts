@@ -16,6 +16,7 @@ import { StrategyStoreService, offsetMs, stepOffsets, type StrategyStep } from '
 import { CallQueue } from './calls/call.queue';
 import { CONVERSATION_MIN_SECS } from './calls/call.types';
 import { SmsConversationService } from './sms/sms-conversation.service';
+import { TelnyxCredentialsService } from './telnyx-credentials.service';
 import { fillTemplate } from './template';
 
 const FINALIZE_AFTER_MS = 90_000;
@@ -39,6 +40,11 @@ export const STEP_FAILED_REVIEW = 'Outreach stopped: a strategy step kept failin
 /** A step held this long for a time zone nobody sets is handed to a person instead of re-checked forever. */
 const TZ_HOLD_MAX_MS = 3 * 24 * 60 * 60_000;
 export const ZONE_HELD_REVIEW = 'Outreach paused: the lead has no usable time zone';
+
+/** While the organization has nothing to send from, a step looks again this often. */
+export const SENDER_RECHECK_MS = 60_000;
+/** Shown on the lead while its outreach waits for the organization's setup, in the owner's words. */
+export const NO_SENDER_HOLD = 'Waiting for a phone number: connect one in AI Settings';
 
 const OPEN_CALL: CallStatus[] = [CallStatus.queued, CallStatus.ringing, CallStatus.in_progress];
 
@@ -135,6 +141,8 @@ export class EngineService implements OnModuleDestroy {
   private readonly active = new Map<string, Enrollment>();
   /** Claimed or being resumed, strategy not loaded yet: counted as running, so nothing starts it twice. */
   private readonly starting = new Set<string>();
+  /** Organizations already logged as unable to send, so the wait is said once and not on every poll. */
+  private readonly waitingForSender = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -146,7 +154,27 @@ export class EngineService implements OnModuleDestroy {
     private readonly state: LeadStateService,
     private readonly conversations: SmsConversationService,
     private readonly optOuts: OptOutService,
+    private readonly creds: TelnyxCredentialsService,
   ) {}
+
+  /**
+   * Whether the organization can reach a lead at all: a Telnyx key and a number
+   * to call and text from. Without them every step would fail the same way, and
+   * that is the organization's setup, not something the lead did: outreach
+   * waits instead of spending the lead's steps. An account row that cannot be
+   * read counts as able, so a database blip goes down the usual retry path
+   * rather than holding every lead.
+   */
+  async canReachLeads(orgId: string): Promise<boolean> {
+    const c = await this.creds.getCreds(orgId).catch(() => undefined);
+    const able = c === undefined || Boolean(c?.apiKey && c.fromNumber);
+    if (able) this.waitingForSender.delete(orgId);
+    else if (!this.waitingForSender.has(orgId)) {
+      this.waitingForSender.add(orgId);
+      this.logger.warn(`org ${orgId} has no ${c?.apiKey ? 'phone number to send from' : 'Telnyx account connected'}: outreach waits until it does`);
+    }
+    return able;
+  }
 
   onModuleDestroy(): void {
     for (const enrollment of this.active.values()) this.halt(enrollment);
@@ -157,6 +185,10 @@ export class EngineService implements OnModuleDestroy {
     if (this.isRunning(leadId)) return;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId } });
     if (!lead || lead.dncStatus || lead.automationPaused) return;
+    // Not claimed and not moved to "contacting": nobody has been contacted. The
+    // watcher offers the lead again on every poll, so it starts by itself once a
+    // number is connected.
+    if (!(await this.canReachLeads(orgId))) return;
     const claimedAt = new Date();
     this.starting.add(leadId);
     try {
@@ -417,6 +449,14 @@ export class EngineService implements OnModuleDestroy {
       this.state.quietly({ ...event, type: 'step_held', reason });
       return true;
     };
+
+    // The number was disconnected (or never there, for a lead resumed from before
+    // this check): the step waits, unspent, and goes out once there is one.
+    if (!(await this.canReachLeads(e.orgId))) {
+      hold(NO_SENDER_HOLD);
+      this.later(e, () => this.fireStep(e, step, office, guardrails, heldSince), SENDER_RECHECK_MS);
+      return;
+    }
 
     // On the LEAD's clock: the organization's quiet hours and days off, plus the legal calling
     // hours of the lead's jurisdiction. Checked again every time the step fires, so a timer that

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
-import { IntegrationProvider, IntegrationStatus, type Integration } from '@prisma/client';
+import { IntegrationProvider, IntegrationStatus, type Integration, type Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '@/audit/audit.service';
 import { httpError } from '@/common/errors/app-error';
@@ -45,6 +45,35 @@ class AccountConflict extends Error {
 }
 
 const LIVE_GOOGLE = (orgId: string) => ({ orgId, provider: IntegrationProvider.google, revokedAt: null });
+
+/** What a sheet or a form says on its card when the Google connection it reads through has lapsed. */
+export const REAUTH_ERROR_CODE = 'GOOGLE_REAUTH_REQUIRED';
+
+/**
+ * A reconnect, carried through to the sheets and forms read with the
+ * connection. Without this they keep saying "Reconnect Google to continue"
+ * after the owner has done exactly that: a paused sheet is never read again to
+ * find out, and a form that kept failing has backed off for hours.
+ *
+ * A source that is still scheduled is brought forward to now, so its next read
+ * settles what it says. One that was paused stays paused (a sheet is only ever
+ * switched on by its owner) and just stops reporting the access it has back.
+ */
+export async function forgetExpiredAccess(
+  tx: Pick<Prisma.TransactionClient, 'leadSource'>,
+  orgId: string,
+  integrationId: string,
+  now = new Date(),
+): Promise<void> {
+  await tx.leadSource.updateMany({
+    where: { orgId, integrationId, syncNextAt: { gt: now }, syncFailures: { gt: 0 } },
+    data: { syncNextAt: now },
+  });
+  await tx.leadSource.updateMany({
+    where: { orgId, integrationId, remoteErrorCode: REAUTH_ERROR_CODE },
+    data: { remoteErrorCode: null, remoteErrorMessage: null, syncFailures: 0 },
+  });
+}
 
 /**
  * The organization's one Google account, connected with the drive.file scope
@@ -162,6 +191,7 @@ export class GoogleConnectionsService {
               data: { integrationId: id },
             })
           : { count: 0 };
+        await forgetExpiredAccess(tx, who.organizationId, id);
         await this.audit.record(
           {
             orgId: who.organizationId,
