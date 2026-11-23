@@ -10,6 +10,8 @@ import { RequireAuth } from './components/auth/RequireAuth';
 import { SignupPage } from './components/auth/SignupPage';
 import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
 import { LandingPage } from './components/public/LandingPage';
+import { PrivacyPage } from './components/public/PrivacyPage';
+import { TermsPage } from './components/public/TermsPage';
 import { useAuth } from './context/AuthContext';
 
 /**
@@ -59,6 +61,9 @@ const Home: React.FC = () => {
  * These routes decide only the auth boundary. Section paths (/dashboard,
  * /leads, ...) all fall through `*` to the role's shell, which maps the path to
  * a view itself: AppContext's activeView for an owner, AgentApp for an agent.
+ *
+ * /terms and /privacy are listed so they stay out of `*`, which would send a
+ * visitor to /login. They render for everyone, signed in or not.
  */
 export const Root: React.FC = () => (
   <Routes>
@@ -69,6 +74,8 @@ export const Root: React.FC = () => (
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route path="/check-email" element={<CheckEmailPage />} />
     <Route path="/verify-email" element={<VerifyEmailPage />} />
+    <Route path="/terms" element={<TermsPage />} />
+    <Route path="/privacy" element={<PrivacyPage />} />
     <Route
       path="*"
       element={
