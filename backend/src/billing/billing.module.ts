@@ -16,11 +16,7 @@ import { StripeService } from './services/stripe.service';
 import { SubscriptionService } from './services/subscription.service';
 import { SubscriptionSyncService } from './services/subscription-sync.service';
 
-/**
- * Subscriptions and plan entitlements. Global so any module can put
- * @RequireFeature() on a route or call EntitlementService (UserService does,
- * for the member limit) without importing billing.
- */
+/** Global so any module can use @RequireFeature() and EntitlementService. */
 @Global()
 @Module({
   controllers: [BillingController, BillingWebhookController],

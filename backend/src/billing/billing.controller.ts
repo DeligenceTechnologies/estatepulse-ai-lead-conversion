@@ -11,11 +11,7 @@ import { StripeCheckoutService } from './services/stripe-checkout.service';
 import { StripeCustomerPortalService } from './services/stripe-customer-portal.service';
 import { SubscriptionService } from './services/subscription.service';
 
-/**
- * The app's billing API (served under /api/billing). The organization is
- * always the session's own — no route takes an organization id — so one
- * organization can neither read nor change another's billing.
- */
+/** /api/billing — always scoped to the session's organization. */
 @Controller('billing')
 export class BillingController {
   constructor(
@@ -25,7 +21,6 @@ export class BillingController {
     private readonly subscriptions: SubscriptionService,
   ) {}
 
-  /** Public: the pricing page is shown before sign-up too. */
   @Public()
   @Get('plans')
   plans() {
@@ -57,7 +52,6 @@ export class BillingController {
     return this.checkout.createCheckout(auth, body.plan, body.interval);
   }
 
-  /** Where a Checkout Session stands, asked of Stripe (the success page polls this). */
   @Get('checkout/:sessionId')
   @RequirePermissions(PERMISSIONS.BILLING_READ)
   checkoutStatus(@CurrentAuth() auth: AuthContext, @Param() params: CheckoutStatusParams) {

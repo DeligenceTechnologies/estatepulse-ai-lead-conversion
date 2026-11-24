@@ -1,23 +1,17 @@
-import { BillingInterval, SubscriptionPlan } from '@prisma/client';
-import { IsBoolean, IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { BillingInterval, type SubscriptionPlan } from '@prisma/client';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { PAID_PLANS } from '../billing-plans';
 
-const PAID: SubscriptionPlan[] = ['STARTER', 'PROFESSIONAL', 'BUSINESS'];
-
-/**
- * A plan and an interval — the only things the browser chooses. No price,
- * amount, Price ID or organization is accepted (unknown fields are rejected by
- * the global ValidationPipe's forbidNonWhitelisted).
- */
+/** Only plan + interval are accepted; never a price or Price ID. */
 export class SelectPlanDto {
-  @IsIn(PAID, { message: `plan must be one of ${PAID.join(', ')}` })
+  @IsIn([...PAID_PLANS], { message: `plan must be one of ${PAID_PLANS.join(', ')}` })
   plan!: SubscriptionPlan;
 
-  @IsIn(Object.values(BillingInterval), { message: 'interval must be MONTHLY or YEARLY' })
+  @IsEnum(BillingInterval, { message: `interval must be one of ${Object.values(BillingInterval).join(', ')}` })
   interval!: BillingInterval;
 }
 
 export class CancelSubscriptionDto {
-  /** End now instead of at the period end; refused unless the server allows it. */
   @IsOptional()
   @IsBoolean()
   immediately?: boolean;

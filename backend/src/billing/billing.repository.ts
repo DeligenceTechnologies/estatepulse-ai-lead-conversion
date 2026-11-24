@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  BaseStatus,
   BillingEventStatus,
   Prisma,
   type BillingInterval,
@@ -9,9 +10,20 @@ import {
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { paginate } from '@/common/pagination/paginate';
 import type { ListQuery } from '@/common/pagination/pagination.types';
-import { MAX_EVENT_ATTEMPTS, STALE_PROCESSING_MS } from './billing.constants';
+import { InvoiceStatus, MAX_EVENT_ATTEMPTS, STALE_PROCESSING_MS, TERMINAL_STATUSES } from './billing.constants';
 
 export type SubscriptionRow = Subscription;
+type Db = Prisma.TransactionClient | PrismaService;
+
+/** Final states a handled webhook event can be marked with. */
+export type FinishedEventStatus = typeof BillingEventStatus.processed | typeof BillingEventStatus.ignored | typeof BillingEventStatus.failed;
+
+export const CLEARED_CHECKOUT = {
+  checkoutSessionId: null,
+  checkoutPlan: null,
+  checkoutInterval: null,
+  checkoutExpiresAt: null,
+} as const;
 
 const INVOICE_FIELDS = {
   id: true,
@@ -30,22 +42,15 @@ const INVOICE_FIELDS = {
   issuedAt: true,
 } satisfies Prisma.InvoiceSelect;
 
-/**
- * Every billing read and write. Each method that touches an organization's
- * rows takes its id explicitly and puts it in the WHERE, so a caller cannot
- * reach another organization's subscription by passing a different row id.
- */
+/** All billing DB access. Every org-scoped query filters by orgId. */
 @Injectable()
 export class BillingRepository {
   constructor(private readonly prisma: PrismaService) {}
-
-  // --- Subscriptions -------------------------------------------------------
 
   findByOrg(orgId: string): Promise<SubscriptionRow | null> {
     return this.prisma.subscription.findUnique({ where: { orgId } });
   }
 
-  /** The organization's row, created on the free plan if it has none. */
   ensure(orgId: string): Promise<SubscriptionRow> {
     return this.prisma.subscription.upsert({ where: { orgId }, create: { orgId }, update: {} });
   }
@@ -54,42 +59,33 @@ export class BillingRepository {
     return this.prisma.subscription.findUnique({ where: { stripeCustomerId } });
   }
 
-  /** First writer wins; returns the row as stored afterwards. */
+  /** First writer wins; returns the stored row. */
   async setCustomerIfMissing(orgId: string, stripeCustomerId: string): Promise<SubscriptionRow> {
     await this.prisma.subscription.updateMany({ where: { orgId, stripeCustomerId: null }, data: { stripeCustomerId } });
     return this.prisma.subscription.findUniqueOrThrow({ where: { orgId } });
   }
 
-  update(orgId: string, data: Prisma.SubscriptionUpdateInput, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+  update(orgId: string, data: Prisma.SubscriptionUpdateInput, db: Db = this.prisma) {
     return db.subscription.update({ where: { orgId }, data });
   }
 
-  setCheckout(orgId: string, checkout: { sessionId: string; plan: SubscriptionPlan; interval: BillingInterval; expiresAt: Date }) {
+  setCheckout(orgId: string, c: { sessionId: string; plan: SubscriptionPlan; interval: BillingInterval; expiresAt: Date }) {
     return this.prisma.subscription.update({
       where: { orgId },
-      data: {
-        checkoutSessionId: checkout.sessionId,
-        checkoutPlan: checkout.plan,
-        checkoutInterval: checkout.interval,
-        checkoutExpiresAt: checkout.expiresAt,
-      },
+      data: { checkoutSessionId: c.sessionId, checkoutPlan: c.plan, checkoutInterval: c.interval, checkoutExpiresAt: c.expiresAt },
     });
   }
 
-  /** Clears the remembered Checkout Session, only if it is still the given one. */
+  /** Clears the stored checkout only if it is still `sessionId`. */
   clearCheckout(orgId: string, sessionId: string) {
-    return this.prisma.subscription.updateMany({
-      where: { orgId, checkoutSessionId: sessionId },
-      data: { checkoutSessionId: null, checkoutPlan: null, checkoutInterval: null, checkoutExpiresAt: null },
-    });
+    return this.prisma.subscription.updateMany({ where: { orgId, checkoutSessionId: sessionId }, data: CLEARED_CHECKOUT });
   }
 
-  /** Paid subscriptions not copied from Stripe since `before`, for the reconciler. */
   staleSubscriptions(before: Date, take: number) {
     return this.prisma.subscription.findMany({
       where: {
         stripeSubscriptionId: { not: null },
-        status: { notIn: ['canceled', 'incomplete_expired'] },
+        status: { notIn: [...TERMINAL_STATUSES] },
         OR: [{ syncedAt: null }, { syncedAt: { lt: before } }],
       },
       select: { orgId: true, stripeSubscriptionId: true },
@@ -98,36 +94,27 @@ export class BillingRepository {
     });
   }
 
-  // --- Organization facts billing needs ------------------------------------
-
   organization(orgId: string) {
     return this.prisma.organization.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
   }
 
-  userEmail(orgId: string, userId: string) {
-    return this.prisma.user
-      .findFirst({ where: { id: userId, orgId }, select: { email: true } })
-      .then((u) => u?.email ?? null);
+  async userEmail(orgId: string, userId: string): Promise<string | null> {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, orgId }, select: { email: true } });
+    return user?.email ?? null;
   }
 
-  countActiveMembers(orgId: string, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<number> {
-    return db.user.count({ where: { orgId, status: 'active' } });
+  countActiveMembers(orgId: string, db: Db = this.prisma): Promise<number> {
+    return db.user.count({ where: { orgId, status: BaseStatus.active } });
   }
 
-  hasBillingHistory(orgId: string): Promise<boolean> {
-    return this.prisma.invoice.count({ where: { orgId } }).then((n) => n > 0);
+  async hasBillingHistory(orgId: string): Promise<boolean> {
+    return (await this.prisma.invoice.count({ where: { orgId } })) > 0;
   }
 
-  // --- Invoices and payments -----------------------------------------------
-
+  /** orgId is set on create only; an invoice never changes organization. */
   upsertInvoice(stripeInvoiceId: string, data: Omit<Prisma.InvoiceUncheckedCreateInput, 'stripeInvoiceId'>) {
-    const { orgId: _org, ...update } = data;
-    return this.prisma.invoice.upsert({
-      where: { stripeInvoiceId },
-      create: { ...data, stripeInvoiceId },
-      // The organization of an invoice never changes.
-      update,
-    });
+    const { orgId: _orgId, ...update } = data;
+    return this.prisma.invoice.upsert({ where: { stripeInvoiceId }, create: { ...data, stripeInvoiceId }, update });
   }
 
   findPayment(stripeInvoiceId: string) {
@@ -135,18 +122,14 @@ export class BillingRepository {
   }
 
   upsertPayment(stripeInvoiceId: string, data: Omit<Prisma.PaymentUncheckedCreateInput, 'stripeInvoiceId'>) {
-    const { orgId: _org, ...update } = data;
-    return this.prisma.payment.upsert({
-      where: { stripeInvoiceId },
-      create: { ...data, stripeInvoiceId },
-      update,
-    });
+    const { orgId: _orgId, ...update } = data;
+    return this.prisma.payment.upsert({ where: { stripeInvoiceId }, create: { ...data, stripeInvoiceId }, update });
   }
 
   listInvoices(orgId: string, query: ListQuery) {
     return paginate(query, {
       where: { orgId } as Prisma.InvoiceWhereInput,
-      filters: { status: { type: 'enum', values: ['draft', 'open', 'paid', 'uncollectible', 'void'] } },
+      filters: { status: { type: 'enum', values: Object.values(InvoiceStatus) } },
       sortableFields: ['issuedAt', 'amountDue'] as const,
       defaultSort: [{ issuedAt: 'desc' }],
       findMany: (args) => this.prisma.invoice.findMany({ ...args, select: INVOICE_FIELDS }),
@@ -154,9 +137,7 @@ export class BillingRepository {
     });
   }
 
-  // --- Webhook events ------------------------------------------------------
-
-  /** Stores the event once; a redelivery returns the row already there. */
+  /** Stores the event once; a redelivery returns the existing row. */
   async recordEvent(event: {
     stripeEventId: string;
     eventType: string;
@@ -165,21 +146,20 @@ export class BillingRepository {
     stripeCreatedAt: Date;
   }) {
     try {
-      return { created: true, row: await this.prisma.billingEvent.create({ data: event }) };
+      return await this.prisma.billingEvent.create({ data: event });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const row = await this.prisma.billingEvent.findUniqueOrThrow({ where: { stripeEventId: event.stripeEventId } });
-        return { created: false, row };
+        return this.prisma.billingEvent.findUniqueOrThrow({ where: { stripeEventId: event.stripeEventId } });
       }
       throw error;
     }
   }
 
-  /**
-   * Takes the event for processing. Only one worker gets it: the update is
-   * conditional on it being pending, failed, or stuck in processing (a crashed
-   * worker). Returns false when someone else holds it or it is already done.
-   */
+  findEvent(id: string) {
+    return this.prisma.billingEvent.findUniqueOrThrow({ where: { id } });
+  }
+
+  /** Atomically claims a pending/failed/stale event. False if another worker holds it or it is done. */
   async claimEvent(id: string, now = new Date()): Promise<boolean> {
     const { count } = await this.prisma.billingEvent.updateMany({
       where: {
@@ -194,19 +174,18 @@ export class BillingRepository {
     return count === 1;
   }
 
-  finishEvent(id: string, result: { status: 'processed' | 'ignored' | 'failed'; orgId?: string | null; error?: string }) {
+  finishEvent(id: string, result: { status: FinishedEventStatus; orgId?: string | null; error?: string }) {
     return this.prisma.billingEvent.update({
       where: { id },
       data: {
         processingStatus: result.status,
         ...(result.orgId !== undefined ? { orgId: result.orgId } : {}),
         errorMessage: result.error ? result.error.slice(0, 1000) : null,
-        processedAt: result.status === 'failed' ? null : new Date(),
+        processedAt: result.status === BillingEventStatus.failed ? null : new Date(),
       },
     });
   }
 
-  /** Events to run again: failed, or stored but never finished. */
   retryableEvents(olderThan: Date, take: number) {
     return this.prisma.billingEvent.findMany({
       where: {

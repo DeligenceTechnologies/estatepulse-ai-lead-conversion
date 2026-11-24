@@ -1,4 +1,4 @@
-import type { SubscriptionPlan, SubscriptionStatus } from '@prisma/client';
+import { SubscriptionPlan, SubscriptionStatus } from '@prisma/client';
 import { PAID_ACCESS_STATUSES } from './billing.constants';
 
 export interface AccessInput {
@@ -7,61 +7,45 @@ export interface AccessInput {
   pastDueSince: Date | null;
 }
 
-export type AccessReason =
-  | 'free_plan'
-  | 'paid'
-  | 'trial'
-  | 'past_due_grace'
-  | 'past_due_expired'
-  | 'unpaid'
-  | 'canceled'
-  | 'incomplete'
-  | 'paused';
+/** Why the organization has the access it has. Values are sent to the client. */
+export enum AccessReason {
+  FREE_PLAN = 'free_plan',
+  PAID = 'paid',
+  TRIAL = 'trial',
+  PAST_DUE_GRACE = 'past_due_grace',
+  PAST_DUE_EXPIRED = 'past_due_expired',
+  UNPAID = 'unpaid',
+  CANCELED = 'canceled',
+  INCOMPLETE = 'incomplete',
+  PAUSED = 'paused',
+}
 
 export interface Access {
-  /** The plan whose features and limits apply right now. */
+  /** Plan whose features apply right now. */
   plan: SubscriptionPlan;
   reason: AccessReason;
-  /** Past due: paid features end at this time unless the payment recovers. */
   graceEndsAt?: Date;
 }
 
-/**
- * What a subscription entitles the organization to, by status:
- *
- *  - trialing, active            → the plan they pay for (cancel-at-period-end
- *                                  stays active until the period ends)
- *  - past_due                    → the plan, for the grace period while Stripe
- *                                  retries the card; then free
- *  - unpaid, paused              → free (Stripe stopped retrying / collection paused)
- *  - incomplete                  → free: the first payment has not succeeded,
- *                                  so nothing paid is granted on an unverified payment
- *  - canceled, incomplete_expired → free; the history is kept
- *
- * Data is never deleted on a downgrade: going over a limit only blocks NEW
- * usage (another member), never what already exists.
- */
+const DAY_MS = 86_400_000;
+const FREE_REASON: Partial<Record<SubscriptionStatus, AccessReason>> = {
+  [SubscriptionStatus.unpaid]: AccessReason.UNPAID,
+  [SubscriptionStatus.paused]: AccessReason.PAUSED,
+  [SubscriptionStatus.incomplete]: AccessReason.INCOMPLETE,
+};
+
+/** active/trialing → paid plan; past_due → paid plan during grace; anything else → free. */
 export function resolveAccess(sub: AccessInput | null, now: Date, graceDays: number): Access {
-  if (!sub || sub.plan === 'FREE') return { plan: 'FREE', reason: 'free_plan' };
+  if (!sub || sub.plan === SubscriptionPlan.FREE) return { plan: SubscriptionPlan.FREE, reason: AccessReason.FREE_PLAN };
 
   if (PAID_ACCESS_STATUSES.includes(sub.status)) {
-    return { plan: sub.plan, reason: sub.status === 'trialing' ? 'trial' : 'paid' };
+    return { plan: sub.plan, reason: sub.status === SubscriptionStatus.trialing ? AccessReason.TRIAL : AccessReason.PAID };
   }
-  switch (sub.status) {
-    case 'past_due': {
-      const since = sub.pastDueSince ?? now;
-      const graceEndsAt = new Date(since.getTime() + graceDays * 86_400_000);
-      return graceEndsAt > now
-        ? { plan: sub.plan, reason: 'past_due_grace', graceEndsAt }
-        : { plan: 'FREE', reason: 'past_due_expired', graceEndsAt };
-    }
-    case 'unpaid':
-      return { plan: 'FREE', reason: 'unpaid' };
-    case 'paused':
-      return { plan: 'FREE', reason: 'paused' };
-    case 'incomplete':
-      return { plan: 'FREE', reason: 'incomplete' };
-    default:
-      return { plan: 'FREE', reason: 'canceled' };
+  if (sub.status === SubscriptionStatus.past_due) {
+    const graceEndsAt = new Date((sub.pastDueSince ?? now).getTime() + graceDays * DAY_MS);
+    return graceEndsAt > now
+      ? { plan: sub.plan, reason: AccessReason.PAST_DUE_GRACE, graceEndsAt }
+      : { plan: SubscriptionPlan.FREE, reason: AccessReason.PAST_DUE_EXPIRED, graceEndsAt };
   }
+  return { plan: SubscriptionPlan.FREE, reason: FREE_REASON[sub.status] ?? AccessReason.CANCELED };
 }

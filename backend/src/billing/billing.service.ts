@@ -1,22 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { SubscriptionPlan } from '@prisma/client';
 import type { ListQuery } from '@/common/pagination/pagination.types';
 import { BillingConfig } from './billing.config';
 import { TERMINAL_STATUSES } from './billing.constants';
 import { BillingRepository } from './billing.repository';
 import {
+  Feature,
   FEATURE_LABELS,
-  FEATURES,
   INTERVALS,
   lowestPlanForMembers,
   PLAN_ORDER,
   PLANS,
-  type Feature,
 } from './billing-plans';
 import { EntitlementService } from './entitlements/entitlement.service';
 
 const iso = (date: Date | null | undefined): string | null => (date ? date.toISOString() : null);
 
-/** The read side of billing: what the Pricing and Billing screens show. */
 @Injectable()
 export class BillingService {
   constructor(
@@ -25,13 +24,13 @@ export class BillingService {
     private readonly entitlements: EntitlementService,
   ) {}
 
-  /** The public catalog. Display prices come from billing-plans.ts; IDs never leave the server. */
+  /** Public catalog; Stripe Price IDs never leave the server. */
   plans() {
     return {
       currency: this.config.currency,
       mode: this.config.mode,
       checkoutConfigured: this.config.stripeConfigured,
-      features: (Object.values(FEATURES) as Feature[]).map((key) => ({ key, label: FEATURE_LABELS[key] })),
+      features: Object.values(Feature).map((key) => ({ key, label: FEATURE_LABELS[key] })),
       plans: PLAN_ORDER.map((key) => {
         const plan = PLANS[key];
         return {
@@ -41,7 +40,7 @@ export class BillingService {
           recommended: plan.recommended ?? false,
           prices: plan.prices,
           checkoutAvailable: Object.fromEntries(
-            INTERVALS.map((interval) => [interval, key !== 'FREE' && this.config.checkoutAvailable(key, interval)]),
+            INTERVALS.map((interval) => [interval, key !== SubscriptionPlan.FREE && this.config.checkoutAvailable(key, interval)]),
           ),
           features: plan.features,
           limits: plan.limits,
@@ -54,9 +53,8 @@ export class BillingService {
     const [row, entitlements] = await Promise.all([this.repo.findByOrg(orgId), this.entitlements.get(orgId)]);
     const live = !!row?.stripeSubscriptionId && !TERMINAL_STATUSES.includes(row.status);
     return {
-      /** The plan whose features apply now; the one to show as "current". */
       plan: entitlements.access.plan,
-      subscribedPlan: row?.plan ?? 'FREE',
+      subscribedPlan: row?.plan ?? SubscriptionPlan.FREE,
       accessReason: entitlements.access.reason,
       graceEndsAt: iso(entitlements.access.graceEndsAt),
       status: row?.stripeSubscriptionId ? row.status : null,
@@ -65,7 +63,6 @@ export class BillingService {
       billingInterval: live ? row!.billingInterval : null,
       currentPeriodStart: live ? iso(row!.currentPeriodStart) : null,
       currentPeriodEnd: live ? iso(row!.currentPeriodEnd) : null,
-      /** The next charge; none once it is set to cancel. */
       renewsAt: live && !row!.cancelAtPeriodEnd ? iso(row!.currentPeriodEnd) : null,
       trialEnd: live ? iso(row!.trialEnd) : null,
       cancelAtPeriodEnd: live ? row!.cancelAtPeriodEnd : false,
@@ -75,7 +72,6 @@ export class BillingService {
         live && row!.pendingPlan
           ? { plan: row!.pendingPlan, interval: row!.pendingInterval, effectiveAt: iso(row!.pendingChangeAt) }
           : null,
-      /** A Checkout Session is open (the success page polls until it settles). */
       checkoutPending: !!row?.checkoutSessionId && !!row.checkoutExpiresAt && row.checkoutExpiresAt > new Date(),
       features: entitlements.features,
       limits: entitlements.limits,

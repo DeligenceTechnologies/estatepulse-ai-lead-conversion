@@ -14,12 +14,9 @@ import type { AuthContext } from '@/auth/auth.types';
 import type { Feature } from '../billing-plans';
 import { EntitlementService } from './entitlement.service';
 
-export const FEATURE_KEY = 'billing:feature';
+const FEATURE_KEY = 'billing:feature';
 
-/**
- * Route guard for plan features. Runs after the global JWT and permission
- * guards (route guards always do), so the organization is the session's.
- */
+/** Runs after the global auth/permission guards. */
 @Injectable()
 export class EntitlementGuard implements CanActivate {
   constructor(
