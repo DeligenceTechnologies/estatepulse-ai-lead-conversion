@@ -93,7 +93,7 @@ export const fileImportEnabled = (): Promise<boolean> =>
 
 /** Import Review is open while any import is switched on — sheets, files, or a CRM. */
 export const importReviewEnabled = (): Promise<boolean> =>
-  Promise.all([googleSheetsEnabled(), fileImportEnabled(), crmEnabled('hubspot')]).then(([sheets, files, crm]) => sheets || files || crm);
+  Promise.all([googleSheetsEnabled(), fileImportEnabled(), crmEnabled('hubspot'), crmEnabled('boldtrail')]).then((on) => on.some(Boolean));
 
 function form(file: File, fields: Record<string, string | undefined>): FormData {
   const fd = new FormData();

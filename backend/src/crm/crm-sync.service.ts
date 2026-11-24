@@ -258,7 +258,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     const active = this.registry.active();
     if (active.length === 0) {
-      this.logger.log('CRM sync disabled (set HUBSPOT_ENABLED=true)');
+      this.logger.log('CRM sync disabled (set HUBSPOT_ENABLED or BOLDTRAIL_ENABLED)');
       return;
     }
     const pollMs = this.config.get('CRM_POLL_MS', { infer: true });
@@ -1068,7 +1068,7 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
   async status(adapter: CrmAdapter, organizationId: string) {
     const credential = await this.prisma.integration.findFirst({
       where: { orgId: organizationId, provider: integrationProviderOf(adapter), revokedAt: null },
-      select: { id: true, status: true, accountName: true, accountEmail: true, externalAccountId: true, lastErrorCode: true, createdAt: true },
+      select: { id: true, status: true, accountName: true, accountEmail: true, externalAccountId: true, lastErrorCode: true, createdAt: true, config: true },
     });
     const source = await this.prisma.leadSource.findFirst({
       where: {
@@ -1121,8 +1121,11 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
     return {
       provider: adapter.provider,
       displayName: adapter.label.displayName,
+      auth: adapter.auth,
       configured: adapter.isConfigured(),
       status,
+      /** API-token CRMs only: when the pasted token stops working, so the card can warn ahead of it. */
+      tokenExpiresAt: credential ? tokenExpiresAt(credential.config) : null,
       account: credential
         ? {
             id: credential.externalAccountId,
@@ -1141,7 +1144,13 @@ export class CrmSyncService implements OnModuleInit, OnModuleDestroy {
       nextReconcileAt: source?.syncNextAt ?? null,
       lastError:
         credential && credential.status !== IntegrationStatus.active
-          ? { code: credential.lastErrorCode ?? 'CRM_REAUTH_REQUIRED', message: `${adapter.label.displayName} access was revoked or has expired. Reconnect to keep syncing.` }
+          ? {
+              code: credential.lastErrorCode ?? 'CRM_REAUTH_REQUIRED',
+              message:
+                adapter.auth === 'api_token'
+                  ? `${adapter.label.displayName} no longer accepts the API token (expired or deleted). Paste a new one to keep syncing.`
+                  : `${adapter.label.displayName} access was revoked or has expired. Reconnect to keep syncing.`,
+            }
           : source?.remoteErrorCode
             ? { code: source.remoteErrorCode, message: source.remoteErrorMessage }
             : null,
@@ -1238,6 +1247,13 @@ export function isCleanCrmLead(
     !lead.dncStatus &&
     lead.reviewReasons.every((r) => r === importReason)
   );
+}
+
+/** integrations.config.tokenExpiresAt, when it is a readable date. */
+function tokenExpiresAt(config: Prisma.JsonValue): string | null {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  const v = (config as Record<string, unknown>).tokenExpiresAt;
+  return typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : null;
 }
 
 /** A database refusal no retry fixes: a value too long, out of range, or otherwise unstorable. */

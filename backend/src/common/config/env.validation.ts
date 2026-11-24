@@ -184,6 +184,11 @@ export const envValidationSchema = Joi.object({
     HUBSPOT_AUTH_BASE_URL: Joi.string().uri().default('https://app.hubspot.com'),
     HUBSPOT_API_VERSION: Joi.string().pattern(/^\d{4}-\d{2}$/).default('2026-09'),
     HUBSPOT_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
+    // BoldTrail (kvCORE) CRM import. Off unless BOLDTRAIL_ENABLED: its endpoints answer 404 and nothing
+    // syncs. No app credentials: each organization pastes its own BoldTrail API token.
+    BOLDTRAIL_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    BOLDTRAIL_API_BASE_URL: Joi.string().uri().default('https://api.kvcore.com/v2/public'),
+    BOLDTRAIL_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
     // How often the worker looks for due CRM work (0 = only when nudged), and how often each
     // connection is reconciled against the CRM's modified dates to catch a lost webhook.
     CRM_POLL_MS: Joi.number().integer().min(0).default(30_000),

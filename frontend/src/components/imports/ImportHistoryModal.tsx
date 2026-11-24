@@ -15,6 +15,7 @@ const BADGE: Record<ImportKind, { icon: typeof FileUp; cls: string; name: string
   google_sheets: { icon: FileSpreadsheet, cls: 'bg-green-500/10 text-green-300 border-green-500/25', name: 'Google Sheet', word: 'Sheet' },
   file_upload: { icon: FileUp, cls: 'bg-sky-500/10 text-sky-300 border-sky-500/25', name: 'Uploaded file', word: 'File' },
   hubspot: { icon: Contact, cls: 'bg-orange-500/10 text-orange-300 border-orange-500/25', name: 'HubSpot', word: 'HubSpot' },
+  boldtrail: { icon: Contact, cls: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/25', name: 'BoldTrail', word: 'BoldTrail' },
   airtable: { icon: Table2, cls: 'bg-sky-500/10 text-sky-300 border-sky-500/25', name: 'Airtable', word: 'Airtable' },
 };
 
@@ -184,7 +185,7 @@ export const ImportHistoryModal: React.FC<{ onClose: () => void; onReview: (batc
                             ) : null}
                           </>
                         ) : (
-                          <span className="text-slate-400">Keeps syncing from {b.kind === 'hubspot' ? 'HubSpot' : 'the sheet'}</span>
+                          <span className="text-slate-400">Keeps syncing from {b.kind === 'hubspot' ? 'HubSpot' : b.kind === 'boldtrail' ? 'BoldTrail' : 'the sheet'}</span>
                         )}
                       </div>
                     </div>

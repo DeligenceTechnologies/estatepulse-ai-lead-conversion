@@ -3,8 +3,8 @@ import type { CrmContact, CrmProviderLabel } from './crm-records';
 /**
  * The contract every CRM adapter implements. Everything provider-specific —
  * URLs, scopes, property names, paging, error shapes — lives behind it, so the
- * connection, sync and review code never names a CRM. HubSpot is the only
- * implementation (hubspot/hubspot.client.ts).
+ * connection, sync and review code never names a CRM. Implementations:
+ * hubspot/hubspot.client.ts (OAuth) and boldtrail/boldtrail.client.ts (API token).
  *
  * Tokens travel only in an Authorization header or a POST body, never in a URL.
  * No method here ever returns a token inside an error.
@@ -81,22 +81,13 @@ export interface CrmChangedPage {
   capped: boolean;
 }
 
-export interface CrmAdapter {
+/** What every CRM adapter does, however it is authorized: read contacts, and write back the few fields Import Review edits. */
+interface CrmAdapterBase {
   /** lead_sources.provider / provider_credentials.provider. */
   readonly provider: string;
   readonly label: CrmProviderLabel;
-  /** Scopes the connection cannot work without; a grant missing any is refused. */
-  readonly requiredScopes: readonly string[];
 
   isConfigured(): boolean;
-  authorizeUrl(state: string): string;
-  exchangeCode(code: string): Promise<CrmTokens>;
-  refresh(refreshToken: string): Promise<CrmTokens>;
-  identify(accessToken: string): Promise<CrmAccount>;
-  /** Best effort is the caller's call; this throws on failure. */
-  revoke(refreshToken: string): Promise<void>;
-  /** Remove the app from the CRM account entirely, so it stops sending webhooks. */
-  uninstall(accessToken: string): Promise<void>;
 
   /** Every live (non-archived) contact, a page at a time. */
   listContacts(accessToken: string, cursor: string | null): Promise<CrmContactPage>;
@@ -107,6 +98,44 @@ export interface CrmAdapter {
   /** Writes contact fields an owner corrected in Import Review; only the keys sent change. Needs the CRM's write scope. */
   updateContact(accessToken: string, externalId: string, fields: CrmContactUpdate): Promise<CrmContact>;
 }
+
+/** A CRM connected through its OAuth consent screen (HubSpot). The stored secret is a refresh token. */
+export interface OAuthCrmAdapter extends CrmAdapterBase {
+  readonly auth: 'oauth';
+  /** Scopes the connection cannot work without; a grant missing any is refused. */
+  readonly requiredScopes: readonly string[];
+
+  authorizeUrl(state: string): string;
+  exchangeCode(code: string): Promise<CrmTokens>;
+  refresh(refreshToken: string): Promise<CrmTokens>;
+  identify(accessToken: string): Promise<CrmAccount>;
+  /** Best effort is the caller's call; this throws on failure. */
+  revoke(refreshToken: string): Promise<void>;
+  /** Remove the app from the CRM account entirely, so it stops sending webhooks. */
+  uninstall(accessToken: string): Promise<void>;
+}
+
+/** The account a pasted API token opens, as far as the CRM says. */
+export interface CrmTokenAccount extends CrmAccount {
+  /** When the token stops working, when the CRM says (BoldTrail: a year after it was generated). */
+  expiresAt: Date | null;
+}
+
+/**
+ * A CRM connected with an API token the owner generates in the CRM and pastes
+ * here (BoldTrail). The token is the stored secret and the bearer token at
+ * once: there is nothing to refresh and nothing to revoke from our side.
+ */
+export interface ApiTokenCrmAdapter extends CrmAdapterBase {
+  readonly auth: 'api_token';
+  /**
+   * Proves the token can read contacts, and says which account it opens. A
+   * token the CRM refuses throws REAUTH, UNAUTHORIZED or FORBIDDEN.
+   */
+  verifyToken(token: string): Promise<CrmTokenAccount>;
+}
+
+export type CrmAdapter = OAuthCrmAdapter | ApiTokenCrmAdapter;
 
 /** The contact fields EstatePulse may write back to a CRM. */
 export interface CrmContactUpdate {

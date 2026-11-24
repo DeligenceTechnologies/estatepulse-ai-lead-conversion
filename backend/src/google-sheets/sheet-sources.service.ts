@@ -62,6 +62,7 @@ const REVIEW_SOURCE_PROVIDER = {
   google_sheets: LeadSourceProvider.GOOGLE_SHEETS,
   file_upload: LeadSourceProvider.FILE_UPLOAD,
   hubspot: LeadSourceProvider.HUBSPOT,
+  boldtrail: LeadSourceProvider.BOLDTRAIL,
   airtable: LeadSourceProvider.AIRTABLE,
 } as const;
 type ReviewKind = keyof typeof REVIEW_SOURCE_PROVIDER;

@@ -45,6 +45,7 @@ export class ImportReviewEnabledGuard extends FeatureGuard {
       this.config.get('GOOGLE_SHEETS_ENABLED', { infer: true }) ||
       this.config.get('FILE_IMPORT_ENABLED', { infer: true }) ||
       this.config.get('HUBSPOT_ENABLED', { infer: true }) ||
+      this.config.get('BOLDTRAIL_ENABLED', { infer: true }) ||
       this.config.get('AIRTABLE_ENABLED', { infer: true })
     );
   }
