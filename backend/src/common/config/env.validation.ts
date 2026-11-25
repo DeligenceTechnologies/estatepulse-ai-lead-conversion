@@ -266,4 +266,5 @@ export const envValidationSchema = Joi.object({
       .empty('')
       .when('AI_PROVIDER', { is: 'openai', then: Joi.when('ASSISTANT_ENABLED', { is: true, then: Joi.required() }) }),
     OPENAI_MODEL: Joi.string().empty('').default('gpt-5'),
+    OPENAI_REASONING_EFFORT: Joi.string().valid('minimal', 'low', 'medium', 'high').empty(''),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

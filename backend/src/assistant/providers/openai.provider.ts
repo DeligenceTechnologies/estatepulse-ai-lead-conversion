@@ -66,6 +66,8 @@ export class OpenAIProvider implements ModelProvider {
   constructor(
     apiKey: string,
     private readonly model: string,
+    /** Only for reasoning models (gpt-5, o-series); older models reject it, so it is sent only when set. */
+    private readonly reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high',
   ) {
     this.client = new OpenAI({ apiKey, maxRetries: 2, timeout: 120_000 });
   }
@@ -81,6 +83,7 @@ export class OpenAIProvider implements ModelProvider {
         messages: toWire(system, messages),
         tools: wireTools.length > 0 ? wireTools : undefined,
         max_completion_tokens: MAX_OUTPUT_TOKENS,
+        ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
         stream_options: { include_usage: true },
       },
       { signal },
