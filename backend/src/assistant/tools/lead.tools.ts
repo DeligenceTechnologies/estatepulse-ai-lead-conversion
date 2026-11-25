@@ -11,6 +11,8 @@ import { AGENT_ROLE_WHERE, OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from 
 import { liveReviewReasons } from '@/lead/review-reasons';
 import type { ManualLeadService } from '@/lead/manual-lead.service';
 import { PERMISSIONS } from '@/role/permissions';
+import { findLeads } from './lead-search';
+import { leadRef, refOf, userRef, type RefTable } from './refs';
 import { display, readTool, writeTool, type AssistantTool, type PreviewChange } from './tool';
 
 export interface LeadToolDeps {
@@ -24,7 +26,6 @@ export interface LeadToolDeps {
 const MAX_BUDGET = 9_999_999_999;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const leadId = z.uuid().describe('Lead id from lead_search or lead_get');
 const text = (max: number) => z.string().trim().max(max);
 const clearable = (max: number) =>
   text(max)
@@ -43,6 +44,7 @@ const LEAD_SUMMARY = {
   temperature: true,
   score: true,
   location: true,
+  lastContactAt: true,
   createdAt: true,
   leadSource: { select: { name: true } },
   assignedTo: { select: { id: true, firstName: true, lastName: true } },
@@ -68,14 +70,14 @@ const LEAD_DETAIL = {
   needsReview: true,
   reviewReasons: true,
   phoneValid: true,
-  lastContactAt: true,
   updatedAt: true,
 } satisfies Prisma.LeadSelect;
 
 type LeadSummaryRow = Prisma.LeadGetPayload<{ select: typeof LEAD_SUMMARY }>;
 
-const toSummary = (l: LeadSummaryRow) => ({
-  id: l.id,
+/** What the model sees of a lead: its ref, never its id. */
+const toSummary = (l: LeadSummaryRow, leads: Map<string, string>, users: Map<string, string>) => ({
+  ref: leads.get(l.id)!,
   name: fullName(l.firstName, l.lastName, 'Unnamed lead'),
   phone: l.phone,
   email: l.email,
@@ -84,17 +86,44 @@ const toSummary = (l: LeadSummaryRow) => ({
   score: l.score === null ? null : Number(l.score),
   location: l.location,
   source: l.leadSource?.name ?? null,
-  assignedTo: l.assignedTo ? { id: l.assignedTo.id, name: fullName(l.assignedTo.firstName, l.assignedTo.lastName) } : null,
+  assignedTo: l.assignedTo ? { ref: users.get(l.assignedTo.id)!, name: fullName(l.assignedTo.firstName, l.assignedTo.lastName) } : null,
+  lastContactAt: l.lastContactAt,
   createdAt: l.createdAt,
 });
+
+async function summaries(refs: RefTable, rows: LeadSummaryRow[]) {
+  const [leads, users] = await Promise.all([
+    refs.issue('lead', rows.map((l) => l.id)),
+    refs.issue('user', rows.flatMap((l) => (l.assignedTo ? [l.assignedTo.id] : []))),
+  ]);
+  return rows.map((l) => toSummary(l, leads, users));
+}
+
+/** Rows for ids a search already scoped to the user, in the order given. */
+async function summaryRows(prisma: PrismaService, orgId: string, ids: string[]): Promise<LeadSummaryRow[]> {
+  if (ids.length === 0) return [];
+  const rows = await prisma.lead.findMany({ where: { id: { in: ids }, orgId }, select: LEAD_SUMMARY });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
+const MATCH_NOTE = {
+  ambiguous: (n: number) =>
+    n === 1
+      ? 'Not a close match. Check with the user that this is the person they mean before acting.'
+      : 'More than one lead could be meant. If the user means one person, ask which one before acting.',
+  none: 'No lead matches that.',
+};
 
 const visible = (auth: AuthContext, extra: Prisma.LeadWhereInput = {}): Prisma.LeadWhereInput => ({
   AND: [{ ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW }, extra],
 });
 
-async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: PrismaService, auth: AuthContext, id: string, select: S) {
+/** The lead behind a ref, if the user may see it and it is not still waiting in import or consent review. */
+async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: PrismaService, auth: AuthContext, refs: RefTable, ref: string, select: S) {
+  const id = await refs.resolve('lead', ref);
   const lead = await prisma.lead.findFirst({ where: visible(auth, { id }), select });
-  if (!lead) throw new AppError('NOT_FOUND', 'No lead with that id is visible to this user.');
+  if (!lead) throw new AppError('NOT_FOUND', `${ref} is still waiting in import or consent review. Finish the review on the Leads screen first.`);
   return lead as Prisma.LeadGetPayload<{ select: S }>;
 }
 
@@ -142,7 +171,7 @@ const FIELD_LABEL: Record<UpdateField, string> = {
   notes: 'Notes',
 };
 
-const leadUpdateInput = z.object({ leadId, ...UPDATE_FIELDS }).strict();
+const leadUpdateInput = z.object({ lead: leadRef, ...UPDATE_FIELDS }).strict();
 const leadCreateInput = z
   .object({
     firstName: z.string().trim().min(1).max(100),
@@ -166,49 +195,49 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
       name: 'lead_search',
       label: 'Searching leads',
       description:
-        'Find leads visible to the user. Matches name, phone, email or location, with optional filters. Returns at most `limit` leads plus the total that match.',
+        'Find leads visible to the user. With a query (a name, phone number or email) it ranks the matches and says whether one lead clearly fits, several could, or none. Without one it lists the newest leads that pass the filters, with the total.',
       permissions: [],
       input: z
         .object({
-          query: text(100).optional().describe('Name, phone, email or location to match'),
+          query: text(100).optional().describe("A person's name, phone number or email. Use the filters for anything else."),
           status: z.array(z.enum(LeadStatus)).max(Object.keys(LeadStatus).length).optional(),
           temperature: z.enum(LeadTemperature).optional(),
+          location: text(100).optional().describe('Part of the area or city, e.g. "Austin"'),
           unassigned: z.boolean().optional().describe('True for leads with no agent'),
-          assignedToId: z.uuid().optional().describe('Agent id from team_list'),
+          assignedTo: userRef.optional(),
           createdAfter: z.iso.datetime({ offset: true }).optional(),
           limit: z.number().int().min(1).max(25).default(10),
         })
         .strict(),
-      async run({ auth }, input) {
-        const q = input.query?.trim();
+      async run({ auth, refs }, input) {
+        const assignedToId = input.assignedTo && !input.unassigned ? await refs.resolve('user', input.assignedTo) : undefined;
         const where = visible(auth, {
           ...(input.status?.length ? { status: { in: input.status } } : {}),
           ...(input.temperature ? { temperature: input.temperature } : {}),
-          ...(input.unassigned ? { assignedToId: null } : input.assignedToId ? { assignedToId: input.assignedToId } : {}),
+          ...(input.location ? { location: { contains: input.location, mode: 'insensitive' } } : {}),
+          ...(input.unassigned ? { assignedToId: null } : assignedToId ? { assignedToId } : {}),
           ...(input.createdAfter ? { createdAt: { gte: new Date(input.createdAfter) } } : {}),
-          ...(q
-            ? {
-                OR: [
-                  ...q
-                    .split(/\s+/)
-                    .slice(0, 3)
-                    .flatMap((part) => [
-                      { firstName: { contains: part, mode: 'insensitive' as const } },
-                      { lastName: { contains: part, mode: 'insensitive' as const } },
-                    ]),
-                  { email: { contains: q, mode: 'insensitive' } },
-                  { phone: { contains: q } },
-                  { normalizedPhone: { contains: q.replace(/[^\d+]/g, '') || q } },
-                  { location: { contains: q, mode: 'insensitive' } },
-                ],
-              }
-            : {}),
         });
-        const [total, rows] = await Promise.all([
-          prisma.lead.count({ where }),
-          prisma.lead.findMany({ where, select: LEAD_SUMMARY, orderBy: { createdAt: 'desc' }, take: input.limit }),
-        ]);
-        return { total, leads: rows.map(toSummary) };
+
+        const q = input.query?.trim();
+        if (!q) {
+          const [total, rows] = await Promise.all([
+            prisma.lead.count({ where }),
+            prisma.lead.findMany({ where, select: LEAD_SUMMARY, orderBy: { createdAt: 'desc' }, take: input.limit }),
+          ]);
+          return { total, leads: await summaries(refs, rows) };
+        }
+
+        const found = await findLeads(prisma, where, q, input.limit);
+        const leads = await summaries(refs, await summaryRows(prisma, auth.organizationId, found.ids));
+        const closest = await summaries(refs, await summaryRows(prisma, auth.organizationId, found.closest));
+        return {
+          match: found.match,
+          ...(found.match === 'ambiguous' ? { note: MATCH_NOTE.ambiguous(found.total) } : found.match === 'none' ? { note: MATCH_NOTE.none } : {}),
+          total: found.total,
+          leads,
+          ...(closest.length ? { closest: closest.map(({ ref, name, location }) => ({ ref, name, location })) } : {}),
+        };
       },
     }),
 
@@ -217,11 +246,12 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
       label: 'Opening lead',
       description: 'Full details of one lead: contact, status, what they are looking for, AI notes, consent and review state.',
       permissions: [],
-      input: z.object({ leadId }).strict(),
-      async run({ auth }, input) {
-        const l = await findVisibleLead(prisma, auth, input.leadId, LEAD_DETAIL);
+      input: z.object({ lead: leadRef }).strict(),
+      async run({ auth, refs }, input) {
+        const l = await findVisibleLead(prisma, auth, refs, input.lead, LEAD_DETAIL);
+        const [summary] = await summaries(refs, [l]);
         return {
-          ...toSummary(l),
+          ...summary,
           followUpReason: l.followUpReason,
           callbackAt: l.callbackAt,
           aiSummary: l.aiSummary,
@@ -238,7 +268,6 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           automationPaused: l.automationPaused,
           needsReview: l.needsReview,
           reviewReasons: liveReviewReasons(l),
-          lastContactAt: l.lastContactAt,
           updatedAt: l.updatedAt,
         };
       },
@@ -278,7 +307,7 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
       description: 'Agents who can be given leads, with how many active leads each holds and their cap.',
       permissions: [PERMISSIONS.LEAD_READ],
       input: z.object({}).strict(),
-      async run({ auth }) {
+      async run({ auth, refs }) {
         const orgId = auth.organizationId;
         const agents = await prisma.user.findMany({
           where: { orgId, status: 'active', roles: { some: { role: AGENT_ROLE_WHERE } } },
@@ -291,8 +320,9 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           _count: { _all: true },
         });
         const counts = new Map(active.map((g) => [g.assignedToId, g._count._all]));
+        const userRefs = await refs.issue('user', agents.map((a) => a.id));
         return agents.map((a) => ({
-          id: a.id,
+          ref: userRefs.get(a.id)!,
           name: fullName(a.firstName, a.lastName, a.email),
           email: a.email,
           activeLeads: counts.get(a.id) ?? 0,
@@ -308,8 +338,8 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
         "Correct a lead's own details. Send only the fields to change; null clears a field. Status, assignment and consent are not changed here.",
       permissions: [PERMISSIONS.LEAD_UPDATE],
       input: leadUpdateInput,
-      async preview({ auth }, input) {
-        const lead = await findVisibleLead(prisma, auth, input.leadId, LEAD_DETAIL);
+      async preview({ auth, refs }, input) {
+        const lead = await findVisibleLead(prisma, auth, refs, input.lead, LEAD_DETAIL);
         const changes: PreviewChange[] = [];
         for (const field of Object.keys(UPDATE_FIELDS) as UpdateField[]) {
           if (input[field] === undefined) continue;
@@ -324,8 +354,8 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },
-      async run({ auth }, { leadId: id, ...fields }) {
-        const result = await edits.update(auth, id, fields);
+      async run({ auth, refs }, { lead, ...fields }) {
+        const result = await edits.update(auth, await refs.resolve('lead', lead), fields);
         return { updated: Object.keys(result.changed), becameDoNotContact: result.becameDoNotContact };
       },
     }),
@@ -335,11 +365,12 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
       label: 'Preparing assignment',
       description: "Give a lead to an agent from team_list. Respects each agent's lead cap.",
       permissions: [PERMISSIONS.LEAD_ASSIGN],
-      input: z.object({ leadId, agentId: z.uuid().describe('Agent id from team_list') }).strict(),
-      async preview({ auth }, input) {
+      input: z.object({ lead: leadRef, agent: userRef }).strict(),
+      async preview({ auth, refs }, input) {
+        const agentId = await refs.resolve('user', input.agent);
         const [lead, agent] = await Promise.all([
-          findVisibleLead(prisma, auth, input.leadId, { ...LEAD_SUMMARY, updatedAt: true }),
-          prisma.user.findFirst({ where: { id: input.agentId, orgId: auth.organizationId }, select: { firstName: true, lastName: true, email: true } }),
+          findVisibleLead(prisma, auth, refs, input.lead, { ...LEAD_SUMMARY, updatedAt: true }),
+          prisma.user.findFirst({ where: { id: agentId, orgId: auth.organizationId }, select: { firstName: true, lastName: true, email: true } }),
         ]);
         if (!agent) throw new AppError('NOT_FOUND', 'No such agent in this organization.');
         return {
@@ -354,8 +385,9 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },
-      async run({ auth }, input) {
-        const result = await assignments.assign(auth.organizationId, input.leadId, input.agentId, {
+      async run({ auth, refs }, input) {
+        const [leadId, agentId] = await Promise.all([refs.resolve('lead', input.lead), refs.resolve('user', input.agent)]);
+        const result = await assignments.assign(auth.organizationId, leadId, agentId, {
           actorType: 'ai',
           actorId: auth.userId,
           assignmentType: AssignmentType.manual,
@@ -391,8 +423,13 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           changes: rows.filter(([, v]) => display(v) !== null).map(([field, v]) => ({ field, from: null, to: display(v) })),
         };
       },
-      async run({ auth }, input) {
-        return manualLeads.create(auth.organizationId, auth.userId, input);
+      async run({ auth, refs }, input) {
+        const created = await manualLeads.create(auth.organizationId, auth.userId, input);
+        return {
+          ref: await refOf(refs, 'lead', created.id),
+          // Set when the phone or email already belonged to a lead: that lead was used instead of a new one.
+          ...(created.matchedBy ? { matchedExistingLeadBy: created.matchedBy } : {}),
+        };
       },
     }),
 
@@ -401,9 +438,9 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
       label: 'Preparing review approval',
       description: 'Approve a lead flagged for review. Its review reasons clear and, if it can be contacted, outreach starts.',
       permissions: [PERMISSIONS.LEAD_UPDATE],
-      input: z.object({ leadId }).strict(),
-      async preview({ auth }, input) {
-        const lead = await findVisibleLead(prisma, auth, input.leadId, LEAD_DETAIL);
+      input: z.object({ lead: leadRef }).strict(),
+      async preview({ auth, refs }, input) {
+        const lead = await findVisibleLead(prisma, auth, refs, input.lead, LEAD_DETAIL);
         const reasons = liveReviewReasons(lead);
         if (!lead.needsReview || reasons.length === 0) throw new AppError('CONFLICT', 'This lead is not waiting for review.');
         return {
@@ -412,8 +449,8 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },
-      async run({ auth }, input) {
-        return reviews.approve(auth.organizationId, auth.userId, input.leadId);
+      async run({ auth, refs }, input) {
+        return reviews.approve(auth.organizationId, auth.userId, await refs.resolve('lead', input.lead));
       },
     }),
   ];

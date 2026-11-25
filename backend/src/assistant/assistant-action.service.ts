@@ -4,9 +4,10 @@ import { AuditService } from '@/audit/audit.service';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
+import { AssistantRefService } from './assistant-ref.service';
 import { AssistantThreadService } from './assistant-thread.service';
 import type { StoredBlock, ToolCall } from './providers/model-provider';
-import type { ActionPreview, AssistantTool } from './tools/tool';
+import type { ActionPreview, AssistantTool, ToolContext } from './tools/tool';
 import { ToolRegistry } from './tools/tool-registry.service';
 
 const PROPOSAL_TTL_MS = 10 * 60_000;
@@ -41,7 +42,13 @@ export class AssistantActionService {
     private readonly registry: ToolRegistry,
     private readonly threads: AssistantThreadService,
     private readonly audit: AuditService,
+    private readonly refs: AssistantRefService,
   ) {}
+
+  /** What a tool runs with: the user, and the refs of the chat the call came from. */
+  private context(auth: AuthContext, threadId: string): ToolContext {
+    return { auth, refs: this.refs.forThread(auth, threadId) };
+  }
 
   /** Runs a read at once; turns a write into a proposal the user must confirm. */
   async handle(auth: AuthContext, threadId: string, messageId: string, call: ToolCall): Promise<AssistantAction> {
@@ -62,7 +69,7 @@ export class AssistantActionService {
 
     if (tool.tier === 'read') {
       try {
-        const result = await tool.run({ auth }, parsed.data);
+        const result = await tool.run(this.context(auth, threadId), parsed.data);
         return this.prisma.assistantAction.create({ data: { ...base, tier: 'read', status: 'executed', result: json(result), decidedAt: new Date() } });
       } catch (error) {
         return this.prisma.assistantAction.create({ data: { ...base, tier: 'read', status: 'failed', error: reasonOf(error, this.logger, tool.name) } });
@@ -71,7 +78,7 @@ export class AssistantActionService {
 
     let preview: ActionPreview;
     try {
-      preview = await tool.preview({ auth }, parsed.data);
+      preview = await tool.preview(this.context(auth, threadId), parsed.data);
     } catch (error) {
       return this.prisma.assistantAction.create({ data: { ...base, tier: 'write', status: 'failed', error: reasonOf(error, this.logger, tool.name) } });
     }
@@ -109,9 +116,16 @@ export class AssistantActionService {
       await this.close(action.id, 'failed', 'This tool is no longer available to this user.');
       throw new AppError('FORBIDDEN', 'You no longer have permission for this action.');
     }
-    const input = tool.input.parse(action.input);
+    // Valid when proposed; a deploy since then can change the tool's input shape.
+    const parsed = tool.input.safeParse(action.input);
+    if (!parsed.success) {
+      await this.close(action.id, 'failed', 'This step was prepared by an older version of the assistant. Ask again.');
+      throw new AppError('ACTION_STALE', 'This card is out of date. Ask the assistant again.', undefined, 409);
+    }
+    const input = parsed.data;
+    const ctx = this.context(auth, action.threadId);
 
-    await this.assertFresh(auth, action, tool, input);
+    await this.assertFresh(ctx, action, tool, input);
 
     const claimed = await this.prisma.assistantAction.updateMany({
       where: { id: action.id, orgId: auth.organizationId, status: 'proposed' },
@@ -120,7 +134,7 @@ export class AssistantActionService {
     if (claimed.count === 0) throw new AppError('ACTION_DECIDED', 'This action was already handled.', undefined, 409);
 
     try {
-      const result = await tool.run({ auth }, input);
+      const result = await tool.run(ctx, input);
       this.audit.quietly({
         orgId: auth.organizationId,
         actorType: 'ai',
@@ -227,14 +241,15 @@ export class AssistantActionService {
   }
 
   /** A card built on data that has since changed is refreshed and shown again rather than applied blind. */
-  private async assertFresh(auth: AuthContext, action: AssistantAction, tool: Extract<AssistantTool, { tier: 'write' }>, input: unknown): Promise<void> {
+  private async assertFresh(ctx: ToolContext, action: AssistantAction, tool: Extract<AssistantTool, { tier: 'write' }>, input: unknown): Promise<void> {
+    const { auth } = ctx;
     if (!action.entityType || !action.entityId || !action.entityVersion) return;
     const current = await this.registry.entityVersion(auth.organizationId, { type: action.entityType, id: action.entityId });
     if (current && current.getTime() === action.entityVersion.getTime()) return;
 
     let preview: ActionPreview;
     try {
-      preview = await tool.preview({ auth }, input);
+      preview = await tool.preview(ctx, input);
     } catch (error) {
       await this.close(action.id, 'failed', reasonOf(error, this.logger, tool.name));
       throw new AppError('ACTION_STALE', 'This record changed and the action no longer applies.', undefined, 409);

@@ -23,7 +23,7 @@ enum AssistantActionStatus {
   @@map("assistant_action_status")
 }
 
-/// One Copilot conversation of one user.
+/// One Ask EstatePulse conversation of one user.
 model AssistantThread {
   id            String   @id @default(uuid(7)) @db.Uuid
   orgId         String   @map("organization_id") @db.Uuid
@@ -37,6 +37,7 @@ model AssistantThread {
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages     AssistantMessage[]
   actions      AssistantAction[]
+  refs         AssistantRef[]
 
   @@index([orgId, userId, lastMessageAt(sort: Desc)])
   @@map("assistant_threads")
@@ -98,6 +99,28 @@ model AssistantAction {
   @@index([threadId, status])
   @@index([orgId, entityType, entityId])
   @@map("assistant_actions")
+}
+
+/// The short handles the model uses instead of ids: lead 7 of this chat is "L7". Issued when a tool
+/// result first shows the record, and the same record keeps its ref for the whole chat. A ref means
+/// nothing outside its own chat.
+model AssistantRef {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  orgId      String   @map("organization_id") @db.Uuid
+  threadId   String   @map("thread_id") @db.Uuid
+  /// lead, user or call; the letter of the ref comes from it.
+  entityType String   @map("entity_type") @db.VarChar(20)
+  entityId   String   @map("entity_id") @db.Uuid
+  /// The number after the letter, counted per thread and type from 1.
+  number     Int
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  thread       AssistantThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, entityType, number])
+  @@unique([threadId, entityType, entityId])
+  @@map("assistant_refs")
 }
 
 /// Tokens and cost per organization per calendar month (UTC), checked against the plan's allowance.

@@ -113,7 +113,9 @@ function setup() {
     allows: (a: AuthContext, t: { permissions: string[] }) => t.permissions.every((p) => a.permissions.includes(p)),
     entityVersion: vi.fn(async () => currentVersion),
   };
-  const service = new AssistantActionService(prisma as any, registry as any, threads as any, audit as any);
+  /** Each chat gets its own ref table; the tool must be handed the one of the chat the call came from. */
+  const refs = { forThread: vi.fn((_a: AuthContext, threadId: string) => ({ threadId, resolve: vi.fn(), issue: vi.fn() })) };
+  const service = new AssistantActionService(prisma as any, registry as any, threads as any, audit as any, refs as any);
 
   /** The model's message that asked for these tool calls, as the orchestrator stores it before calling handle(). */
   const modelAsked = async (calls: { id: string; name: string; input: unknown }[]) => {
@@ -127,7 +129,7 @@ function setup() {
   const setVersion = (v: Date | null) => {
     currentVersion = v;
   };
-  return { service, prisma, threads, audit, search, update, registry, modelAsked, propose, setVersion };
+  return { service, prisma, threads, audit, refs, search, update, registry, modelAsked, propose, setVersion };
 }
 
 describe('AssistantActionService.handle', () => {
@@ -170,6 +172,32 @@ describe('AssistantActionService.handle', () => {
     expect(action.status).toBe('failed');
     expect(action.error).toMatch(/^Invalid input/);
     expect(s.search.run).not.toHaveBeenCalled();
+  });
+});
+
+describe('AssistantActionService: refs', () => {
+  it("a read runs with the refs of its own chat", async () => {
+    const s = setup();
+    const messageId = await s.modelAsked([{ id: 'tu-1', name: 'lead_search', input: { query: 'Maria' } }]);
+    await s.service.handle(auth(), 'thread-1', messageId, { id: 'tu-1', name: 'lead_search', input: { query: 'Maria' } });
+    expect(s.search.run).toHaveBeenCalledWith(expect.objectContaining({ refs: expect.objectContaining({ threadId: 'thread-1' }) }), { query: 'Maria' });
+  });
+
+  it("a confirmed write resolves its refs in the chat that proposed it, as the user confirming", async () => {
+    const s = setup();
+    const proposed = await s.propose();
+    await s.service.confirm(auth(), proposed.id);
+    expect(s.refs.forThread).toHaveBeenLastCalledWith(expect.objectContaining({ userId: 'user-1' }), 'thread-1');
+    expect(s.update.run).toHaveBeenCalledWith(expect.objectContaining({ refs: expect.objectContaining({ threadId: 'thread-1' }) }), expect.anything());
+  });
+
+  it('a card whose input no longer fits the tool (changed by a deploy) is closed, not run', async () => {
+    const s = setup();
+    const proposed = await s.propose();
+    s.prisma.rows[0].input = { leadId: 'lead-1', firstName: 'Mariah', extra: true };
+    await expect(s.service.confirm(auth(), proposed.id)).rejects.toMatchObject({ code: 'ACTION_STALE' });
+    expect(s.prisma.rows[0].status).toBe('failed');
+    expect(s.update.run).not.toHaveBeenCalled();
   });
 });
 

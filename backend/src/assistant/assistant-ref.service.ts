@@ -1,0 +1,109 @@
+import { Inject, Injectable } from '@nestjs/common';
+import type { AuthContext } from '@/auth/auth.types';
+import { AppError } from '@/common/errors/app-error';
+import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
+import { visibleLeads } from '@/lead/lead-scope';
+import { formatRef, parseRef, type RefKind, type RefTable } from './tools/refs';
+
+/** Two turns of one chat never run at once, so a clash on a number is rare; a few retries settle it. */
+const MAX_ATTEMPTS = 3;
+
+const NOT_FOUND: Record<RefKind, string> = {
+  lead: 'is not a lead from this chat that this user can see. Find the lead with lead_search first.',
+  user: 'is not a team member from this chat. Look them up with team_list first.',
+  call: 'is not a call from this chat that this user can see. Find it with call_list first.',
+};
+
+@Injectable()
+export class AssistantRefService {
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly db: GuardedPrisma,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** The refs of one chat, for the user it belongs to. The caller has already checked the chat is theirs. */
+  forThread(auth: AuthContext, threadId: string): RefTable {
+    return new ThreadRefs(this.db, this.prisma, auth, threadId);
+  }
+}
+
+class ThreadRefs implements RefTable {
+  /** `${kind}:${id}` to ref, for refs already read or written in this request. */
+  private readonly known = new Map<string, string>();
+
+  constructor(
+    private readonly db: GuardedPrisma,
+    private readonly prisma: PrismaService,
+    private readonly auth: AuthContext,
+    private readonly threadId: string,
+  ) {}
+
+  async resolve(kind: RefKind, ref: string): Promise<string> {
+    const number = parseRef(kind, ref);
+    const row =
+      number === null
+        ? null
+        : await this.db.assistantRef.findFirst({ where: { threadId: this.threadId, entityType: kind, number }, select: { entityId: true } });
+    // Same answer for a ref never issued and a record the user can no longer see, so nothing leaks.
+    if (!row || !(await this.visible(kind, row.entityId))) throw new AppError('NOT_FOUND', `${ref} ${NOT_FOUND[kind]}`);
+    this.known.set(`${kind}:${row.entityId}`, ref);
+    return row.entityId;
+  }
+
+  async issue(kind: RefKind, ids: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    let missing: string[] = [];
+    for (const id of new Set(ids)) {
+      const ref = this.known.get(`${kind}:${id}`);
+      if (ref) out.set(id, ref);
+      else missing.push(id);
+    }
+
+    for (let attempt = 0; missing.length > 0; attempt++) {
+      const rows = await this.db.assistantRef.findMany({
+        where: { threadId: this.threadId, entityType: kind, entityId: { in: missing } },
+        select: { entityId: true, number: true },
+      });
+      for (const r of rows) {
+        const ref = formatRef(kind, r.number);
+        this.known.set(`${kind}:${r.entityId}`, ref);
+        out.set(r.entityId, ref);
+      }
+      missing = missing.filter((id) => !out.has(id));
+      if (missing.length === 0) break;
+      if (attempt === MAX_ATTEMPTS) throw new Error(`could not issue ${kind} refs in thread ${this.threadId}`);
+      await this.allocate(kind, missing);
+    }
+    return out;
+  }
+
+  /** Numbers the records in the order given, after the highest number this chat has for the kind. */
+  private async allocate(kind: RefKind, ids: string[]): Promise<void> {
+    const top = await this.db.assistantRef.aggregate({ where: { threadId: this.threadId, entityType: kind }, _max: { number: true } });
+    const next = (top._max.number ?? 0) + 1;
+    // A row that clashes with one written meanwhile is skipped, and the next round numbers it again.
+    await this.db.assistantRef.createMany({
+      data: ids.map((entityId, i) => ({
+        orgId: this.auth.organizationId,
+        threadId: this.threadId,
+        entityType: kind,
+        entityId,
+        number: next + i,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  /** Checked on every use: a lead reassigned or merged away since the ref was issued is gone for this user. */
+  private async visible(kind: RefKind, id: string): Promise<boolean> {
+    const orgId = this.auth.organizationId;
+    switch (kind) {
+      case 'lead':
+        return (await this.prisma.lead.count({ where: { id, ...visibleLeads(this.auth) } })) > 0;
+      case 'call':
+        return (await this.prisma.call.count({ where: { id, orgId, lead: visibleLeads(this.auth) } })) > 0;
+      case 'user':
+        return (await this.prisma.user.count({ where: { id, orgId } })) > 0;
+    }
+  }
+}

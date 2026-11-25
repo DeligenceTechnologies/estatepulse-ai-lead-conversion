@@ -9,12 +9,14 @@ import { fullName } from '@/lead/lead-scope';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantLimitsService, type TurnAbortReason } from './assistant-limits.service';
 import { AssistantOrchestrator, type Emit } from './assistant-orchestrator.service';
+import { AssistantRefService } from './assistant-ref.service';
 import { AssistantConfig } from './assistant.config';
 import { contextBlock } from './assistant.prompt';
 import { AssistantThreadService, MAX_THREAD_MESSAGES, toActionView } from './assistant-thread.service';
 import { AssistantUsageService } from './assistant-usage.service';
 import type { SendMessageDto } from './dto/send-message.dto';
 import type { EventStream } from './event-stream';
+import { refOf } from './tools/refs';
 
 /** Room left for the model's steps after the user's message. */
 const TURN_HEADROOM = 20;
@@ -34,6 +36,7 @@ export class AssistantService {
     private readonly threads: AssistantThreadService,
     private readonly actions: AssistantActionService,
     private readonly orchestrator: AssistantOrchestrator,
+    private readonly refs: AssistantRefService,
   ) {}
 
   async status(auth: AuthContext) {
@@ -65,7 +68,8 @@ export class AssistantService {
       });
       const context = contextBlock({
         now: new Date(),
-        userId: auth.userId,
+        // The user's own ref, so "give it to me" needs no look-up.
+        userRef: await refOf(this.refs.forThread(auth, thread.id), 'user', auth.userId),
         userName: fullName(user?.firstName, user?.lastName, user?.email ?? 'User'),
         timezone: user?.timezone ?? null,
         screen: input.screen,

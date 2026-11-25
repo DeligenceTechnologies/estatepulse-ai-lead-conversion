@@ -42,6 +42,7 @@ function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopp
     threads as any,
     actions as any,
     orchestrator as any,
+    { forThread: () => ({ issue: vi.fn(async (_kind: string, ids: string[]) => new Map(ids.map((id) => [id, 'U1']))) }) } as any,
   );
   const events: AssistantEvent[] = [];
   const stream = { send: (e: AssistantEvent) => events.push(e) };
@@ -55,6 +56,9 @@ describe('AssistantService.send', () => {
     expect(s.threads.append).toHaveBeenCalledWith('org-1', 'thread-1', expect.objectContaining({ role: 'user', text: 'Which hot leads came in today?' }));
     const content = (s.threads.append.mock.calls[0] as any[])[2].content;
     expect(content[0].text).toContain("user's time zone: America/Chicago");
+    // The model knows the user by their ref in this chat, never by their id.
+    expect(content[0].text).toContain('User: Sarah Owens (U1)');
+    expect(content[0].text).not.toContain('user-1');
     expect(s.orchestrator.run).toHaveBeenCalledWith(auth, 'thread-1', expect.any(Function), s.turn.signal);
     expect(s.lock.release).toHaveBeenCalled();
     expect(s.turn.dispose).toHaveBeenCalled();

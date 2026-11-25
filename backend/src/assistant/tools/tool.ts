@@ -1,9 +1,12 @@
 import type { z } from 'zod';
 import type { AuthContext } from '@/auth/auth.types';
 import type { Permission } from '@/role/permissions';
+import type { RefTable } from './refs';
 
 export interface ToolContext {
   auth: AuthContext;
+  /** Refs of the chat the tool runs in: inputs arrive as refs, and results show refs, never ids. */
+  refs: RefTable;
 }
 
 export interface PreviewChange {

@@ -12,6 +12,7 @@ export const TENANT_SCOPED_MODELS: ReadonlySet<Prisma.ModelName> =
       Prisma.ModelName.AssistantMessage,
       Prisma.ModelName.AssistantAction,
       Prisma.ModelName.AssistantUsage,
+      Prisma.ModelName.AssistantRef,
     ]);
 
 const WHERE_OPERATIONS = new Set([
