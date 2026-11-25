@@ -7,8 +7,8 @@ import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { fullName } from '@/lead/lead-scope';
 import { AssistantActionService } from './assistant-action.service';
-import { AssistantLimitsService } from './assistant-limits.service';
-import { AssistantOrchestrator } from './assistant-orchestrator.service';
+import { AssistantLimitsService, type TurnAbortReason } from './assistant-limits.service';
+import { AssistantOrchestrator, type Emit } from './assistant-orchestrator.service';
 import { AssistantConfig } from './assistant.config';
 import { contextBlock } from './assistant.prompt';
 import { AssistantThreadService, MAX_THREAD_MESSAGES, toActionView } from './assistant-thread.service';
@@ -53,8 +53,12 @@ export class AssistantService {
     }
 
     const lock = await this.limits.lockThread(thread.id);
+    const turn = await this.limits.turnSignal(thread.id);
     try {
       await this.actions.closeOpenCalls(auth, thread.id, true);
+      if (await this.actions.awaitingResults(auth.organizationId, thread.id)) {
+        throw new AppError('ASSISTANT_BUSY', 'The last step in this chat is still finishing. Try again in a minute.', undefined, 409);
+      }
       const user = await this.prisma.user.findFirst({
         where: { id: auth.userId, orgId: auth.organizationId },
         select: { firstName: true, lastName: true, email: true, timezone: true },
@@ -75,8 +79,10 @@ export class AssistantService {
         text: input.text,
       });
       stream.send({ type: 'thread', threadId: thread.id, title: thread.title });
-      await this.orchestrator.run(auth, thread.id, stream.send, stream.signal);
+      await this.orchestrator.run(auth, thread.id, stream.send, turn.signal);
+      endIfCut(turn.signal, stream.send);
     } finally {
+      turn.dispose();
       await lock.release();
     }
   }
@@ -86,6 +92,7 @@ export class AssistantService {
     const pending = await this.actions.require(auth, actionId);
 
     const lock = await this.limits.lockThread(pending.threadId);
+    const turn = await this.limits.turnSignal(pending.threadId);
     try {
       const action = decision === 'confirm' ? await this.actions.confirm(auth, actionId) : await this.actions.reject(auth, actionId);
       stream.send({ type: 'action', action: toActionView(action) });
@@ -94,19 +101,36 @@ export class AssistantService {
         return stream.send({ type: 'done', awaitingConfirmation: true });
       }
       if (await this.actions.closeOpenCalls(auth, action.threadId, false)) {
-        await this.orchestrator.run(auth, action.threadId, stream.send, stream.signal);
+        await this.orchestrator.run(auth, action.threadId, stream.send, turn.signal);
+        endIfCut(turn.signal, stream.send);
       } else {
         stream.send({ type: 'done', awaitingConfirmation: false });
       }
     } finally {
+      turn.dispose();
       await lock.release();
     }
   }
 
+  /** Stops the turn running in one of the user's chats, after the step it is on. A write already confirmed still finishes. */
+  async stop(auth: AuthContext, threadId: string): Promise<void> {
+    await this.threads.require(auth, threadId);
+    await this.limits.requestStop(threadId);
+  }
+
   private async admit(auth: AuthContext): Promise<void> {
-    if (!this.config.enabled) throw new AppError('ASSISTANT_DISABLED', 'Copilot is not switched on for this server.', undefined, 503);
+    if (!this.config.enabled) throw new AppError('ASSISTANT_DISABLED', 'The assistant is not switched on for this server.', undefined, 503);
     await this.entitlements.assertFeature(auth.organizationId, Feature.AI_ASSISTANT);
     await this.limits.consume(auth.userId);
     await this.usage.assertWithinBudget(auth.organizationId);
   }
+}
+
+/** A turn cut by Stop or by the time limit ends quietly in the orchestrator; this closes the stream for the user. */
+function endIfCut(signal: AbortSignal, emit: Emit): void {
+  if (!signal.aborted) return;
+  if ((signal.reason as TurnAbortReason) === 'timeout') {
+    emit({ type: 'error', code: 'ASSISTANT_TIMEOUT', message: 'That took too long. Try asking for one thing at a time.' });
+  }
+  emit({ type: 'done', awaitingConfirmation: false });
 }

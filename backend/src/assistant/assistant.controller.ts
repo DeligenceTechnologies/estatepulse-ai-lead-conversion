@@ -9,7 +9,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { EventStream } from './event-stream';
 
 /**
- * Copilot. Open to every signed-in user: each tool checks the same permissions as the screen it stands in for.
+ * Ask EstatePulse, the in-app assistant. Open to every signed-in user: each tool checks the same permissions as the screen it stands in for.
  * Streaming routes answer text/event-stream; a check that fails before the stream opens answers as JSON.
  */
 @Controller('v1/assistant')
@@ -39,6 +39,13 @@ export class AssistantController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.threads.remove(auth, id);
+  }
+
+  /** Stops the answer being written in this chat. The browser closing does not stop it; this does. */
+  @Post('threads/:id/stop')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async stop(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    await this.assistant.stop(auth, id);
   }
 
   @Post('messages')

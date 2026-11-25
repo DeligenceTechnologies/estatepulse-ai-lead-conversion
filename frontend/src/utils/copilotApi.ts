@@ -53,6 +53,7 @@ export const copilotApi = {
   thread: (id: string) =>
     apiFetch<{ thread: CopilotThreadSummary; messages: CopilotMessage[] }>(`/v1/assistant/threads/${id}`, { auth: true }),
   removeThread: (id: string) => apiFetch<void>(`/v1/assistant/threads/${id}`, { method: 'DELETE', auth: true }),
+  stop: (threadId: string) => apiFetch<void>(`/v1/assistant/threads/${threadId}/stop`, { method: 'POST', auth: true }),
 
   send: (body: { threadId?: string; text: string; screen?: string }, onEvent: (e: CopilotEvent) => void, signal: AbortSignal) =>
     stream('/v1/assistant/messages', body, onEvent, signal),

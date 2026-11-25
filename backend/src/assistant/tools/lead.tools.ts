@@ -359,7 +359,7 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           actorType: 'ai',
           actorId: auth.userId,
           assignmentType: AssignmentType.manual,
-          reason: 'Assigned through Copilot',
+          reason: 'Assigned through Ask EstatePulse',
         });
         return { agent: result.agent.name, changed: result.changed };
       },

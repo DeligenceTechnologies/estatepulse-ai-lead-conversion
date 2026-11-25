@@ -30,12 +30,12 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
   [Feature.ADVANCED_AUTOMATION]: 'Advanced automation',
   [Feature.PRIORITY_SUPPORT]: 'Priority support',
   [Feature.ADVANCED_REPORTING]: 'Advanced reporting',
-  [Feature.AI_ASSISTANT]: 'Copilot AI assistant',
+  [Feature.AI_ASSISTANT]: 'Ask EstatePulse AI assistant',
 };
 
 export interface PlanLimits {
   maxMembers: number;
-  /** Copilot spend allowed per calendar month, in US dollars × 1,000,000. */
+  /** Assistant spend allowed per calendar month, in US dollars × 1,000,000. */
   assistantMonthlyBudgetMicros: number;
 }
 

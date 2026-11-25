@@ -12,7 +12,7 @@ import { leadTools, leadVersion } from './lead.tools';
 import type { ToolSpec } from '../providers/model-provider';
 import type { AssistantTool } from './tool';
 
-/** The catalog of what Copilot can do. Each tool wraps a service the UI already uses. */
+/** The catalog of what the assistant can do. Each tool wraps a service the UI already uses. */
 @Injectable()
 export class ToolRegistry {
   private readonly tools: ReadonlyMap<string, AssistantTool>;

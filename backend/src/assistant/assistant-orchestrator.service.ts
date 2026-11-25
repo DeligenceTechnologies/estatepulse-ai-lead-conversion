@@ -38,7 +38,7 @@ export class AssistantOrchestrator {
   /** Runs model and tools until the model answers, a write needs confirming, or the step limit is reached. */
   async run(auth: AuthContext, threadId: string, emit: Emit, signal: AbortSignal): Promise<void> {
     const provider = this.provider;
-    if (!provider) throw new AppError('ASSISTANT_DISABLED', 'Copilot is not switched on for this server.', undefined, 503);
+    if (!provider) throw new AppError('ASSISTANT_DISABLED', 'The assistant is not switched on for this server.', undefined, 503);
     const orgId = auth.organizationId;
     const tools = this.registry.definitionsFor(auth);
 
@@ -70,7 +70,7 @@ export class AssistantOrchestrator {
       });
 
       if (turn.stop === 'refusal') {
-        emit({ type: 'error', code: 'ASSISTANT_DECLINED', message: "Copilot can't help with that request." });
+        emit({ type: 'error', code: 'ASSISTANT_DECLINED', message: "The assistant can't help with that request." });
         return emit({ type: 'done', awaitingConfirmation: false });
       }
 
@@ -101,6 +101,6 @@ export class AssistantOrchestrator {
     const known = this.provider?.describe(error);
     if (known) return known;
     this.logger.error(`turn failed: ${(error as Error)?.stack ?? String(error)}`);
-    return { code: 'INTERNAL', message: 'Copilot hit an unexpected error. Try again.' };
+    return { code: 'INTERNAL', message: 'The assistant hit an unexpected error. Try again.' };
   }
 }

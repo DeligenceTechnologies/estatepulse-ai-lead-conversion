@@ -60,5 +60,5 @@ export const MODEL_PROVIDER = Symbol('MODEL_PROVIDER');
 
 export const MAX_OUTPUT_TOKENS = 16_000;
 
-export const BUSY = { code: 'ASSISTANT_BUSY', message: 'Copilot is busy right now. Try again in a minute.' };
-export const UNAVAILABLE = { code: 'ASSISTANT_UNAVAILABLE', message: 'Copilot is unavailable right now. Try again shortly.' };
+export const BUSY = { code: 'ASSISTANT_BUSY', message: 'The assistant is busy right now. Try again in a minute.' };
+export const UNAVAILABLE = { code: 'ASSISTANT_UNAVAILABLE', message: 'The assistant is unavailable right now. Try again shortly.' };

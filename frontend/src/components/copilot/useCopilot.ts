@@ -175,7 +175,13 @@ export function useCopilot(open: boolean) {
     [newChat, loadThreads],
   );
 
-  const stop = useCallback(() => abort.current?.abort(), []);
+  // Closing the stream alone no longer stops the server: a turn finishes and is saved even if the
+  // browser goes away. Stop tells the server, then stops reading.
+  const stop = useCallback(() => {
+    const id = threadRef.current;
+    if (id) void copilotApi.stop(id).catch(() => undefined);
+    abort.current?.abort();
+  }, []);
 
   return { status, threads, threadId, messages, busy, error, send, decide, openThread, newChat, removeThread, stop, dismissError: () => setError(null) };
 }

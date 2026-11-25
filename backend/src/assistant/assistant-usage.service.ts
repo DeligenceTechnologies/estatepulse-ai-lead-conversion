@@ -71,7 +71,7 @@ export class AssistantUsageService {
   async assertWithinBudget(orgId: string): Promise<void> {
     const { usedMicros, budgetMicros } = await this.summary(orgId);
     if (usedMicros >= budgetMicros) {
-      throw new AppError('ASSISTANT_BUDGET_EXCEEDED', "Copilot has reached this month's limit for your plan. It resets on the 1st.", undefined, 429);
+      throw new AppError('ASSISTANT_BUDGET_EXCEEDED', "The assistant has reached this month's limit for your plan. It resets on the 1st.", undefined, 429);
     }
   }
 

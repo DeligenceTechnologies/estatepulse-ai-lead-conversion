@@ -101,7 +101,7 @@ export class AssistantActionService {
 
     if (action.expiresAt && action.expiresAt.getTime() < Date.now()) {
       await this.close(action.id, 'expired', 'Not confirmed in time; nothing was changed.');
-      throw new AppError('ACTION_EXPIRED', 'This confirmation expired. Ask Copilot again.', undefined, 410);
+      throw new AppError('ACTION_EXPIRED', 'This confirmation expired. Ask the assistant again.', undefined, 410);
     }
 
     const tool = this.registry.get(action.toolName);
@@ -145,6 +145,17 @@ export class AssistantActionService {
     const closed = await this.close(action.id, 'rejected', 'The user declined this action. Nothing was changed. Do not retry unless asked.');
     if (!closed) throw new AppError('ACTION_DECIDED', 'This action was already handled.', undefined, 409);
     return this.require(auth, actionId);
+  }
+
+  /**
+   * True while the chat ends in tool calls that have no results yet, for example a write that was
+   * still running when the server stopped. A new message then would break the history: the model
+   * API refuses a tool call that is not followed by its result.
+   */
+  async awaitingResults(orgId: string, threadId: string): Promise<boolean> {
+    const last = await this.threads.lastMessage(orgId, threadId);
+    if (!last || last.role !== AssistantRole.assistant) return false;
+    return (last.content as unknown as StoredBlock[]).some((b) => b.type === 'tool_use');
   }
 
   /** True once every tool call of the message has an outcome. */
