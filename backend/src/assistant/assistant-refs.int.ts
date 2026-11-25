@@ -6,6 +6,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { TenantContext } from '@/common/prisma/tenant-context';
 import { CONSENT_REVIEW_REASON } from '@/lead/consent';
 import { AssistantRefService } from './assistant-ref.service';
+import { historyTools } from './tools/history.tools';
 import { leadTools } from './tools/lead.tools';
 import type { RefTable } from './tools/refs';
 
@@ -18,7 +19,9 @@ import type { RefTable } from './tools/refs';
 const prisma = new PrismaService({ get: () => undefined } as unknown as ConfigService);
 const guarded = prisma.withTenancyGuard();
 const refService = new AssistantRefService(guarded, prisma);
-const tools = Object.fromEntries(leadTools({ prisma, edits: {}, assignments: {}, manualLeads: {}, reviews: {} } as never).map((t) => [t.name, t as any]));
+const tools = Object.fromEntries(
+  [...leadTools({ prisma, edits: {}, assignments: {}, manualLeads: {}, reviews: {} } as never), ...historyTools({} as never, prisma)].map((t) => [t.name, t as any]),
+);
 
 const orgs: string[] = [];
 let orgId: string;
@@ -142,6 +145,37 @@ describe('refs on the real database', () => {
     orgs.push(other.id);
     // A Prisma query runs when awaited, so it is awaited inside the other office's context.
     expect(await inOrg(async () => await guarded.assistantRef.findMany({ where: { threadId: id } }), other.id)).toEqual([]);
+  });
+
+  it('a slot ref keeps the start time it stands for, which is not a uuid', async () => {
+    const id = await thread(owner);
+    const start = '2026-11-27T21:00:00.000Z';
+    const issued = await inOrg(() => refService.forThread(owner, id).issue('slot', [start]));
+    expect(issued.get(start)).toBe('T1');
+    await expect(inOrg(() => refService.forThread(owner, id).resolve('slot', 'T1'))).resolves.toBe(start);
+  });
+
+  it("a sequence ref resolves only to the office's own sequence", async () => {
+    const id = await thread(owner);
+    const seq = await prisma.sequence.create({ data: { orgId, code: `int-${randomUUID().slice(0, 8)}`, name: 'Nurture' } });
+    const other = await prisma.organization.create({ data: { name: `assistant-refs-int seq ${randomUUID().slice(0, 8)}` } });
+    orgs.push(other.id);
+    const theirs = await prisma.sequence.create({ data: { orgId: other.id, code: 'theirs', name: 'Theirs' } });
+    await inOrg(() => refService.forThread(owner, id).issue('sequence', [seq.id, theirs.id]));
+    await expect(inOrg(() => refService.forThread(owner, id).resolve('sequence', 'S1'))).resolves.toBe(seq.id);
+    await expect(inOrg(() => refService.forThread(owner, id).resolve('sequence', 'S2'))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it("the timeline shows a lead's events newest first, with people as refs", async () => {
+    const refs = refService.forThread(owner, await thread(owner));
+    const base = { orgId, leadId: leads.priya };
+    await prisma.leadEvent.create({ data: { ...base, type: 'status_changed', fromStatus: 'new', toStatus: 'contacting', source: 'strategy', actorType: 'system', createdAt: new Date(Date.now() - 60_000) } });
+    await prisma.leadEvent.create({ data: { ...base, type: 'outreach_stopped', source: 'assistant', actorType: 'user', actorId: owner.userId, reason: 'Working with another agent' } });
+    await search(owner, refs, { query: 'Priya Shah' });
+    const timeline = await inOrg((): Promise<any> => tools.lead_timeline.run({ auth: owner, refs }, { lead: 'L1', limit: 10 }));
+    expect(timeline.map((e: { event: string }) => e.event)).toEqual(['outreach_stopped', 'status_changed']);
+    expect(timeline[0]).toMatchObject({ by: 'U1', reason: 'Working with another agent', source: 'assistant' });
+    expect(timeline[1]).toMatchObject({ by: 'system', status: { from: 'new', to: 'contacting' } });
   });
 
   it('deleting the chat deletes its refs', async () => {

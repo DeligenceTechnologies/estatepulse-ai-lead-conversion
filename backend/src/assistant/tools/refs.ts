@@ -4,8 +4,11 @@ import { z } from 'zod';
  * The model never sees a database id. Each record a tool shows it gets a short ref, "L3" for the
  * third lead of the chat, and tools take those refs back as input. A ref only means something inside
  * the chat that issued it, and every use is checked again against what the user may see.
+ *
+ * A slot is not a record: its ref stands for a start time a free-times look-up offered, so a booking
+ * can only use a time that was actually open.
  */
-export const REF_LETTER = { lead: 'L', user: 'U', call: 'C' } as const;
+export const REF_LETTER = { lead: 'L', user: 'U', call: 'C', meeting: 'M', sequence: 'S', slot: 'T' } as const;
 
 export type RefKind = keyof typeof REF_LETTER;
 
@@ -35,6 +38,8 @@ const refInput = (kind: RefKind, what: string, from: string) =>
 export const leadRef = refInput('lead', 'lead', 'from lead_search or another result in this chat');
 export const userRef = refInput('user', 'team member', 'from team_list or another result in this chat');
 export const callRef = refInput('call', 'call', 'from call_list');
+export const sequenceRef = refInput('sequence', 'sequence', 'from sequence_list');
+export const slotRef = refInput('slot', 'time slot', 'from meeting_slots');
 
 /** One record's ref. */
 export async function refOf(refs: RefTable, kind: RefKind, id: string): Promise<string> {

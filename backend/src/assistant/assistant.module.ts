@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CalendarModule } from '@/calendar/calendar.module';
+import { FollowupModule } from '@/followup/followup.module';
 import { HistoryModule } from '@/history/history.module';
 import { LeadModule } from '@/lead/lead.module';
+import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantLimitsService } from './assistant-limits.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
@@ -15,7 +18,7 @@ import { MODEL_PROVIDER } from './providers/model-provider';
 import { ToolRegistry } from './tools/tool-registry.service';
 
 @Module({
-  imports: [LeadModule, HistoryModule],
+  imports: [LeadModule, HistoryModule, CalendarModule, TelnyxModule, FollowupModule],
   controllers: [AssistantController],
   providers: [
     { provide: AssistantConfig, inject: [ConfigService], useFactory: AssistantConfig.fromConfigService },

@@ -231,6 +231,21 @@ describe('lead tools: cards', () => {
     expect(preview.entity).toEqual({ type: 'lead', id: LEAD, version: UPDATED });
   });
 
+  it('budgets read as money on the card', async () => {
+    const s = setup({ lead: { ...leadRow, maxBudget: 400000 as never } });
+    const lead = await s.leadRefIssued();
+    const preview = await s.tools.lead_update.preview({ auth: owner, refs: s.refs }, { lead, minBudget: 350000, maxBudget: 450000 });
+    expect(preview.changes).toEqual([
+      { field: 'Budget min', from: null, to: '$350,000' },
+      { field: 'Budget max', from: '$400,000', to: '$450,000' },
+    ]);
+    const created = await s.tools.lead_create.preview(
+      { auth: owner, refs: s.refs },
+      { firstName: 'Ana', phone: '5125550199', minBudget: 300000, maxBudget: 500000, consent: false, startOutreach: false },
+    );
+    expect(created.changes).toContainEqual({ field: 'Budget', from: null, to: '$300,000 – $500,000' });
+  });
+
   it('an update that changes nothing is refused instead of shown', async () => {
     const s = setup();
     const lead = await s.leadRefIssued();

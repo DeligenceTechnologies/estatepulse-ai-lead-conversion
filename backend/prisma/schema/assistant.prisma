@@ -108,9 +108,10 @@ model AssistantRef {
   id         String   @id @default(uuid(7)) @db.Uuid
   orgId      String   @map("organization_id") @db.Uuid
   threadId   String   @map("thread_id") @db.Uuid
-  /// lead, user or call; the letter of the ref comes from it.
+  /// lead, user, call, meeting, sequence or slot; the letter of the ref comes from it.
   entityType String   @map("entity_type") @db.VarChar(20)
-  entityId   String   @map("entity_id") @db.Uuid
+  /// A record's id, or for a slot the start time it stands for (ISO, UTC).
+  entityId   String   @map("entity_id") @db.VarChar(100)
   /// The number after the letter, counted per thread and type from 1.
   number     Int
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

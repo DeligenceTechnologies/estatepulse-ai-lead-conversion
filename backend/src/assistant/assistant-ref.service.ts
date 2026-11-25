@@ -12,6 +12,9 @@ const NOT_FOUND: Record<RefKind, string> = {
   lead: 'is not a lead from this chat that this user can see. Find the lead with lead_search first.',
   user: 'is not a team member from this chat. Look them up with team_list first.',
   call: 'is not a call from this chat that this user can see. Find it with call_list first.',
+  meeting: 'is not a meeting from this chat that this user can see. Find it with meeting_list first.',
+  sequence: 'is not a sequence from this chat. Look it up with sequence_list first.',
+  slot: 'is not a time offered in this chat. Get open times with meeting_slots first.',
 };
 
 @Injectable()
@@ -104,6 +107,14 @@ class ThreadRefs implements RefTable {
         return (await this.prisma.call.count({ where: { id, orgId, lead: visibleLeads(this.auth) } })) > 0;
       case 'user':
         return (await this.prisma.user.count({ where: { id, orgId } })) > 0;
+      case 'meeting':
+        // A meeting with a lead they can see, or one they host.
+        return (await this.prisma.calendarMeeting.count({ where: { id, orgId, OR: [{ lead: visibleLeads(this.auth) }, { hostUserId: this.auth.userId }] } })) > 0;
+      case 'sequence':
+        return (await this.prisma.sequence.count({ where: { id, orgId } })) > 0;
+      case 'slot':
+        // A start time, not a record: the booking tool checks it is still ahead and still open.
+        return true;
     }
   }
 }

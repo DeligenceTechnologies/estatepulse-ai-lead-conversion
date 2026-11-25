@@ -1,16 +1,16 @@
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma } from '@prisma/client';
 import { z } from 'zod';
-import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import type { PrismaService } from '@/common/prisma/prisma.service';
 import type { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import type { LeadEditService } from '@/lead/lead-edit.service';
 import type { LeadReviewService } from '@/lead/lead-review.service';
 import { INACTIVE_STATUSES } from '@/lead/lead-status';
-import { AGENT_ROLE_WHERE, OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from '@/lead/lead-scope';
+import { AGENT_ROLE_WHERE, fullName } from '@/lead/lead-scope';
 import { liveReviewReasons } from '@/lead/review-reasons';
 import type { ManualLeadService } from '@/lead/manual-lead.service';
 import { PERMISSIONS } from '@/role/permissions';
+import { findVisibleLead, money, visible } from './lead-access';
 import { findLeads } from './lead-search';
 import { leadRef, refOf, userRef, type RefTable } from './refs';
 import { display, readTool, writeTool, type AssistantTool, type PreviewChange } from './tool';
@@ -115,18 +115,6 @@ const MATCH_NOTE = {
   none: 'No lead matches that.',
 };
 
-const visible = (auth: AuthContext, extra: Prisma.LeadWhereInput = {}): Prisma.LeadWhereInput => ({
-  AND: [{ ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW }, extra],
-});
-
-/** The lead behind a ref, if the user may see it and it is not still waiting in import or consent review. */
-async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: PrismaService, auth: AuthContext, refs: RefTable, ref: string, select: S) {
-  const id = await refs.resolve('lead', ref);
-  const lead = await prisma.lead.findFirst({ where: visible(auth, { id }), select });
-  if (!lead) throw new AppError('NOT_FOUND', `${ref} is still waiting in import or consent review. Finish the review on the Leads screen first.`);
-  return lead as Prisma.LeadGetPayload<{ select: S }>;
-}
-
 const UPDATE_FIELDS = {
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: clearable(100),
@@ -142,6 +130,10 @@ const UPDATE_FIELDS = {
 };
 
 type UpdateField = keyof typeof UPDATE_FIELDS;
+
+/** Budgets read as money on the card; everything else as it is. */
+const shown = (field: UpdateField, value: unknown): string | null =>
+  field === 'minBudget' || field === 'maxBudget' ? money(value as number | null) : display(value);
 
 const CURRENT_FIELD: Record<UpdateField, keyof Prisma.LeadGetPayload<{ select: typeof LEAD_DETAIL }>> = {
   firstName: 'firstName',
@@ -343,8 +335,8 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
         const changes: PreviewChange[] = [];
         for (const field of Object.keys(UPDATE_FIELDS) as UpdateField[]) {
           if (input[field] === undefined) continue;
-          const from = display(lead[CURRENT_FIELD[field]]);
-          const to = display(input[field]);
+          const from = shown(field, lead[CURRENT_FIELD[field]]);
+          const to = shown(field, input[field]);
           if (from !== to) changes.push({ field: FIELD_LABEL[field], from, to });
         }
         if (changes.length === 0) throw new AppError('VALIDATION_ERROR', 'Those values are already on the lead; nothing would change.');
@@ -412,7 +404,7 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
           ['Email', input.email],
           ['Location', input.location],
           ['Timeline', input.timeline],
-          ['Budget', input.minBudget !== undefined || input.maxBudget !== undefined ? `${input.minBudget ?? '?'} – ${input.maxBudget ?? '?'}` : null],
+          ['Budget', input.minBudget !== undefined || input.maxBudget !== undefined ? `${money(input.minBudget) ?? '?'} – ${money(input.maxBudget) ?? '?'}` : null],
           ['Bedrooms', input.bedrooms],
           ['Notes', input.notes],
           ['Consent to call/text', input.consent ? 'Yes' : 'No'],

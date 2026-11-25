@@ -53,6 +53,9 @@ function fakePrisma(opts: { gone?: string[] } = {}) {
     lead: { count: vi.fn(async ({ where }: any) => (visibleTo(where, where.id) ? 1 : 0)) },
     call: { count: vi.fn(async ({ where }: any) => (visibleTo(where.lead, 'lead-mine') ? 1 : 0)) },
     user: { count: vi.fn(async ({ where }: any) => (where.orgId === ORG ? 1 : 0)) },
+    // Only meeting-mine passes the visibility filter (asserted below); seq-1 belongs to the office.
+    calendarMeeting: { count: vi.fn(async ({ where }: any) => (where.id === 'meeting-mine' ? 1 : 0)) },
+    sequence: { count: vi.fn(async ({ where }: any) => (where.id === 'seq-1' && where.orgId === ORG ? 1 : 0)) },
   };
 }
 
@@ -150,6 +153,28 @@ describe('refs: resolving', () => {
     const gone = await refs.resolve('lead', 'L1').catch((e) => e.message.replace('L1', 'Lx'));
     const never = await refs.resolve('lead', 'L5').catch((e) => e.message.replace('L5', 'Lx'));
     expect(gone).toBe(never);
+  });
+
+  it("a meeting is visible through its lead or to its host, never another agent's", async () => {
+    const s = setup();
+    await s.service.forThread(agent, 'thread-1').issue('meeting', ['meeting-mine', 'meeting-theirs']);
+    const refs = s.service.forThread(agent, 'thread-1');
+    await expect(refs.resolve('meeting', 'M1')).resolves.toBe('meeting-mine');
+    await expect(refs.resolve('meeting', 'M2')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(s.prisma.calendarMeeting.count).toHaveBeenLastCalledWith({
+      where: { id: 'meeting-theirs', orgId: ORG, OR: [{ lead: expect.objectContaining({ assignedToId: 'agent-1' }) }, { hostUserId: 'agent-1' }] },
+    });
+  });
+
+  it('a sequence is checked against the office; a slot stands for its start time', async () => {
+    const s = setup();
+    await s.service.forThread(owner, 'thread-1').issue('sequence', ['seq-1', 'seq-gone']);
+    await s.service.forThread(owner, 'thread-1').issue('slot', ['2026-11-27T21:00:00.000Z']);
+    const refs = s.service.forThread(owner, 'thread-1');
+    await expect(refs.resolve('sequence', 'S1')).resolves.toBe('seq-1');
+    await expect(refs.resolve('sequence', 'S2')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(refs.resolve('slot', 'T1')).resolves.toBe('2026-11-27T21:00:00.000Z');
+    await expect(refs.resolve('slot', 'S1')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('a call is visible only through a lead the user may see', async () => {

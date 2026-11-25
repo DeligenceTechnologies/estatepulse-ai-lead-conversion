@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PrismaService } from '@/common/prisma/prisma.service';
 import { CALL_OUTCOMES } from '@/history/dto/history.query';
 import type { HistoryService } from '@/history/history.service';
 import { callRef, leadRef, type RefTable } from './refs';
@@ -31,7 +32,7 @@ async function shapeCalls<T extends CallRow>(refs: RefTable, calls: T[]) {
   }));
 }
 
-export function historyTools(history: HistoryService): AssistantTool[] {
+export function historyTools(history: HistoryService, prisma: PrismaService): AssistantTool[] {
   return [
     readTool({
       name: 'call_list',
@@ -71,6 +72,38 @@ export function historyTools(history: HistoryService): AssistantTool[] {
           ...shaped,
           transcript: transcript && transcript.length > MAX_TRANSCRIPT_CHARS ? `${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}… (truncated)` : transcript,
         };
+      },
+    }),
+
+    readTool({
+      name: 'lead_timeline',
+      label: 'Reading the timeline',
+      description:
+        "What happened on a lead, newest first: status changes and why, outreach steps sent, held or skipped, callbacks, takeovers and meetings. Calls and texts themselves are in call_list and lead_messages.",
+      permissions: [],
+      input: z.object({ lead: leadRef, limit: z.number().int().min(1).max(100).default(30) }).strict(),
+      async run({ auth, refs }, input) {
+        const leadId = await refs.resolve('lead', input.lead);
+        const events = await prisma.leadEvent.findMany({
+          where: { leadId, orgId: auth.organizationId },
+          orderBy: { createdAt: 'desc' },
+          take: input.limit,
+          select: { type: true, fromStatus: true, toStatus: true, reason: true, channel: true, source: true, actorType: true, actorId: true, callId: true, createdAt: true },
+        });
+        const [userRefs, callRefs] = await Promise.all([
+          refs.issue('user', events.flatMap((e) => (e.actorType === 'user' && e.actorId ? [e.actorId] : []))),
+          refs.issue('call', events.flatMap((e) => (e.callId ? [e.callId] : []))),
+        ]);
+        return events.map((e) => ({
+          at: e.createdAt,
+          event: e.type,
+          ...(e.fromStatus || e.toStatus ? { status: { from: e.fromStatus, to: e.toStatus } } : {}),
+          ...(e.reason ? { reason: e.reason } : {}),
+          ...(e.channel ? { channel: e.channel } : {}),
+          by: e.actorType === 'user' && e.actorId ? userRefs.get(e.actorId)! : e.actorType,
+          source: e.source,
+          ...(e.callId ? { call: callRefs.get(e.callId)! } : {}),
+        }));
       },
     }),
 
