@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import App from './App';
 import { AgentApp } from './components/agent/AgentApp';
+import { AssistantProvider } from './components/assistant/AssistantProvider';
 import { CheckEmailPage } from './components/auth/CheckEmailPage';
 import { ForgotPasswordPage } from './components/auth/ForgotPasswordPage';
 import { LoginPage } from './components/auth/LoginPage';
@@ -29,7 +30,8 @@ import { useAuth } from './context/AuthContext';
  */
 const RoleShell: React.FC = () => {
   const { role } = useAuth();
-  return role === 'agent' ? <AgentApp /> : <App />;
+  // One assistant chat for the whole signed-in app: its home page and the bar on every other page share it.
+  return <AssistantProvider>{role === 'agent' ? <AgentApp /> : <App />}</AssistantProvider>;
 };
 
 /**
@@ -44,18 +46,21 @@ const RoleShell: React.FC = () => {
  * landing page for the moment it takes /me to answer would flash marketing copy
  * at a user who is already signed in.
  *
- * Signed in, it redirects to /dashboard — both shells' default — before either
- * shell mounts. Rendering the shell here and letting it redirect itself mounted
- * the whole app twice, because `/` and `*` are different route elements: every
+ * Signed in, it redirects to /assistant, the home page of both shells, before
+ * either shell mounts. That page sends anyone who cannot use the assistant (it
+ * is off on this server, or not in the office's plan) on to /dashboard.
+ * Rendering the shell here and letting it redirect itself mounted the whole app
+ * twice, because `/` and `*` are different route elements: every
  * boot request (dashboard, agents, leads) went out once per mount. The query
  * string goes along for the Calendly fallback's `?calendly=` boot signal, which
- * AppContext reads at /dashboard instead.
+ * AppContext reads at /dashboard, so a `/` with a query string still goes there.
  */
 const Home: React.FC = () => {
   const { status } = useAuth();
   const { search } = useLocation();
   if (status === 'loading') return null;
-  return status === 'authed' ? <Navigate to={{ pathname: '/dashboard', search }} replace /> : <LandingPage />;
+  if (status !== 'authed') return <LandingPage />;
+  return <Navigate to={{ pathname: search ? '/dashboard' : '/assistant', search }} replace />;
 };
 
 /**

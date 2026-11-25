@@ -30,6 +30,8 @@ import { formatDate } from '../lib/datetime';
 
 // A runtime list, not just a union, because the URL is parsed back into a view.
 const APP_VIEWS = [
+  // The home page: Ask EstatePulse, the assistant's full-page chat. Live API.
+  'assistant',
   'dashboard',
   'leads',
   'conversations',

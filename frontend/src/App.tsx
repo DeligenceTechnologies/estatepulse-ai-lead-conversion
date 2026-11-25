@@ -11,6 +11,7 @@ import { AppShell } from './components/layout/AppShell';
 
 // Views. Only the sections under active development are imported; the rest
 // render ComingSoonView, so their prototype dummy data never reaches the UI.
+import { AssistantHome } from './components/assistant/AssistantHome';
 import { DashboardView } from './components/views/DashboardView';
 import { LeadsView } from './components/views/LeadsView';
 import { AgentsView } from './components/views/AgentsView';
@@ -42,6 +43,7 @@ const AppContent: React.FC = () => {
   return (
     <>
       <AppShell groups={navGroups} activeId={activeView} onNavigate={(id) => setActiveView(id as AppView)}>
+        {activeView === 'assistant' && <AssistantHome />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'leads' && <LeadsView />}
         {activeView === 'conversations' && <ConversationsView />}

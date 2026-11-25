@@ -4,7 +4,7 @@ const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
 
 export type ActionStatus = 'proposed' | 'executing' | 'executed' | 'rejected' | 'expired' | 'failed';
 
-export interface CopilotAction {
+export interface AssistantAction {
   id: string;
   messageId: string;
   tool: string;
@@ -17,54 +17,54 @@ export interface CopilotAction {
   decidedAt: string | null;
 }
 
-export interface CopilotMessage {
+export interface AssistantMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
-  actions: CopilotAction[];
+  actions: AssistantAction[];
 }
 
-export interface CopilotThreadSummary {
+export interface AssistantThreadSummary {
   id: string;
   title: string | null;
   lastMessageAt: string;
   createdAt: string;
 }
 
-export interface CopilotStatus {
+export interface AssistantStatus {
   enabled: boolean;
   included: boolean;
   usage: { period: string; usedMicros: number; budgetMicros: number };
 }
 
-export type CopilotEvent =
+export type AssistantEvent =
   | { type: 'thread'; threadId: string; title: string | null }
   | { type: 'text'; text: string }
   | { type: 'tool.started'; toolUseId: string; tool: string; label: string }
   | { type: 'tool.finished'; toolUseId: string; tool: string; ok: boolean }
-  | { type: 'action'; action: CopilotAction }
+  | { type: 'action'; action: AssistantAction }
   | { type: 'done'; awaitingConfirmation: boolean }
   | { type: 'error'; code: string; message: string };
 
-export const copilotApi = {
-  status: () => apiFetch<CopilotStatus>('/v1/assistant/status', { auth: true }),
-  threads: () => apiFetch<CopilotThreadSummary[]>('/v1/assistant/threads', { auth: true }),
+export const assistantChatApi = {
+  status: () => apiFetch<AssistantStatus>('/v1/assistant/status', { auth: true }),
+  threads: () => apiFetch<AssistantThreadSummary[]>('/v1/assistant/threads', { auth: true }),
   thread: (id: string) =>
-    apiFetch<{ thread: CopilotThreadSummary; messages: CopilotMessage[] }>(`/v1/assistant/threads/${id}`, { auth: true }),
+    apiFetch<{ thread: AssistantThreadSummary; messages: AssistantMessage[] }>(`/v1/assistant/threads/${id}`, { auth: true }),
   removeThread: (id: string) => apiFetch<void>(`/v1/assistant/threads/${id}`, { method: 'DELETE', auth: true }),
   stop: (threadId: string) => apiFetch<void>(`/v1/assistant/threads/${threadId}/stop`, { method: 'POST', auth: true }),
 
-  send: (body: { threadId?: string; text: string; screen?: string }, onEvent: (e: CopilotEvent) => void, signal: AbortSignal) =>
+  send: (body: { threadId?: string; text: string; screen?: string }, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream('/v1/assistant/messages', body, onEvent, signal),
-  confirm: (actionId: string, onEvent: (e: CopilotEvent) => void, signal: AbortSignal) =>
+  confirm: (actionId: string, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream(`/v1/assistant/actions/${actionId}/confirm`, undefined, onEvent, signal),
-  reject: (actionId: string, onEvent: (e: CopilotEvent) => void, signal: AbortSignal) =>
+  reject: (actionId: string, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream(`/v1/assistant/actions/${actionId}/reject`, undefined, onEvent, signal),
 };
 
 /** POSTs and reads the text/event-stream answer. A failure before the stream opens rejects with an ApiError. */
-async function stream(path: string, body: unknown, onEvent: (e: CopilotEvent) => void, signal: AbortSignal): Promise<void> {
+async function stream(path: string, body: unknown, onEvent: (e: AssistantEvent) => void, signal: AbortSignal): Promise<void> {
   const send = async (token: string | null) => {
     try {
       return await fetch(`${BASE}${path}`, {
@@ -115,7 +115,7 @@ async function stream(path: string, body: unknown, onEvent: (e: CopilotEvent) =>
   }
 }
 
-function parseFrame(frame: string): CopilotEvent | null {
+function parseFrame(frame: string): AssistantEvent | null {
   const data = frame
     .split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -123,7 +123,7 @@ function parseFrame(frame: string): CopilotEvent | null {
     .join('\n');
   if (!data) return null;
   try {
-    return JSON.parse(data) as CopilotEvent;
+    return JSON.parse(data) as AssistantEvent;
   } catch {
     return null;
   }

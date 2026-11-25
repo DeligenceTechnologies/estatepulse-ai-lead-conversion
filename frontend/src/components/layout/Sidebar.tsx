@@ -17,7 +17,9 @@ import {
   ClipboardCheck,
   Copy,
   CreditCard,
+  Sparkles,
 } from 'lucide-react';
+import { useAssistant } from '../assistant/AssistantProvider';
 import { isLockedView, type AppView } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
@@ -80,11 +82,14 @@ export function useOwnerNav(): NavGroup[] {
   }, [canMerge]);
 
   const canReadOrg = can('organization.read');
+  const assistantReady = useAssistant().availability === 'ready';
 
   const groups: { label?: string; items: OwnerNavItem[] }[] = [
     {
       label: 'Overview',
       items: [
+        // The home page. Listed only while the assistant can be used; its page sends anyone else to the dashboard.
+        ...(assistantReady ? [{ id: 'assistant' as const, label: 'Ask EstatePulse', icon: Sparkles }] : []),
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       ],
     },
@@ -143,7 +148,9 @@ export function useOwnerNav(): NavGroup[] {
     {
       label: 'Setup',
       items: [
-        { id: 'ai_settings', label: 'AI Assistant', icon: Bot },
+        // "AI Agent" is the AI that calls and texts leads. The label changed so it is not mixed up with
+        // Ask EstatePulse, the assistant for staff; the view id stays so /ai-settings links keep working.
+        { id: 'ai_settings', label: 'AI Agent', icon: Bot },
         ...(can('billing.read') ? [{ id: 'pricing' as const, label: 'Plans & Billing', icon: CreditCard }] : []),
         ...(canReadOrg ? [{ id: 'settings' as const, label: 'Settings', icon: Settings }] : []),
       ],

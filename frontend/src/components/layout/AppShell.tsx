@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChevronRight, Menu } from 'lucide-react';
+import { ChevronRight, Menu, Sparkles } from 'lucide-react';
 import { ProfileMenu } from '../auth/ProfileMenu';
 import { DashboardSidebar, type NavGroup } from './DashboardSidebar';
 import { AppearanceButton } from './AppearanceButton';
 import { IconButton } from '../common/Button';
-import { CopilotDock } from '../copilot/CopilotDock';
+import { AssistantDock } from '../assistant/AssistantDock';
+import { useAssistant } from '../assistant/AssistantProvider';
 
 const COLLAPSED_KEY = 'ep_sidebar_collapsed';
 
@@ -52,6 +53,9 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
   const current = group?.items.find((i) => i.id === activeId);
   // The profile menu's Settings shortcut, offered only when the sidebar lists Settings.
   const hasSettings = groups.some((g) => g.items.some((i) => i.id === 'settings'));
+  // Every page but the home page (which is the assistant) gets the header button and the chat in the corner.
+  const assistant = useAssistant();
+  const showAssistant = assistant.availability === 'ready' && activeId !== 'assistant';
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-emerald-500 selection:text-on-accent">
@@ -86,6 +90,18 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {/* Ask EstatePulse: opens the same chat panel as the icon in the corner. */}
+            {showAssistant && (
+              <button
+                type="button"
+                onClick={() => assistant.setDockOpen((o) => !o)}
+                aria-expanded={assistant.dockOpen}
+                className="cursor-pointer mr-1.5 inline-flex items-center gap-2 h-9 rounded-full border border-slate-700 bg-slate-800/70 px-3 sm:px-4 text-sm font-semibold text-slate-200 hover:border-emerald-500/50 hover:text-white transition-colors"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-400" aria-hidden />
+                <span className="hidden sm:inline">Ask EstatePulse</span>
+              </button>
+            )}
             <AppearanceButton hasSettings={hasSettings} />
             <div className="w-px h-6 bg-slate-800 mx-1" aria-hidden />
             <ProfileMenu onOpenSettings={hasSettings ? () => onNavigate('settings') : undefined} />
@@ -95,7 +111,8 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
         {/* Every view renders its own heading and actions below the navbar. */}
         <main className="app-canvas flex-1 overflow-y-auto custom-scrollbar">{children}</main>
       </div>
-      <CopilotDock screen={current?.label} />
+
+      {showAssistant && <AssistantDock screen={current?.label} />}
     </div>
   );
 };
