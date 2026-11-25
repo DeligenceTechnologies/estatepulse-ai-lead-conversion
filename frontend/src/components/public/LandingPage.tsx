@@ -1,210 +1,144 @@
 import React, { useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import {
-  ArrowRight,
-  Building2,
-  PhoneCall,
-  ShieldCheck,
-  Sparkles,
-  UserCheck,
-  Webhook,
-} from 'lucide-react';
-import { FaqSection } from './FaqSection';
-import { PublicFooter, PublicHeader } from './PublicChrome';
+import { useLocation } from 'react-router-dom';
+import { Check, ClipboardList, Eye, Send, ShieldCheck } from 'lucide-react';
+import { CallDemo } from './landing/CallDemo';
+import { Faq } from './landing/Faq';
+import { FeatureAccordion } from './landing/FeatureAccordion';
+import { Hero } from './landing/Hero';
+import { LandingShell } from './landing/LandingShell';
+import { LeadTimeline } from './landing/LeadTimeline';
+import { OldWayNewWay } from './landing/OldWayNewWay';
+import { Reveal } from './landing/Reveal';
+import { SourcesMarquee } from './landing/SourcesMarquee';
 
 /**
  * The public home page, shown at `/` to anyone who is not signed in.
  *
- * Deliberately claims only what the product actually does today: lead capture
- * from real webhook sources, an AI qualification call, and handoff to an agent.
- * There are no invented metrics, testimonials, customer logos or pricing on this
- * page — putting a number like "3x more conversions" here would be inventing
- * product behaviour, and it would be the first thing a prospect asks about.
+ * Claims only what the product does today: lead capture from real sources, an
+ * AI qualification call, follow-ups, booking and handoff to an agent. No
+ * invented metrics, testimonials, customer logos or pricing. The example lead
+ * and the scripted call are labelled as examples.
  *
- * Visual language is AuthLayout's, so arriving here and then hitting Sign in
- * does not feel like two different products.
+ * Styling lives in landing/landing.css, scoped to `.lp`. Midnight is the
+ * default look; the nav's theme button switches to Beige + Terracotta.
  */
 
-const STEPS: Array<{ title: string; body: string; icon: React.ReactNode }> = [
-  {
-    title: 'A lead arrives',
-    body: 'Your website form, portal or CRM posts straight into EstatePulse over a live webhook. Nothing is typed in by hand.',
-    icon: <Webhook className="w-5 h-5" />,
-  },
-  {
-    title: 'The AI calls and qualifies',
-    body: 'An AI voice call goes out and asks the things that matter: budget, area, timeline and why they are moving.',
-    icon: <PhoneCall className="w-5 h-5" />,
-  },
-  {
-    title: 'The right agent takes over',
-    body: 'Qualified leads are handed to an agent who covers that area and has room to take them, with the call summary attached.',
-    icon: <UserCheck className="w-5 h-5" />,
-  },
-];
-
-const FEATURES: Array<{ title: string; body: string; icon: React.ReactNode }> = [
-  {
-    title: 'Live lead sources',
-    body: 'Connect the forms you already use. Every delivery is logged, so you can see exactly what arrived and when.',
-    icon: <Webhook className="w-4 h-4" />,
-  },
-  {
-    title: 'AI qualification calls',
-    body: 'Budget, preferred area, timeline and motivation captured on the call and written to the lead record.',
-    icon: <Sparkles className="w-4 h-4" />,
-  },
-  {
-    title: 'Your agent roster',
-    body: 'Add agents, set their territories, working hours and how many live leads each one should carry.',
-    icon: <Building2 className="w-4 h-4" />,
-  },
-  {
-    title: 'Routing you can audit',
-    body: 'Every assignment records why that agent was chosen — and an unassigned lead always shows the reason.',
-    icon: <UserCheck className="w-4 h-4" />,
-  },
-  {
-    title: 'One office, one set of data',
-    body: 'Each organization is isolated at the database level. An agent only ever sees the leads assigned to them.',
-    icon: <ShieldCheck className="w-4 h-4" />,
-  },
-  {
-    title: 'Built for handoff, not dashboards',
-    body: 'The product exists to get a real person on the phone with a real buyer. Everything else serves that.',
-    icon: <PhoneCall className="w-4 h-4" />,
-  },
+const TRUST = [
+  { title: 'Isolated per organization', body: 'Each office’s data is separated at the database level.', Icon: ShieldCheck },
+  { title: 'Agents see their own leads', body: 'Owners see the whole pipeline. Agents see what’s assigned to them.', Icon: Eye },
+  { title: 'Audit trail', body: 'Every assignment records why that agent was chosen, and an unassigned lead always shows the reason.', Icon: ClipboardList },
+  { title: 'Delivery log', body: 'Each lead source keeps a log of what arrived and when, so a missing lead is a lookup, not a guess.', Icon: Send },
 ];
 
 export const LandingPage: React.FC = () => {
   const { hash, key } = useLocation();
 
-  // The router does not scroll to a hash itself. `key` changes on every
-  // navigation, so clicking the same section link twice scrolls both times.
+  // The router does not scroll to a hash itself (e.g. /#faq from /terms). `key`
+  // changes on every navigation, so the same link works twice in a row.
   useEffect(() => {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView();
   }, [hash, key]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-on-accent">
-      <PublicHeader />
+    <LandingShell>
 
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-16 pb-14 sm:pt-24 sm:pb-20">
-        <div className="max-w-3xl space-y-6">
-          <span className="inline-flex items-center gap-1.5 text-xs uppercase font-bold tracking-wider px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            <Sparkles className="w-3 h-3" />
-            Lead conversion for real estate teams
-          </span>
+      <main>
+        <Hero />
+        <SourcesMarquee />
+        <OldWayNewWay />
 
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-[1.1]">
-            Every inbound lead gets a call.
-            <span className="block text-emerald-400">Not a queue.</span>
-          </h1>
-
-          <p className="text-base sm:text-lg text-slate-400 leading-relaxed max-w-2xl">
-            EstatePulse answers new leads with an AI voice call, finds out what they actually want,
-            and hands the serious ones to the agent who covers that area — while they are still
-            interested.
-          </p>
-
-          <div className="pt-2">
-            <Link
-              to="/signup"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
-            >
-              Create your organization
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section id="how-it-works" className="border-y border-slate-800/70 bg-slate-900/30 scroll-mt-18">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20 space-y-10">
-          <div className="space-y-2">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">How it works</h2>
-            <p className="text-sm text-slate-400">Three steps, and none of them are manual.</p>
-          </div>
-
-          <ol className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {STEPS.map((step, i) => (
-              <li
-                key={step.title}
-                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-3 shadow-xl"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="w-10 h-10 rounded-xl bg-emerald-600/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-                    {step.icon}
-                  </span>
-                  <span className="text-3xl font-extrabold text-slate-800 font-mono leading-none">
-                    {i + 1}
-                  </span>
-                </div>
-                <h3 className="text-base font-bold text-white">{step.title}</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{step.body}</p>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </section>
-
-      {/* Features */}
-      <section
-        id="features"
-        className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20 space-y-10 scroll-mt-18"
-      >
-        <div className="space-y-2">
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            What you get
-          </h2>
-          <p className="text-sm text-slate-400">
-            The parts of the platform that are live today.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {FEATURES.map((f) => (
-            <div
-              key={f.title}
-              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-2.5 hover:border-slate-700 transition-colors"
-            >
-              <span className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/60 text-emerald-400 flex items-center justify-center">
-                {f.icon}
-              </span>
-              <h3 className="text-sm font-bold text-white">{f.title}</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">{f.body}</p>
+        <section className="lp-feat-band" id="product">
+          <div className="lp-wrap">
+            <div className="lp-feat-panel">
+              <div className="lp-wrap">
+                <Reveal className="lp-sec-head">
+                  <span className="lp-eyebrow">The product</span>
+                  <h2 className="lp-h2">Everything between “form submitted” and “meeting booked”.</h2>
+                </Reveal>
+                <Reveal delay={0.05}>
+                  <FeatureAccordion />
+                </Reveal>
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <FaqSection />
-
-      {/* Closing call to action. No band of its own: the FAQ above has one. */}
-      <section>
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 sm:p-10 text-center space-y-5 shadow-xl">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-              Set up your office in a few minutes
-            </h2>
-            <p className="text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
-              Create an organization, connect the form your leads already come through, and add your
-              agents. Nothing to install.
-            </p>
-            <Link
-              to="/signup"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-semibold shadow-lg shadow-emerald-950/50 transition-colors"
-            >
-              Get started
-              <ArrowRight className="w-4 h-4" />
-            </Link>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <PublicFooter />
-    </div>
+        <section className="lp-section lp-call-band" aria-label="Example AI call">
+          <div className="lp-wrap lp-call-grid">
+            <Reveal>
+              <div className="lp-sec-head" style={{ marginBottom: 0 }}>
+                <span className="lp-eyebrow">Example call</span>
+                <h2 className="lp-h2">Hear what the AI asks.</h2>
+                <p className="lp-lede">
+                  The questions your best agent would ask on a first call. Every answer lands on the lead record while
+                  the call is still going.
+                </p>
+              </div>
+              <ul className="lp-call-points">
+                <li>
+                  <Check />
+                  Area, budget, timeline, property type and financing
+                </li>
+                <li>
+                  <Check />
+                  Offers a consultation and books it from your calendar
+                </li>
+                <li>
+                  <Check />
+                  Live transfer to an agent when the lead wants a person
+                </li>
+              </ul>
+            </Reveal>
+            <Reveal delay={0.08}>
+              <CallDemo />
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="lp-section" aria-label="A lead's first minutes">
+          <div className="lp-wrap">
+            <Reveal className="lp-sec-head center">
+              <span className="lp-eyebrow">A lead’s first minutes</span>
+              <h2 className="lp-h2">What happens after someone hits “Submit”.</h2>
+            </Reveal>
+            <LeadTimeline />
+          </div>
+        </section>
+
+        <section className="lp-section lp-trust" aria-label="Built for teams">
+          <div className="lp-wrap">
+            <Reveal className="lp-sec-head">
+              <span className="lp-eyebrow">Built for teams</span>
+              <h2 className="lp-h2">Your leads stay yours.</h2>
+            </Reveal>
+            <ul className="lp-trust-grid" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {TRUST.map(({ title, body, Icon }, i) => (
+                <Reveal as="li" key={title} delay={i * 0.06}>
+                  <div className="lp-tcard">
+                    <Icon />
+                    <h3>{title}</h3>
+                    <p>{body}</p>
+                  </div>
+                </Reveal>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="lp-section" id="faq" aria-label="FAQ">
+          <div className="lp-wrap">
+            <Reveal className="lp-sec-head center">
+              <span className="lp-eyebrow">FAQ</span>
+              <h2 className="lp-h2">Frequently asked questions</h2>
+              <p className="lp-lede">How EstatePulse works, before you sign up.</p>
+            </Reveal>
+            <Reveal delay={0.05}>
+              <Faq />
+            </Reveal>
+          </div>
+        </section>
+      </main>
+
+    </LandingShell>
   );
 };

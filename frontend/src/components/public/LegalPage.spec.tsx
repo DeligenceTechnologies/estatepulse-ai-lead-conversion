@@ -6,7 +6,6 @@ import { PRIVACY } from '../../content/privacy';
 import { TERMS } from '../../content/terms';
 import { LegalPage } from './LegalPage';
 import { PrivacyPage } from './PrivacyPage';
-import { PublicHeader } from './PublicChrome';
 import { TermsPage } from './TermsPage';
 
 const auth = vi.hoisted(() => ({ current: { status: 'anon' } as Record<string, unknown> }));
@@ -59,14 +58,11 @@ describe('legal pages', () => {
     expect(html).toContain('href="/terms"');
   });
 
-  it('the header links to the FAQ and the terms', () => {
-    const header = renderToString(
-      <MemoryRouter>
-        <PublicHeader />
-      </MemoryRouter>,
-    );
-    expect(header).toContain('href="/#faq"');
-    expect(header).toContain('href="/terms"');
+  it('the nav links to the FAQ and the terms, and the footer to both legal pages', () => {
+    const html = render(<TermsPage />);
+    expect(html).toContain('href="/#faq"');
+    expect(html).toContain('href="/terms"');
+    expect(html).toContain('href="/privacy"');
   });
 
   it('the header offers sign-in to a visitor and the dashboard to someone signed in', () => {
