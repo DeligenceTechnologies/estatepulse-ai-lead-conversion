@@ -125,23 +125,8 @@ export function permissionsOf(scopes: readonly string[]): AirtablePermissions {
 }
 
 // ---------------------------------------------------------------------------
-// OAuth
+// Accounts
 // ---------------------------------------------------------------------------
-
-export interface AirtableTokens {
-  accessToken: string;
-  /** Seconds. Airtable documents 60 minutes. */
-  expiresIn: number;
-  /**
-   * Airtable ROTATES on every refresh and invalidates the presented one
-   * immediately, so the newest must always win the race to be stored.
-   */
-  refreshToken: string | null;
-  /** Seconds. Airtable documents 60 days; unused for that long and the grant is gone. */
-  refreshExpiresIn: number | null;
-  /** The scopes actually granted to this token, as Airtable returns them. */
-  scopes: string[] | null;
-}
 
 /** The Airtable user whose account authorized the connection. */
 export interface AirtableAccount {

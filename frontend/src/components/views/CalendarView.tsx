@@ -100,7 +100,7 @@ export const CalendarView: React.FC<{ section: CalendarSection }> = ({ section }
   const connected = Boolean(provider && connection?.status === 'active');
   const page = SECTIONS[section];
 
-  const openCalendarSettings = () => navigate('/settings?tab=calendar');
+  const openCalendarSettings = () => navigate('/integrations?manage=calendly');
 
   let body: React.ReactNode;
   if (forbidden) {

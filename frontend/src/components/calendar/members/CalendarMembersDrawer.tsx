@@ -43,7 +43,7 @@ export const CalendarMembersDrawer: React.FC<{ onAdded: () => void; onClose: () 
 
   const openCalendarSettings = () => {
     onClose();
-    navigate('/settings?tab=calendar');
+    navigate('/integrations?manage=calendly');
   };
 
   let body: React.ReactNode;

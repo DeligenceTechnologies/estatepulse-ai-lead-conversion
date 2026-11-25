@@ -1,4 +1,5 @@
 // EstatePulse AI-agent (Telnyx) API — goes through the shared apiFetch (relative /api,
+import { connectProvider, disconnectConnection } from './connectionsApi';
 // Bearer token, org resolved from the JWT server-side). No provider name leaks to the browser.
 import { apiFetch } from '../lib/api';
 
@@ -147,7 +148,8 @@ export const reconnectTelnyx = () =>
 
 export interface TelnyxCredentials {
   label?: string;
-  apiKey?: string;
+  /** Which connected account to set up; the one in use when omitted. Keys are connected through Nango (connectTelnyxKey). */
+  accountId?: string;
   publicKey?: string;
   connectionId?: string;
   messagingProfileId?: string;
@@ -197,14 +199,12 @@ export interface TelnyxAccount {
 export const getTelnyxStatus = () => apiFetch<TelnyxStatus>('/telnyx/status', { auth: true });
 export const listTelnyxAccounts = () =>
   apiFetch<{ accounts: TelnyxAccount[] }>('/telnyx/accounts', { auth: true }).then((d) => d.accounts);
-export const addTelnyxAccount = (creds: TelnyxCredentials & { label?: string }) =>
-  apiFetch<TelnyxStatus>('/telnyx/accounts', { method: 'POST', body: creds, auth: true });
 export const activateTelnyxAccount = (id: string) =>
   apiFetch<TelnyxStatus>(`/telnyx/accounts/${id}/activate`, { method: 'POST', auth: true });
 export const renameTelnyxAccount = (id: string, label: string) =>
   apiFetch<{ accounts: TelnyxAccount[] }>(`/telnyx/accounts/${id}`, { method: 'PATCH', body: { label }, auth: true });
-export const deleteTelnyxAccount = (id: string) =>
-  apiFetch<TelnyxStatus>(`/telnyx/accounts/${id}`, { method: 'DELETE', auth: true });
+/** Disconnects one Telnyx account and deletes its API key from Nango. */
+export const deleteTelnyxAccount = (id: string) => disconnectConnection(id);
 export const saveTelnyxCredentials = (creds: TelnyxCredentials) =>
   apiFetch<TelnyxStatus>('/telnyx/credentials', { method: 'PUT', body: creds, auth: true });
 export const disconnectTelnyx = () =>
@@ -272,9 +272,20 @@ export function searchNumbers(params: { country?: string; area?: string; feature
 }
 export const listOwnedNumbers = () =>
   apiFetch<{ numbers: OwnedNumber[] }>('/telnyx/numbers/owned', { auth: true }).then((d) => d.numbers);
-/** Verifies `apiKey` (or the stored key when omitted) and lists the numbers it owns. */
-export const lookupOwnedNumbers = (apiKey?: string) =>
-  apiFetch<{ numbers: OwnedNumber[] }>('/telnyx/numbers/lookup', { method: 'POST', body: apiKey ? { apiKey } : {}, auth: true }).then((d) => d.numbers);
+/** Lists the numbers on one connected account (or the one in use when omitted); only a working key can. */
+export const lookupOwnedNumbers = (accountId?: string) =>
+  apiFetch<{ numbers: OwnedNumber[] }>('/telnyx/numbers/lookup', {
+    method: 'POST',
+    body: accountId ? { accountId } : {},
+    auth: true,
+  }).then((d) => d.numbers);
+
+/**
+ * Opens Nango Connect for a Telnyx API key and links it as an account
+ * (waiting for setup). Resolves the new account's id, or null when closed.
+ */
+export const connectTelnyxKey = async (signal?: AbortSignal): Promise<string | null> =>
+  (await connectProvider('telnyx', { signal }))?.id ?? null;
 export const buyNumber = (phone_number: string) =>
   apiFetch<any>('/telnyx/numbers/buy', { method: 'POST', body: { phone_number }, auth: true });
 export const assignNumber = (phone_number: string) =>

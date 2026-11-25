@@ -84,12 +84,19 @@ export const envValidationSchema = Joi.object({
 
     INTEGRATION_ENCRYPTION_KEY: Joi.string().base64().empty('').optional(),
 
-    CALENDLY_CLIENT_ID: Joi.string().empty('').optional(),
-    CALENDLY_CLIENT_SECRET: Joi.string().empty('').optional(),
-    // Must match the redirect URI registered on the Calendly OAuth app and reach
-    // GET /org-settings/calendar/calendly/callback on this server.
-    CALENDLY_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
-    CALENDLY_SCOPES: Joi.string().empty('').optional(),
+    // Nango holds the OAuth grants for Google, Airtable, HubSpot and Calendly
+    // (consent, token storage and refresh). Unset = those integrations say
+    // "not configured" instead of failing at boot.
+    NANGO_SECRET_KEY: Joi.string().empty('').optional(),
+    // Environment Settings → Webhooks → Signing key. A different key from the
+    // API key; without it Nango's webhooks (refresh failures) are refused.
+    NANGO_WEBHOOK_SIGNING_KEY: Joi.string().empty('').optional(),
+    // Only for a self-hosted Nango. Default https://api.nango.dev.
+    NANGO_HOST: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+
+    // Optional, and only so a disconnect can revoke the Calendly grant at
+    // Calendly (Nango deletes its copy, but does not revoke at the provider).
+    // The same OAuth app as the "calendly" integration in Nango.
     // Public https address of this API, e.g. https://api.example.com. When set, Calendly and Cal.com
     // push booking changes to POST /calendar-webhooks/:connectionId; without it availability is polled only.
     CALENDAR_WEBHOOK_BASE_URL: Joi.string().uri({ scheme: ['https'] }).empty('').optional(),
@@ -134,10 +141,10 @@ export const envValidationSchema = Joi.object({
     DAILY_SUMMARY_POLL_MS: Joi.number().integer().min(10_000).default(60_000),
 
     GOOGLE_SHEETS_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    // Public: the Google Picker runs in the browser with it. Must be the same
+    // OAuth client as the "google" integration in Nango (whose secret lives
+    // only in Nango), or a file picked grants this app nothing.
     GOOGLE_CLIENT_ID: Joi.string().empty('').optional(),
-    GOOGLE_CLIENT_SECRET: Joi.string().empty('').optional(),
-    // Defaults to ${APP_URL}/oauth/google-callback.html; must match the Google Cloud console exactly.
-    GOOGLE_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
     GOOGLE_PICKER_API_KEY: Joi.string().empty('').optional(),
     GOOGLE_APP_ID: Joi.string().empty('').optional(),
     SHEETS_SYNC: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
@@ -168,20 +175,13 @@ export const envValidationSchema = Joi.object({
     CUSTOM_WEBHOOK_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
 
     // HubSpot CRM import. Off unless HUBSPOT_ENABLED: its endpoints answer 404 and nothing syncs.
-    // Unset client id/secret = the card says "not configured" instead of failing at boot.
+    // The OAuth flow and tokens are Nango's ("hubspot" integration). The same
+    // app's client id/secret are still needed here: token introspection (which
+    // HubSpot account was connected) and HubSpot's v3 webhook signatures use them.
     HUBSPOT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
-    HUBSPOT_CLIENT_ID: Joi.string().empty('').optional(),
-    // Also keys HubSpot's v3 webhook signatures, so it must be the same app's secret.
-    HUBSPOT_CLIENT_SECRET: Joi.string().empty('').optional(),
-    // Defaults to ${APP_URL}/oauth/hubspot-callback.html; must be listed in the app's redirect URLs exactly.
-    HUBSPOT_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
-    // Space-separated; must include every REQUIRED scope of the HubSpot app. Default: "oauth crm.objects.contacts.read".
-    HUBSPOT_SCOPES: Joi.string().empty('').optional(),
     // The webhook target exactly as registered with HubSpot (part of what it signs).
     // Defaults to ${PUBLIC_API_URL}/ingest/v1/crm/hubspot/webhook.
-    HUBSPOT_WEBHOOK_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
     HUBSPOT_API_BASE_URL: Joi.string().uri().default('https://api.hubapi.com'),
-    HUBSPOT_AUTH_BASE_URL: Joi.string().uri().default('https://app.hubspot.com'),
     HUBSPOT_API_VERSION: Joi.string().pattern(/^\d{4}-\d{2}$/).default('2026-09'),
     HUBSPOT_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
     // How often the worker looks for due CRM work (0 = only when nudged), and how often each
@@ -190,19 +190,13 @@ export const envValidationSchema = Joi.object({
     CRM_RECONCILE_INTERVAL_MS: Joi.number().integer().positive().default(3_600_000),
 
     // Airtable two-way sync. Off unless AIRTABLE_ENABLED: its endpoints answer 404 and nothing syncs.
-    // Unset client id/secret = the card says "not configured" instead of failing at boot.
+    // The OAuth flow and tokens are Nango's ("airtable" integration).
     AIRTABLE_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
-    AIRTABLE_CLIENT_ID: Joi.string().empty('').optional(),
-    AIRTABLE_CLIENT_SECRET: Joi.string().empty('').optional(),
-    // Defaults to ${APP_URL}/oauth/airtable-callback.html. Airtable requires HTTPS (localhost
-    // excepted) and no wildcards, and it must match the integration's redirect URL exactly.
-    AIRTABLE_REDIRECT_URI: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
-    // Space-separated. Must be a subset of the scopes enabled on the Airtable integration, and
-    // must include schema.bases:read and data.records:read. Drop schema.bases:write here to run
-    // without column creation; record sync keeps working.
+    // Space-separated: the scopes the "airtable" integration in Nango requests, so the card can
+    // say which were not granted. Must include schema.bases:read and data.records:read. Drop
+    // schema.bases:write (here and in Nango) to run without column creation.
     AIRTABLE_SCOPES: Joi.string().empty('').optional(),
     AIRTABLE_API_BASE_URL: Joi.string().uri().default('https://api.airtable.com'),
-    AIRTABLE_AUTH_BASE_URL: Joi.string().uri().default('https://airtable.com'),
     AIRTABLE_RETRY_BASE_MS: Joi.number().integer().min(0).default(1000),
     // Airtable allows 5 requests a second per base, so 200ms between requests is
     // exactly that ceiling. 0 switches the pacing off.

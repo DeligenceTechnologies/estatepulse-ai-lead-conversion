@@ -454,20 +454,9 @@ export const providersApi = {
 
   connections: () => request<ProviderConnection[]>('/v1/integrations'),
 
-  /** The only call that carries a raw provider key, and only in a POST body. */
-  connect: (provider: string, apiKey: string, label?: string) =>
-    request<ProviderConnection>('/v1/integrations', {
-      method: 'POST',
-      body: JSON.stringify({ provider, apiKey, label }),
-    }),
+  /** Connecting, reconnecting and disconnecting an account: utils/connectionsApi (one flow for every provider). */
 
   verify: (id: string) => request<ProviderConnection>(`/v1/integrations/${id}/verify`, { method: 'POST' }),
-
-  disconnectAccount: (id: string, force = false) =>
-    request<{ revoked: boolean; orphanedLeadSources: number }>(
-      `/v1/integrations/${id}?force=${force}`,
-      { method: 'DELETE' },
-    ),
 
   forms: (id: string, cursor?: string | null) =>
     request<{ items: ProviderForm[]; nextCursor: string | null }>(

@@ -1,6 +1,13 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { Button, type ButtonVariant } from '../common/Button';
+
+/**
+ * True inside a Connections drawer, whose own header already names the
+ * provider and its status: the card then drops its chrome and header and
+ * shows only its body and action.
+ */
+export const EmbeddedCardContext = createContext(false);
 
 /**
  * The shell every card on Lead Integrations is built from.
@@ -33,7 +40,25 @@ export const IntegrationCard: React.FC<{
     disabled?: boolean;
   };
   children: React.ReactNode;
-}> = ({ icon, title, blurb, connected, loading, accent, action, children }) => (
+}> = (props) => (useContext(EmbeddedCardContext) ? <EmbeddedCard {...props} /> : <FullCard {...props} />);
+
+type CardProps = React.ComponentProps<typeof IntegrationCard>;
+
+/** Inside a drawer: a titled section with the card's body and action. */
+const EmbeddedCard: React.FC<CardProps> = ({ title, blurb, loading, action, children }) => (
+  <section className="space-y-3">
+    <div>
+      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{title}</h4>
+      <p className="text-xs text-slate-500 mt-0.5">{blurb}</p>
+    </div>
+    <div className="space-y-2">{children}</div>
+    <Button variant={action.variant ?? 'primary'} onClick={action.onClick} disabled={loading || action.disabled} icon={action.icon}>
+      {action.label}
+    </Button>
+  </section>
+);
+
+const FullCard: React.FC<CardProps> = ({ icon, title, blurb, connected, loading, accent, action, children }) => (
   <div
     className={`bg-slate-900/90 border rounded-2xl p-5 shadow-xl flex flex-col gap-4 ${
       connected && !loading ? accent : 'border-slate-800'

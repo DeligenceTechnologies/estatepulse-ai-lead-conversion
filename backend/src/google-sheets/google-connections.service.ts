@@ -1,15 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConnectionAlertService } from '@/common/service/connection-alert.service';
-import { IntegrationProvider, IntegrationStatus, type Integration, type Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
-import { AuditService } from '@/audit/audit.service';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { IntegrationProvider, type Prisma } from '@prisma/client';
 import { httpError } from '@/common/errors/app-error';
-import { lockOrganization } from '@/calendar/connection/calendar-access.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { SecretBoxService } from '@/common/service/secret-box.service';
-import { aad, sha256Hex } from '@/common/utils/crypto';
-import { DRIVE_FILE_SCOPE, GoogleApiError, GoogleClient, SPREADSHEET_MIME, decodeIdToken } from './google.client';
-import { openState, sealState } from './oauth-state';
+import { ConnectionRefused } from '@/connections/connection-definition';
+import { ConnectionsService, REAUTH_REQUIRED, type CredentialErrors } from '@/connections/connections.service';
+import { DRIVE_FILE_SCOPE, GoogleApiError, GoogleClient, SPREADSHEET_MIME } from './google.client';
 
 const SAMPLE_ROWS = 5;
 const SAMPLE_COLUMNS = 6;
@@ -20,15 +15,6 @@ export interface SessionIdentity {
   sessionId: string;
 }
 
-export interface GoogleConnectionDTO {
-  id: string;
-  accountEmail: string | null;
-  status: string;
-  lastVerifiedAt: Date | null;
-  lastErrorCode: string | null;
-  connectedAt: Date;
-}
-
 export interface SpreadsheetInspectionDTO {
   spreadsheetId: string;
   title: string;
@@ -37,14 +23,6 @@ export interface SpreadsheetInspectionDTO {
   tabs: { sheetId: number; title: string; index: number; rowCount: number | null; columnCount: number | null }[];
   sample: { sheetId: number; title: string; rows: string[][] } | null;
 }
-
-class AccountConflict extends Error {
-  constructor(readonly email: string | null) {
-    super('account conflict');
-  }
-}
-
-const LIVE_GOOGLE = (orgId: string) => ({ orgId, provider: IntegrationProvider.google, revokedAt: null });
 
 /** What a sheet or a form says on its card when the Google connection it reads through has lapsed. */
 export const REAUTH_ERROR_CODE = 'GOOGLE_REAUTH_REQUIRED';
@@ -75,182 +53,61 @@ export async function forgetExpiredAccess(
   });
 }
 
+/** How Google's client reports a refused credential, for ConnectionsService.withCredential. */
+const GOOGLE_ERRORS: CredentialErrors = {
+  unauthorized: (e) => e instanceof GoogleApiError && e.kind === 'UNAUTHORIZED',
+  reauth: (e) => (e instanceof GoogleApiError && e.kind === 'REAUTH' ? REAUTH_REQUIRED : null),
+  reauthError: (message) => new GoogleApiError('REAUTH', message, 400),
+  unavailableError: (message, status) => new GoogleApiError('UNAVAILABLE', message, status),
+};
+
 /**
- * The organization's one Google account, connected with the drive.file scope
- * (only files the owner picks) and PKCE, its refresh token sealed to the row.
+ * Google as a connection (one account per organization, drive.file scope:
+ * only files the owner picks), and reading with it. Connecting, refreshing
+ * and disconnecting are ConnectionsService's; Sheets and Forms both read
+ * through the same account.
  */
 @Injectable()
-export class GoogleConnectionsService {
+export class GoogleConnectionsService implements OnModuleInit {
   private readonly logger = new Logger(GoogleConnectionsService.name);
-  private readonly accessTokens = new Map<string, { token: string; expiresAt: number }>();
-  /**
-   * OAuth states already redeemed, so one cannot be spent twice.
-   *
-   * ponytail: in process memory, so a second API instance would not know what
-   * this one has seen. It is defence in depth rather than the control that
-   * matters — a state is sealed to one organization, user and session, and the
-   * provider invalidates its own authorization code after a single use, so a
-   * replay needs the victim's session and still dies at the provider. Move it
-   * to shared storage (and do it for Airtable, HubSpot and Google together, as
-   * all three carry this same map) before running more than one instance.
-   */
-  private readonly usedNonces = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly secrets: SecretBoxService,
     private readonly google: GoogleClient,
-    private readonly audit: AuditService,
-    private readonly connectionAlerts: ConnectionAlertService,
+    private readonly connections: ConnectionsService,
   ) {}
 
+  onModuleInit(): void {
+    this.connections.register({
+      key: 'google',
+      provider: IntegrationProvider.google,
+      label: 'Google',
+      description: 'Import leads from Google Sheets and Google Forms.',
+      category: 'leads',
+      auth: 'oauth',
+      impact: 'New leads from your Google Sheets and Forms are not being imported.',
+      unavailable: () => (this.google.clientId ? null : 'Google is not configured on this server. Set GOOGLE_CLIENT_ID.'),
+      identify: async (token, raw) => {
+        // The token response Nango kept from the consent screen says what was granted.
+        const scope = typeof raw.scope === 'string' ? raw.scope : null;
+        if (scope !== null && !scope.split(/\s+/).includes(DRIVE_FILE_SCOPE)) {
+          throw new ConnectionRefused(400, 'GOOGLE_SCOPE_NOT_GRANTED', 'Google did not grant access to the files you choose. Connect again and leave that permission ticked.');
+        }
+        const identity = await this.google.userInfo(token);
+        return { accountId: identity.sub, email: identity.email, name: identity.email };
+      },
+      connected: async ({ tx, orgId, row }) => {
+        await forgetExpiredAccess(tx, orgId, row.id);
+      },
+      recovered: (row) => forgetExpiredAccess(this.prisma, row.orgId, row.id),
+      // An access token revokes its refresh token too.
+      revoke: (token) => this.google.revoke(token),
+    });
+  }
+
   publicConfig() {
-    const configured = this.google.isConfigured();
+    const configured = Boolean(this.google.clientId);
     return { configured, clientId: configured ? this.google.clientId : null, ...this.google.pickerConfig(), scope: DRIVE_FILE_SCOPE };
-  }
-
-  start(who: SessionIdentity): { authorizeUrl: string; state: string } {
-    if (!this.google.isConfigured()) {
-      throw httpError(400, 'GOOGLE_NOT_CONFIGURED', 'Google is not configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.');
-    }
-    const { state, codeChallenge } = sealState(this.secrets, who);
-    return { authorizeUrl: this.google.authorizeUrl(state, codeChallenge), state };
-  }
-
-  /** The state must come back to the same session that started it, once. */
-  async complete(who: SessionIdentity, code: string, state: string): Promise<GoogleConnectionDTO> {
-    const p = openState(this.secrets, state);
-    if (!p) throw httpError(400, 'OAUTH_STATE_INVALID', 'This Google authorization is not valid. Start the connection again.');
-    if (p.exp < Date.now()) throw httpError(400, 'OAUTH_STATE_EXPIRED', 'This Google authorization expired. Start the connection again.');
-    if (p.org !== who.organizationId || p.usr !== who.userId || p.sid !== who.sessionId) {
-      throw httpError(403, 'OAUTH_SESSION_MISMATCH', 'This Google authorization was started from a different session. Start it again from this window.');
-    }
-    this.consumeNonce(p.nonce, p.exp);
-
-    let tokens;
-    try {
-      tokens = await this.google.exchangeCode(code, p.cv);
-    } catch (error) {
-      if (error instanceof GoogleApiError && error.kind === 'REAUTH') {
-        throw httpError(400, 'OAUTH_CODE_REJECTED', 'Google rejected the authorization code. Start the connection again.');
-      }
-      throw this.toHttp(error);
-    }
-
-    const liveToken = tokens.refreshToken ?? tokens.accessToken;
-    const refuse = async (status: number, errorCode: string, message: string) => {
-      await this.revokeQuietly(liveToken);
-      return httpError(status, errorCode, message);
-    };
-    if (!tokens.scope.split(/\s+/).includes(DRIVE_FILE_SCOPE)) {
-      throw await refuse(400, 'GOOGLE_SCOPE_NOT_GRANTED', 'Google did not grant access to the files you choose. Connect again and leave that permission ticked.');
-    }
-    const identity = decodeIdToken(tokens.idToken, this.google.clientId);
-    if (!identity) throw await refuse(502, 'GOOGLE_IDENTITY_MISSING', 'Google did not say which account was connected. Try again.');
-    if (!tokens.refreshToken) {
-      throw await refuse(502, 'GOOGLE_NO_REFRESH_TOKEN', 'Google did not issue a long-lived token. Try connecting again.');
-    }
-    const refreshToken = tokens.refreshToken;
-
-    let saved: Integration;
-    try {
-      saved = await this.prisma.$transaction(async (tx) => {
-        await lockOrganization(tx, who.organizationId);
-        const live = await tx.integration.findMany({
-          where: LIVE_GOOGLE(who.organizationId),
-          select: { id: true, externalAccountId: true, accountEmail: true },
-        });
-        const other = live.find((c) => c.externalAccountId !== identity.sub);
-        if (other) throw new AccountConflict(other.accountEmail);
-        const existing = live.find((c) => c.externalAccountId === identity.sub);
-        const id = existing?.id ?? randomUUID();
-        const data = {
-          credentials: this.secrets.seal(refreshToken, aad.integration(who.organizationId, id)),
-          credentialHash: sha256Hex(refreshToken),
-          credentialPreview: 'oauth',
-          label: identity.email,
-          accountEmail: identity.email,
-          externalAccountId: identity.sub,
-          status: IntegrationStatus.active,
-          lastVerifiedAt: new Date(),
-          lastErrorAt: null,
-          lastErrorCode: null,
-        };
-        const row = existing
-          ? await tx.integration.update({ where: { id }, data })
-          : await tx.integration.create({ data: { id, orgId: who.organizationId, provider: IntegrationProvider.google, ...data } });
-
-        // Sheets connected through this account before a disconnect come back with it.
-        const retired = await tx.integration.findMany({
-          where: { orgId: who.organizationId, provider: IntegrationProvider.google, externalAccountId: identity.sub, revokedAt: { not: null } },
-          select: { id: true },
-        });
-        const moved = retired.length
-          ? await tx.leadSource.updateMany({
-              where: { orgId: who.organizationId, integrationId: { in: retired.map((r) => r.id) } },
-              data: { integrationId: id },
-            })
-          : { count: 0 };
-        await forgetExpiredAccess(tx, who.organizationId, id);
-        await this.audit.record(
-          {
-            orgId: who.organizationId,
-            actorType: 'user',
-            actorId: who.userId,
-            action: existing ? 'google.reconnected' : 'google.connected',
-            entityType: 'integration',
-            entityId: id,
-            payload: { accountEmail: identity.email, sheetsReattached: moved.count },
-          },
-          tx,
-        );
-        return row;
-      });
-    } catch (error) {
-      if (error instanceof AccountConflict) {
-        throw await refuse(
-          409,
-          'GOOGLE_ACCOUNT_CONFLICT',
-          `This organization is already connected to ${error.email ?? 'another Google account'}. Disconnect it first to use a different account.`,
-        );
-      }
-      await this.revokeQuietly(liveToken);
-      throw error;
-    }
-
-    this.accessTokens.set(saved.id, { token: tokens.accessToken, expiresAt: Date.now() + tokens.expiresIn * 1000 });
-    this.logger.log(`Google connected for organization ${who.organizationId}`);
-    return toDTO(saved);
-  }
-
-  async list(orgId: string): Promise<GoogleConnectionDTO[]> {
-    const rows = await this.prisma.integration.findMany({ where: LIVE_GOOGLE(orgId), orderBy: { createdAt: 'desc' } });
-    return rows.map(toDTO);
-  }
-
-  async disconnect(who: SessionIdentity, id: string): Promise<void> {
-    const row = await this.prisma.integration.findFirst({ where: { id, ...LIVE_GOOGLE(who.organizationId) } });
-    if (!row) throw httpError(404, 'GOOGLE_CONNECTION_NOT_FOUND', 'No such Google connection.');
-    if (row.credentials) {
-      try {
-        await this.google.revoke(this.decrypt(row));
-      } catch (error) {
-        this.logger.warn(`Google revoke skipped for ${row.id}: ${(error as Error).message}`);
-      }
-    }
-    await this.prisma.integration.update({
-      where: { id: row.id },
-      data: { status: IntegrationStatus.revoked, revokedAt: new Date(), credentials: '' },
-    });
-    this.accessTokens.delete(row.id);
-    await this.audit.record({
-      orgId: who.organizationId,
-      actorType: 'user',
-      actorId: who.userId,
-      action: 'google.disconnected',
-      entityType: 'integration',
-      entityId: row.id,
-    });
   }
 
   async inspectSpreadsheet(orgId: string, integrationId: string, spreadsheetId: string): Promise<SpreadsheetInspectionDTO> {
@@ -285,91 +142,14 @@ export class GoogleConnectionsService {
     });
   }
 
-  /** Runs `fn` with a fresh access token, refreshing once when Google says the cached one is no longer good. */
+  /** Runs `fn` with a valid access token for the organization's Google connection; Google errors come back as API errors. */
   async withAccessToken<T>(orgId: string, integrationId: string, fn: (accessToken: string) => Promise<T>): Promise<T> {
-    if (!integrationId) throw httpError(409, 'GOOGLE_REAUTH_REQUIRED', 'Reconnect Google to continue.');
-    const row = await this.prisma.integration.findFirst({ where: { id: integrationId, ...LIVE_GOOGLE(orgId) } });
-    if (!row) {
-      throw httpError(
-        404,
-        'GOOGLE_CONNECTION_NOT_FOUND',
-        'The Google connection for this was disconnected. Connect Google again, or pick the spreadsheet again with “Add a spreadsheet”.',
-      );
-    }
-    if (row.status === IntegrationStatus.invalid) throw this.toHttp(new GoogleApiError('REAUTH', 'credential invalid', 400));
+    if (!integrationId) throw httpError(409, REAUTH_ERROR_CODE, 'Reconnect Google to continue.');
     try {
-      return await fn(await this.accessToken(row));
-    } catch (error) {
-      if (!(error instanceof GoogleApiError && error.kind === 'UNAUTHORIZED')) throw this.toHttp(error);
-    }
-    this.accessTokens.delete(row.id);
-    try {
-      return await fn(await this.accessToken(row));
+      return await this.connections.withCredential(orgId, integrationId, 'google', GOOGLE_ERRORS, (token) => fn(token));
     } catch (error) {
       throw this.toHttp(error);
     }
-  }
-
-  private async accessToken(row: Integration): Promise<string> {
-    const cached = this.accessTokens.get(row.id);
-    if (cached && cached.expiresAt - 60_000 > Date.now()) return cached.token;
-    let tokens;
-    try {
-      tokens = await this.google.refresh(this.decrypt(row));
-    } catch (error) {
-      if (error instanceof GoogleApiError && error.kind === 'REAUTH') await this.markInvalid(row.id, 'GOOGLE_REAUTH_REQUIRED');
-      throw error;
-    }
-    if (tokens.scope && !tokens.scope.split(/\s+/).includes(DRIVE_FILE_SCOPE)) {
-      await this.markInvalid(row.id, 'GOOGLE_SCOPE_NOT_GRANTED');
-      throw new GoogleApiError('REAUTH', 'drive.file scope no longer granted', 400);
-    }
-    this.accessTokens.set(row.id, { token: tokens.accessToken, expiresAt: Date.now() + tokens.expiresIn * 1000 });
-    await this.prisma.integration.update({ where: { id: row.id }, data: { lastVerifiedAt: new Date() } });
-    return tokens.accessToken;
-  }
-
-  /** active -> invalid; the owners are emailed once, on the transition. */
-  private async markInvalid(id: string, code: string): Promise<void> {
-    this.accessTokens.delete(id);
-    const brokenAt = new Date();
-    const changed = await this.prisma.integration.updateMany({
-      where: { id, status: IntegrationStatus.active },
-      data: { status: IntegrationStatus.invalid, lastErrorAt: brokenAt, lastErrorCode: code },
-    });
-    if (changed.count === 0) return;
-    const row = await this.prisma.integration.findUnique({ where: { id }, select: { orgId: true, accountEmail: true } });
-    if (!row) return;
-    this.connectionAlerts.connectionBroken({
-      orgId: row.orgId,
-      connectionId: id,
-      providerLabel: 'Google Sheets',
-      account: row.accountEmail,
-      impact: 'New leads from your Google Sheets are not being imported.',
-      reconnectPath: '/integrations',
-      brokenAt,
-    });
-  }
-
-  private consumeNonce(nonce: string, exp: number): void {
-    const now = Date.now();
-    for (const [n, e] of this.usedNonces) if (e < now) this.usedNonces.delete(n);
-    if (this.usedNonces.has(nonce)) {
-      throw httpError(400, 'OAUTH_STATE_USED', 'This Google authorization was already used. Start the connection again.');
-    }
-    this.usedNonces.set(nonce, exp);
-  }
-
-  private async revokeQuietly(token: string): Promise<void> {
-    try {
-      await this.google.revoke(token);
-    } catch (error) {
-      this.logger.warn(`Google revoke failed: ${(error as Error).message}`);
-    }
-  }
-
-  private decrypt(row: Pick<Integration, 'id' | 'orgId' | 'credentials'>): string {
-    return this.secrets.open(row.credentials, aad.integration(row.orgId, row.id));
   }
 
   toHttp(error: unknown): unknown {
@@ -407,15 +187,4 @@ export class GoogleConnectionsService {
         return httpError(502, 'GOOGLE_REQUEST_FAILED', `Google refused the request: ${error.message}`);
     }
   }
-}
-
-function toDTO(row: Integration): GoogleConnectionDTO {
-  return {
-    id: row.id,
-    accountEmail: row.accountEmail,
-    status: row.status.toUpperCase(),
-    lastVerifiedAt: row.lastVerifiedAt,
-    lastErrorCode: row.lastErrorCode,
-    connectedAt: row.createdAt,
-  };
 }

@@ -3,7 +3,7 @@ import { AirtableClient } from './airtable.client';
 import { AirtableApiError, REQUIRED_SCOPES, SCOPES, permissionsOf } from './types';
 
 /**
- * The OAuth and HTTP contract, pinned against Airtable's documented behaviour
+ * The HTTP contract, pinned against Airtable's documented behaviour
  * (verified 2026-11-13). Nothing here reaches the network: every test stubs
  * fetch, so these run anywhere, with or without Airtable credentials.
  */
@@ -13,63 +13,8 @@ const config = (over: Record<string, unknown> = {}) =>
   // would buy nothing but a slower suite.
   ({ get: (k: string) => ({ AIRTABLE_MIN_REQUEST_GAP_MS: 0, ...over })[k] }) as never;
 
-describe('AirtableClient OAuth', () => {
+describe('AirtableClient', () => {
   afterEach(() => vi.unstubAllGlobals());
-
-  it('sends PKCE with S256, which Airtable requires, and asks only for the configured scopes', () => {
-    const client = new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec', APP_URL: 'https://app.test' }));
-
-    const url = new URL(client.authorizeUrl('s'.repeat(32), 'challenge-value'));
-
-    expect(url.origin + url.pathname).toBe('https://airtable.com/oauth2/v1/authorize');
-    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(url.searchParams.get('code_challenge')).toBe('challenge-value');
-    expect(url.searchParams.get('response_type')).toBe('code');
-    expect(url.searchParams.get('redirect_uri')).toBe('https://app.test/oauth/airtable-callback.html');
-    // Space delimited, as the authorize endpoint demands.
-    expect(url.searchParams.get('scope')).toContain(`${SCOPES.SCHEMA_READ} ${SCOPES.RECORDS_READ}`);
-  });
-
-  it('never puts the authorization code or the client secret in a URL', async () => {
-    const fetch = vi.fn(
-      async (_url: string, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, refresh_expires_in: 5_184_000, scope: 'data.records:read schema.bases:read' }),
-          { status: 200 },
-        ),
-    );
-    vi.stubGlobal('fetch', fetch);
-    const client = new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec' }));
-
-    const tokens = await client.exchangeCode('the-code', 'the-verifier');
-
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toBe('https://airtable.com/oauth2/v1/token');
-    expect(url).not.toContain('the-code');
-    expect(url).not.toContain('sec');
-    const body = new URLSearchParams(String(init.body));
-    expect(body.get('grant_type')).toBe('authorization_code');
-    expect(body.get('code')).toBe('the-code');
-    expect(body.get('code_verifier')).toBe('the-verifier');
-    // Basic credentials: standard base64 of "id:secret", as RFC 7617 requires.
-    // Pinned explicitly, padding included — base64url would silently drop the
-    // '=' and Airtable would answer invalid_client.
-    const headers = init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe(`Basic ${Buffer.from('cli:sec').toString('base64')}`);
-    expect(headers.Authorization).toBe('Basic Y2xpOnNlYw==');
-    expect(tokens).toMatchObject({ accessToken: 'at', refreshToken: 'rt', expiresIn: 3600, refreshExpiresIn: 5_184_000 });
-    expect(tokens.scopes).toEqual(['data.records:read', 'schema.bases:read']);
-  });
-
-  it('treats a refused refresh as a dead grant, and a 409 as a race another instance won', async () => {
-    const client = new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec', AIRTABLE_RETRY_BASE_MS: 0 }));
-
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'expired' }), { status: 400 })));
-    await expect(client.refresh('rt')).rejects.toMatchObject({ kind: 'REAUTH' });
-
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'conflict' }), { status: 409 })));
-    await expect(client.refresh('rt')).rejects.toMatchObject({ kind: 'CONFLICT' });
-  });
 
   it('reads the granted scopes from whoami, which is what gates column creation', async () => {
     const fetch = vi.fn(
@@ -77,7 +22,7 @@ describe('AirtableClient OAuth', () => {
         new Response(JSON.stringify({ id: 'usr123', email: 'a@b.test', scopes: ['data.records:read', 'schema.bases:read'] }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetch);
-    const client = new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec' }));
+    const client = new AirtableClient(config());
 
     const account = await client.identify('tok');
 
@@ -90,19 +35,13 @@ describe('AirtableClient OAuth', () => {
   it('hands a 429 back to the caller to back off on rather than holding a request open', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { type: 'TOO_MANY_REQUESTS' } }), { status: 429 }));
     vi.stubGlobal('fetch', fetch);
-    const client = new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec', AIRTABLE_RETRY_BASE_MS: 0 }));
+    const client = new AirtableClient(config({ AIRTABLE_RETRY_BASE_MS: 0 }));
 
     const err = await client.identify('tok').catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(AirtableApiError);
     // Airtable's documented recovery is a 30-second wait, too long to sleep in-request.
     expect(err).toMatchObject({ kind: 'RATE_LIMITED', retryAfterMs: 30_000 });
-  });
-
-  it('is not configured without both halves of the client credentials', () => {
-    expect(new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli' })).isConfigured()).toBe(false);
-    expect(new AirtableClient(config({ AIRTABLE_CLIENT_SECRET: 'sec' })).isConfigured()).toBe(false);
-    expect(new AirtableClient(config({ AIRTABLE_CLIENT_ID: 'cli', AIRTABLE_CLIENT_SECRET: 'sec' })).isConfigured()).toBe(true);
   });
 
   it('refuses a deployment whose scopes cannot read Airtable at all', () => {

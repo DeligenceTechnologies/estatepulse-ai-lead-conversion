@@ -1,13 +1,13 @@
-/// An organization's account with an outside service: Telnyx (voice/SMS),
-/// Tally (forms) or Google (Sheets). Credentials are sealed with SecretBox.
+/// One connected account with an outside service (Google, HubSpot, Airtable,
+/// Typeform, Tally, Calendly, Cal.com, Telnyx). Every credential, OAuth grant
+/// or API key, is held by Nango: the row keeps the account, its setup and
+/// "nangoConnectionId", never a token.
 model Integration {
   id                String              @id @default(uuid(7)) @db.Uuid
   orgId             String              @map("organization_id") @db.Uuid
   provider          IntegrationProvider
   status            IntegrationStatus   @default(active)
   label             String?             @db.VarChar(255)
-  credentials       String
-  credentialHash    String?             @map("credential_hash") @db.VarChar(64)
   credentialPreview String?             @map("credential_preview") @db.VarChar(64)
   externalAccountId String?             @map("external_account_id") @db.VarChar(255)
   accountEmail      String?             @map("account_email") @db.VarChar(255)
@@ -18,13 +18,49 @@ model Integration {
   lastErrorAt       DateTime?           @map("last_error_at") @db.Timestamptz(6)
   lastErrorCode     String?             @map("last_error_code") @db.VarChar(50)
   revokedAt         DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  /// The Nango connection holding this account's credential.
+  nangoConnectionId String?             @unique @map("nango_connection_id") @db.VarChar(255)
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   leadSources  LeadSource[]
+  calendar     CalendarConnection?
 
   @@index([orgId, provider, status])
   @@index([provider, phoneNumber])
   @@map("integrations")
+}
+
+/// Nango webhook deliveries, one row per distinct body: a redelivery of the
+/// same event is recognised and not processed twice. Processing happens on the
+/// nango queue, never inside the HTTP request.
+model NangoWebhookEvent {
+  id                String                  @id @default(uuid(7)) @db.Uuid
+  /// sha256 of the exact bytes Nango signed.
+  dedupeKey         String                  @unique @map("dedupe_key") @db.VarChar(64)
+  type              String                  @db.VarChar(30)
+  operation         String?                 @db.VarChar(30)
+  providerConfigKey String?                 @map("provider_config_key") @db.VarChar(255)
+  connectionId      String?                 @map("connection_id") @db.VarChar(255)
+  success           Boolean?
+  status            NangoWebhookEventStatus @default(received)
+  attempts          Int                     @default(0)
+  /// Safe to show: never a token or a raw provider payload.
+  error             String?                 @db.VarChar(500)
+  receivedAt        DateTime                @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt       DateTime?               @map("processed_at") @db.Timestamptz(6)
+
+  @@index([connectionId])
+  @@index([status, receivedAt])
+  @@map("nango_webhook_events")
+}
+
+enum NangoWebhookEventStatus {
+  received
+  processed
+  ignored
+  failed
+
+  @@map("nango_webhook_event_status")
 }

@@ -1,92 +1,12 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 /**
- * HubSpot webhook deliveries: signature verification and event parsing. Pure —
- * the controller supplies the request, nothing here touches the database.
- *
- * Verification follows HubSpot's v3 scheme
- * (developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/request-validation):
- *
- *   base64( HMAC-SHA256( clientSecret, method + uri + rawBody + timestamp ) )
- *
- * compared with X-HubSpot-Signature-v3, where `uri` is the full URL HubSpot
- * called (scheme, host, path, query) with a fixed set of percent-escapes
- * decoded in the query string, and the timestamp is X-HubSpot-Request-Timestamp
- * in epoch milliseconds. A request older than five minutes is refused: the
- * timestamp is inside the signed material, so that window is the replay bound.
+ * HubSpot webhook deliveries: event parsing. Pure — nothing here touches the
+ * database. HubSpot signs its deliveries with the app's client secret, which
+ * only Nango holds: Nango checks that signature and forwards the body to
+ * /webhooks/nango, signed with Nango's key (see NangoWebhookService).
  */
-
-export const SIGNATURE_HEADER = 'x-hubspot-signature-v3';
-export const TIMESTAMP_HEADER = 'x-hubspot-request-timestamp';
-/** HubSpot's own limit for a valid request. */
-export const MAX_SKEW_MS = 5 * 60 * 1000;
-
-export type SignatureVerdict = 'VALID' | 'MISSING' | 'STALE' | 'INVALID';
-
-/** HubSpot's table: only these escapes are decoded, and only in the query string. */
-const DECODE: Record<string, string> = {
-  '%3A': ':',
-  '%2F': '/',
-  '%3F': '?',
-  '%40': '@',
-  '%21': '!',
-  '%24': '$',
-  '%27': "'",
-  '%28': '(',
-  '%29': ')',
-  '%2A': '*',
-  '%2C': ',',
-  '%3B': ';',
-};
-
-/**
- * The URI HubSpot signed. The origin and path come from the URL we registered
- * with HubSpot (`publicUrl`), not from the request's Host header: behind a
- * proxy or load balancer the request no longer carries the public host, and a
- * Host header is attacker-controlled anyway. The query string is the request's
- * own, since that is what HubSpot sent.
- */
-export function signedUri(publicUrl: string, requestUrl: string): string {
-  const base = new URL(publicUrl);
-  const withoutFragment = requestUrl.split('#')[0];
-  const q = withoutFragment.indexOf('?');
-  const query = q >= 0 ? withoutFragment.slice(q + 1) : '';
-  const decoded = query.replace(/%3A|%2F|%3F|%40|%21|%24|%27|%28|%29|%2A|%2C|%3B/g, (m) => DECODE[m]);
-  return `${base.origin}${base.pathname}${q >= 0 ? `?${decoded}` : ''}`;
-}
-
-export function verifySignatureV3(input: {
-  method: string;
-  uri: string;
-  rawBody: Buffer;
-  signature: string | undefined;
-  timestamp: string | undefined;
-  clientSecret: string;
-  now?: number;
-}): SignatureVerdict {
-  const { signature, timestamp } = input;
-  if (!signature || !timestamp || !input.clientSecret) return 'MISSING';
-  const ts = Number(timestamp);
-  // Either direction: a clock running ahead is not a reason to accept a
-  // timestamp that would stay "fresh" for longer than five minutes.
-  if (!Number.isFinite(ts) || Math.abs((input.now ?? Date.now()) - ts) > MAX_SKEW_MS) return 'STALE';
-
-  const source = Buffer.concat([
-    Buffer.from(`${input.method.toUpperCase()}${input.uri}`, 'utf8'),
-    input.rawBody,
-    Buffer.from(timestamp, 'utf8'),
-  ]);
-  const expected = createHmac('sha256', input.clientSecret).update(source).digest();
-  let provided: Buffer;
-  try {
-    provided = Buffer.from(signature, 'base64');
-  } catch {
-    return 'INVALID';
-  }
-  if (provided.length !== expected.length) return 'INVALID';
-  return timingSafeEqual(provided, expected) ? 'VALID' : 'INVALID';
-}
 
 // ---------------------------------------------------------------------------
 // Events

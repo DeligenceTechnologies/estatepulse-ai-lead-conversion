@@ -96,7 +96,9 @@ export const HubSpotCard: React.FC = () => {
     const ac = new AbortController();
     pending.current = ac;
     try {
-      setStatus(await connectCrm(PROVIDER, NAME, ac.signal));
+      const connected = await connectCrm(PROVIDER, ac.signal);
+      if (!connected) return;
+      setStatus(connected);
       toast.success(`${NAME} connected. Importing your contacts…`);
     } catch (e) {
       if (!ac.signal.aborted) toast.error(errorText(e));

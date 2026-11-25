@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Check, Eye, EyeOff, KeyRound, Link2, User, Users } from 'lucide-react';
+import { Check, KeyRound, Link2, User, Users } from 'lucide-react';
 import { messageFor } from '../../../lib/api';
-import { connectCalCom, listCalComTeams, type CalComAccountCheck } from '../../../utils/calendarApi';
+import { connectCalCom, listCalComTeams, setCalComWorkspace, type CalComAccountCheck } from '../../../utils/calendarApi';
 import { Button } from '../../common/Button';
 import { Notice, PROVIDERS, panel } from '../shared/ui';
 
@@ -11,22 +11,23 @@ export const CalComConnect: React.FC<{ onConnected: () => Promise<boolean>; reco
   onConnected,
   reconnect,
 }) => {
-  const [apiKey, setApiKey] = useState('');
-  const [reveal, setReveal] = useState(false);
   const [checked, setChecked] = useState<CalComAccountCheck | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const key = apiKey.trim();
   const account = checked?.account;
 
   const check = async () => {
-    if (!key || busy) return;
+    if (busy) return;
     setBusy(true);
     setError(null);
+    setChecked(null);
+    setTarget(null);
     try {
-      const result = await listCalComTeams(key);
+      // The key is entered in Nango's window and linked as the calendar (personal to start with).
+      if (!(await connectCalCom())) return;
+      const result = await listCalComTeams();
       setChecked(result);
       setTarget(result.teams.length === 0 ? 'personal' : result.teams.length === 1 ? result.teams[0].id : null);
     } catch (e) {
@@ -41,7 +42,7 @@ export const CalComConnect: React.FC<{ onConnected: () => Promise<boolean>; reco
     setBusy(true);
     setError(null);
     try {
-      await connectCalCom(key, target === 'personal' ? null : target);
+      await setCalComWorkspace(target === 'personal' ? null : target);
       await onConnected();
     } catch (e) {
       setError(messageFor(e));
@@ -85,52 +86,18 @@ export const CalComConnect: React.FC<{ onConnected: () => Promise<boolean>; reco
     <div className="space-y-3">
       {error && <Notice tone="error">{error}</Notice>}
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void check();
-        }}
-      >
-        <label htmlFor="cal-api-key" className="block text-xs font-semibold text-slate-300 mb-1.5">
-          Cal.com API key
-        </label>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1">
-            <KeyRound className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              id="cal-api-key"
-              type={reveal ? 'text' : 'password'}
-              value={apiKey}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="cal_live_…"
-              disabled={busy}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                setChecked(null);
-                setTarget(null);
-              }}
-              className={`w-full h-9 bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-9 text-xs text-white font-mono focus:outline-none disabled:opacity-60 ${PROVIDERS.cal.focus}`}
-            />
-            <button
-              type="button"
-              onClick={() => setReveal((value) => !value)}
-              aria-label={reveal ? 'Hide API key' : 'Show API key'}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-slate-300 cursor-pointer"
-            >
-              {reveal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-          {!checked && (
-            <Button type="submit" variant="secondary" disabled={!key} loading={busy} icon={<Check />}>
-              Verify key
-            </Button>
-          )}
-        </div>
+      <div>
+        <p className="text-xs font-semibold text-slate-300 mb-1.5">Cal.com API key</p>
+        {!checked && (
+          <Button variant="secondary" onClick={() => void check()} loading={busy} icon={<KeyRound />}>
+            Enter API key
+          </Button>
+        )}
         <p className="mt-1.5 text-2xs text-slate-500">
-          Find it in Cal.com under Settings → Developer → API keys. It is stored encrypted.
+          Find it in Cal.com under Settings → Developer → API keys. You enter it in a secure window; it is stored by our
+          credential vault (Nango), never in this browser.
         </p>
-      </form>
+      </div>
 
       {checked && (
         <div className="space-y-2.5">

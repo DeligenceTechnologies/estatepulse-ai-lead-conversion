@@ -136,7 +136,7 @@ export function useOwnerNav(): NavGroup[] {
       // Where leads come from: connect a channel once, then watch what it sends.
       label: 'Lead Intake',
       items: [
-        { id: 'integrations', label: 'Lead Integrations', icon: Plug },
+        { id: 'integrations', label: 'Connections', icon: Plug },
         { id: 'lead_sources', label: 'Lead Sources', icon: Webhook },
       ],
     },

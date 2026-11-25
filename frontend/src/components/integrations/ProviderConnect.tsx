@@ -25,7 +25,6 @@ import {
   TelnyxAccount,
   AssistantSummary,
   saveTelnyxCredentials,
-  addTelnyxAccount,
   listTelnyxAccounts,
   listAssistants,
   createAssistant,
@@ -87,49 +86,35 @@ const PublicKeyHint: React.FC = () => (
 
 type Tab = 'connect' | 'assistant';
 
-/** API key input with its Verify button beside it, and what the check found below. */
+/**
+ * Opens Nango Connect for a Telnyx API key, then shows what the check found.
+ * The key is typed into Nango's window, never into this page.
+ */
 const ApiKeyInput: React.FC<{
-  value: string;
-  onChange: (v: string) => void;
-  onVerify: () => void;
+  onConnect: () => void;
   verifying: boolean;
   verified: boolean;
   error: string | null;
   count?: number;
-  autoFocus?: boolean;
   trailing?: React.ReactNode;
-}> = ({ value, onChange, onVerify, verifying, verified, error, count, autoFocus, trailing }) => (
+}> = ({ onConnect, verifying, verified, error, count, trailing }) => (
   <div className="space-y-1.5">
     <div className="flex items-center gap-2">
-      <div className="relative flex-1 min-w-0">
-        <input
-          type="password"
-          value={value}
-          autoFocus={autoFocus}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && value.trim() && !verified) {
-              e.preventDefault();
-              onVerify();
-            }
-          }}
-          placeholder="KEY0123…"
-          className={`${input} font-mono pr-9 ${verified ? 'border-green-500/50' : error ? 'border-rose-500/50' : ''}`}
-        />
-        {verified && <CheckCircle2 className="w-4 h-4 text-green-400 absolute right-3 top-1/2 -translate-y-1/2" />}
-      </div>
       <Button
         variant={verified ? 'outline' : 'primary'}
         className="h-11!"
-        disabled={!value.trim() || verifying || verified}
+        disabled={verifying}
         loading={verifying}
         icon={verified ? <CheckCircle2 /> : <ShieldCheck />}
-        onClick={onVerify}
+        onClick={onConnect}
       >
-        {verifying ? 'Verifying…' : verified ? 'Verified' : 'Verify'}
+        {verifying ? 'Verifying…' : verified ? 'Key verified · use another' : 'Enter API key'}
       </Button>
       {trailing}
     </div>
+    {!verified && !error && (
+      <p className="text-2xs text-slate-500">You enter it in a secure window. It is kept in our credential vault, never in this browser.</p>
+    )}
     {verified && count !== undefined && (
       <p className="text-2xs text-green-400 flex items-center gap-1.5">
         <CheckCircle2 className="w-3 h-3" /> Key works · {count} {count === 1 ? 'number' : 'numbers'} found on this account
@@ -163,8 +148,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   onChange,
   onClose,
 }) => {
-  const [apiKey, setApiKey] = useState('');
-  // A stored key is encrypted and can never be shown again, so the field reports
+  // A stored key is held by Nango and never shown again, so the field reports
   // what is on file and only turns back into an input when you ask to replace it.
   const [replacingKey, setReplacingKey] = useState(false);
   // Not a secret — it is what Telnyx signs its webhooks with, so it is shown plainly.
@@ -193,7 +177,6 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   const [accounts, setAccounts] = useState<TelnyxAccount[]>([]);
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
-  const [newApiKey, setNewApiKey] = useState('');
   const [newPublicKey, setNewPublicKey] = useState('');
   const [newFrom, setNewFrom] = useState('');
 
@@ -248,7 +231,6 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   useEffect(() => {
     setFromNumber(status.fromNumber || '');
     setLabel(status.label || '');
-    setApiKey('');
     setPublicKey('');
     setReplacingKey(false);
   }, [status.accountId, status.fromNumber, status.label]);
@@ -272,8 +254,8 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
   const usingStored = status.connected && !replacingKey;
   const keyVerified = usingStored
     ? lookup.verifiedFor === ''
-    : !!apiKey.trim() && lookup.verifiedFor === apiKey.trim();
-  const newKeyVerified = !!newApiKey.trim() && newLookup.verifiedFor === newApiKey.trim();
+    : !!lookup.verifiedFor;
+  const newKeyVerified = !!newLookup.verifiedFor;
 
   const missing = [
     !keyVerified && (usingStored ? 'A working API key' : 'Verified API key'),
@@ -318,7 +300,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
     run('save', () => {
       const firstConnect = !status.connected;
       const payload: TelnyxCredentials = { fromNumber, label };
-      if (apiKey && !usingStored) payload.apiKey = apiKey.trim();
+      if (!usingStored && lookup.verifiedFor) payload.accountId = lookup.verifiedFor;
       if (publicKey.trim()) payload.publicKey = publicKey.trim();
       // Overrides only travel when Advanced is open and filled in. Echoing the stored ids back would pin the
       // connection to them and stop the server re-detecting — which is how a stale id survives a re-save.
@@ -326,7 +308,6 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
       if (advanced && messagingProfileId.trim()) payload.messagingProfileId = messagingProfileId.trim();
       return saveTelnyxCredentials(payload).then((r) => {
         toast.success('Telnyx settings saved.');
-        setApiKey('');
         setPublicKey('');
         setReplacingKey(false);
         // The next thing a first-time setup needs is an assistant, so go straight there.
@@ -479,17 +460,11 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                     </div>
                   ) : (
                     <ApiKeyInput
-                      value={apiKey}
-                      onChange={(v) => {
-                        setApiKey(v);
-                        if (lookup.error) lookup.reset();
-                      }}
-                      onVerify={() => void lookup.verify(apiKey)}
+                      onConnect={() => void lookup.connectKey()}
                       verifying={lookup.loading}
                       verified={keyVerified}
                       error={lookup.error}
                       count={lookup.numbers?.length}
-                      autoFocus={replacingKey}
                       trailing={
                         status.connected && (
                           <Button
@@ -497,7 +472,6 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                             className="h-11!"
                             onClick={() => {
                               setReplacingKey(false);
-                              setApiKey('');
                               void lookup.verify();
                             }}
                           >
@@ -593,12 +567,7 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                       <div className="md:col-span-2">
                         <Field label="API key" required hint={<PortalPath path={API_KEY_PATH} />}>
                           <ApiKeyInput
-                            value={newApiKey}
-                            onChange={(v) => {
-                              setNewApiKey(v);
-                              if (newLookup.error) newLookup.reset();
-                            }}
-                            onVerify={() => void newLookup.verify(newApiKey)}
+                            onConnect={() => void newLookup.connectKey()}
                             verifying={newLookup.loading}
                             verified={newKeyVerified}
                             error={newLookup.error}
@@ -634,14 +603,13 @@ export const ProviderConnect: React.FC<{ status: TelnyxStatus; onChange: () => v
                       icon={<Plus />}
                       onClick={() =>
                         run('add', () =>
-                          addTelnyxAccount({
+                          saveTelnyxCredentials({
                             label: newLabel.trim(),
-                            apiKey: newApiKey.trim(),
+                            accountId: newLookup.verifiedFor || undefined,
                             publicKey: newPublicKey.trim(),
                             fromNumber: newFrom.trim(),
                           }).then((r) => {
                             setNewLabel('');
-                            setNewApiKey('');
                             setNewPublicKey('');
                             setNewFrom('');
                             newLookup.reset();

@@ -108,7 +108,7 @@ export const AirtableCard: React.FC = () => {
     const ac = new AbortController();
     pending.current = ac;
     try {
-      await connectAirtable(ac.signal);
+      if (!(await connectAirtable(ac.signal))) return;
       await load();
       toast.success(`${NAME} connected. Pick a base and table to start importing.`);
     } catch (e) {

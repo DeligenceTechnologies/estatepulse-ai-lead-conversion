@@ -18,7 +18,7 @@ import {
   type ProviderInfo,
 } from '../../api/client';
 import { CopyField } from './CopyField';
-import { CredentialField } from './CredentialField';
+import { connectProvider, disconnectConnection, type ProviderKey } from '../../utils/connectionsApi';
 import { FormPicker } from './FormPicker';
 import { TimezoneNotice } from '../common/TimezoneNotice';
 import { IconButton, Button } from '../common/Button';
@@ -146,7 +146,6 @@ export const ConnectFormPanel: React.FC<{
   const [step, setStep] = useState<Step>({ k: 'credential' });
   const [error, setError] = useState<PanelError | null>(null);
 
-  const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
 
   const [confirmForget, setConfirmForget] = useState(false);
@@ -155,9 +154,6 @@ export const ConnectFormPanel: React.FC<{
   const [loadingForms, setLoadingForms] = useState(false);
   const [selectedForm, setSelectedForm] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState('');
-
-  // The key must not outlive the component in React state.
-  useEffect(() => () => setApiKey(''), []);
 
   const loadForms = useCallback(async (connectionId: string) => {
     setLoadingForms(true);
@@ -196,11 +192,15 @@ export const ConnectFormPanel: React.FC<{
     })();
   }, [loadForms, providerCode]);
 
-  const submitKey = async () => {
-    if (!apiKey || busy) return;
+  /** The key goes into Nango Connect, never into this page; only the connection id comes back. */
+  const connectAccount = async () => {
+    if (busy) return;
     setBusy(true);
     try {
-      const conn = await providersApi.connect(providerCode, apiKey);
+      const linked = await connectProvider(providerCode.toLowerCase() as ProviderKey);
+      if (!linked) return;
+      const conn = (await providersApi.connections()).find((c) => c.id === linked.id);
+      if (!conn) return;
       setConnection(conn);
       setStep({ k: 'forms' });
       setError(null);
@@ -209,9 +209,6 @@ export const ConnectFormPanel: React.FC<{
     } catch (e) {
       setError(mapError(e));
     } finally {
-      // Cleared even on failure: a rejected key is wrong or revoked, and
-      // re-submitting the same string is never the fix.
-      setApiKey('');
       setBusy(false);
     }
   };
@@ -247,11 +244,10 @@ export const ConnectFormPanel: React.FC<{
     if (!connection || busy) return;
     setBusy(true);
     try {
-      await providersApi.disconnectAccount(connection.id, confirmForget);
+      await disconnectConnection(connection.id, confirmForget);
       setConnection(null);
       setForms(null);
       setConfirmForget(false);
-      setApiKey('');
       setError(null);
       setStep({ k: 'credential' });
       toast.success('Account disconnected.');
@@ -285,21 +281,18 @@ export const ConnectFormPanel: React.FC<{
       {step.k === 'credential' && (
         <div className="space-y-3">
           <TimezoneNotice tone="hint" />
-          <CredentialField
-            label={provider?.capabilities.credentialLabel ?? 'API key'}
-            value={apiKey}
-            onChange={setApiKey}
-            onSubmit={submitKey}
-            disabled={busy}
-          />
-          <div className="text-xs text-slate-500">{provider?.capabilities.credentialHint}</div>
+          <div className="text-xs text-slate-500">
+            {provider?.capabilities.credentialHint}
+            {provider?.capabilities.credentialHint ? ' ' : ''}
+            You enter your {provider?.capabilities.credentialLabel ?? 'API key'} in the secure window that opens next.
+          </div>
 
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 leading-relaxed flex gap-2">
             <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
               This key can read and change everything in that account — all forms and all
               submissions, not just the one you pick. We use it to list your forms and install one
-              webhook. It is encrypted at rest and never sent back to this browser. Disconnect here,
+              webhook. It is stored by our credential vault (Nango), never in this browser. Disconnect here,
               or delete the key with your provider, to revoke it.
             </span>
           </div>
@@ -308,7 +301,7 @@ export const ConnectFormPanel: React.FC<{
             <Button variant="ghost" onClick={onSetUpManually}>
               Rather not share a key? Set it up manually →
             </Button>
-            <Button onClick={submitKey} disabled={!apiKey} loading={busy}>
+            <Button onClick={connectAccount} loading={busy}>
               Connect
             </Button>
           </div>

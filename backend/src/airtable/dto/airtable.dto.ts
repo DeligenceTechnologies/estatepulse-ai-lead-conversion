@@ -18,22 +18,6 @@ const RECORD_ID = /^rec[A-Za-z0-9]{1,30}$/;
  * is ever put in a URL.
  */
 
-/** Airtable's code and state as the consent screen handed them back. */
-export class CompleteAirtableOAuthDto {
-  @IsString()
-  @Length(1, 2048)
-  code!: string;
-
-  /**
-   * The sealed state this session started the flow with. Airtable allows 16 to
-   * 1024 characters of [A-Za-z0-9._-], which is exactly what SecretBox emits.
-   */
-  @IsString()
-  @Length(16, 1024)
-  @Matches(/^[A-Za-z0-9._-]+$/, { message: 'state is not a valid Airtable OAuth state' })
-  state!: string;
-}
-
 /** Which base and table to sync, under which connection. */
 export class CreateAirtableSourceDto {
   @IsUUID()

@@ -25,18 +25,6 @@ import { MAPPING_TARGETS } from '../sheet-rows';
 
 export const SPREADSHEET_ID = /^[A-Za-z0-9_-]{20,128}$/;
 
-export class CompleteOAuthDto {
-  @IsString()
-  @MinLength(10)
-  @MaxLength(2048)
-  code!: string;
-
-  @IsString()
-  @MinLength(20)
-  @MaxLength(4096)
-  state!: string;
-}
-
 export class CreateSheetSourceDto {
   @IsUUID()
   connectionId!: string;

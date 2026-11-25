@@ -4,22 +4,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { SecretBoxService } from '@/common/service/secret-box.service';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
-import { PROVIDER_LABEL, type CalCredentials, type CalendlyCredentials } from '../calendar.types';
-import { CalendlyClient, type CalendlyGrant } from '../providers/calendly.client';
+import { ConnectionsService } from '@/connections/connections.service';
+import { NangoError } from '@/nango/nango.service';
+import { PROVIDER_LABEL } from '../calendar.types';
 import { ProviderHttpError } from '../providers/provider-http';
 import { SchedulingProvider } from '../providers/scheduling-provider';
 import { inUse } from './connection-state';
-
-const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
-/** The refresh holds a row lock across one Calendly call (15s timeout, never retried). */
-const REFRESH_LOCK_WAIT_MS = 10_000;
-const REFRESH_LOCK_TIMEOUT_MS = 30_000;
 
 export const CALENDAR_UNAVAILABLE = 'Calendar connections are not available yet. Please contact support.';
 
@@ -33,8 +27,8 @@ export const USAGE_FIELDS = {
   workspaceId: true,
   workspaceSlug: true,
   accountId: true,
-  credentials: true,
-  tokenExpiresAt: true,
+  integrationId: true,
+  integration: { select: { id: true, provider: true, nangoConnectionId: true } },
   lastError: true,
   webhookId: true,
   scope: true,
@@ -42,27 +36,31 @@ export const USAGE_FIELDS = {
 
 export type UsableConnection = Prisma.CalendarConnectionGetPayload<{ select: typeof USAGE_FIELDS }>;
 
+/** What a connection the provider stopped accepting says until it is reconnected. */
+export function rejectedMessage(provider: UsableConnection['provider']): string {
+  const label = PROVIDER_LABEL[provider];
+  return `${label} no longer accepts this connection. Reconnect ${label} to continue.`;
+}
+
 /** Someone reconnected while this request held the old credentials. */
 class CredentialsChanged extends Error {}
 
 /**
  * The one gate to a connection's credentials. Everything that calls Calendly
- * or Cal.com for an organization goes through here, so decrypting, refreshing
- * Calendly tokens and parking a connection the provider has stopped accepting
- * happen in exactly one place.
+ * or Cal.com for an organization goes through here, so reading credentials
+ * and parking a connection the provider has stopped accepting happen in
+ * exactly one place. The credential is the linked integration's, held by
+ * Nango (ConnectionsService): Calendly's OAuth grant or Cal.com's API key.
  */
 @Injectable()
 export class CalendarAccessService {
   private readonly logger = new Logger(CalendarAccessService.name);
-  /** In-flight Calendly refreshes per connection, so concurrent calls share one. */
-  private readonly refreshes = new Map<string, Promise<string>>();
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly secrets: SecretBoxService,
-    private readonly calendly: CalendlyClient,
     private readonly provider: SchedulingProvider,
     private readonly connectionAlerts: ConnectionAlertService,
+    private readonly connections: ConnectionsService,
   ) {}
 
   /**
@@ -107,36 +105,44 @@ export class CalendarAccessService {
   async removeWebhook(connection: UsableConnection): Promise<void> {
     if (!connection.webhookId || connection.status !== 'active') return;
     try {
-      const secret = await this.secretFor(connection);
+      const secret = await this.secretFor(connection, false);
       await this.provider.deleteWebhook(connection.provider, secret, connection.webhookId);
     } catch (error) {
       this.logger.warn(`${PROVIDER_LABEL[connection.provider]} webhook removal failed: ${(error as Error).message}`);
     }
   }
 
-  /** Best effort: revokes the Calendly grant stored in `sealed`, which we are about to forget. */
-  async revokeStoredCalendly(sealed: string): Promise<void> {
-    await this.revokeCalendly(this.unseal<CalendlyCredentials>(sealed)?.refreshToken);
-  }
-
-  /** Best effort: revokes a Calendly token we are about to forget. */
-  async revokeCalendly(token: string | undefined): Promise<void> {
-    if (!token || !this.calendly.configured) return;
-    try {
-      await this.calendly.revoke(token);
-    } catch (error) {
-      this.logger.warn(`Calendly token revocation failed: ${(error as Error).message}`);
+  /**
+   * Parks the connection the provider stopped accepting, so every screen shows
+   * "reconnect" instead of failing call after call. A saved (inactive) one
+   * keeps its status and only records the error. Matching on the integration
+   * and status read earlier keeps a reconnect or a switch that happened
+   * meanwhile from being overwritten. Returns the message to show.
+   */
+  async park(orgId: string, connection: Pick<UsableConnection, 'id' | 'provider' | 'status' | 'integrationId'>): Promise<{ parked: boolean; message: string }> {
+    const label = PROVIDER_LABEL[connection.provider];
+    const message = rejectedMessage(connection.provider);
+    const parked = await this.prisma.calendarConnection.updateMany({
+      where: {
+        id: connection.id,
+        orgId,
+        integrationId: connection.integrationId,
+        status: connection.status,
+      },
+      data: connection.status === 'active' ? { status: 'error', lastError: message } : { lastError: message },
+    });
+    // Only the connection in use breaking pauses anything; a saved one just records it.
+    if (parked.count > 0 && connection.status === 'active') {
+      this.connectionAlerts.connectionBroken({
+        orgId,
+        connectionId: connection.id,
+        providerLabel: label,
+        impact: 'Leads cannot book meetings, and availability and meetings are not syncing.',
+        reconnectPath: '/integrations',
+        brokenAt: new Date(),
+      });
     }
-  }
-
-  /** Decrypts a sealed JSON value; null when it cannot be read. */
-  unseal<T>(sealed: string): T | null {
-    if (!this.secrets.enabled) return null;
-    try {
-      return JSON.parse(this.secrets.open(sealed)) as T;
-    } catch {
-      return null;
-    }
+    return { parked: parked.count > 0, message };
   }
 
   private async withCredentials<T>(
@@ -145,112 +151,31 @@ export class CalendarAccessService {
     run: (secret: string) => Promise<T>,
   ): Promise<T> {
     try {
-      return await run(await this.secretFor(connection));
+      try {
+        return await run(await this.secretFor(connection, false));
+      } catch (error) {
+        // Calendly: the token may have been revoked early; ask Nango for a new one once.
+        if (!(connection.provider === 'calendly' && error instanceof ProviderHttpError && error.credentialRejected)) throw error;
+        return await run(await this.secretFor(connection, true));
+      }
     } catch (error) {
       if (!(error instanceof ProviderHttpError)) throw error;
       if (!error.credentialRejected) throw new BadGatewayException(error.message);
-
-      // The provider refused the credentials: park the connection so every
-      // screen shows "reconnect" instead of failing call after call. A saved
-      // (inactive) one keeps its status and only records the error. Matching
-      // on the old credentials and status keeps a reconnect or a switch that
-      // happened meanwhile from being overwritten.
-      const label = PROVIDER_LABEL[connection.provider];
-      const message = `${label} no longer accepts this connection. Reconnect ${label} to continue.`;
-      const parked = await this.prisma.calendarConnection.updateMany({
-        where: { id: connection.id, orgId, credentials: connection.credentials, status: connection.status },
-        data: connection.status === 'active' ? { status: 'error', lastError: message } : { lastError: message },
-      });
-      if (parked.count === 0) throw new CredentialsChanged(message);
-      // Only the connection in use breaking pauses anything; a saved one just records it.
-      if (connection.status === 'active') {
-        this.connectionAlerts.connectionBroken({
-          orgId,
-          connectionId: connection.id,
-          providerLabel: label,
-          impact: 'Leads cannot book meetings, and availability and meetings are not syncing.',
-          reconnectPath: '/settings?tab=calendar',
-          brokenAt: new Date(),
-        });
-      }
+      const { parked, message } = await this.park(orgId, connection);
+      if (!parked) throw new CredentialsChanged(message);
       throw new ConflictException(message);
     }
   }
 
-  private async secretFor(connection: UsableConnection): Promise<string> {
-    if (connection.provider === 'cal') {
-      return this.requireCredentials<CalCredentials>(connection.credentials).apiKey;
+  /** The provider credential, from Nango: Calendly's OAuth token or Cal.com's API key. */
+  private async secretFor(connection: UsableConnection, forceRefresh: boolean): Promise<string> {
+    const label = PROVIDER_LABEL[connection.provider];
+    try {
+      return await this.connections.credential(connection.integration, forceRefresh);
+    } catch (error) {
+      if (error instanceof NangoError && error.kind === 'REAUTH') throw new ProviderHttpError(label, 401, error.message);
+      if (error instanceof NangoError) throw new ProviderHttpError(label, error.kind === 'UNAVAILABLE' ? 503 : 500, error.message);
+      throw error;
     }
-
-    const credentials = this.requireCredentials<CalendlyCredentials>(connection.credentials);
-    const expiresAt = connection.tokenExpiresAt?.getTime() ?? 0;
-    if (expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
-      return credentials.accessToken;
-    }
-
-    let pending = this.refreshes.get(connection.id);
-    if (!pending) {
-      pending = this.refreshCalendly(connection, credentials.refreshToken).finally(() =>
-        this.refreshes.delete(connection.id),
-      );
-      this.refreshes.set(connection.id, pending);
-    }
-    return pending;
   }
-
-  /**
-   * Calendly refresh tokens are single-use, so two servers refreshing the same
-   * connection at once would leave one holding a dead token. The row lock makes
-   * every other server wait, then see the new credentials and retry with them.
-   */
-  private async refreshCalendly(connection: UsableConnection, refreshToken: string): Promise<string> {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const [row] = await tx.$queryRaw<{ credentials: string }[]>`
-          SELECT credentials FROM calendar_connections WHERE id = ${connection.id}::uuid FOR UPDATE`;
-        if (!row || row.credentials !== connection.credentials) {
-          throw new CredentialsChanged('The calendar connection changed. Try again.');
-        }
-
-        let grant: CalendlyGrant;
-        try {
-          grant = await this.calendly.refresh(refreshToken);
-        } catch (error) {
-          // Calendly answers a dead refresh token with 400; treat it as a rejected credential.
-          if (error instanceof ProviderHttpError && error.status === 400) {
-            throw new ProviderHttpError(error.provider, 401, error.message);
-          }
-          throw error;
-        }
-
-        const credentials: CalendlyCredentials = { accessToken: grant.accessToken, refreshToken: grant.refreshToken };
-        await tx.calendarConnection.updateMany({
-          where: { id: connection.id },
-          data: {
-            credentials: this.secrets.seal(JSON.stringify(credentials)),
-            tokenExpiresAt: grant.expiresAt,
-            ...(grant.scope ? { scope: grant.scope } : {}),
-          },
-        });
-        return grant.accessToken;
-      },
-      { maxWait: REFRESH_LOCK_WAIT_MS, timeout: REFRESH_LOCK_TIMEOUT_MS },
-    );
-  }
-
-  private requireCredentials<T>(sealed: string): T {
-    if (!this.secrets.enabled) {
-      throw new ServiceUnavailableException(CALENDAR_UNAVAILABLE);
-    }
-    const credentials = this.unseal<T>(sealed);
-    if (!credentials) {
-      throw new ConflictException('The stored calendar credentials cannot be read. Reconnect the calendar.');
-    }
-    return credentials;
-  }
-}
-
-/** Serializes connection changes per organization, so two connects cannot both end up active. */
-export async function lockOrganization(tx: Prisma.TransactionClient, orgId: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`;
 }

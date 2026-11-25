@@ -90,7 +90,7 @@ describe('@RequireFeature on existing routes', () => {
     expect(featureOf(FollowupController.prototype.create)).toBe(FEATURES.LEAD_AUTOMATION);
     expect(featureOf(FollowupController.prototype.replaceSteps)).toBe(FEATURES.LEAD_AUTOMATION);
     expect(featureOf(FollowupController.prototype.list)).toBeUndefined();
-    expect(featureOf(CalendarConnectionController.prototype.authorizeCalendly)).toBe(FEATURES.CALENDAR_INTEGRATION);
+    expect(featureOf(CalendarConnectionController.prototype.setCalWorkspace)).toBe(FEATURES.CALENDAR_INTEGRATION);
     expect(featureOf(CalendarConnectionController.prototype.status)).toBeUndefined();
   });
 

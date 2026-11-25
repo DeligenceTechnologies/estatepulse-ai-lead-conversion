@@ -9,7 +9,7 @@ describe('HubSpotClient.updateContact', () => {
       new Response(JSON.stringify({ id: '901', properties: { firstname: 'Ana', phone: '+14155550199', email: 'ana@example.test' } }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetch);
-    const client = new HubSpotClient({ get: () => undefined } as any);
+    const client = new HubSpotClient({ get: () => undefined } as any, { configured: true } as any);
 
     const contact = await client.updateContact('tok', '901', { phone: '+14155550199' });
 
@@ -20,9 +20,8 @@ describe('HubSpotClient.updateContact', () => {
     expect(contact).toMatchObject({ externalId: '901', phone: '+14155550199', email: 'ana@example.test' });
   });
 
-  it('asks for the write scope on new connections, without requiring it of old ones', () => {
-    const client = new HubSpotClient({ get: () => undefined } as any);
-    expect(client.scopes.split(' ')).toContain('crm.objects.contacts.write');
+  it('does not require the write scope of old connections', () => {
+    const client = new HubSpotClient({ get: () => undefined } as any, { configured: true } as any);
     expect(client.requiredScopes).not.toContain('crm.objects.contacts.write');
   });
 });

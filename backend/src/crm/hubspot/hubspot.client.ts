@@ -1,16 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NangoService } from '@/nango/nango.service';
 import { CRM_PROVIDER_LABELS, HUBSPOT_PROVIDER } from '../crm-records';
-import { CrmApiError, type CrmAccount, type CrmAdapter, type CrmChangedPage, type CrmContactPage, type CrmContactUpdate, type CrmTokens } from '../types';
+import { CrmApiError, type CrmAccount, type CrmAdapter, type CrmChangedPage, type CrmContactPage, type CrmContactUpdate } from '../types';
 import { HUBSPOT_CONTACT_PROPERTIES, modifiedAtMs, toCrmContact, type HubSpotObject } from './hubspot-contacts';
 
 /**
- * Everything that talks to HubSpot over HTTP.
+ * Everything that talks to HubSpot over HTTP, with an access token Nango
+ * issued (the "hubspot" integration owns consent and token refresh). The app's
+ * client id/secret are still read here, for token introspection and webhook
+ * signatures. Bare `fetch`, so the retries and error mapping stay ours.
  *
- * Bare `fetch`, like google.client.ts and calendly.client.ts: a handful of
- * endpoints does not justify an SDK that would own our token handling.
- *
- * Endpoints are HubSpot's date-versioned ones (`/oauth/2026-09/token`,
+ * Endpoints are HubSpot's date-versioned ones (`/oauth/2026-09/token/introspect`,
  * `/crm/objects/2026-09/contacts`), which HubSpot recommends for new
  * integrations; the v1 OAuth endpoints stop working on 2027-02-16. The version
  * is configuration (HUBSPOT_API_VERSION) so a move to the next one is a
@@ -24,9 +25,8 @@ import { HUBSPOT_CONTACT_PROPERTIES, modifiedAtMs, toCrmContact, type HubSpotObj
 
 /** Without this a connection cannot read a single contact. `oauth` is added to every app by HubSpot. */
 const REQUIRED_SCOPES = ['crm.objects.contacts.read'] as const;
-// Write is asked for, not required: a connection granted before it keeps syncing, and only an edit
-// from Import Review asks for a reconnect (see CrmRowEditService).
-const DEFAULT_SCOPES = 'oauth crm.objects.contacts.read crm.objects.contacts.write';
+// The "hubspot" integration in Nango should also request crm.objects.contacts.write (and oauth):
+// write is asked for, not required, so only an edit from Import Review asks for a reconnect.
 
 /** HubSpot's maximum page size for the list and batch-read endpoints. */
 export const PAGE_SIZE = 100;
@@ -46,16 +46,12 @@ export class HubSpotClient implements CrmAdapter {
   readonly provider = HUBSPOT_PROVIDER;
   readonly label = CRM_PROVIDER_LABELS[HUBSPOT_PROVIDER];
   readonly requiredScopes = REQUIRED_SCOPES;
+  readonly nangoIntegration = 'hubspot' as const;
 
-  constructor(private readonly config: ConfigService) {}
-
-  private get clientId(): string {
-    return this.config.get<string>('HUBSPOT_CLIENT_ID') ?? '';
-  }
-
-  private get clientSecret(): string {
-    return this.config.get<string>('HUBSPOT_CLIENT_SECRET') ?? '';
-  }
+  constructor(
+    private readonly config: ConfigService,
+    private readonly nango: NangoService,
+  ) {}
 
   private get api(): string {
     return (this.config.get<string>('HUBSPOT_API_BASE_URL') ?? 'https://api.hubapi.com').replace(/\/+$/, '');
@@ -70,69 +66,21 @@ export class HubSpotClient implements CrmAdapter {
     return Number(this.config.get('HUBSPOT_RETRY_BASE_MS') ?? 1000);
   }
 
-  /**
-   * A static page on the APP's origin, as for Google: it hands the code to the
-   * tab that started the flow, which completes it on its own session, so a code
-   * never reaches an API URL or access log. Must match the redirect URL in the
-   * HubSpot app's configuration exactly.
-   */
-  get redirectUri(): string {
-    const override = this.config.get<string>('HUBSPOT_REDIRECT_URI');
-    if (override) return override;
-    const app = this.config.get<string>('APP_URL') ?? 'http://localhost:3000';
-    return `${app.replace(/\/+$/, '')}/oauth/hubspot-callback.html`;
-  }
-
-  /**
-   * Space-separated. Must include every REQUIRED scope configured on the
-   * HubSpot app, or HubSpot's authorize page errors — so it is configuration,
-   * for apps whose owner added more.
-   */
-  get scopes(): string {
-    return (this.config.get<string>('HUBSPOT_SCOPES') ?? DEFAULT_SCOPES).trim().replace(/\s+/g, ' ');
-  }
-
-  /** The public URL registered as the app's webhook target; what HubSpot signs. */
-  get webhookUrl(): string {
-    const override = this.config.get<string>('HUBSPOT_WEBHOOK_URL');
-    if (override) return override;
-    const api = this.config.get<string>('PUBLIC_API_URL') ?? 'http://localhost:4000';
-    return `${api.replace(/\/+$/, '')}/ingest/v1/crm/hubspot/webhook`;
-  }
-
-  /** The secret webhook signatures are keyed with — HubSpot signs with the app's client secret. */
-  get webhookSecret(): string {
-    return this.clientSecret;
-  }
-
+  /** The app's id and secret live in Nango only; connecting needs nothing else here. */
   isConfigured(): boolean {
-    return Boolean(this.clientId && this.clientSecret);
-  }
-
-  authorizeUrl(state: string): string {
-    const auth = (this.config.get<string>('HUBSPOT_AUTH_BASE_URL') ?? 'https://app.hubspot.com').replace(/\/+$/, '');
-    const q = new URLSearchParams({ client_id: this.clientId, redirect_uri: this.redirectUri, scope: this.scopes, state });
-    return `${auth}/oauth/authorize?${q.toString()}`;
-  }
-
-  async exchangeCode(code: string): Promise<CrmTokens> {
-    return this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: this.redirectUri });
-  }
-
-  async refresh(refreshToken: string): Promise<CrmTokens> {
-    return this.tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+    return this.nango.configured;
   }
 
   /**
-   * Who the token belongs to, by introspection — a POST with the token in the
-   * body. (The legacy GET /oauth/v1/access-tokens/{token} put it in the path.)
+   * Who the token belongs to: HubSpot's access-token metadata, which needs no
+   * app credentials (the newer introspection endpoint wants the client secret,
+   * which only Nango holds). The token sits in the path of a request to
+   * HubSpot itself; it is never logged.
    */
   async identify(accessToken: string): Promise<CrmAccount> {
-    const res = await this.send(`${this.api}/oauth/${this.version}/token/introspect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: this.form({ client_id: this.clientId, client_secret: this.clientSecret, token: accessToken, token_type_hint: 'access_token' }),
-    });
+    const res = await this.send(`${this.api}/oauth/v1/access-tokens/${encodeURIComponent(accessToken)}`, { method: 'GET' });
+    // HubSpot answers 400/404 for a token it does not know.
+    if (res.status === 400 || res.status === 404) throw new CrmApiError('REAUTH', 'HubSpot did not recognise the access token', 401);
     if (!res.ok) throw await this.apiError(res);
     const body = (await res.json().catch(() => ({}))) as {
       active?: boolean;
@@ -150,17 +98,6 @@ export class HubSpotClient implements CrmAdapter {
       userEmail: typeof body.user === 'string' ? body.user.slice(0, 255) : null,
       scopes: Array.isArray(body.scopes) ? body.scopes.map(String) : [],
     };
-  }
-
-  async revoke(refreshToken: string): Promise<void> {
-    const res = await this.send(`${this.api}/oauth/${this.version}/token/revoke`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: this.form({ client_id: this.clientId, client_secret: this.clientSecret, token: refreshToken, token_type_hint: 'refresh_token' }),
-    });
-    // 400/401 here means it is already dead, which is what we wanted.
-    if (res.ok || res.status === 400 || res.status === 401) return;
-    throw await this.apiError(res);
   }
 
   /**
@@ -249,43 +186,6 @@ export class HubSpotClient implements CrmAdapter {
   }
 
   // -------------------------------------------------------------------------
-
-  private form(params: Record<string, string>): string {
-    return new URLSearchParams(params).toString();
-  }
-
-  private async tokenRequest(params: Record<string, string>): Promise<CrmTokens> {
-    const res = await this.send(`${this.api}/oauth/${this.version}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: this.form({ client_id: this.clientId, client_secret: this.clientSecret, ...params }),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      access_token?: string;
-      expires_in?: number;
-      refresh_token?: string;
-      scopes?: string[];
-      error?: string;
-      status?: string;
-    };
-    if (!res.ok || !body.access_token) {
-      const err = body.error ?? body.status ?? `http_${res.status}`;
-      // A dead refresh token, or an authorization code that is expired, used,
-      // or minted for another redirect. The caller knows which and words it.
-      if (err === 'invalid_grant' || body.status === 'BAD_REFRESH_TOKEN' || body.status === 'BAD_AUTH_CODE' || res.status === 401 || res.status === 403) {
-        throw new CrmApiError('REAUTH', `HubSpot rejected the grant (${String(err).slice(0, 60)})`, res.status);
-      }
-      if (res.status === 429) throw new CrmApiError('RATE_LIMITED', 'HubSpot rate limit on the token endpoint', 429, retryAfter(res));
-      if (res.status >= 500 || res.status === 0) throw new CrmApiError('UNAVAILABLE', 'HubSpot token endpoint unavailable', res.status);
-      throw new CrmApiError('BAD_REQUEST', `HubSpot token endpoint refused the request (${String(err).slice(0, 60)})`, res.status);
-    }
-    return {
-      accessToken: body.access_token,
-      expiresIn: Number(body.expires_in ?? 1800),
-      refreshToken: body.refresh_token ?? null,
-      scopes: Array.isArray(body.scopes) ? body.scopes.map(String) : null,
-    };
-  }
 
   private async json<T>(url: string, init: RequestInit): Promise<T> {
     const res = await this.send(url, init);

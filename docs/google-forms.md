@@ -239,9 +239,9 @@ mechanism, reused unchanged.
 | `FORMS_POLL_MS` | `60000` | How often the poller looks for due forms |
 | `FORMS_SYNC_INTERVAL_MS` | `900000` | How long after a poll a form is due again |
 
-The OAuth client, picker key and app id are the Google Sheets ones
-(`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`,
-`GOOGLE_APP_ID`) — there is nothing extra to register.
+The Google connection is the Google Sheets one: the "google" integration in
+Nango (`NANGO_SECRET_KEY`), plus the picker's `GOOGLE_CLIENT_ID`,
+`GOOGLE_PICKER_API_KEY` and `GOOGLE_APP_ID` — there is nothing extra to register.
 
 ## Troubleshooting: responses only appear after "Check now"
 

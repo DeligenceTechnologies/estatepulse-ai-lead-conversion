@@ -15,6 +15,12 @@ export interface MailEnv {
   AWS_SES_CONFIGURATION_SET?: string;
 }
 
+export interface NangoEnv {
+  NANGO_SECRET_KEY?: string;
+  NANGO_WEBHOOK_SIGNING_KEY?: string;
+  NANGO_HOST?: string;
+}
+
 export interface AppEnv {
   /** The frontend's address, for links in emails. */
   APP_URL?: string;
@@ -34,10 +40,6 @@ export interface AuthEnv {
 export interface IntegrationEnv {
   APP_URL?: string;
   INTEGRATION_ENCRYPTION_KEY?: string;
-  CALENDLY_CLIENT_ID?: string;
-  CALENDLY_CLIENT_SECRET?: string;
-  CALENDLY_REDIRECT_URI?: string;
-  CALENDLY_SCOPES?: string;
   CALENDAR_WEBHOOK_BASE_URL?: string;
   PUBLIC_API_URL?: string;
   ALLOW_INSECURE_INGEST_URL: boolean;
@@ -61,8 +63,6 @@ export interface IntegrationEnv {
   OUTREACH_POLL_MS: number;
   GOOGLE_SHEETS_ENABLED: boolean;
   GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  GOOGLE_REDIRECT_URI?: string;
   GOOGLE_PICKER_API_KEY?: string;
   GOOGLE_APP_ID?: string;
   SHEETS_SYNC: boolean;
@@ -77,24 +77,14 @@ export interface IntegrationEnv {
   FILE_IMPORT_MAX_BYTES: number;
   CUSTOM_WEBHOOK_ENABLED: boolean;
   HUBSPOT_ENABLED: boolean;
-  HUBSPOT_CLIENT_ID?: string;
-  HUBSPOT_CLIENT_SECRET?: string;
-  HUBSPOT_REDIRECT_URI?: string;
-  HUBSPOT_SCOPES?: string;
-  HUBSPOT_WEBHOOK_URL?: string;
   HUBSPOT_API_BASE_URL: string;
-  HUBSPOT_AUTH_BASE_URL: string;
   HUBSPOT_API_VERSION: string;
   HUBSPOT_RETRY_BASE_MS: number;
   CRM_POLL_MS: number;
   CRM_RECONCILE_INTERVAL_MS: number;
   AIRTABLE_ENABLED: boolean;
-  AIRTABLE_CLIENT_ID?: string;
-  AIRTABLE_CLIENT_SECRET?: string;
-  AIRTABLE_REDIRECT_URI?: string;
   AIRTABLE_SCOPES?: string;
   AIRTABLE_API_BASE_URL: string;
-  AIRTABLE_AUTH_BASE_URL: string;
   AIRTABLE_RETRY_BASE_MS: number;
   AIRTABLE_MIN_REQUEST_GAP_MS: number;
   AIRTABLE_POLL_MS: number;

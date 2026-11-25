@@ -52,7 +52,7 @@ const AppContent: React.FC = () => {
         {activeView === 'roles' && <RolesView />}
         {activeView === 'team_availability' && <CalendarView section="availability" />}
         {/* Meetings moved into Settings → Calendar; old links still land there. */}
-        {activeView === 'meetings' && <Navigate to="/settings?tab=calendar" replace />}
+        {activeView === 'meetings' && <Navigate to="/integrations?manage=calendly" replace />}
         {activeView === 'my_availability' && <AgentAvailability />}
         {activeView === 'integrations' && <IntegrationsView />}
         {activeView === 'lead_sources' && <LeadSourcesView />}

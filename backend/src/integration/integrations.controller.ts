@@ -1,10 +1,9 @@
-import { Body, Controller, Delete, Get, Param, ParseBoolPipe, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
-import { ConnectIntegrationDto } from './dto/connect-integration.dto';
 import { IntegrationsService } from './integrations.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ProviderApiError } from './providers/types';
@@ -22,11 +21,7 @@ export class IntegrationsController {
     return this.registry.list();
   }
 
-  @Post()
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  connect(@CurrentAuth() auth: AuthContext, @Body() body: ConnectIntegrationDto) {
-    return this.service.connect(auth.organizationId, body.provider ?? 'TALLY', body.apiKey, body.label);
-  }
+  // Connecting and disconnecting Tally/Typeform: /connections/:provider/* (ConnectionsController).
 
   @Get()
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
@@ -38,16 +33,6 @@ export class IntegrationsController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   verify(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.verify(auth.organizationId, id);
-  }
-
-  @Delete(':id')
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  revoke(
-    @CurrentAuth() auth: AuthContext,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query('force', new ParseBoolPipe({ optional: true })) force?: boolean,
-  ) {
-    return this.service.revoke(auth.organizationId, id, force ?? false);
   }
 
   @Get(':id/forms')

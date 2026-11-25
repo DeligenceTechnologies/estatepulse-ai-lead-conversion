@@ -1,4 +1,5 @@
 import { ApiError, apiFetch } from '../lib/api';
+import { connectProvider, connectionsOf, disconnectConnection, legacyStatus, type ConnectionView } from './connectionsApi';
 import type { OutreachChoice, OutreachSummary } from './outreachApi';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -49,10 +50,6 @@ export interface SpreadsheetInspection {
 }
 
 const BASE = '/integrations/google-sheets';
-const SOURCE = 'estatepulse:google-oauth';
-const CHANNEL = 'estatepulse:google-oauth';
-/** A consent screen left open longer than the server's state lifetime is dead anyway. */
-const CALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 export const getGoogleSheetsConfig = (): Promise<GoogleSheetsConfig> =>
   apiFetch<GoogleSheetsConfig>(`${BASE}/config`, { auth: true });
@@ -66,11 +63,18 @@ export const googleSheetsEnabled = (): Promise<boolean> =>
     (e) => !isSheetsDisabled(e),
   );
 
-export const listGoogleConnections = (): Promise<GoogleConnection[]> =>
-  apiFetch<{ connections: GoogleConnection[] }>(`${BASE}/connections`, { auth: true }).then((r) => r.connections);
+const toGoogleConnection = (c: ConnectionView): GoogleConnection => ({
+  id: c.id,
+  accountEmail: c.accountEmail,
+  status: legacyStatus(c.state),
+  lastVerifiedAt: c.lastVerifiedAt,
+  lastErrorCode: c.errorCode,
+  connectedAt: c.connectedAt,
+});
 
-export const disconnectGoogle = (id: string): Promise<void> =>
-  apiFetch<void>(`${BASE}/connections/${id}`, { method: 'DELETE', auth: true });
+export const listGoogleConnections = (): Promise<GoogleConnection[]> => connectionsOf('google').then((rows) => rows.map(toGoogleConnection));
+
+export const disconnectGoogle = (id: string): Promise<void> => disconnectConnection(id);
 
 export const inspectSpreadsheet = (connectionId: string, spreadsheetId: string): Promise<SpreadsheetInspection> =>
   apiFetch<SpreadsheetInspection>(
@@ -354,77 +358,12 @@ export const resolveChanges = (rowIds: string[], action: 'apply' | 'keep'): Prom
   });
 
 /**
- * Run Google's consent screen and finish the connection on THIS session.
- *
- * Call it straight from a click: the window is opened before the first await,
- * which is what keeps popup blockers out of the way.
+ * Connect Google through Nango Connect (see connectionsApi). Resolves null when
+ * the window was closed without connecting. Call it straight from a click.
  */
-export async function connectGoogle(signal?: AbortSignal): Promise<GoogleConnection> {
-  const popup = window.open('', 'estatepulse-google-oauth', 'width=520,height=720');
-  if (!popup) throw new Error('Your browser blocked the Google window. Allow pop-ups for this site and try again.');
-
-  let start: { authorizeUrl: string; state: string };
-  try {
-    start = await apiFetch<{ authorizeUrl: string; state: string }>(`${BASE}/oauth/start`, { method: 'POST', auth: true });
-  } catch (e) {
-    popup.close();
-    throw e;
-  }
-  popup.location.href = start.authorizeUrl;
-
-  const result = await waitForCallback(start.state, signal);
-  if (result.error) {
-    throw new Error(result.error === 'access_denied' ? 'Google access was not granted.' : `Google returned an error: ${result.error}`);
-  }
-  if (!result.code) throw new Error('Google did not return an authorization code. Try again.');
-
-  return apiFetch<GoogleConnection>(`${BASE}/oauth/complete`, {
-    method: 'POST',
-    auth: true,
-    body: { code: result.code, state: result.state },
-  });
-}
-
-function waitForCallback(
-  state: string,
-  signal?: AbortSignal,
-): Promise<{ code: string | null; state: string; error: string | null }> {
-  return new Promise((resolve, reject) => {
-    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL) : null;
-    let settled = false;
-
-    const finish = (settle: () => void) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', onMessage);
-      channel?.close();
-      clearTimeout(timer);
-      settle();
-    };
-
-    const accept = (data: unknown) => {
-      const d = data as { source?: string; code?: string | null; state?: string | null; error?: string | null } | null;
-      // Only the authorization this tab started. Another tab's flow, or one an
-      // attacker began, carries a different state and is ignored.
-      if (d?.source !== SOURCE || d.state !== state) return;
-      finish(() => resolve({ code: d.code ?? null, state, error: d.error ?? null }));
-    };
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin === window.location.origin) accept(e.data);
-    };
-
-    window.addEventListener('message', onMessage);
-    if (channel) channel.onmessage = (e) => accept(e.data);
-
-    // ponytail: no popup.closed polling. Google's pages can sever the opener,
-    // after which `closed` reads true while the owner is still consenting. The
-    // caller's Cancel and this timeout end an abandoned attempt instead.
-    const timer = setTimeout(
-      () => finish(() => reject(new Error('Timed out waiting for Google. Try again.'))),
-      CALLBACK_TIMEOUT_MS,
-    );
-    signal?.addEventListener('abort', () => finish(() => reject(new DOMException('Cancelled', 'AbortError'))));
-  });
+export async function connectGoogle(signal?: AbortSignal, reconnectId?: string): Promise<GoogleConnection | null> {
+  const connection = await connectProvider('google', { signal, reconnectId });
+  return connection ? toGoogleConnection(connection) : null;
 }
 
 // --- the Google Picker ---------------------------------------------------------

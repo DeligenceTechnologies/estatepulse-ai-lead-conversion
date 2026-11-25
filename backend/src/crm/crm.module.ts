@@ -5,14 +5,13 @@ import { CrmController } from './crm.controller';
 import { CrmRegistry } from './crm-registry';
 import { CrmRowEditService } from './crm-row-edit.service';
 import { CrmSyncService } from './crm-sync.service';
-import { CrmWebhooksController } from './crm-webhooks.controller';
 import { CrmWebhooksService } from './crm-webhooks.service';
 import { HubSpotClient } from './hubspot/hubspot.client';
 
 /** CRM integrations (HubSpot today), importing through the Google Sheets engine and its review queue. */
 @Module({
   imports: [GoogleSheetsModule],
-  controllers: [CrmController, CrmWebhooksController],
+  controllers: [CrmController],
   providers: [HubSpotClient, CrmRegistry, CrmConnectionsService, CrmSyncService, CrmWebhooksService, CrmRowEditService],
 })
 export class CrmModule {}

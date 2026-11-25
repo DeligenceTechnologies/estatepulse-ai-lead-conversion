@@ -7,7 +7,6 @@ import { PERMISSIONS } from '@/role/permissions';
 import {
   ApproveRowsDto,
   ChangesQueryDto,
-  CompleteOAuthDto,
   CreateSheetSourceDto,
   EditSheetRowDto,
   EnableSheetDto,
@@ -43,32 +42,7 @@ export class GoogleSheetsController {
     return this.connections.publicConfig();
   }
 
-  @Post('oauth/start')
-  @HttpCode(200)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  start(@CurrentAuth() auth: AuthContext) {
-    return this.connections.start(identity(auth));
-  }
-
-  @Post('oauth/complete')
-  @HttpCode(200)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  complete(@CurrentAuth() auth: AuthContext, @Body() body: CompleteOAuthDto) {
-    return this.connections.complete(identity(auth), body.code, body.state);
-  }
-
-  @Get('connections')
-  @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
-  async list(@CurrentAuth() auth: AuthContext) {
-    return { connections: await this.connections.list(auth.organizationId) };
-  }
-
-  @Delete('connections/:id')
-  @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  async disconnect(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
-    await this.connections.disconnect(identity(auth), id);
-  }
+  // Connecting and disconnecting Google: /connections/google/* (ConnectionsController).
 
   @Get('connections/:id/spreadsheets/:spreadsheetId')
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)

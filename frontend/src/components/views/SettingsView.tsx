@@ -1,15 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
-  CalendarDays,
   Clock,
   Globe,
   Loader2,
   LocateFixed,
   Mail,
   Palette,
-  PhoneCall,
   RotateCcw,
   Save,
   Settings2,
@@ -36,19 +34,15 @@ import {
   type WorkingDay,
 } from '../../utils/workingHours';
 import { TimezoneSelect } from '../common/TimezoneSelect';
-import { ConnectCalendar } from '../calendar/connect/ConnectCalendar';
-import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
 import { Button } from '../common/Button';
 import { AppearanceSettings } from '../settings/AppearanceSettings';
 import { BillingSettings } from '../billing/BillingSettings';
 
-type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'billing' | 'appearance';
+type SettingsTab = 'general' | 'billing' | 'appearance';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
-  { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com, and booked meetings', icon: CalendarDays },
-  { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
   { id: 'billing', label: 'Billing', hint: 'Plan, usage & invoices', icon: CreditCard },
   { id: 'appearance', label: 'Appearance', hint: 'Theme, brand colour & buttons', icon: Palette },
 ];
@@ -503,9 +497,10 @@ const GeneralSettings: React.FC = () => {
 
 /**
  * Settings: everything about how the organization runs, in one place, one
- * section at a time — General (timezone, business hours), Calendar (Calendly
- * or Cal.com) and Telnyx (calling). The open section is in the URL
- * (?tab=telnyx) so it can be linked to and survives a reload.
+ * section at a time — General (timezone, business hours), Billing and
+ * Appearance. The open section is in the URL (?tab=billing) so it can be
+ * linked to and survives a reload. Telnyx and the calendar are accounts and
+ * live on Connections; their old links are sent there.
  */
 export const SettingsView: React.FC = () => {
   const [params, setParams] = useSearchParams();
@@ -513,6 +508,9 @@ export const SettingsView: React.FC = () => {
   // Billing only for those who may see it (the server checks billing.read itself).
   const tabs = TABS.filter((t) => t.id !== 'billing' || can('billing.read'));
   const requested = params.get('tab');
+  if (requested === 'telnyx' || requested === 'calendar') {
+    return <Navigate to={`/integrations?manage=${requested === 'telnyx' ? 'telnyx' : 'calendly'}`} replace />;
+  }
   const tab: SettingsTab = isTab(requested) && tabs.some((t) => t.id === requested) ? requested : 'general';
   const current = tabs.find((t) => t.id === tab) ?? tabs[0];
 
@@ -524,7 +522,7 @@ export const SettingsView: React.FC = () => {
     <div className="p-4 sm:p-6 max-w-6xl mx-auto text-slate-100">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-white tracking-tight">Settings</h2>
-        <p className="text-xs text-slate-400">Your organization’s timezone, business hours, calling and calendar.</p>
+        <p className="text-xs text-slate-400">Your organization’s timezone, business hours, billing and appearance.</p>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
@@ -572,14 +570,6 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {tab === 'general' && <GeneralSettings />}
-
-          {tab === 'telnyx' && (
-            <div className="grid grid-cols-1 gap-5">
-              <TelnyxCard />
-            </div>
-          )}
-
-          {tab === 'calendar' && <ConnectCalendar />}
 
           {tab === 'billing' && <BillingSettings />}
 

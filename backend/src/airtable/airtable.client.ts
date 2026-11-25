@@ -9,30 +9,24 @@ import {
   type AirtableField,
   type AirtableRecord,
   type AirtableTable,
-  type AirtableTokens,
   type AirtableWebhookPayload,
 } from './types';
 
 /**
- * Everything that talks to Airtable over HTTP.
- *
- * Bare `fetch`, like google.client.ts and hubspot.client.ts: a handful of
- * endpoints does not justify an SDK that would own our token handling.
+ * Everything that talks to Airtable's API, with an access token Nango issued
+ * (the "airtable" integration owns the OAuth flow and the rotating refresh
+ * token). Bare `fetch`, like google.client.ts and hubspot.client.ts, so the
+ * pacing, retries and error classification below stay ours.
  *
  * Endpoints and limits verified against the Web API documentation on
  * 2026-11-13:
- *  - authorize  GET  https://airtable.com/oauth2/v1/authorize
- *  - token      POST https://airtable.com/oauth2/v1/token
  *  - whoami     GET  https://api.airtable.com/v0/meta/whoami
  *  - rate limit 5 requests/second/base, 429 then "wait 30 seconds"
  *
- * Airtable documents NO token revocation endpoint, so disconnect forgets the
- * grant locally and lets the refresh token lapse (60 days unused). The owner
- * can also remove the integration from their Airtable account settings.
+ * Airtable documents NO token revocation endpoint, so disconnect deletes the
+ * Nango connection and the grant lapses (60 days unused). The owner can also
+ * remove the integration from their Airtable account settings.
  */
-
-const AUTHORIZE_PATH = '/oauth2/v1/authorize';
-const TOKEN_PATH = '/oauth2/v1/token';
 
 /** In-request retries for a transient failure; anything longer is the sync's backoff. */
 const MAX_ATTEMPTS = 3;
@@ -62,22 +56,9 @@ const PAYLOAD_LIMIT = 50;
 export class AirtableClient {
   constructor(private readonly config: ConfigService) {}
 
-  private get clientId(): string {
-    return this.config.get<string>('AIRTABLE_CLIENT_ID') ?? '';
-  }
-
-  private get clientSecret(): string {
-    return this.config.get<string>('AIRTABLE_CLIENT_SECRET') ?? '';
-  }
-
   /** Where the REST and metadata APIs live. */
   get api(): string {
     return (this.config.get<string>('AIRTABLE_API_BASE_URL') ?? 'https://api.airtable.com').replace(/\/+$/, '');
-  }
-
-  /** Where the consent screen and the token endpoint live — a different host from the API. */
-  private get authBase(): string {
-    return (this.config.get<string>('AIRTABLE_AUTH_BASE_URL') ?? 'https://airtable.com').replace(/\/+$/, '');
   }
 
   /** Base delay for in-request retries. Configurable only so tests do not sleep. */
@@ -91,23 +72,7 @@ export class AirtableClient {
   }
 
   /**
-   * A static page on the APP's origin, as for Google and HubSpot: it hands the
-   * code to the tab that started the flow, which completes it on its own
-   * session, so a code never reaches an API URL or an access log.
-   *
-   * Airtable requires HTTPS here, with the single exception of localhost, and
-   * allows no wildcards or fragments. Must match the integration's registered
-   * redirect URL exactly.
-   */
-  get redirectUri(): string {
-    const override = this.config.get<string>('AIRTABLE_REDIRECT_URI');
-    if (override) return override;
-    const app = this.config.get<string>('APP_URL') ?? 'http://localhost:3000';
-    return `${app.replace(/\/+$/, '')}/oauth/airtable-callback.html`;
-  }
-
-  /**
-   * Space-separated, as Airtable's authorize endpoint requires. Configuration,
+   * Space-separated: what the "airtable" integration in Nango requests. Configuration,
    * so a deployment can request LESS — narrowing it to drop
    * `schema.bases:write` is the supported way to run without column creation.
    * Every scope asked for here must also be enabled on the Airtable
@@ -122,46 +87,10 @@ export class AirtableClient {
     return this.scopes.split(' ').filter(Boolean);
   }
 
-  isConfigured(): boolean {
-    return Boolean(this.clientId && this.clientSecret);
-  }
-
   /** Every scope the integration cannot work without is actually being asked for. */
   missingRequiredRequests(): string[] {
     const asked = new Set(this.requestedScopes);
     return REQUIRED_SCOPES.filter((s) => !asked.has(s));
-  }
-
-  /**
-   * PKCE is not optional here: Airtable rejects an exchange whose
-   * code_challenge_method was not `S256`. The challenge comes from the sealed
-   * state's verifier, so the code can only be redeemed by the session that
-   * started the flow.
-   */
-  authorizeUrl(state: string, codeChallenge: string): string {
-    const q = new URLSearchParams({
-      client_id: this.clientId,
-      redirect_uri: this.redirectUri,
-      response_type: 'code',
-      scope: this.scopes,
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-    });
-    return `${this.authBase}${AUTHORIZE_PATH}?${q.toString()}`;
-  }
-
-  exchangeCode(code: string, codeVerifier: string): Promise<AirtableTokens> {
-    return this.tokenRequest({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: this.redirectUri,
-      code_verifier: codeVerifier,
-    });
-  }
-
-  refresh(refreshToken: string): Promise<AirtableTokens> {
-    return this.tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
   }
 
   /**
@@ -410,41 +339,6 @@ export class AirtableClient {
     });
   }
 
-  private async tokenRequest(fields: Record<string, string>): Promise<AirtableTokens> {
-    // HTTP Basic credentials: the STANDARD base64 of "{client_id}:{client_secret}",
-    // padding and all, as RFC 7617 defines Basic auth. NOT base64url — that strips
-    // the '=' padding and rewrites '+' and '/', which a strict decoder reads as a
-    // different secret and answers invalid_client. Airtable requires the header
-    // whenever the integration has a secret (sending one without a secret is
-    // invalid_client too).
-    const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`, 'utf8').toString('base64');
-    const res = await this.send(`${this.authBase}${TOKEN_PATH}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({ client_id: this.clientId, ...fields }).toString(),
-    });
-    if (!res.ok) throw await this.oauthError(res);
-
-    const body = (await res.json().catch(() => ({}))) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-      refresh_expires_in?: number;
-      scope?: string;
-    };
-    if (!body.access_token) throw new AirtableApiError('REAUTH', 'Airtable returned no access token', 502);
-    return {
-      accessToken: body.access_token,
-      expiresIn: Number.isFinite(body.expires_in) ? Number(body.expires_in) : 3600,
-      refreshToken: body.refresh_token ?? null,
-      refreshExpiresIn: Number.isFinite(body.refresh_expires_in) ? Number(body.refresh_expires_in) : null,
-      scopes: typeof body.scope === 'string' ? body.scope.split(' ').filter(Boolean) : null,
-    };
-  }
-
   private async json<T>(url: string, init: RequestInit): Promise<T> {
     const res = await this.send(url, init);
     if (!res.ok) throw await this.apiError(res);
@@ -491,24 +385,6 @@ export class AirtableClient {
       if (wait > MAX_INLINE_WAIT_MS) return res;
       await sleep(wait);
     }
-  }
-
-  /** The OAuth endpoints answer with `error` / `error_description`, not Airtable's API envelope. */
-  private async oauthError(res: Response): Promise<AirtableApiError> {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; error_description?: string };
-    const code = body.error ?? `HTTP ${res.status}`;
-    const message = `${code}${body.error_description ? `: ${body.error_description}` : ''}`.slice(0, 300);
-    // A refresh that lost a race against another instance: the token we hold is
-    // stale, not dead. The caller re-reads the row and uses the newer one.
-    if (res.status === 409) return new AirtableApiError('CONFLICT', message, 409);
-    if (res.status === 429) return new AirtableApiError('RATE_LIMITED', message, 429, retryAfter(res) ?? RATE_LIMIT_BACKOFF_MS);
-    if (res.status >= 500) return new AirtableApiError('UNAVAILABLE', message, res.status, retryAfter(res));
-    // invalid_grant / invalid_client on a refresh means the grant is gone: the
-    // 60-day window lapsed, or the user removed the integration.
-    if (body.error === 'invalid_grant' || body.error === 'invalid_client' || res.status === 401) {
-      return new AirtableApiError('REAUTH', message, res.status);
-    }
-    return new AirtableApiError('BAD_REQUEST', message, res.status);
   }
 
   private async apiError(res: Response): Promise<AirtableApiError> {

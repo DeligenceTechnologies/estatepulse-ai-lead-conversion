@@ -2,13 +2,13 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Pu
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AirtableEnabledGuard } from '@/google-sheets/import-enabled.guard';
+import { NangoService } from '@/nango/nango.service';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AirtableClient } from './airtable.client';
 import { AirtableConnectionsService, type SessionIdentity } from './airtable-connections.service';
 import { AirtableSourcesService } from './airtable-sources.service';
 import {
-  CompleteAirtableOAuthDto,
   CreateAirtableFieldDto,
   CreateAirtableSourceDto,
   ImportAirtableDto,
@@ -26,12 +26,9 @@ const identity = (auth: AuthContext): SessionIdentity => ({
  * Connecting an Airtable account: `/integrations/airtable/...`.
  *
  * The organization, user and session are never parameters: they come from the
- * authenticated session, which is also what an OAuth state is checked against.
- *
- * There is no OAuth callback route here. Airtable redirects to a static page on
- * the app's own origin, which passes the code to the tab that started the flow,
- * and that tab POSTs it to oauth/complete on its own session — so an
- * authorization code never reaches an API URL or an access log.
+ * authenticated session. The consent screen runs in Nango Connect; the browser
+ * reports the connection id Nango assigned, and the server checks with Nango
+ * that it was created for this organization before linking it.
  *
  * Switched off (AIRTABLE_ENABLED unset), every route answers 404, so the UI
  * hides the card and nothing about the integration leaks.
@@ -43,6 +40,7 @@ export class AirtableController {
     private readonly connections: AirtableConnectionsService,
     private readonly sources: AirtableSourcesService,
     private readonly client: AirtableClient,
+    private readonly nango: NangoService,
   ) {}
 
   /** Whether this server can run the flow at all, and which permissions it will ask for. */
@@ -52,7 +50,7 @@ export class AirtableController {
     return {
       provider: 'airtable',
       displayName: 'Airtable',
-      configured: this.client.isConfigured(),
+      configured: this.nango.configured,
       requestedScopes: this.client.requestedScopes,
     };
   }
@@ -64,31 +62,7 @@ export class AirtableController {
     return { connections: await this.connections.list(auth.organizationId) };
   }
 
-  @Post('oauth/start')
-  @HttpCode(200)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  start(@CurrentAuth() auth: AuthContext) {
-    return this.connections.start(identity(auth));
-  }
-
-  @Post('oauth/complete')
-  @HttpCode(200)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  complete(@CurrentAuth() auth: AuthContext, @Body() body: CompleteAirtableOAuthDto) {
-    return this.connections.complete(identity(auth), body.code, body.state);
-  }
-
-  /** Stop using the grant and forget it. Imported leads are kept. */
-  @Delete('connections/:id')
-  @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  async disconnect(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    // First, while the grant still works. Once it is forgotten Airtable cannot
-    // be asked to stop, and a live notification target would sit in the owner's
-    // base pointing at us for the rest of its seven days.
-    await this.sources.releaseWebhooks(auth.organizationId, id);
-    await this.connections.disconnect(identity(auth), id);
-  }
+  // Connecting and disconnecting Airtable: /connections/airtable/* (ConnectionsController).
 
   // ---------------------------------------------------------------------------
   // Bases, tables and the sources built from them

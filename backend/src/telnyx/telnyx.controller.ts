@@ -30,8 +30,8 @@ export class TelnyxController {
   @Put('credentials')
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async saveCredentials(@CurrentAuth() auth: AuthContext, @Body() body: TelnyxCredentialsDto) {
-    const current = await this.creds.getCreds(auth.organizationId);
-    await this.creds.saveCreds(auth.organizationId, await this.validated(body, current));
+    const current = body.accountId ? await this.creds.accountCreds(auth.organizationId, body.accountId) : await this.creds.getCreds(auth.organizationId);
+    await this.creds.saveCreds(auth.organizationId, await this.validated(body, current), body.accountId);
     void this.capacity.pushToTelnyx(auth.organizationId);
     return this.creds.publicStatus(auth.organizationId);
   }
@@ -40,15 +40,6 @@ export class TelnyxController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
   async listAccounts(@CurrentAuth() auth: AuthContext) {
     return { accounts: await this.creds.listAccounts(auth.organizationId) };
-  }
-
-  @Post('accounts')
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  async addAccount(@CurrentAuth() auth: AuthContext, @Body() body: TelnyxCredentialsDto) {
-    if (!body.apiKey) throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required to add an account.');
-    await this.creds.createAccount(auth.organizationId, await this.validated(body, null));
-    void this.capacity.pushToTelnyx(auth.organizationId);
-    return this.creds.publicStatus(auth.organizationId);
   }
 
   @Post('accounts/:id/activate')
@@ -65,13 +56,6 @@ export class TelnyxController {
   async renameAccount(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: RenameAccountDto) {
     await this.creds.renameAccount(auth.organizationId, id, body.label);
     return { accounts: await this.creds.listAccounts(auth.organizationId) };
-  }
-
-  @Delete('accounts/:id')
-  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
-  async deleteAccount(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
-    await this.creds.deleteAccount(auth.organizationId, id);
-    return this.creds.publicStatus(auth.organizationId);
   }
 
   @Delete('credentials')
@@ -151,15 +135,14 @@ export class TelnyxController {
 
   /**
    * Verify a key and list the numbers it owns, so the From Number can be picked
-   * rather than typed. With no key in the body the stored one is used.
+   * rather than typed. Without an account, the one in use.
    */
   @Post('numbers/lookup')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
   async lookup(@CurrentAuth() auth: AuthContext, @Body() body: NumbersLookupDto) {
-    const apiKey = body.apiKey?.trim();
-    if (!apiKey) return { numbers: await this.numbers.listOwned(auth.organizationId) };
-    return { numbers: await this.numbers.listOwnedForKey(apiKey) };
+    if (!body.accountId) return { numbers: await this.numbers.listOwned(auth.organizationId) };
+    return { numbers: await this.numbers.listOwnedForKey(await this.creds.keyFor(auth.organizationId, body.accountId)) };
   }
 
   @Post('numbers/buy')
@@ -186,8 +169,10 @@ export class TelnyxController {
 
   /** Checks what calls need before saving: a key, the webhook public key, an E.164 from-number and a Call Control application. */
   private async validated(body: TelnyxCredentialsDto, current: TelnyxCreds | null): Promise<Partial<TelnyxCreds>> {
-    const apiKey = body.apiKey || current?.apiKey || '';
-    if (!apiKey) throw new AppError('VALIDATION_ERROR', 'A Telnyx API key is required.');
+    const apiKey = current?.apiKey || '';
+    if (!apiKey) {
+      throw new AppError('VALIDATION_ERROR', current ? 'The Telnyx API key for this account can no longer be read. Reconnect it.' : 'Connect a Telnyx API key first.');
+    }
     // Without it every webhook that account sends is unverifiable, and unverified events are dropped.
     const publicKey = body.publicKey || current?.publicKey || '';
     if (!publicKey) {
@@ -216,7 +201,6 @@ export class TelnyxController {
       connectionId,
       fromNumber,
       messagingProfileId: body.messagingProfileId || (await this.creds.findMessagingProfile(apiKey, fromNumber)),
-      ...(body.apiKey ? { apiKey: body.apiKey } : {}),
       publicKey,
       ...(body.label !== undefined ? { label: body.label } : {}),
     };

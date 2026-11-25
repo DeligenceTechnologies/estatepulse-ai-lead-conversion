@@ -1,3 +1,4 @@
+import type { NangoIntegration } from '@/nango/nango.constants';
 import type { CrmContact, CrmProviderLabel } from './crm-records';
 
 /**
@@ -45,16 +46,6 @@ export class CrmApiError extends Error {
   }
 }
 
-export interface CrmTokens {
-  accessToken: string;
-  /** Seconds. */
-  expiresIn: number;
-  /** Always returned by HubSpot; it may differ from the one presented (rotation), so the latest is kept. */
-  refreshToken: string | null;
-  /** Granted scopes, when the provider says. */
-  scopes: string[] | null;
-}
-
 export interface CrmAccount {
   /** The CRM account (HubSpot: hub/portal id). */
   externalAccountId: string;
@@ -88,13 +79,12 @@ export interface CrmAdapter {
   /** Scopes the connection cannot work without; a grant missing any is refused. */
   readonly requiredScopes: readonly string[];
 
+  /** The Nango integration holding this CRM's OAuth grants. */
+  readonly nangoIntegration: NangoIntegration;
+
+  /** Whether it can be connected on this server (Nango is configured). */
   isConfigured(): boolean;
-  authorizeUrl(state: string): string;
-  exchangeCode(code: string): Promise<CrmTokens>;
-  refresh(refreshToken: string): Promise<CrmTokens>;
   identify(accessToken: string): Promise<CrmAccount>;
-  /** Best effort is the caller's call; this throws on failure. */
-  revoke(refreshToken: string): Promise<void>;
   /** Remove the app from the CRM account entirely, so it stops sending webhooks. */
   uninstall(accessToken: string): Promise<void>;
 

@@ -119,7 +119,7 @@ export const AISettingsView: React.FC = () => {
   const { orgSettings, updateOrgSettings } = useApp();
   const navigate = useNavigate();
   /** The Telnyx connection lives in Settings → Telnyx. */
-  const openTelnyxSettings = () => navigate({ pathname: pathForView('settings'), search: '?tab=telnyx' });
+  const openTelnyxSettings = () => navigate({ pathname: pathForView('integrations'), search: '?manage=telnyx' });
 
   const [aiName, setAiName] = useState(orgSettings.aiAgentName);
   const [tone, setTone] = useState(orgSettings.aiTone);

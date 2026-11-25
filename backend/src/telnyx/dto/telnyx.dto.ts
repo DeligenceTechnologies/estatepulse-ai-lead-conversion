@@ -28,11 +28,10 @@ import { VOICEMAIL_MAX_CHARS } from '../voicemail/voicemail';
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 export class TelnyxCredentialsDto {
+  /** Which connected account to set up; the one in use when omitted. Keys are connected through /connections/telnyx. */
   @IsOptional()
-  @Transform(trim)
-  @Matches(/^KEY/, { message: 'A valid Telnyx API key (starts with "KEY") is required.' })
-  @MaxLength(500)
-  apiKey?: string;
+  @IsUUID()
+  accountId?: string;
 
   /** The account's Ed25519 webhook key as the Telnyx portal shows it: 32 raw bytes, base64. */
   @IsOptional()
@@ -65,14 +64,11 @@ export class TelnyxCredentialsDto {
   label?: string;
 }
 
-/** POST /telnyx/numbers/lookup: a key to verify, or none to use the stored one. */
+/** POST /telnyx/numbers/lookup: the numbers on one connected account, or on the one in use. */
 export class NumbersLookupDto {
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
-  @IsString()
-  @Matches(/^KEY/, { message: 'A valid Telnyx API key (starts with "KEY") is required.' })
-  @MaxLength(500)
-  apiKey?: string;
+  @IsUUID()
+  accountId?: string;
 }
 
 export class RenameAccountDto {

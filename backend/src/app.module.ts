@@ -29,6 +29,8 @@ import { DailySummaryModule } from './daily-summary/daily-summary.module';
 import { BillingModule } from './billing/billing.module';
 import { HealthController } from './health.controller';
 import {QueueModule} from "@/queue/queue.module";
+import { NangoModule } from '@/nango/nango.module';
+import { ConnectionsModule } from '@/connections/connections.module';
 
 @Module({
   imports: [
@@ -61,6 +63,8 @@ import {QueueModule} from "@/queue/queue.module";
     DailySummaryModule,
     BillingModule,
     QueueModule,
+    NangoModule,
+    ConnectionsModule,
   ],
   controllers: [HealthController],
 })

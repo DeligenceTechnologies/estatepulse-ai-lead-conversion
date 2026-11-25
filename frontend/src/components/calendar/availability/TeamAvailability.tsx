@@ -225,7 +225,7 @@ export const TeamAvailability: React.FC<{ syncVersion: number }> = ({ syncVersio
         icon={<CalendarClock className="w-6 h-6 text-emerald-400" />}
         title={calendar?.connection ? 'Reconnect your calendar' : 'Connect a calendar'}
         action={
-          <Button onClick={() => navigate('/settings?tab=calendar')}>
+          <Button onClick={() => navigate('/integrations?manage=calendly')}>
             {calendar?.connection ? 'Reconnect calendar' : 'Connect calendar'}
           </Button>
         }

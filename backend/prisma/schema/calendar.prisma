@@ -67,8 +67,8 @@ model CalendarConnection {
   workspaceSlug String?               @map("workspace_slug") @db.VarChar(255)
   workspaceRole String?               @map("workspace_role") @db.VarChar(50)
 
-  credentials    String    @map("credentials")
-  tokenExpiresAt DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  /// The connected account (and through it the Nango credential) this calendar reads with.
+  integrationId  String    @unique @map("integration_id") @db.Uuid
   scope          String?   @db.VarChar(1000)
   lastError      String?   @map("last_error") @db.VarChar(500)
   connectedById  String?   @map("connected_by_id") @db.Uuid
@@ -87,6 +87,7 @@ model CalendarConnection {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  integration  Integration         @relation(fields: [integrationId], references: [id], onDelete: Cascade)
   connectedBy  User?               @relation(fields: [connectedById], references: [id], onDelete: SetNull)
   members      CalendarMember[]
   blocks       CalendarTimeBlock[]

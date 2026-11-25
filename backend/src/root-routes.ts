@@ -1,8 +1,8 @@
 /**
  * Routes that stay at the root, outside API_PREFIX: outside services were handed
- * these URLs (lead webhooks, Telnyx, calendar webhooks, booking tools, the
- * Calendly OAuth redirect), so moving them would break every connection already
- * installed. Health stays put for uptime checks.
+ * these URLs (lead webhooks, Telnyx, calendar webhooks, booking tools, Nango),
+ * so moving them would break every connection already installed. Health stays
+ * put for uptime checks.
  */
 export const ROOT_ROUTES = [
   'health',
@@ -13,7 +13,6 @@ export const ROOT_ROUTES = [
   'ingest/v1/custom/:token',
   // The URL baked into the Apps Script on an owner's Google Form.
   'ingest/v1/google-forms/:token',
-  'ingest/v1/crm/hubspot/webhook',
   // Where Airtable sends a base's change notifications.
   'ingest/v1/airtable/webhook',
   'webhooks/leads/:token',
@@ -28,7 +27,8 @@ export const ROOT_ROUTES = [
   'tools/telnyx/outcome/record',
   'tools/telnyx/outcome/meeting',
   'tools/telnyx/outcome/transfer',
-  'org-settings/calendar/calendly/callback',
+  // Set in the Nango dashboard (Environment Settings → Webhooks).
+  'webhooks/nango',
   // Registered in the Stripe Dashboard as the billing webhook endpoint.
   'billing/webhook',
 ];

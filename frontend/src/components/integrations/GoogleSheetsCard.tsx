@@ -235,7 +235,9 @@ export const GoogleSheetsCard: React.FC = () => {
     const ac = new AbortController();
     pending.current = ac;
     try {
-      setConnection(await connectGoogle(ac.signal));
+      const connected = await connectGoogle(ac.signal);
+      if (!connected) return;
+      setConnection(connected);
       toast.success('Google connected.');
     } catch (e) {
       if (!ac.signal.aborted) toast.error(errorText(e));
@@ -320,7 +322,7 @@ export const GoogleSheetsCard: React.FC = () => {
       >
         {!loading && !config?.configured && (
           <p className="text-xs text-slate-500">
-            Not set up on the server yet (needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).
+            Not set up on the server yet (needs NANGO_SECRET_KEY and GOOGLE_CLIENT_ID).
           </p>
         )}
 

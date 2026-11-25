@@ -189,7 +189,9 @@ export const GoogleFormsCard: React.FC = () => {
     const ac = new AbortController();
     pending.current = ac;
     try {
-      setConnection(await connectGoogle(ac.signal));
+      const connected = await connectGoogle(ac.signal);
+      if (!connected) return;
+      setConnection(connected);
       toast.success('Google connected.');
       await load();
     } catch (e) {
@@ -280,7 +282,7 @@ export const GoogleFormsCard: React.FC = () => {
       >
         {!loading && !config?.configured && (
           <p className="text-xs text-slate-500">
-            The server has no Google OAuth client yet. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable this.
+            The server has no Google OAuth client yet. Set NANGO_SECRET_KEY and GOOGLE_CLIENT_ID to enable this.
           </p>
         )}
 

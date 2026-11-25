@@ -1,60 +1,47 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { LeadSourceProvider, Prisma, QueueState, SignatureState } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { sha256Hex } from '@/common/utils/crypto';
+import { NangoConnectionRegistry } from '@/nango/nango-connection.registry';
+import { CrmRegistry } from './crm-registry';
 import { CrmSyncService } from './crm-sync.service';
-import { HubSpotClient } from './hubspot/hubspot.client';
-import { SIGNATURE_HEADER, TIMESTAMP_HEADER, parseDelivery, signedUri, verifySignatureV3 } from './hubspot/hubspot-webhooks';
+import { parseDelivery } from './hubspot/hubspot-webhooks';
 
 export type WebhookResult =
   | { kind: 'accepted'; accepted: number; duplicates: number; ignored: number }
-  | { kind: 'unauthenticated'; verdict: string }
   | { kind: 'invalid_payload'; detail: string };
 
 /**
- * The synchronous half of a HubSpot webhook: authenticate it, record it, and
- * get out of the way. HubSpot retries anything slower than five seconds or
- * non-2xx, so nothing slow happens here; CrmSyncService does the work under
- * the connection's lease.
+ * The synchronous half of a HubSpot webhook: record it and get out of the
+ * way. Deliveries arrive forwarded by Nango, which verified HubSpot's
+ * signature and signed the forward with its own key; nothing slow happens
+ * here, CrmSyncService does the work under the connection's lease.
  *
  * The ONLY way an event reaches an organization is through the HubSpot account
- * id inside a signature-verified body, looked up against live connections.
+ * id inside a verified body, looked up against live connections.
  */
 @Injectable()
-export class CrmWebhooksService {
+export class CrmWebhooksService implements OnModuleInit {
   private readonly logger = new Logger('CrmWebhooks');
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly hubspot: HubSpotClient,
     private readonly sync: CrmSyncService,
+    private readonly crms: CrmRegistry,
+    private readonly nango: NangoConnectionRegistry,
   ) {}
 
-  async ingestHubSpot(req: { method: string; url: string; rawBody: Buffer; headers: Record<string, unknown> }): Promise<WebhookResult> {
-    const header = (name: string) => {
-      const v = req.headers[name];
-      return Array.isArray(v) ? String(v[0]) : typeof v === 'string' ? v : undefined;
-    };
-    const verdict = verifySignatureV3({
-      method: req.method,
-      uri: signedUri(this.hubspot.webhookUrl, req.url),
-      rawBody: req.rawBody,
-      signature: header(SIGNATURE_HEADER),
-      timestamp: header(TIMESTAMP_HEADER),
-      clientSecret: this.hubspot.webhookSecret,
+  onModuleInit(): void {
+    this.nango.registerForward('hubspot', async ({ payload }) => {
+      const hubspot = this.crms.byProvider('HUBSPOT');
+      if (!hubspot || !this.crms.enabled(hubspot)) return;
+      const result = await this.ingestHubSpot(payload);
+      // A body that is not a HubSpot delivery will not become one on retry.
+      if (result.kind === 'invalid_payload') this.logger.warn(`Forwarded HubSpot webhook refused: ${result.detail}`);
     });
-    if (verdict !== 'VALID') {
-      // Never the body or the header values: they are either an attacker's or a misconfiguration's.
-      this.logger.warn(`HubSpot webhook refused: signature ${verdict}`);
-      return { kind: 'unauthenticated', verdict };
-    }
+  }
 
-    let body: unknown;
-    try {
-      body = JSON.parse(req.rawBody.toString('utf8'));
-    } catch {
-      return { kind: 'invalid_payload', detail: 'Body is not JSON' };
-    }
+  async ingestHubSpot(body: unknown): Promise<WebhookResult> {
     const parsed = parseDelivery(body);
     if ('error' in parsed) return { kind: 'invalid_payload', detail: parsed.error };
 
@@ -96,13 +83,13 @@ export class CrmWebhooksService {
           dedupeKey: e.dedupeKey,
           payload,
           payloadHash: sha256Hex(JSON.stringify(e.stored)),
-          headers: { 'content-type': header('content-type') ?? null, 'user-agent': header('user-agent') ?? null, signature: '[verified, redacted]' },
+          headers: { via: 'nango', signature: '[verified by Nango, redacted]' },
           signatureState: SignatureState.VALID,
           queueState: QueueState.PENDING,
           receivedAt: now,
           availableAt: now,
           providerCreatedAt: new Date(e.occurredAt),
-          contentLength: req.rawBody.byteLength,
+          contentLength: Buffer.byteLength(JSON.stringify(body)),
         });
       }
     }

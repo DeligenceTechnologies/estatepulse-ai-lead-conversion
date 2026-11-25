@@ -1,4 +1,5 @@
 import { ApiError, apiFetch } from '../lib/api';
+import { connectProvider, connectionsOf, disconnectConnection } from './connectionsApi';
 
 /**
  * A connected CRM (HubSpot today) — owner only.
@@ -67,10 +68,6 @@ export interface CrmStatus {
 }
 
 const base = (p: CrmProvider) => `/integrations/crm/${p}`;
-const SOURCE = 'estatepulse:crm-oauth';
-const CHANNEL = 'estatepulse:crm-oauth';
-/** The server's state lives ten minutes; a consent screen left open longer is dead anyway. */
-const CALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** A CRM switched off on this server answers 404 everywhere. */
 export const isCrmDisabled = (e: unknown): boolean => e instanceof ApiError && e.status === 404;
@@ -91,65 +88,18 @@ export const crmRuns = (p: CrmProvider): Promise<CrmRun[]> =>
   apiFetch<{ runs: CrmRun[] }>(`${base(p)}/runs`, { auth: true }).then((r) => r.runs);
 
 /** Stops syncing and forgets the grant. Imported leads are kept. */
-export const disconnectCrm = (p: CrmProvider): Promise<void> => apiFetch<void>(`${base(p)}/connection`, { method: 'DELETE', auth: true });
-
-/**
- * Run the CRM's consent screen and finish the connection on THIS session.
- *
- * Call it straight from a click: the window is opened before the first await,
- * which keeps popup blockers out of the way.
- */
-export async function connectCrm(p: CrmProvider, displayName: string, signal?: AbortSignal): Promise<CrmStatus> {
-  const popup = window.open('', 'estatepulse-crm-oauth', 'width=560,height=760');
-  if (!popup) throw new Error(`Your browser blocked the ${displayName} window. Allow pop-ups for this site and try again.`);
-
-  let start: { authorizeUrl: string; state: string };
-  try {
-    start = await apiFetch<{ authorizeUrl: string; state: string }>(`${base(p)}/oauth/start`, { method: 'POST', auth: true });
-  } catch (e) {
-    popup.close();
-    throw e;
-  }
-  popup.location.href = start.authorizeUrl;
-
-  const result = await waitForCallback(start.state, signal);
-  if (result.error) {
-    throw new Error(result.error === 'access_denied' ? `${displayName} access was not granted.` : `${displayName} returned an error: ${result.error}`);
-  }
-  if (!result.code) throw new Error(`${displayName} did not return an authorization code. Try again.`);
-
-  return apiFetch<CrmStatus>(`${base(p)}/oauth/complete`, { method: 'POST', auth: true, body: { code: result.code, state: result.state } });
+export async function disconnectCrm(p: CrmProvider): Promise<void> {
+  const [connection] = await connectionsOf(p);
+  if (connection) await disconnectConnection(connection.id);
 }
 
-function waitForCallback(state: string, signal?: AbortSignal): Promise<{ code: string | null; state: string; error: string | null }> {
-  return new Promise((resolve, reject) => {
-    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL) : null;
-    let settled = false;
-
-    const finish = (settle: () => void) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', onMessage);
-      channel?.close();
-      clearTimeout(timer);
-      settle();
-    };
-
-    const accept = (data: unknown) => {
-      const d = data as { source?: string; code?: string | null; state?: string | null; error?: string | null } | null;
-      // Only the authorization this tab started. Another tab's flow, or one an
-      // attacker began, carries a different state and is ignored.
-      if (d?.source !== SOURCE || d.state !== state) return;
-      finish(() => resolve({ code: d.code ?? null, state, error: d.error ?? null }));
-    };
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin === window.location.origin) accept(e.data);
-    };
-
-    window.addEventListener('message', onMessage);
-    if (channel) channel.onmessage = (e) => accept(e.data);
-
-    const timer = setTimeout(() => finish(() => reject(new Error('Timed out waiting for the connection. Try again.'))), CALLBACK_TIMEOUT_MS);
-    signal?.addEventListener('abort', () => finish(() => reject(new DOMException('Cancelled', 'AbortError'))));
-  });
+/**
+ * Connect the CRM through Nango Connect, then link the connection to this
+ * organization (which queues the first import). Resolves null when the window
+ * was closed without connecting.
+ */
+export async function connectCrm(p: CrmProvider, signal?: AbortSignal): Promise<CrmStatus | null> {
+  const [existing] = await connectionsOf(p);
+  const connection = await connectProvider(p, { signal, reconnectId: existing?.state === 'broken' ? existing.id : undefined });
+  return connection ? getCrmStatus(p) : null;
 }

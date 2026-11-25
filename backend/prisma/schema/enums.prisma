@@ -137,6 +137,8 @@ enum IntegrationProvider {
   hubspot
   airtable
   retell
+  calendly
+  cal
 
   @@map("integration_provider")
 }

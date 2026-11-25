@@ -1,22 +1,25 @@
 import React, { useCallback, useState } from 'react';
 import { Phone } from 'lucide-react';
-import { OwnedNumber, lookupOwnedNumbers } from '../../utils/assistantApi';
+import { OwnedNumber, connectTelnyxKey, lookupOwnedNumbers } from '../../utils/assistantApi';
 import { RichSelect } from './RichSelect';
 
 /**
  * Verifying a key is the same call as reading its numbers: Telnyx only lists an
  * account's numbers for a key that works. So "verified" here means "we have
  * this key's numbers", and the number picker stays hidden until then.
+ *
+ * A new key is entered in Nango Connect, never on this page: `connectKey`
+ * opens it, links it as an account, and verifies that account.
  */
 export function useNumberLookup() {
   const [numbers, setNumbers] = useState<OwnedNumber[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The key the numbers belong to; '' for the stored key. */
+  /** The account whose key the numbers belong to; '' for the account in use. */
   const [verifiedFor, setVerifiedFor] = useState<string | null>(null);
 
-  const verify = useCallback(async (apiKey?: string) => {
-    const key = apiKey?.trim() || '';
+  const verify = useCallback(async (accountId?: string) => {
+    const key = accountId || '';
     setLoading(true);
     setError(null);
     try {
@@ -33,13 +36,26 @@ export function useNumberLookup() {
     }
   }, []);
 
+  /** Opens Nango Connect for a new key, then verifies it. False when it was closed or the key did not work. */
+  const connectKey = useCallback(async () => {
+    setError(null);
+    let accountId: string | null;
+    try {
+      accountId = await connectTelnyxKey();
+    } catch (e: any) {
+      setError(e?.message || 'Could not connect that key.');
+      return false;
+    }
+    return accountId ? verify(accountId) : false;
+  }, [verify]);
+
   const reset = useCallback(() => {
     setNumbers(null);
     setVerifiedFor(null);
     setError(null);
   }, []);
 
-  return { numbers, loading, error, verifiedFor, verify, reset };
+  return { numbers, loading, error, verifiedFor, verify, connectKey, reset };
 }
 
 /** Picks the from-number out of the numbers a verified key returned. */

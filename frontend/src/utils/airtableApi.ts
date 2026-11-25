@@ -1,4 +1,5 @@
 import { ApiError, apiFetch } from '../lib/api';
+import { connectProvider, disconnectConnection } from './connectionsApi';
 
 /**
  * A connected Airtable account — owner only.
@@ -44,10 +45,6 @@ export interface AirtableConfig {
 }
 
 const BASE = '/integrations/airtable';
-const SOURCE = 'estatepulse:airtable-oauth';
-const CHANNEL = 'estatepulse:airtable-oauth';
-/** The server's state lives ten minutes; a consent screen left open longer is dead anyway. */
-const CALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Airtable switched off on this server answers 404 everywhere. */
 export const isAirtableDisabled = (e: unknown): boolean => e instanceof ApiError && e.status === 404;
@@ -58,72 +55,16 @@ export const listAirtableConnections = (): Promise<AirtableConnection[]> =>
   apiFetch<{ connections: AirtableConnection[] }>(`${BASE}/connections`, { auth: true }).then((r) => r.connections);
 
 /** Stops using the grant and forgets it. Imported leads are kept. */
-export const disconnectAirtable = (id: string): Promise<void> =>
-  apiFetch<void>(`${BASE}/connections/${id}`, { method: 'DELETE', auth: true });
+export const disconnectAirtable = (id: string): Promise<void> => disconnectConnection(id);
 
 /**
- * Run Airtable's consent screen and finish the connection on THIS session.
- *
- * Call it straight from a click: the window is opened before the first await,
- * which keeps popup blockers out of the way.
+ * Connect Airtable through Nango Connect, then link the connection to this
+ * organization. Resolves null when the window was closed without connecting.
  */
-export async function connectAirtable(signal?: AbortSignal): Promise<AirtableConnection> {
-  const popup = window.open('', 'estatepulse-airtable-oauth', 'width=560,height=760');
-  if (!popup) throw new Error('Your browser blocked the Airtable window. Allow pop-ups for this site and try again.');
-
-  let start: { authorizeUrl: string; state: string };
-  try {
-    start = await apiFetch<{ authorizeUrl: string; state: string }>(`${BASE}/oauth/start`, { method: 'POST', auth: true });
-  } catch (e) {
-    popup.close();
-    throw e;
-  }
-  popup.location.href = start.authorizeUrl;
-
-  const result = await waitForCallback(start.state, signal);
-  if (result.error) {
-    throw new Error(result.error === 'access_denied' ? 'Airtable access was not granted.' : `Airtable returned an error: ${result.error}`);
-  }
-  if (!result.code) throw new Error('Airtable did not return an authorization code. Try again.');
-
-  return apiFetch<AirtableConnection>(`${BASE}/oauth/complete`, {
-    method: 'POST',
-    auth: true,
-    body: { code: result.code, state: result.state },
-  });
-}
-
-function waitForCallback(state: string, signal?: AbortSignal): Promise<{ code: string | null; state: string; error: string | null }> {
-  return new Promise((resolve, reject) => {
-    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL) : null;
-    let settled = false;
-
-    const finish = (settle: () => void) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', onMessage);
-      channel?.close();
-      clearTimeout(timer);
-      settle();
-    };
-
-    const accept = (data: unknown) => {
-      const d = data as { source?: string; code?: string | null; state?: string | null; error?: string | null } | null;
-      // Only the authorization this tab started. Another tab's flow, or one an
-      // attacker began, carries a different state and is ignored.
-      if (d?.source !== SOURCE || d.state !== state) return;
-      finish(() => resolve({ code: d.code ?? null, state, error: d.error ?? null }));
-    };
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin === window.location.origin) accept(e.data);
-    };
-
-    window.addEventListener('message', onMessage);
-    if (channel) channel.onmessage = (e) => accept(e.data);
-
-    const timer = setTimeout(() => finish(() => reject(new Error('Timed out waiting for the connection. Try again.'))), CALLBACK_TIMEOUT_MS);
-    signal?.addEventListener('abort', () => finish(() => reject(new DOMException('Cancelled', 'AbortError'))));
-  });
+export async function connectAirtable(signal?: AbortSignal, reconnectId?: string): Promise<AirtableConnection | null> {
+  const connection = await connectProvider('airtable', { signal, reconnectId });
+  if (!connection) return null;
+  return (await listAirtableConnections()).find((c) => c.id === connection.id) ?? null;
 }
 
 // ---------------------------------------------------------------------------

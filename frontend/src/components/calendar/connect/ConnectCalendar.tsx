@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import {
-  announceCalendlyResult,
   disconnectOrganizationCalendar,
   getOrganizationCalendar,
   type CalendarConnection,
@@ -160,7 +159,6 @@ const ConnectionSummary: React.FC<{
 export const ConnectCalendar: React.FC = () => {
   const { can } = useAuth();
   const canEdit = can('organization.update');
-  const [params, setParams] = useSearchParams();
 
   const [status, setStatus] = useState<OrganizationCalendarStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -182,21 +180,6 @@ export const ConnectCalendar: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    const outcome = params.get('calendar');
-    if (!outcome) return;
-    // Calendly severs window.opener, so its callback lands the popup here.
-    // Report to the tab that opened it, then close (a no-op in an ordinary tab).
-    announceCalendlyResult(outcome === 'connected');
-    window.close();
-    // toastId: StrictMode runs this effect twice before the param is cleared.
-    if (outcome === 'connected') toast.success('Calendly connected.', { toastId: 'calendly-return' });
-    else toast.error('Calendly was not connected. Please try again.', { toastId: 'calendly-return' });
-    const next = new URLSearchParams(params);
-    next.delete('calendar');
-    setParams(next, { replace: true });
-  }, [params, setParams]);
 
   const refreshAfterConnect = useCallback(async (): Promise<boolean> => {
     const connectionKey = (value: OrganizationCalendarStatus | null) =>

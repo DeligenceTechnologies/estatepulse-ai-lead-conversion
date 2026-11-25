@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { IntegrationProvider, IntegrationStatus, type Integration } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { httpError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { ConnectionAlertService } from '@/common/service/connection-alert.service';
-import { SecretBoxService } from '@/common/service/secret-box.service';
-import { aad, sha256Hex } from '@/common/utils/crypto';
+import { sha256Hex } from '@/common/utils/crypto';
+import { ConnectionRefused } from '@/connections/connection-definition';
+import { ConnectionsService } from '@/connections/connections.service';
+import { NangoError } from '@/nango/nango.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ProviderApiError, type ProviderCredential } from './providers/types';
 
@@ -13,7 +14,6 @@ const FORM_PROVIDERS: Record<string, IntegrationProvider> = {
   TALLY: IntegrationProvider.tally,
   TYPEFORM: IntegrationProvider.typeform,
 };
-const FORM_PROVIDER_LABEL: Partial<Record<IntegrationProvider, string>> = { tally: 'Tally', typeform: 'Typeform' };
 const ADAPTER_CODE: Partial<Record<IntegrationProvider, string>> = { tally: 'TALLY', typeform: 'TYPEFORM' };
 
 export interface ProviderCredentialSummary {
@@ -30,66 +30,76 @@ export interface ProviderCredentialSummary {
   leadSourceCount: number;
 }
 
-/** Form-provider API keys (Tally today), kept so we can install and repair webhooks on the customer's forms. */
+/**
+ * Form-provider accounts (Tally, Typeform) as connections, used to install
+ * and repair webhooks on the customer's forms. Connecting, the credential
+ * (Tally's API key, Typeform's OAuth grant) and disconnecting are
+ * ConnectionsService's.
+ */
 @Injectable()
-export class IntegrationsService {
-  private readonly logger = new Logger(IntegrationsService.name);
-
+export class IntegrationsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly secrets: SecretBoxService,
     private readonly registry: ProviderRegistry,
-    private readonly connectionAlerts: ConnectionAlertService,
+    private readonly connections: ConnectionsService,
   ) {}
 
-  async connect(orgId: string, providerCode: string, apiKey: string, label?: string) {
-    const key = (apiKey ?? '').trim();
-    if (!key) throw new BadRequestException({ error: { code: 'CREDENTIAL_REQUIRED', message: 'An API key is required.' } });
-    const adapter = this.registry.get(providerCode);
-    const provider = FORM_PROVIDERS[adapter.provider];
-    let account;
-    try {
-      account = await adapter.verifyCredential({ apiKey: key });
-    } catch (error) {
-      throw this.toHttp(error);
-    }
-
-    const credentialHash = sha256Hex(key);
-    const verified = {
-      status: IntegrationStatus.active,
-      lastVerifiedAt: new Date(),
-      lastErrorAt: null,
-      lastErrorCode: null,
-      accountEmail: account.email,
-      accountName: account.displayName,
-      externalAccountId: account.externalAccountId,
-    };
-    const existing = await this.prisma.integration.findFirst({
-      where: { orgId, provider, credentialHash, revokedAt: null },
-    });
-    if (existing) {
-      const refreshed = await this.prisma.integration.update({
-        where: { id: existing.id },
-        data: { ...verified, ...(label ? { label } : {}) },
+  onModuleInit(): void {
+    const forms = [
+      { code: 'TALLY', key: 'tally' as const, provider: IntegrationProvider.tally, auth: 'apiKey' as const },
+      { code: 'TYPEFORM', key: 'typeform' as const, provider: IntegrationProvider.typeform, auth: 'oauth' as const },
+    ];
+    for (const form of forms) {
+      if (!this.registry.has(form.code)) continue;
+      const adapter = this.registry.get(form.code);
+      const label = adapter.displayName;
+      this.connections.register({
+        key: form.key,
+        provider: form.provider,
+        label,
+        description: `Install the lead webhook on your ${label} forms in one click.`,
+        category: 'leads',
+        auth: form.auth,
+        multiple: true,
+        impact: `New ${label} form submissions are not reaching your lead sources.`,
+        unavailable: () => null,
+        identify: async (credential) => {
+          let account;
+          try {
+            account = await adapter.verifyCredential({ apiKey: credential });
+          } catch (error) {
+            if (error instanceof ProviderApiError && error.kind === 'INVALID_CREDENTIAL') {
+              throw new ConnectionRefused(400, 'PROVIDER_INVALID_CREDENTIAL', `${label} did not accept that key.`);
+            }
+            throw error;
+          }
+          // An API key identifies itself; an OAuth token changes on every refresh, so Typeform is matched by account.
+          const accountId = account.externalAccountId || sha256Hex(credential);
+          return {
+            accountId,
+            email: account.email,
+            name: account.displayName,
+            preview: form.auth === 'apiKey' ? `${credential.slice(0, 8)}…${credential.slice(-4)}` : null,
+          };
+        },
+        // Two presses when forms still use it: those forms go on delivering leads, but we can no longer repair or remove their webhooks.
+        disconnecting: async ({ tx, orgId, row, force }) => {
+          const sources = await tx.leadSource.findMany({ where: { orgId, integrationId: row.id, archivedAt: null }, select: { id: true, name: true } });
+          if (sources.length > 0 && !force) {
+            const one = sources.length === 1;
+            throw new ConnectionRefused(
+              409,
+              'CREDENTIAL_IN_USE',
+              `${sources.length} connected form${one ? '' : 's'} still ${one ? 'uses' : 'use'} this account. Disconnecting leaves ` +
+                `${one ? 'that form' : 'those forms'} delivering leads that we can no longer manage or repair.`,
+            );
+          }
+          await tx.leadSource.updateMany({ where: { orgId, integrationId: row.id }, data: { integrationId: null, remoteState: 'ORPHANED' } });
+          return { orphanedLeadSources: sources.length };
+        },
+        view: (row) => ({ adapter: ADAPTER_CODE[row.provider] }),
       });
-      return this.toSummary(refreshed, await this.countSources(orgId, refreshed.id));
     }
-
-    const id = randomUUID();
-    const created = await this.prisma.integration.create({
-      data: {
-        id,
-        orgId,
-        provider,
-        label: label ?? account.email ?? adapter.displayName,
-        credentials: this.secrets.seal(key, aad.integration(orgId, id)),
-        credentialHash,
-        credentialPreview: `${key.slice(0, 8)}…${key.slice(-4)}`,
-        ...verified,
-      },
-    });
-    this.logger.log(`Connected ${adapter.provider} for org ${orgId}`);
-    return this.toSummary(created, 0);
   }
 
   async list(orgId: string, providerCode?: string) {
@@ -106,8 +116,9 @@ export class IntegrationsService {
   async verify(orgId: string, id: string) {
     const row = await this.mustFind(orgId, id);
     const adapter = this.registry.get(ADAPTER_CODE[row.provider]!);
+    const apiKey = await this.keyFor(row);
     try {
-      const account = await adapter.verifyCredential({ apiKey: this.decrypt(row) });
+      const account = await adapter.verifyCredential({ apiKey });
       const ok = await this.prisma.integration.update({
         where: { id: row.id },
         data: {
@@ -129,37 +140,6 @@ export class IntegrationsService {
     }
   }
 
-  async revoke(orgId: string, id: string, force = false) {
-    const row = await this.mustFind(orgId, id);
-    const sources = await this.prisma.leadSource.findMany({
-      where: { orgId, integrationId: id, archivedAt: null },
-      select: { id: true, name: true },
-    });
-    if (sources.length > 0 && !force) {
-      const one = sources.length === 1;
-      throw new ConflictException({
-        error: {
-          code: 'CREDENTIAL_IN_USE',
-          message:
-            `${sources.length} connected form${one ? '' : 's'} still ${one ? 'uses' : 'use'} this key. Removing it leaves ` +
-            `${one ? 'that form' : 'those forms'} delivering leads that we can no longer manage or repair.`,
-          leadSources: sources,
-        },
-      });
-    }
-    await this.prisma.$transaction([
-      this.prisma.integration.update({
-        where: { id: row.id },
-        data: { status: IntegrationStatus.revoked, revokedAt: new Date() },
-      }),
-      this.prisma.leadSource.updateMany({
-        where: { orgId, integrationId: id },
-        data: { integrationId: null, remoteState: 'ORPHANED' },
-      }),
-    ]);
-    return { revoked: true, orphanedLeadSources: sources.length };
-  }
-
   async connectedFormIds(orgId: string): Promise<Map<string, string>> {
     const rows = await this.prisma.leadSource.findMany({
       where: { orgId, archivedAt: null, externalFormId: { not: null } },
@@ -175,33 +155,13 @@ export class IntegrationsService {
         error: { code: 'CREDENTIAL_REVOKED', message: 'That connection was disconnected. Reconnect it first.' },
       });
     }
-    return { apiKey: this.decrypt(row), provider: ADAPTER_CODE[row.provider]! };
+    return { apiKey: await this.keyFor(row), provider: ADAPTER_CODE[row.provider]! };
   }
 
-  /**
-   * active -> invalid. The owners are emailed once, on the transition: a dead
-   * key hit by every webhook repair or form listing does not alert again.
-   */
+  /** active -> invalid, emailing the owners once on the transition (ConnectionsService.markBroken). */
   async markInvalid(id: string, code: string) {
-    const brokenAt = new Date();
-    const changed = await this.prisma.integration.updateMany({
-      where: { id, status: IntegrationStatus.active },
-      data: { status: IntegrationStatus.invalid, lastErrorAt: brokenAt, lastErrorCode: code },
-    });
-    const row = await this.prisma.integration.findUniqueOrThrow({ where: { id } });
-    if (changed.count === 1) {
-      const label = FORM_PROVIDER_LABEL[row.provider] ?? row.provider;
-      this.connectionAlerts.connectionBroken({
-        orgId: row.orgId,
-        connectionId: row.id,
-        providerLabel: label,
-        account: row.accountEmail ?? row.accountName,
-        impact: `New ${label} form submissions are not reaching your lead sources.`,
-        reconnectPath: '/integrations',
-        brokenAt,
-      });
-    }
-    return row;
+    await this.connections.markBroken(id, code);
+    return this.prisma.integration.findUniqueOrThrow({ where: { id } });
   }
 
   toHttp(error: unknown) {
@@ -226,8 +186,19 @@ export class IntegrationsService {
     return row;
   }
 
-  private decrypt(row: Pick<Integration, 'id' | 'orgId' | 'credentials'>): string {
-    return this.secrets.open(row.credentials, aad.integration(row.orgId, row.id));
+  /** The credential Nango holds for this row. */
+  private async keyFor(row: Integration): Promise<string> {
+    const label = this.registry.get(ADAPTER_CODE[row.provider]!).displayName;
+    try {
+      return await this.connections.credential(row);
+    } catch (error) {
+      if (error instanceof NangoError && error.kind === 'REAUTH') {
+        await this.markInvalid(row.id, 'REAUTH_REQUIRED');
+        throw httpError(409, 'CREDENTIAL_RECONNECT_REQUIRED', `${label} needs to be reconnected. Connect ${label} again to continue.`);
+      }
+      if (error instanceof NangoError) throw httpError(502, 'PROVIDER_UNAVAILABLE', `Could not reach ${label}. Try again shortly.`);
+      throw error;
+    }
   }
 
   private countSources(orgId: string, integrationId: string) {

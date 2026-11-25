@@ -3,10 +3,10 @@ import { ConfigService } from '@nestjs/config';
 
 export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
-const SCOPES = ['openid', 'email', DRIVE_FILE_SCOPE].join(' ');
+/** The scopes the "google" integration in Nango must request. */
+export const GOOGLE_SCOPES = ['openid', 'email', DRIVE_FILE_SCOPE] as const;
 
-const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -37,14 +37,6 @@ export class GoogleApiError extends Error {
   }
 }
 
-export interface GoogleTokens {
-  accessToken: string;
-  expiresIn: number;
-  refreshToken: string | null;
-  scope: string;
-  idToken: string | null;
-}
-
 export interface GoogleDriveFile {
   id: string;
   name: string;
@@ -73,27 +65,18 @@ export interface GoogleIdentity {
   email: string | null;
 }
 
+/**
+ * Google's APIs, called with an access token Nango issued. The OAuth flow and
+ * token refresh are Nango's (the "google" integration); nothing here sees a
+ * client secret or a refresh token.
+ */
 @Injectable()
 export class GoogleClient {
   constructor(private readonly config: ConfigService) {}
 
+  /** Public: the browser's Google Picker uses it. The same OAuth client as Nango's "google" integration. */
   get clientId(): string {
     return this.config.get<string>('GOOGLE_CLIENT_ID') ?? '';
-  }
-
-  private get clientSecret(): string {
-    return this.config.get<string>('GOOGLE_CLIENT_SECRET') ?? '';
-  }
-
-  get redirectUri(): string {
-    const override = this.config.get<string>('GOOGLE_REDIRECT_URI');
-    if (override) return override;
-    const app = this.config.get<string>('APP_URL') ?? 'http://localhost:3000';
-    return `${app.replace(/\/+$/, '')}/oauth/google-callback.html`;
-  }
-
-  isConfigured(): boolean {
-    return Boolean(this.clientId && this.clientSecret);
   }
 
   pickerConfig(): { apiKey: string | null; appId: string | null } {
@@ -103,35 +86,14 @@ export class GoogleClient {
     };
   }
 
-  authorizeUrl(state: string, codeChallenge: string): string {
-    const q = new URLSearchParams({
-      client_id: this.clientId,
-      redirect_uri: this.redirectUri,
-      response_type: 'code',
-      scope: SCOPES,
-      access_type: 'offline',
-      prompt: 'consent select_account',
-      include_granted_scopes: 'true',
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-    });
-    return `${AUTH_URL}?${q.toString()}`;
+  /** Which Google account the token belongs to (OpenID Connect userinfo; needs openid + email). */
+  async userInfo(accessToken: string): Promise<GoogleIdentity> {
+    const body = await this.getJson<{ sub?: unknown; email?: unknown }>(USERINFO_URL, accessToken);
+    if (typeof body.sub !== 'string' || !body.sub) throw new GoogleApiError('BAD_REQUEST', 'Google did not say which account this is', 200);
+    return { sub: body.sub, email: typeof body.email === 'string' ? body.email : null };
   }
 
-  async exchangeCode(code: string, codeVerifier: string): Promise<GoogleTokens> {
-    return this.tokenRequest({
-      grant_type: 'authorization_code',
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: this.redirectUri,
-    });
-  }
-
-  async refresh(refreshToken: string): Promise<GoogleTokens> {
-    return this.tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
-  }
-
+  /** Revokes the grant at Google. An access token revokes its refresh token too. */
   async revoke(token: string): Promise<void> {
     const res = await this.send(REVOKE_URL, {
       method: 'POST',
@@ -249,39 +211,6 @@ export class GoogleClient {
     if (!res.ok) throw await this.apiError(res);
   }
 
-  private async tokenRequest(params: Record<string, string>): Promise<GoogleTokens> {
-    const res = await this.send(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: this.clientId, client_secret: this.clientSecret, ...params }).toString(),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      access_token?: string;
-      expires_in?: number;
-      refresh_token?: string;
-      scope?: string;
-      id_token?: string;
-      error?: string;
-      error_description?: string;
-    };
-    if (!res.ok || !body.access_token) {
-      const err = body.error ?? `http_${res.status}`;
-      if (err === 'invalid_grant') {
-        throw new GoogleApiError('REAUTH', 'Google rejected the grant (invalid_grant)', res.status);
-      }
-      if (res.status === 429) throw new GoogleApiError('RATE_LIMITED', 'Google rate limit on the token endpoint', 429);
-      if (res.status >= 500) throw new GoogleApiError('UNAVAILABLE', 'Google token endpoint unavailable', res.status);
-      throw new GoogleApiError('BAD_REQUEST', `Google token endpoint refused the request (${err})`, res.status);
-    }
-    return {
-      accessToken: body.access_token,
-      expiresIn: Number(body.expires_in ?? 3600),
-      refreshToken: body.refresh_token ?? null,
-      scope: body.scope ?? '',
-      idToken: body.id_token ?? null,
-    };
-  }
-
   private async getJson<T>(url: string, accessToken: string): Promise<T> {
     const res = await this.send(url, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!res.ok) throw await this.apiError(res);
@@ -325,21 +254,4 @@ export class GoogleClient {
     if (res.status >= 500) return new GoogleApiError('UNAVAILABLE', message, res.status);
     return new GoogleApiError('BAD_REQUEST', message, res.status);
   }
-}
-
-export function decodeIdToken(idToken: string | null, clientId: string, now = Date.now()): GoogleIdentity | null {
-  if (!idToken) return null;
-  const part = idToken.split('.')[1];
-  if (!part) return null;
-  let claims: { sub?: unknown; email?: unknown; aud?: unknown; iss?: unknown; exp?: unknown };
-  try {
-    claims = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-  if (claims.aud !== clientId) return null;
-  if (claims.iss !== 'https://accounts.google.com' && claims.iss !== 'accounts.google.com') return null;
-  if (typeof claims.exp !== 'number' || claims.exp * 1000 < now - 5 * 60 * 1000) return null;
-  if (typeof claims.sub !== 'string' || !claims.sub) return null;
-  return { sub: claims.sub, email: typeof claims.email === 'string' ? claims.email : null };
 }

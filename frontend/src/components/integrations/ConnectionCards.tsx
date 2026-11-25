@@ -145,7 +145,11 @@ const SourceRow: React.FC<{
   );
 };
 
-export const ConnectionCards: React.FC = () => {
+/** Which card a Connections drawer shows; every card when omitted. */
+export type ConnectionCardsOnly = 'TALLY' | 'TYPEFORM' | 'WEBHOOK';
+
+export const ConnectionCards: React.FC<{ only?: ConnectionCardsOnly }> = ({ only }) => {
+  const show = (card: ConnectionCardsOnly | 'OTHER') => !only || only === card;
   const { setActiveView, setFocusLeadSourceId } = useApp();
 
   const [sources, setSources] = useState<LeadSourceConfig[] | null>(null);
@@ -339,38 +343,40 @@ export const ConnectionCards: React.FC = () => {
       )}
 
       {/* Cards keep their natural height, up to a cap: past it a long list scrolls inside its card instead of stretching the row. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 [&>*]:max-h-[24rem]">
+      <div className={only ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-5 [&>*]:max-h-[24rem]'}>
         {/* Telnyx and the calendar (Calendly / Cal.com) live under Settings.
             Google Sheets is self-loading: its account is not a lead source. */}
-        <GoogleSheetsCard />
+        {show('OTHER') && <GoogleSheetsCard />}
 
         {/* Google Forms — same Google account as Sheets, but the owner pastes a
             short Apps Script into their form because Google Forms has no
             webhook of its own. Hidden where the server has it switched off. */}
-        <GoogleFormsCard />
+        {show('OTHER') && <GoogleFormsCard />}
 
         {/* Webhook — one URL for any app or form; the owner maps the first payload's fields. Hidden when the server has it off. */}
-        <CustomWebhookCard
-          sources={customSources}
-          loading={loading}
-          onOpenSource={openInLeadSources}
-          onAdd={() => setWebhookWizard({ sourceId: null })}
-          onMap={(id) => setWebhookWizard({ sourceId: id })}
-        />
+        {show('WEBHOOK') && (
+          <CustomWebhookCard
+            sources={customSources}
+            loading={loading}
+            onOpenSource={openInLeadSources}
+            onAdd={() => setWebhookWizard({ sourceId: null })}
+            onMap={(id) => setWebhookWizard({ sourceId: id })}
+          />
+        )}
         {/* HubSpot — self-loading too; hidden where the server has it switched off. */}
-        <HubSpotCard />
+        {show('OTHER') && <HubSpotCard />}
 
         {/* Airtable — self-loading; hidden where the server has it switched off.
             The account is not a lead source: bases and tables are picked after connecting. */}
-        <AirtableCard />
+        {show('OTHER') && <AirtableCard />}
 
         {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
-        {formProviderCard(
+        {show('TALLY') && formProviderCard(
           'TALLY',
           'Tally',
           'Add your Tally API key, pick your forms, and we do the rest.',
         )}
-        {formProviderCard(
+        {show('TYPEFORM') && formProviderCard(
           'TYPEFORM',
           'Typeform',
           'Add your Typeform token, pick your forms, and we do the rest.',
@@ -379,7 +385,7 @@ export const ConnectionCards: React.FC = () => {
         {/* Website & Other Forms — sources made with the plain webhook URL before
             the Webhook card above existed. Kept so they stay visible and
             manageable; a new one is made on the Webhook card. */}
-        {legacyWebhookSources.length > 0 && (
+        {show('WEBHOOK') && legacyWebhookSources.length > 0 && (
           <IntegrationCard
             icon={
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">

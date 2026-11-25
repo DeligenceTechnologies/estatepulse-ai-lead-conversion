@@ -9,7 +9,7 @@ import {
   type EnrolledBy,
   type Sequence,
 } from '@prisma/client';
-import { lockOrganization } from '@/calendar/connection/calendar-access.service';
+import { lockOrganization } from '@/common/prisma/lock-organization';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { contactZone, leadZone } from '@/common/utils/lead-timezone';
