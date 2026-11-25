@@ -1,0 +1,118 @@
+enum AssistantRole {
+  user
+  assistant
+
+  @@map("assistant_role")
+}
+
+enum AssistantRiskTier {
+  read
+  write
+
+  @@map("assistant_risk_tier")
+}
+
+enum AssistantActionStatus {
+  proposed
+  executing
+  executed
+  rejected
+  expired
+  failed
+
+  @@map("assistant_action_status")
+}
+
+/// One Copilot conversation of one user.
+model AssistantThread {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  orgId         String   @map("organization_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  title         String?  @db.VarChar(200)
+  messageCount  Int      @default(0) @map("message_count")
+  lastMessageAt DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     AssistantMessage[]
+  actions      AssistantAction[]
+
+  @@index([orgId, userId, lastMessageAt(sort: Desc)])
+  @@map("assistant_threads")
+}
+
+/// One turn, stored as the exact content blocks sent to or received from the model, so history replays unchanged.
+model AssistantMessage {
+  id              String        @id @default(uuid(7)) @db.Uuid
+  orgId           String        @map("organization_id") @db.Uuid
+  threadId        String        @map("thread_id") @db.Uuid
+  /// Order within the thread; history is replayed in this order.
+  position        Int
+  role            AssistantRole
+  content         Json
+  /// What the user typed, for display; null on assistant turns and on tool results.
+  text            String?
+  model           String?       @db.VarChar(64)
+  inputTokens     Int           @default(0) @map("input_tokens")
+  outputTokens    Int           @default(0) @map("output_tokens")
+  cacheReadTokens Int           @default(0) @map("cache_read_tokens")
+  stopReason      String?       @map("stop_reason") @db.VarChar(32)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  thread       AssistantThread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  actions      AssistantAction[]
+
+  @@unique([threadId, position])
+  @@map("assistant_messages")
+}
+
+/// Every tool call the model asked for. Reads run at once; writes wait here as proposals until the user decides.
+model AssistantAction {
+  id            String                @id @default(uuid(7)) @db.Uuid
+  orgId         String                @map("organization_id") @db.Uuid
+  userId        String                @map("user_id") @db.Uuid
+  threadId      String                @map("thread_id") @db.Uuid
+  messageId     String                @map("message_id") @db.Uuid
+  toolUseId     String                @map("tool_use_id") @db.VarChar(64)
+  toolName      String                @map("tool_name") @db.VarChar(64)
+  tier          AssistantRiskTier
+  input         Json
+  preview       Json?
+  status        AssistantActionStatus
+  entityType    String?               @map("entity_type") @db.VarChar(40)
+  entityId      String?               @map("entity_id") @db.Uuid
+  entityVersion DateTime?             @map("entity_version") @db.Timestamptz(6)
+  result        Json?
+  error         String?
+  expiresAt     DateTime?             @map("expires_at") @db.Timestamptz(6)
+  decidedAt     DateTime?             @map("decided_at") @db.Timestamptz(6)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  thread       AssistantThread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message      AssistantMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, toolUseId])
+  @@index([threadId, status])
+  @@index([orgId, entityType, entityId])
+  @@map("assistant_actions")
+}
+
+/// Tokens and cost per organization per calendar month (UTC), checked against the plan's allowance.
+model AssistantUsage {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  orgId        String   @map("organization_id") @db.Uuid
+  period       String   @db.VarChar(7)
+  inputTokens  BigInt   @default(0) @map("input_tokens")
+  outputTokens BigInt   @default(0) @map("output_tokens")
+  costMicros   BigInt   @default(0) @map("cost_micros")
+  requests     Int      @default(0)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, period])
+  @@map("assistant_usage")
+}

@@ -16,6 +16,6 @@ import { ManualLeadService } from './manual-lead.service';
   imports: [TelnyxModule],
   controllers: [ConsentReviewController, LeadsController, DashboardController, DuplicatesController],
   providers: [ConsentReviewService, LeadAssignmentService, LeadAssignmentNotifier, ManualLeadService, LeadTimezoneService, LeadReviewService, LeadEditService],
-  exports: [LeadAssignmentService],
+  exports: [LeadAssignmentService, LeadEditService, ManualLeadService, LeadReviewService],
 })
 export class LeadModule {}

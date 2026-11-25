@@ -254,4 +254,16 @@ export const envValidationSchema = Joi.object({
     BILLING_ALLOW_IMMEDIATE_CANCEL: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
     // Retries failed webhook events and re-reads stale subscriptions from Stripe.
     BILLING_RECONCILE_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
+
+    // Copilot, the in-app assistant. Off: its routes answer 503 and the dock says it is unavailable.
+    ASSISTANT_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(false),
+    AI_PROVIDER: Joi.string().valid('claude', 'openai').empty('').default('claude'),
+    ANTHROPIC_API_KEY: Joi.string()
+      .empty('')
+      .when('AI_PROVIDER', { is: 'claude', then: Joi.when('ASSISTANT_ENABLED', { is: true, then: Joi.required() }) }),
+    ANTHROPIC_MODEL: Joi.string().empty('').default('claude-opus-5-5'),
+    OPENAI_API_KEY: Joi.string()
+      .empty('')
+      .when('AI_PROVIDER', { is: 'openai', then: Joi.when('ASSISTANT_ENABLED', { is: true, then: Joi.required() }) }),
+    OPENAI_MODEL: Joi.string().empty('').default('gpt-5'),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

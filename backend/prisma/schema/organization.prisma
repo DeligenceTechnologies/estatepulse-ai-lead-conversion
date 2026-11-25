@@ -32,6 +32,10 @@ model Organization {
   payments            Payment[]
   invoices            Invoice[]
   billingEvents       BillingEvent[]
+  assistantThreads    AssistantThread[]
+  assistantMessages   AssistantMessage[]
+  assistantActions    AssistantAction[]
+  assistantUsage      AssistantUsage[]
 
   @@map("organizations")
 }

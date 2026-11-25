@@ -5,6 +5,7 @@ import { ProfileMenu } from '../auth/ProfileMenu';
 import { DashboardSidebar, type NavGroup } from './DashboardSidebar';
 import { AppearanceButton } from './AppearanceButton';
 import { IconButton } from '../common/Button';
+import { CopilotDock } from '../copilot/CopilotDock';
 
 const COLLAPSED_KEY = 'ep_sidebar_collapsed';
 
@@ -94,6 +95,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
         {/* Every view renders its own heading and actions below the navbar. */}
         <main className="app-canvas flex-1 overflow-y-auto custom-scrollbar">{children}</main>
       </div>
+      <CopilotDock screen={current?.label} />
     </div>
   );
 };

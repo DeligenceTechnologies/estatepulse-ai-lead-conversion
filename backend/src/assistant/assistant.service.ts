@@ -1,0 +1,112 @@
+import { Injectable } from '@nestjs/common';
+import { AssistantRole } from '@prisma/client';
+import type { AuthContext } from '@/auth/auth.types';
+import { Feature } from '@/billing/billing-plans';
+import { EntitlementService } from '@/billing/entitlements/entitlement.service';
+import { AppError } from '@/common/errors/app-error';
+import { PrismaService } from '@/common/prisma/prisma.service';
+import { fullName } from '@/lead/lead-scope';
+import { AssistantActionService } from './assistant-action.service';
+import { AssistantLimitsService } from './assistant-limits.service';
+import { AssistantOrchestrator } from './assistant-orchestrator.service';
+import { AssistantConfig } from './assistant.config';
+import { contextBlock } from './assistant.prompt';
+import { AssistantThreadService, MAX_THREAD_MESSAGES, toActionView } from './assistant-thread.service';
+import { AssistantUsageService } from './assistant-usage.service';
+import type { SendMessageDto } from './dto/send-message.dto';
+import type { EventStream } from './event-stream';
+
+/** Room left for the model's steps after the user's message. */
+const TURN_HEADROOM = 20;
+
+/**
+ * The three ways a turn starts: a new message, a confirmation, a decline.
+ * Checks that can fail run before the stream opens, so they answer as ordinary JSON errors.
+ */
+@Injectable()
+export class AssistantService {
+  constructor(
+    private readonly config: AssistantConfig,
+    private readonly prisma: PrismaService,
+    private readonly entitlements: EntitlementService,
+    private readonly limits: AssistantLimitsService,
+    private readonly usage: AssistantUsageService,
+    private readonly threads: AssistantThreadService,
+    private readonly actions: AssistantActionService,
+    private readonly orchestrator: AssistantOrchestrator,
+  ) {}
+
+  async status(auth: AuthContext) {
+    const entitlements = await this.entitlements.get(auth.organizationId);
+    return {
+      enabled: this.config.enabled,
+      included: !entitlements.enforced || entitlements.features.includes(Feature.AI_ASSISTANT),
+      usage: await this.usage.summary(auth.organizationId),
+    };
+  }
+
+  async send(auth: AuthContext, input: SendMessageDto, stream: EventStream): Promise<void> {
+    await this.admit(auth);
+    const thread = input.threadId ? await this.threads.require(auth, input.threadId) : await this.threads.create(auth, input.text);
+    if (thread.messageCount >= MAX_THREAD_MESSAGES - TURN_HEADROOM) {
+      throw new AppError('ASSISTANT_THREAD_FULL', 'This chat is full. Start a new chat to continue.', undefined, 409);
+    }
+
+    const lock = await this.limits.lockThread(thread.id);
+    try {
+      await this.actions.closeOpenCalls(auth, thread.id, true);
+      const user = await this.prisma.user.findFirst({
+        where: { id: auth.userId, orgId: auth.organizationId },
+        select: { firstName: true, lastName: true, email: true, timezone: true },
+      });
+      const context = contextBlock({
+        now: new Date(),
+        userId: auth.userId,
+        userName: fullName(user?.firstName, user?.lastName, user?.email ?? 'User'),
+        timezone: user?.timezone ?? null,
+        screen: input.screen,
+      });
+      await this.threads.append(auth.organizationId, thread.id, {
+        role: AssistantRole.user,
+        content: [
+          { type: 'text', text: context },
+          { type: 'text', text: input.text },
+        ],
+        text: input.text,
+      });
+      stream.send({ type: 'thread', threadId: thread.id, title: thread.title });
+      await this.orchestrator.run(auth, thread.id, stream.send, stream.signal);
+    } finally {
+      await lock.release();
+    }
+  }
+
+  async decide(auth: AuthContext, actionId: string, decision: 'confirm' | 'reject', stream: EventStream): Promise<void> {
+    await this.admit(auth);
+    const pending = await this.actions.require(auth, actionId);
+
+    const lock = await this.limits.lockThread(pending.threadId);
+    try {
+      const action = decision === 'confirm' ? await this.actions.confirm(auth, actionId) : await this.actions.reject(auth, actionId);
+      stream.send({ type: 'action', action: toActionView(action) });
+
+      if (!(await this.actions.settled(auth.organizationId, action.messageId))) {
+        return stream.send({ type: 'done', awaitingConfirmation: true });
+      }
+      if (await this.actions.closeOpenCalls(auth, action.threadId, false)) {
+        await this.orchestrator.run(auth, action.threadId, stream.send, stream.signal);
+      } else {
+        stream.send({ type: 'done', awaitingConfirmation: false });
+      }
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async admit(auth: AuthContext): Promise<void> {
+    if (!this.config.enabled) throw new AppError('ASSISTANT_DISABLED', 'Copilot is not switched on for this server.', undefined, 503);
+    await this.entitlements.assertFeature(auth.organizationId, Feature.AI_ASSISTANT);
+    await this.limits.consume(auth.userId);
+    await this.usage.assertWithinBudget(auth.organizationId);
+  }
+}

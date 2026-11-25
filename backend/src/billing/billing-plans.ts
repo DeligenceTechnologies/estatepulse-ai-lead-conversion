@@ -16,6 +16,7 @@ export enum Feature {
   ADVANCED_AUTOMATION = 'advanced_automation',
   PRIORITY_SUPPORT = 'priority_support',
   ADVANCED_REPORTING = 'advanced_reporting',
+  AI_ASSISTANT = 'ai_assistant',
 }
 
 export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
@@ -29,10 +30,13 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
   [Feature.ADVANCED_AUTOMATION]: 'Advanced automation',
   [Feature.PRIORITY_SUPPORT]: 'Priority support',
   [Feature.ADVANCED_REPORTING]: 'Advanced reporting',
+  [Feature.AI_ASSISTANT]: 'Copilot AI assistant',
 };
 
 export interface PlanLimits {
   maxMembers: number;
+  /** Copilot spend allowed per calendar month, in US dollars × 1,000,000. */
+  assistantMonthlyBudgetMicros: number;
 }
 
 export interface PlanDefinition {
@@ -53,6 +57,7 @@ const PROFESSIONAL_FEATURES: readonly Feature[] = [
   Feature.LEAD_AUTOMATION,
   Feature.ADVANCED_ANALYTICS,
   Feature.CALENDAR_INTEGRATION,
+  Feature.AI_ASSISTANT,
 ];
 const BUSINESS_FEATURES: readonly Feature[] = [
   ...PROFESSIONAL_FEATURES,
@@ -68,7 +73,7 @@ export const PLANS: Readonly<Record<SubscriptionPlan, PlanDefinition>> = {
     description: 'For trying EstatePulse on your own.',
     prices: null,
     features: FREE_FEATURES,
-    limits: { maxMembers: 1 },
+    limits: { maxMembers: 1, assistantMonthlyBudgetMicros: 0 },
   },
   [SubscriptionPlan.STARTER]: {
     key: SubscriptionPlan.STARTER,
@@ -76,7 +81,7 @@ export const PLANS: Readonly<Record<SubscriptionPlan, PlanDefinition>> = {
     description: 'For a small team getting organised.',
     prices: { [BillingInterval.MONTHLY]: 99_900, [BillingInterval.YEARLY]: 999_900 },
     features: STARTER_FEATURES,
-    limits: { maxMembers: 3 },
+    limits: { maxMembers: 3, assistantMonthlyBudgetMicros: 0 },
   },
   [SubscriptionPlan.PROFESSIONAL]: {
     key: SubscriptionPlan.PROFESSIONAL,
@@ -84,7 +89,7 @@ export const PLANS: Readonly<Record<SubscriptionPlan, PlanDefinition>> = {
     description: 'Automation, analytics and calendar booking for a growing office.',
     prices: { [BillingInterval.MONTHLY]: 299_900, [BillingInterval.YEARLY]: 2_999_900 },
     features: PROFESSIONAL_FEATURES,
-    limits: { maxMembers: 10 },
+    limits: { maxMembers: 10, assistantMonthlyBudgetMicros: 50_000_000 },
     recommended: true,
   },
   [SubscriptionPlan.BUSINESS]: {
@@ -93,7 +98,7 @@ export const PLANS: Readonly<Record<SubscriptionPlan, PlanDefinition>> = {
     description: 'Everything, for brokerages running at scale.',
     prices: { [BillingInterval.MONTHLY]: 599_900, [BillingInterval.YEARLY]: 5_999_900 },
     features: BUSINESS_FEATURES,
-    limits: { maxMembers: 25 },
+    limits: { maxMembers: 25, assistantMonthlyBudgetMicros: 150_000_000 },
   },
 };
 

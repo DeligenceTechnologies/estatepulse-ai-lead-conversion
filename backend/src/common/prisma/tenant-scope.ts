@@ -8,6 +8,10 @@ export const TENANT_SCOPED_MODELS: ReadonlySet<Prisma.ModelName> =
       Prisma.ModelName.CalendarConnection,
       Prisma.ModelName.CalendarMember,
       Prisma.ModelName.CalendarTimeBlock,
+      Prisma.ModelName.AssistantThread,
+      Prisma.ModelName.AssistantMessage,
+      Prisma.ModelName.AssistantAction,
+      Prisma.ModelName.AssistantUsage,
     ]);
 
 const WHERE_OPERATIONS = new Set([
