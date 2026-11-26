@@ -1,1 +1,7 @@
 *.tsbuildinfo
+
+# Raw demo recording — only the cut clips in public/videos are shipped
+public/videos/source/
+
+# Full walkthrough, no longer used on the site (kept locally only)
+public/videos/demo-full.mp4

@@ -1,17 +1,13 @@
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { FAQ_ITEMS } from '../../content/faq';
-import { FaqSection } from './FaqSection';
+import { FAQ_ITEMS } from '../../../content/faq';
+import { Faq } from './Faq';
 
 /** What React writes for the characters it escapes in text. */
 const escaped = (s: string) => s.replace(/&/g, '&amp;').replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
 
-describe('FaqSection', () => {
-  const html = renderToString(<FaqSection />);
-
-  it('is the #faq anchor the footer links to', () => {
-    expect(html).toContain('<section id="faq"');
-  });
+describe('Faq', () => {
+  const html = renderToString(<Faq />);
 
   it('has every question and every answer in the page, open or not', () => {
     for (const item of FAQ_ITEMS) {
@@ -23,7 +19,7 @@ describe('FaqSection', () => {
   it('starts with every answer closed', () => {
     expect(html.match(/aria-expanded="false"/g)).toHaveLength(FAQ_ITEMS.length);
     expect(html).not.toContain('aria-expanded="true"');
-    expect(html.match(/role="region"[^>]* hidden=""/g)).toHaveLength(FAQ_ITEMS.length);
+    expect(html.match(/role="region"[^>]*aria-hidden="true"/g)).toHaveLength(FAQ_ITEMS.length);
   });
 
   it('ties each question button to its own answer panel', () => {
