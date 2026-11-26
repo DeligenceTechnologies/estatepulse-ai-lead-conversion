@@ -19,4 +19,6 @@ export const ROOT_ROUTES = [
   'tools/telnyx/outcome/transfer',
   // Registered in the Stripe Dashboard as the billing webhook endpoint.
   'billing/webhook',
+  // Registered in the Nango dashboard (Environment Settings → Webhooks).
+  'webhooks/nango',
 ];

@@ -65,3 +65,14 @@ export interface DailySummaryEnv {
   DAILY_SUMMARY_POLL_MS: number;
   APP_URL?: string;
 }
+
+export interface NangoEnv {
+  NANGO_SECRET_KEY?: string;
+  NANGO_HOST?: string;
+  NANGO_CONNECT_UI_URL?: string;
+  NANGO_WEBHOOK_SIGNING_KEY?: string;
+  INTEGRATION_WORKER_ENABLED: boolean;
+  INTEGRATION_WORKER_CONCURRENCY: number;
+  INTEGRATION_SYNC_MAX_RECORDS: number;
+  INTEGRATION_SYNC_INTERVAL_SECONDS: number;
+}

@@ -110,6 +110,24 @@ async function bootstrap() {
     }),
   );
 
+  // Integration writes open Nango connect sessions, queue syncs and call providers:
+  // their own bucket per session, so one tab cannot burn the provider's rate limit.
+  app.use(
+    `${API_PREFIX}/integrations`,
+    rateLimit({
+      windowMs: 10 * 60_000,
+      limit: testing ? Number.MAX_SAFE_INTEGER : 60,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      keyGenerator: (req) => {
+        const auth = req.headers.authorization;
+        return auth?.startsWith('Bearer ') ? `n:${sha256Hex(auth.slice(7)).slice(0, 32)}` : `ni:${ipKeyGenerator(req.ip ?? '')}`;
+      },
+      skip: (req) => req.method === 'GET',
+      handler: limited('Too many integration requests, please try again in a few minutes'),
+    }),
+  );
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

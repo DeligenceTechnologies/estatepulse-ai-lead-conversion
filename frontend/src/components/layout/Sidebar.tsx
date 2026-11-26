@@ -132,7 +132,7 @@ export function useOwnerNav(): NavGroup[] {
     },
     {
       label: 'Lead Intake',
-      items: [{ id: 'integrations', label: 'Lead Integrations', icon: Plug }],
+      items: [{ id: 'integrations', label: 'Integrations', icon: Plug }],
     },
     {
       label: 'Setup',

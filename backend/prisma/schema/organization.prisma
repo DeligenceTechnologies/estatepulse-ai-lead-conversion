@@ -6,29 +6,32 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  users               User[]
-  roles               Role[]
-  settings            OrganizationSetting?
-  calendarConnections CalendarConnection[]
-  leads               Lead[]
-  leadSources         LeadSource[]
-  integrations        Integration[]
-  messages            Message[]
-  calls               Call[]
-  sequences           Sequence[]
-  enrollments         SequenceEnrollment[]
-  auditLogs           AuditLog[]
-  outreachBatches     OutreachBatch[]
-  leadEvents          LeadEvent[]
-  contactSuppressions ContactSuppression[]
-  dailySummaryRuns    DailySummaryRun[]
-  leadSubmissions     LeadSubmission[]
-  leadMerges          LeadMerge[]
-  duplicateCandidates DuplicateCandidate[]
-  subscription        Subscription?
-  payments            Payment[]
-  invoices            Invoice[]
-  billingEvents       BillingEvent[]
+  users                  User[]
+  roles                  Role[]
+  settings               OrganizationSetting?
+  calendarConnections    CalendarConnection[]
+  leads                  Lead[]
+  leadSources            LeadSource[]
+  integrations           Integration[]
+  integrationConnections IntegrationConnection[]
+  integrationSyncRuns    IntegrationSyncRun[]
+  integrationRecords     IntegrationRecord[]
+  messages               Message[]
+  calls                  Call[]
+  sequences              Sequence[]
+  enrollments            SequenceEnrollment[]
+  auditLogs              AuditLog[]
+  outreachBatches        OutreachBatch[]
+  leadEvents             LeadEvent[]
+  contactSuppressions    ContactSuppression[]
+  dailySummaryRuns       DailySummaryRun[]
+  leadSubmissions        LeadSubmission[]
+  leadMerges             LeadMerge[]
+  duplicateCandidates    DuplicateCandidate[]
+  subscription           Subscription?
+  payments               Payment[]
+  invoices               Invoice[]
+  billingEvents          BillingEvent[]
 
   @@map("organizations")
 }
@@ -66,7 +69,7 @@ model OrganizationSetting {
   /// Who the organization is in its texts ({ legalName, mailingAddress, email, website }); CASL wants the address for Canadian leads. Unset is all empty.
   businessDetails        Json?   @map("business_details")
   /// The business facts the AI answers a lead's questions from ([{ title, body }], e.g. areas served, commission); NULL means none entered.
-  knowledge             Json?   @map("knowledge")
+  knowledge              Json?   @map("knowledge")
   /// Of maxConcurrentCalls, kept free for calls outside an outreach batch (new form leads, hot follow-ups).
   reservedCallSlots      Int     @default(1) @map("reserved_call_slots")
   /// The owners' end-of-day summary email.

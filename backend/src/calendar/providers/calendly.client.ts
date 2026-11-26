@@ -3,6 +3,7 @@ import type { BusySource } from '../calendar.types';
 import type {
   BookedMeeting,
   PoolingType,
+  ProviderAccount,
   SchedulingEventType,
   SchedulingMember,
   WorkspaceRole,
@@ -27,6 +28,17 @@ interface CalendlyUser {
   scheduling_url: string | null;
   timezone: string | null;
   slug: string | null;
+}
+
+/** `GET /users/me` adds the organization the user is currently in. */
+interface CalendlyMe extends CalendlyUser {
+  current_organization: string;
+}
+
+export interface CalendlyAccount extends ProviderAccount {
+  organizationUri: string;
+  timezone: string | null;
+  schedulingUrl: string | null;
 }
 
 interface CalendlyMembership {
@@ -140,6 +152,27 @@ interface Page<T> {
 @Injectable()
 export class CalendlyClient {
   private readonly logger = new Logger(CalendlyClient.name);
+
+  /** The token's user and the Calendly organization they are currently in. */
+  async currentUser(accessToken: string): Promise<CalendlyAccount> {
+    const { resource } = await this.get<{ resource: CalendlyMe }>(accessToken, `${API_BASE}/users/me`);
+    return {
+      id: resource.uri,
+      email: resource.email,
+      name: resource.name,
+      organizationUri: resource.current_organization,
+      timezone: resource.timezone,
+      schedulingUrl: resource.scheduling_url,
+    };
+  }
+
+  /** The user's role in the organization, or null when they are not a member. */
+  async roleOf(accessToken: string, organizationUri: string, userUri: string): Promise<WorkspaceRole | null> {
+    const url = `${API_BASE}/organization_memberships?${new URLSearchParams({ organization: organizationUri, user: userUri })}`;
+    const page = await this.get<Page<CalendlyMembership>>(accessToken, url);
+    const role = page.collection[0]?.role;
+    return role ? toRole(role) : null;
+  }
 
   async members(accessToken: string, organizationUri: string): Promise<SchedulingMember[]> {
     const memberships = await this.collect<CalendlyMembership>(

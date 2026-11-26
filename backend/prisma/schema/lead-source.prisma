@@ -12,9 +12,10 @@ model LeadSource {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  leads        Lead[]
-  submissions  LeadSubmission[]
+  organization           Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leads                  Lead[]
+  submissions            LeadSubmission[]
+  integrationConnections IntegrationConnection[]
 
   @@unique([orgId, code])
   @@index([orgId])

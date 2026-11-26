@@ -18,6 +18,7 @@ import { OutreachModule } from './outreach/outreach.module';
 import { HistoryModule } from './history/history.module';
 import { DailySummaryModule } from './daily-summary/daily-summary.module';
 import { BillingModule } from './billing/billing.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 import { HealthController } from './health.controller';
 import {QueueModule} from "@/queue/queue.module";
 
@@ -42,6 +43,7 @@ import {QueueModule} from "@/queue/queue.module";
     HistoryModule,
     DailySummaryModule,
     BillingModule,
+    IntegrationsModule,
     QueueModule,
   ],
   controllers: [HealthController],

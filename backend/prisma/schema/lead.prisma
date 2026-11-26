@@ -73,22 +73,22 @@ model Lead {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization    Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  leadSource      LeadSource?          @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
-  assignedTo      User?                @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
-  takenOverBy     User?                @relation("LeadChatTakeover", fields: [takenOverById], references: [id], onDelete: SetNull)
-  messages        Message[]
-  calls           Call[]
-  enrollments     SequenceEnrollment[]
-  meetings        CalendarMeeting[]
-  callTransfers   CallTransfer[]
-  outreachItems   OutreachBatchLead[]
-  events          LeadEvent[]
-  mergedInto      Lead?                @relation("LeadMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
-  mergedLeads     Lead[]               @relation("LeadMergedInto")
-  submissions     LeadSubmission[]
-  duplicatesAsA   DuplicateCandidate[] @relation("DuplicateLeadA")
-  duplicatesAsB   DuplicateCandidate[] @relation("DuplicateLeadB")
+  organization  Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource    LeadSource?          @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
+  assignedTo    User?                @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  takenOverBy   User?                @relation("LeadChatTakeover", fields: [takenOverById], references: [id], onDelete: SetNull)
+  messages      Message[]
+  calls         Call[]
+  enrollments   SequenceEnrollment[]
+  meetings      CalendarMeeting[]
+  callTransfers CallTransfer[]
+  outreachItems OutreachBatchLead[]
+  events        LeadEvent[]
+  mergedInto    Lead?                @relation("LeadMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedLeads   Lead[]               @relation("LeadMergedInto")
+  submissions   LeadSubmission[]
+  duplicatesAsA DuplicateCandidate[] @relation("DuplicateLeadA")
+  duplicatesAsB DuplicateCandidate[] @relation("DuplicateLeadB")
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, status])
@@ -227,19 +227,19 @@ model AuditLog {
 /// ones that matched an existing lead and were attached to it instead of creating a new one. The isOriginal row
 /// is the source the lead first came from; a merge moves the other lead's rows here too.
 model LeadSubmission {
-  id               String   @id @default(uuid(7)) @db.Uuid
-  orgId            String   @map("organization_id") @db.Uuid
-  leadId           String   @map("lead_id") @db.Uuid
-  leadSourceId     String?  @map("lead_source_id") @db.Uuid
+  id           String   @id @default(uuid(7)) @db.Uuid
+  orgId        String   @map("organization_id") @db.Uuid
+  leadId       String   @map("lead_id") @db.Uuid
+  leadSourceId String?  @map("lead_source_id") @db.Uuid
   /// webhook, manual, import, crm, sms, backfill
-  channel          String   @db.VarChar(20)
+  channel      String   @db.VarChar(20)
   /// What matched it to an existing lead: phone or email. Null when it created the lead.
-  matchedBy        String?  @map("matched_by") @db.VarChar(10)
-  isOriginal       Boolean  @default(false) @map("is_original")
+  matchedBy    String?  @map("matched_by") @db.VarChar(10)
+  isOriginal   Boolean  @default(false) @map("is_original")
   /// The mapped values this submission carried, for the lead's source history.
-  values           Json     @default("{}")
-  submittedAt      DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  values       Json     @default("{}")
+  submittedAt  DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)

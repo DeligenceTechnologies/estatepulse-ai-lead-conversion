@@ -16,3 +16,12 @@ export const TextJob = {
   /** A text the lead asked for at a set time ("message me in 10 minutes"). */
   TextBack: 'text-back',
 } as const;
+
+export const INTEGRATION_SYNC_QUEUE = 'integration-sync';
+
+export const IntegrationSyncJob = {
+  /** Reads one connection's records from the provider and imports them as leads. */
+  Sync: 'sync',
+  /** Writes one linked record's lead changes back to the provider (two-way sync). */
+  Push: 'push',
+} as const;

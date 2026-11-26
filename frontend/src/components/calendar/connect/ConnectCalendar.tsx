@@ -26,6 +26,9 @@ import { formatDate } from '../../../lib/datetime';
 import { Meetings } from '../meetings/Meetings.tsx';
 import { SyncButton } from '../shared/SyncButton';
 
+/** Nango's catalog names, as the Integrations page opens them. */
+const INTEGRATION_OF: Record<CalendarProviderId, string> = { cal: 'cal-com-v2', calendly: 'calendly' };
+
 const Fact: React.FC<{ label: string; value: string | null }> = ({ label, value }) => (
   <div className="min-w-0">
     <dt className="text-2xs uppercase tracking-wide text-slate-500">{label}</dt>
@@ -91,6 +94,11 @@ const ConnectionSummary: React.FC<{
       {broken && (
         <Notice tone="warning">
           {connection.lastError ?? `${label} stopped accepting this connection. Reconnect to resume.`}
+          {connection.managedBy === 'integrations' && canEdit && (
+            <Button variant="link" size="sm" className="ml-2" onClick={() => navigate(`/integrations?integration=${INTEGRATION_OF[provider]}`)}>
+              Reconnect on the Integrations page
+            </Button>
+          )}
         </Notice>
       )}
 
@@ -141,6 +149,7 @@ const ConnectionSummary: React.FC<{
 export const ConnectCalendar: React.FC = () => {
   const { can } = useAuth();
   const canEdit = can('organization.update');
+  const navigate = useNavigate();
 
   const [status, setStatus] = useState<OrganizationCalendarStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -200,7 +209,21 @@ export const ConnectCalendar: React.FC = () => {
   } else if (!status) {
     body = <LoadingState />;
   } else if (!provider || !connection) {
-    body = <div className={`${panel} p-4 text-xs text-slate-400`}>No calendar is connected yet.</div>;
+    body = (
+      <div className={`${panel} p-4 flex flex-wrap items-center justify-between gap-3`}>
+        <span className="text-xs text-slate-400">No calendar is connected yet.</span>
+        {canEdit && (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" iconRight={<ArrowRight />} onClick={() => navigate(`/integrations?integration=${INTEGRATION_OF.calendly}`)}>
+              Connect Calendly
+            </Button>
+            <Button size="sm" iconRight={<ArrowRight />} onClick={() => navigate(`/integrations?integration=${INTEGRATION_OF.cal}`)}>
+              Connect Cal.com
+            </Button>
+          </div>
+        )}
+      </div>
+    );
   } else {
     body = <ConnectionSummary provider={provider} connection={connection} canEdit={canEdit} onDisconnected={afterDisconnect} />;
   }

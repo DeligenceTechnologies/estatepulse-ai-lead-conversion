@@ -84,6 +84,23 @@ export const envValidationSchema = Joi.object({
 
     INTEGRATION_ENCRYPTION_KEY: Joi.string().base64().empty('').optional(),
 
+    // Nango (Integration Marketplace). All optional: without NANGO_SECRET_KEY the
+    // marketplace shows every integration as "configuration required" and nothing
+    // can be connected. The keys never leave the server.
+    NANGO_SECRET_KEY: Joi.string().empty('').optional(),
+    // Self-hosted Nango only, e.g. https://nango.example.com. Unset = Nango Cloud.
+    NANGO_HOST: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Self-hosted Connect UI only. Unset = https://connect.nango.dev.
+    NANGO_CONNECT_UI_URL: Joi.string().uri({ scheme: ['http', 'https'] }).empty('').optional(),
+    // Environment Settings → Webhooks → signing key (not the API key). Without it every webhook is refused.
+    NANGO_WEBHOOK_SIGNING_KEY: Joi.string().empty('').optional(),
+    INTEGRATION_WORKER_ENABLED: Joi.boolean().truthy('true').truthy('1').falsy('false').falsy('0').empty('').default(true),
+    INTEGRATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(20).default(2),
+    // Upper bound on records read in one sync, so one huge table cannot hold a worker for hours.
+    INTEGRATION_SYNC_MAX_RECORDS: Joi.number().integer().min(100).max(200_000).default(20_000),
+    // Seconds between automatic syncs of every connected account (provider -> EstatePulse). 0 or empty = off.
+    INTEGRATION_SYNC_INTERVAL_SECONDS: Joi.number().integer().min(0).max(86_400).empty('').default(0),
+
     // Public https address of this API, e.g. https://api.example.com. When set, Calendly and Cal.com
     // push booking changes to POST /calendar-webhooks/:connectionId; without it availability is polled only.
     CALENDAR_WEBHOOK_BASE_URL: Joi.string().uri({ scheme: ['https'] }).empty('').optional(),

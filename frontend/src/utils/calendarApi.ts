@@ -17,6 +17,8 @@ export interface CalendarConnection {
   /** When its data was last synced from the provider; null before the first sync. */
   syncedAt?: string | null;
   lastError: string | null;
+  /** 'integrations' when it was connected on the Integrations page (through Nango) and is reconnected there. */
+  managedBy?: 'integrations' | 'calendar';
 }
 
 export interface OrganizationCalendarStatus {

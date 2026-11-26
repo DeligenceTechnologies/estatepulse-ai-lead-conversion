@@ -188,9 +188,9 @@ model CalendarMeeting {
   lead       Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
   hostUser   User?              @relation(fields: [hostUserId], references: [id], onDelete: SetNull)
 
+  @@unique([connectionId, externalId])
   @@index([leadId])
   @@index([hostUserId, startsAt])
-  @@unique([connectionId, externalId])
   @@index([connectionId, startsAt])
   @@index([endsAt])
   @@index([orgId])

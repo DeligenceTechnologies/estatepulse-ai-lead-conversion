@@ -1,20 +1,20 @@
 /// A nurture sequence. `steps` is the ordered list of
 /// { actionType, delayMinutes, messageTemplate, voicePrompt, maxAttempts }.
 model Sequence {
-  id          String            @id @default(uuid(7)) @db.Uuid
-  orgId       String            @map("organization_id") @db.Uuid
-  code        String            @db.VarChar(50)
-  name        String            @db.VarChar(100)
-  description String?
-  status      SequenceStatus    @default(active)
-  steps       Json              @default("[]")
-  triggers    SequenceTrigger[] @default([])
+  id                   String            @id @default(uuid(7)) @db.Uuid
+  orgId                String            @map("organization_id") @db.Uuid
+  code                 String            @db.VarChar(50)
+  name                 String            @db.VarChar(100)
+  description          String?
+  status               SequenceStatus    @default(active)
+  steps                Json              @default("[]")
+  triggers             SequenceTrigger[] @default([])
   /// Hours a lead has to answer after the last step before the sequence closes out.
-  closeOutHours        Int     @default(48) @map("close_out_hours")
+  closeOutHours        Int               @default(48) @map("close_out_hours")
   /// At close-out, a lead who stayed silent is marked unresponsive; off, it stays in follow-up.
-  closeOutUnresponsive Boolean @default(true) @map("close_out_unresponsive")
-  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  closeOutUnresponsive Boolean           @default(true) @map("close_out_unresponsive")
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   enrollments  SequenceEnrollment[]
@@ -44,10 +44,10 @@ model SequenceEnrollment {
   stoppedReason    String?          @map("stopped_reason") @db.VarChar(100)
   updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  sequence     Sequence     @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
-  enrolledByUser User?      @relation(fields: [enrolledByUserId], references: [id], onDelete: SetNull)
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sequence       Sequence     @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  enrolledByUser User?        @relation(fields: [enrolledByUserId], references: [id], onDelete: SetNull)
 
   @@index([orgId, leadId])
   @@index([sequenceId])

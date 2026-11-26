@@ -26,6 +26,11 @@ export class EventsBus {
     }
   }
 
+  /** Every event, for in-process consumers that act across organizations (integration write-back). */
+  all(): Observable<LiveEvent> {
+    return this.stream.asObservable();
+  }
+
   forOrganization(organizationId: string): Observable<LiveEvent> {
     return this.stream.pipe(filter((event) => event.organizationId === organizationId));
   }

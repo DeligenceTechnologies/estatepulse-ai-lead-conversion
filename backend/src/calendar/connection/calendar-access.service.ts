@@ -13,7 +13,9 @@ import { ConnectionAlertService } from '@/common/service/connection-alert.servic
 import { PROVIDER_LABEL, type CalCredentials, type CalendlyCredentials } from '../calendar.types';
 import { ProviderHttpError } from '../providers/provider-http';
 import { SchedulingProvider } from '../providers/scheduling-provider';
+import { NangoError, NangoService } from '@/integrations/nango/nango.service';
 import { inUse } from './connection-state';
+import { readNangoReference } from './nango-reference';
 
 export const CALENDAR_UNAVAILABLE = 'Calendar connections are not available yet. Please contact support.';
 
@@ -39,6 +41,9 @@ export type UsableConnection = Prisma.CalendarConnectionGetPayload<{ select: typ
 /** Someone reconnected while this request held the old credentials. */
 class CredentialsChanged extends Error {}
 
+/** Nango no longer has the connection: a fresh token cannot help, only reconnecting. */
+class NangoConnectionGone extends ProviderHttpError {}
+
 /**
  * The one gate to a connection's credentials. Everything that calls Calendly
  * or Cal.com for an organization goes through here, so decrypting and parking
@@ -53,6 +58,7 @@ export class CalendarAccessService {
     private readonly secrets: SecretBoxService,
     private readonly provider: SchedulingProvider,
     private readonly connectionAlerts: ConnectionAlertService,
+    private readonly nango: NangoService,
   ) {}
 
   /**
@@ -109,44 +115,112 @@ export class CalendarAccessService {
     connection: UsableConnection,
     run: (secret: string) => Promise<T>,
   ): Promise<T> {
+    let error: unknown;
     try {
       return await run(await this.secretFor(connection));
-    } catch (error) {
-      if (!(error instanceof ProviderHttpError)) throw error;
-      if (!error.credentialRejected) throw new BadGatewayException(error.message);
-
-      // The provider refused the credentials: park the connection so every
-      // screen shows "reconnect" instead of failing call after call. A saved
-      // (inactive) one keeps its status and only records the error. Matching
-      // on the old credentials and status keeps a reconnect or a switch that
-      // happened meanwhile from being overwritten.
-      const label = PROVIDER_LABEL[connection.provider];
-      const message = `${label} no longer accepts this connection. Reconnect ${label} to continue.`;
-      const parked = await this.prisma.calendarConnection.updateMany({
-        where: { id: connection.id, orgId, credentials: connection.credentials, status: connection.status },
-        data: connection.status === 'active' ? { status: 'error', lastError: message } : { lastError: message },
-      });
-      if (parked.count === 0) throw new CredentialsChanged(message);
-      // Only the connection in use breaking pauses anything; a saved one just records it.
-      if (connection.status === 'active') {
-        this.connectionAlerts.connectionBroken({
-          orgId,
-          connectionId: connection.id,
-          providerLabel: label,
-          impact: 'Leads cannot book meetings, and availability and meetings are not syncing.',
-          reconnectPath: '/settings?tab=calendar',
-          brokenAt: new Date(),
-        });
-      }
-      throw new ConflictException(message);
+    } catch (caught) {
+      error = caught;
     }
+
+    // An OAuth token (Calendly) can be refused just before Nango would have
+    // refreshed it: ask Nango for a new one and try once more before parking.
+    // A 401 means the provider did nothing, so repeating the call is safe.
+    const ref = readNangoReference(connection.credentials);
+    if (ref && error instanceof ProviderHttpError && error.credentialRejected && !(error instanceof NangoConnectionGone)) {
+      this.nango.forgetApiKey(ref.providerConfigKey, ref.connectionId);
+      try {
+        return await run(await this.nangoSecret(connection, ref.providerConfigKey, ref.connectionId, true));
+      } catch (retried) {
+        error = retried;
+      }
+    }
+
+    if (!(error instanceof ProviderHttpError)) throw error;
+    if (!error.credentialRejected) throw new BadGatewayException(error.message);
+    await this.nangoCredentialsRejected(connection);
+
+    // The provider refused the credentials: park the connection so every
+    // screen shows "reconnect" instead of failing call after call. A saved
+    // (inactive) one keeps its status and only records the error. Matching
+    // on the old credentials and status keeps a reconnect or a switch that
+    // happened meanwhile from being overwritten.
+    const label = PROVIDER_LABEL[connection.provider];
+    const message = `${label} no longer accepts this connection. Reconnect ${label} to continue.`;
+    const parked = await this.prisma.calendarConnection.updateMany({
+      where: { id: connection.id, orgId, credentials: connection.credentials, status: connection.status },
+      data: connection.status === 'active' ? { status: 'error', lastError: message } : { lastError: message },
+    });
+    if (parked.count === 0) throw new CredentialsChanged(message);
+    // Only the connection in use breaking pauses anything; a saved one just records it.
+    if (connection.status === 'active') {
+      this.connectionAlerts.connectionBroken({
+        orgId,
+        connectionId: connection.id,
+        providerLabel: label,
+        impact: 'Leads cannot book meetings, and availability and meetings are not syncing.',
+        // A connection made on the Integrations page is reconnected there.
+        reconnectPath: readNangoReference(connection.credentials) ? '/integrations' : '/settings?tab=calendar',
+        brokenAt: new Date(),
+      });
+    }
+    throw new ConflictException(message);
   }
 
   private async secretFor(connection: UsableConnection): Promise<string> {
+    const ref = readNangoReference(connection.credentials);
+    if (ref) return this.nangoSecret(connection, ref.providerConfigKey, ref.connectionId);
     if (connection.provider === 'cal') {
       return this.requireCredentials<CalCredentials>(connection.credentials).apiKey;
     }
     return this.requireCredentials<CalendlyCredentials>(connection.credentials).accessToken;
+  }
+
+  /**
+   * The key of a connection made on the Integrations page, read from Nango.
+   * A connection Nango no longer has reads as a rejected credential, so it is
+   * parked for reconnecting exactly like a revoked key.
+   */
+  private async nangoSecret(
+    connection: UsableConnection,
+    providerConfigKey: string,
+    connectionId: string,
+    forceRefresh = false,
+  ): Promise<string> {
+    const label = PROVIDER_LABEL[connection.provider];
+    if (!this.nango.configured) throw new ServiceUnavailableException(CALENDAR_UNAVAILABLE);
+    try {
+      return await this.nango.secretOf(providerConfigKey, connectionId, forceRefresh);
+    } catch (error) {
+      if (!(error instanceof NangoError)) throw error;
+      // Gone from Nango, or Nango could not refresh the token: only reconnecting helps.
+      if (error.kind === 'REAUTH') throw new NangoConnectionGone(label, 401, `${label} connection is no longer valid in Nango`);
+      if (error.kind === 'MISCONFIGURED') {
+        this.logger.error(`Nango refused to read the ${label} connection: ${error.message}`);
+        throw new ServiceUnavailableException(CALENDAR_UNAVAILABLE);
+      }
+      throw new ServiceUnavailableException(`${label} could not be reached right now. Try again in a minute.`);
+    }
+  }
+
+  /**
+   * A Nango-held key was refused: forget the cached copy (a reconnect may have
+   * replaced it) and show the account as "reconnect" on the Integrations page,
+   * where reconnecting happens.
+   */
+  private async nangoCredentialsRejected(connection: UsableConnection): Promise<void> {
+    const ref = readNangoReference(connection.credentials);
+    if (!ref) return;
+    this.nango.forgetApiKey(ref.providerConfigKey, ref.connectionId);
+    const label = PROVIDER_LABEL[connection.provider];
+    await this.prisma.integrationConnection.updateMany({
+      where: { orgId: connection.orgId, nangoConnectionId: ref.connectionId, status: { in: ['connected', 'error'] } },
+      data: {
+        status: 'reauth_required',
+        lastErrorCode: 'REAUTH_REQUIRED',
+        lastErrorMessage: `${label} no longer accepts this connection. Reconnect to continue.`,
+        lastErrorAt: new Date(),
+      },
+    });
   }
 
   private requireCredentials<T>(sealed: string): T {

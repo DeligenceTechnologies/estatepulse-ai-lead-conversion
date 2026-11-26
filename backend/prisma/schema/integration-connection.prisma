@@ -1,0 +1,135 @@
+/// connected: usable. reauth_required: the provider stopped accepting the grant
+/// (refresh failed, revoked, deleted in Nango); the owner must reconnect.
+/// error: our side could not use it (misconfigured, provider rejected a call).
+/// disconnected: removed by the organization; kept for history and audit.
+enum IntegrationConnectionStatus {
+  connected
+  reauth_required
+  error
+  disconnected
+
+  @@map("integration_connection_status")
+}
+
+enum IntegrationSyncStatus {
+  queued
+  running
+  succeeded
+  failed
+
+  @@map("integration_sync_status")
+}
+
+enum IntegrationSyncTrigger {
+  manual
+  connected
+  webhook
+  schedule
+
+  @@map("integration_sync_trigger")
+}
+
+/// One third-party account an organization connected through Nango. An
+/// organization may connect several accounts of the same provider, so nothing
+/// here is unique per (organization, provider). Nango holds the credentials;
+/// this row holds only the Nango connection id and safe account details.
+model IntegrationConnection {
+  id                String                      @id @default(uuid(7)) @db.Uuid
+  orgId             String                      @map("organization_id") @db.Uuid
+  /// Nango's provider name from its catalog, e.g. "airtable", "hubspot".
+  provider          String                      @db.VarChar(100)
+  /// The Nango integration's unique key in our environment.
+  providerConfigKey String                      @map("provider_config_key") @db.VarChar(255)
+  /// The Nango connection id. Globally unique: Nango generates it per connect session.
+  nangoConnectionId String                      @unique @map("nango_connection_id") @db.VarChar(255)
+  status            IntegrationConnectionStatus @default(connected)
+  accountName       String?                     @map("account_name") @db.VarChar(255)
+  accountEmail      String?                     @map("account_email") @db.VarChar(255)
+  externalAccountId String?                     @map("external_account_id") @db.VarChar(255)
+  /// Safe, display-only account details from the adapter (never tokens).
+  metadata          Json                        @default("{}")
+  /// Provider-specific settings chosen by the organization (e.g. Airtable base/table and field map).
+  settings          Json                        @default("{}")
+  /// Where leads imported through this connection are attributed.
+  leadSourceId      String?                     @map("lead_source_id") @db.Uuid
+  connectedById     String?                     @map("connected_by_id") @db.Uuid
+  lastSyncedAt      DateTime?                   @map("last_synced_at") @db.Timestamptz(6)
+  lastErrorCode     String?                     @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage  String?                     @map("last_error_message") @db.VarChar(500)
+  lastErrorAt       DateTime?                   @map("last_error_at") @db.Timestamptz(6)
+  disconnectedAt    DateTime?                   @map("disconnected_at") @db.Timestamptz(6)
+  /// Two-way sync: EstatePulse writes lead changes back to the provider record.
+  writeBackEnabled  Boolean   @default(false) @map("write_back_enabled")
+  /// Why writing back is paused (e.g. the grant lacks write access); cleared on reconnect.
+  writeBackError    String?   @map("write_back_error") @db.VarChar(500)
+  writeBackErrorAt  DateTime? @map("write_back_error_at") @db.Timestamptz(6)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leadSource   LeadSource?          @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
+  syncRuns     IntegrationSyncRun[]
+  records      IntegrationRecord[]
+
+  @@index([orgId, provider, status])
+  @@index([orgId, createdAt])
+  @@map("integration_connections")
+}
+
+/// One sync of one connection, queued on BullMQ. At most one is queued or running per connection.
+model IntegrationSyncRun {
+  id            String                 @id @default(uuid(7)) @db.Uuid
+  orgId         String                 @map("organization_id") @db.Uuid
+  connectionId  String                 @map("connection_id") @db.Uuid
+  trigger       IntegrationSyncTrigger
+  status        IntegrationSyncStatus  @default(queued)
+  requestedById String?                @map("requested_by_id") @db.Uuid
+  jobId         String?                @map("job_id") @db.VarChar(255)
+  /// { fetched, created, attached, unchanged, skipped, failed }
+  stats         Json                   @default("{}")
+  attempts      Int                    @default(0)
+  errorMessage  String?                @map("error_message") @db.VarChar(500)
+  queuedAt      DateTime               @default(now()) @map("queued_at") @db.Timestamptz(6)
+  startedAt     DateTime?              @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime?              @map("finished_at") @db.Timestamptz(6)
+
+  organization Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, queuedAt(sort: Desc)])
+  @@index([orgId, status])
+  @@map("integration_sync_runs")
+}
+
+/// Which external record became which lead, and what it looked like, so a
+/// re-sync skips records that did not change instead of importing them again.
+model IntegrationRecord {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  orgId        String   @map("organization_id") @db.Uuid
+  connectionId String   @map("connection_id") @db.Uuid
+  /// e.g. "airtable:tblXXXX", "hubspot:contact"
+  objectType   String   @map("object_type") @db.VarChar(100)
+  externalId   String   @map("external_id") @db.VarChar(255)
+  leadId       String?  @map("lead_id") @db.Uuid
+  /// sha256 of the mapped values last imported.
+  contentHash  String   @map("content_hash") @db.VarChar(64)
+  firstSeenAt  DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  /// Two-way sync base: the last agreed value of each synced field on each side ({ local, remote, meta }).
+  syncState      Json?     @map("sync_state")
+  /// When the lead was last compared with `syncState.local`; a lead updated after this is checked again.
+  localCheckedAt DateTime? @map("local_checked_at") @db.Timestamptz(6)
+  /// When a change was last written to the provider.
+  pushedAt       DateTime? @map("pushed_at") @db.Timestamptz(6)
+  /// Why the last write-back of this record failed, for the account screen.
+  pushError      String?   @map("push_error") @db.VarChar(500)
+  pushErrorAt    DateTime? @map("push_error_at") @db.Timestamptz(6)
+
+  organization Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, objectType, externalId])
+  @@index([orgId, leadId])
+  @@index([connectionId, pushErrorAt])
+  @@map("integration_records")
+}
