@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
-import { PrismaService } from '@/common/prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
 import { ConnectedAppsService } from '@/integration/connected-apps.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from '@/lead/lead-scope';
 import { PERMISSIONS } from '@/role/permissions';
@@ -89,7 +89,7 @@ const nameOf = (l: { id: string; firstName: string | null; lastName: string | nu
 @Injectable()
 export class AssistantActivityService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     private readonly apps: ConnectedAppsService,
   ) {}
 

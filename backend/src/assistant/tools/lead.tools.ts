@@ -1,7 +1,7 @@
 import { AssignmentType, LeadStatus, LeadTemperature, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AppError } from '@/common/errors/app-error';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma } from '@/common/prisma/prisma.service';
 import type { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import type { LeadEditService } from '@/lead/lead-edit.service';
 import type { LeadReviewService } from '@/lead/lead-review.service';
@@ -16,7 +16,7 @@ import { leadRef, refOf, userRef, type RefTable } from './refs';
 import { display, readTool, writeTool, type AssistantTool, type PreviewChange } from './tool';
 
 export interface LeadToolDeps {
-  prisma: PrismaService;
+  prisma: GuardedPrisma;
   edits: LeadEditService;
   assignments: LeadAssignmentService;
   manualLeads: ManualLeadService;
@@ -100,7 +100,7 @@ async function summaries(refs: RefTable, rows: LeadSummaryRow[]) {
 }
 
 /** Rows for ids a search already scoped to the user, in the order given. */
-async function summaryRows(prisma: PrismaService, orgId: string, ids: string[]): Promise<LeadSummaryRow[]> {
+async function summaryRows(prisma: GuardedPrisma, orgId: string, ids: string[]): Promise<LeadSummaryRow[]> {
   if (ids.length === 0) return [];
   const rows = await prisma.lead.findMany({ where: { id: { in: ids }, orgId }, select: LEAD_SUMMARY });
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -448,7 +448,7 @@ export function leadTools({ prisma, edits, assignments, manualLeads, reviews }: 
   ];
 }
 
-export async function leadVersion(prisma: PrismaService, orgId: string, id: string): Promise<Date | null> {
+export async function leadVersion(prisma: GuardedPrisma, orgId: string, id: string): Promise<Date | null> {
   const lead = await prisma.lead.findFirst({ where: { id, orgId }, select: { updatedAt: true } });
   return lead?.updatedAt ?? null;
 }

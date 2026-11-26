@@ -290,8 +290,8 @@ export class PortalLeadsController {
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async enroll(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
-    const lead = await this.prisma.lead.findFirst({ where: { id, orgId: auth.organizationId }, select: { id: true } });
-    if (!lead) throw new AppError('NOT_FOUND', 'No such lead in this organization');
+    // An agent only on their own leads, an admin on any: the same rule as viewing the lead.
+    await this.requireVisible(auth, id);
     // Started by hand, so the person is told why nothing would happen, rather than the lead quietly waiting.
     if (!(await this.engine.canReachLeads(auth.organizationId))) {
       throw new AppError('CONFLICT', 'Connect a phone number in AI Settings before starting outreach.');
@@ -391,6 +391,7 @@ export class PortalLeadsController {
   @Patch(':id/status')
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async setStatus(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: SetLeadStatusDto) {
+    await this.requireVisible(auth, id);
     await this.engine.setStatus(auth.organizationId, id, body.status, body.reason, {
       followUpReason: body.followUpReason,
       actor: { type: 'user', id: auth.userId },
@@ -402,6 +403,7 @@ export class PortalLeadsController {
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async outcome(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: LeadOutcomeDto) {
+    await this.requireVisible(auth, id);
     const optOut = body.outcome === 'dnc';
     await this.engine.setStatus(auth.organizationId, id, optOut ? LeadStatus.not_interested : (body.outcome as LeadStatus), body.summary, {
       followUpReason: body.followUpReason ?? FollowUpReason.callback_requested,
@@ -415,6 +417,7 @@ export class PortalLeadsController {
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
   async qualified(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: LeadQualifiedDto) {
+    await this.requireVisible(auth, id);
     await this.engine.qualified(auth.organizationId, id, body.temperature, body.summary, { actor: { type: 'user', id: auth.userId } });
     return { ok: true };
   }

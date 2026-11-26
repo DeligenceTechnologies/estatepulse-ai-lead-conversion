@@ -2,7 +2,7 @@ import { ConsentStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { spoken } from '@/calendar/booking/booking-time';
 import { AppError } from '@/common/errors/app-error';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma, PrismaService } from '@/common/prisma/prisma.service';
 import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { nextLeadContactAt } from '@/common/utils/quiet-hours';
 import type { EventsBus } from '@/events/events.bus';
@@ -16,7 +16,7 @@ import type { SmsConversationService } from '@/telnyx/sms/sms-conversation.servi
 import { agentMessageForAi } from '@/telnyx/sms/sms-prompt';
 
 export interface LeadTextDeps {
-  prisma: PrismaService;
+  prisma: GuardedPrisma;
   sms: SmsService;
   conversations: SmsConversationService;
   optOuts: OptOutService;
@@ -58,7 +58,8 @@ export async function textBlocker(deps: Pick<LeadTextDeps, 'prisma' | 'followup'
   if (lead.consentStatus !== ConsentStatus.granted) {
     return "This lead has not given consent to be texted, so the assistant does not text them. Record their consent on the lead's page first.";
   }
-  if (await isSuppressed(deps.prisma, auth.organizationId, lead.normalizedPhone)) return 'This number asked not to be contacted.';
+  // The helper is typed for the plain client; at run time this is still the guarded one.
+  if (await isSuppressed(deps.prisma as unknown as PrismaService, auth.organizationId, lead.normalizedPhone)) return 'This number asked not to be contacted.';
   if (lead.takenOverById && lead.takenOverById !== auth.userId) {
     const holder = lead.takenOverBy ? fullName(lead.takenOverBy.firstName, lead.takenOverBy.lastName, lead.takenOverBy.email) : 'An agent';
     return `${holder} has taken over this lead's text chat and is answering personally, so the assistant does not text them.`;

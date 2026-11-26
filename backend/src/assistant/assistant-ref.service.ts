@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
-import { PrismaService, TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
 import { visibleLeads } from '@/lead/lead-scope';
 import { formatRef, parseRef, type RefKind, type RefTable } from './tools/refs';
 
@@ -19,14 +19,11 @@ const NOT_FOUND: Record<RefKind, string> = {
 
 @Injectable()
 export class AssistantRefService {
-  constructor(
-    @Inject(TENANT_PRISMA) private readonly db: GuardedPrisma,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly db: GuardedPrisma) {}
 
   /** The refs of one chat, for the user it belongs to. The caller has already checked the chat is theirs. */
   forThread(auth: AuthContext, threadId: string): RefTable {
-    return new ThreadRefs(this.db, this.prisma, auth, threadId);
+    return new ThreadRefs(this.db, auth, threadId);
   }
 }
 
@@ -36,7 +33,6 @@ class ThreadRefs implements RefTable {
 
   constructor(
     private readonly db: GuardedPrisma,
-    private readonly prisma: PrismaService,
     private readonly auth: AuthContext,
     private readonly threadId: string,
   ) {}
@@ -102,16 +98,16 @@ class ThreadRefs implements RefTable {
     const orgId = this.auth.organizationId;
     switch (kind) {
       case 'lead':
-        return (await this.prisma.lead.count({ where: { id, ...visibleLeads(this.auth) } })) > 0;
+        return (await this.db.lead.count({ where: { id, ...visibleLeads(this.auth) } })) > 0;
       case 'call':
-        return (await this.prisma.call.count({ where: { id, orgId, lead: visibleLeads(this.auth) } })) > 0;
+        return (await this.db.call.count({ where: { id, orgId, lead: visibleLeads(this.auth) } })) > 0;
       case 'user':
-        return (await this.prisma.user.count({ where: { id, orgId } })) > 0;
+        return (await this.db.user.count({ where: { id, orgId } })) > 0;
       case 'meeting':
         // A meeting with a lead they can see, or one they host.
-        return (await this.prisma.calendarMeeting.count({ where: { id, orgId, OR: [{ lead: visibleLeads(this.auth) }, { hostUserId: this.auth.userId }] } })) > 0;
+        return (await this.db.calendarMeeting.count({ where: { id, orgId, OR: [{ lead: visibleLeads(this.auth) }, { hostUserId: this.auth.userId }] } })) > 0;
       case 'sequence':
-        return (await this.prisma.sequence.count({ where: { id, orgId } })) > 0;
+        return (await this.db.sequence.count({ where: { id, orgId } })) > 0;
       case 'slot':
         // A start time, not a record: the booking tool checks it is still ahead and still open.
         return true;

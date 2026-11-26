@@ -7,7 +7,7 @@ import type { InCallBookingService, Slot } from '@/calendar/booking/in-call-book
 import type { LeadBookingService } from '@/calendar/booking/lead-booking.service';
 import type { ToolContext as BookingContext } from '@/calendar/booking/tool-auth.service';
 import { AppError } from '@/common/errors/app-error';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma, PrismaService } from '@/common/prisma/prisma.service';
 import { contactZone, leadZone } from '@/common/utils/lead-timezone';
 import { visibleLeads } from '@/lead/lead-scope';
 import { nextMeeting } from '@/lead/upcoming-meeting';
@@ -18,7 +18,7 @@ import { leadRef, refOf, slotRef, userRef, type RefTable } from './refs';
 import { readTool, writeTool, type AssistantTool } from './tool';
 
 export interface CalendarToolDeps {
-  prisma: PrismaService;
+  prisma: GuardedPrisma;
   appointments: AppointmentsService;
   booking: InCallBookingService;
   bookingSettings: InCallBookingSettingsService;
@@ -216,7 +216,8 @@ export function calendarTools(deps: CalendarToolDeps): AssistantTool[] {
         if (!lead.email) {
           throw new AppError('VALIDATION_ERROR', `${name} has no email address, and Calendly needs one for the invite. Add it with lead_update first.`);
         }
-        const existing = await nextMeeting(prisma, orgId, lead.id);
+        // The helper is typed for the plain client; at run time this is still the guarded one.
+        const existing = await nextMeeting(prisma as unknown as PrismaService, orgId, lead.id);
         if (existing) throw new AppError('CONFLICT', `${name} already has a meeting on ${spoken(existing.startsAt, timezone)}. One upcoming meeting per lead.`);
 
         const clock = clockOf(lead);

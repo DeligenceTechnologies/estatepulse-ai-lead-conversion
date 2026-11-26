@@ -1,7 +1,7 @@
 import { ConsentStatus, EnrollmentStatus, FollowUpReason, LeadStatus, SequenceStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AppError } from '@/common/errors/app-error';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma } from '@/common/prisma/prisma.service';
 import type { FollowupService } from '@/followup/followup.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { PERMISSIONS } from '@/role/permissions';
@@ -15,7 +15,7 @@ import { leadRef, refOf, sequenceRef } from './refs';
 import { readTool, writeTool, type AssistantTool } from './tool';
 
 export interface OutreachToolDeps {
-  prisma: PrismaService;
+  prisma: GuardedPrisma;
   engine: EngineService;
   strategies: StrategyStoreService;
   followup: FollowupService;

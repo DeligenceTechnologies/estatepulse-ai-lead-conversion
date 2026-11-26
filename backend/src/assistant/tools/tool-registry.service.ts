@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppointmentsService } from '@/calendar/appointments/appointments.service';
 import { InCallBookingSettingsService } from '@/calendar/booking/in-call-booking-settings.service';
 import { InCallBookingService } from '@/calendar/booking/in-call-booking.service';
 import { LeadBookingService } from '@/calendar/booking/lead-booking.service';
-import { PrismaService } from '@/common/prisma/prisma.service';
+import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { HistoryService } from '@/history/history.service';
@@ -39,7 +39,7 @@ export class ToolRegistry {
   private readonly definitions: ReadonlyMap<string, ToolSpec>;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     edits: LeadEditService,
     assignments: LeadAssignmentService,
     manualLeads: ManualLeadService,

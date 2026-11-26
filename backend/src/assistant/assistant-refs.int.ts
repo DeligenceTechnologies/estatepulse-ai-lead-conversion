@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthContext } from '@/auth/auth.types';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { TenantContext } from '@/common/prisma/tenant-context';
+import { TenancyViolationError } from '@/common/prisma/tenant-scope';
 import { CONSENT_REVIEW_REASON } from '@/lead/consent';
 import { AssistantRefService } from './assistant-ref.service';
 import { historyTools } from './tools/history.tools';
@@ -18,9 +19,9 @@ import type { RefTable } from './tools/refs';
 
 const prisma = new PrismaService({ get: () => undefined } as unknown as ConfigService);
 const guarded = prisma.withTenancyGuard();
-const refService = new AssistantRefService(guarded, prisma);
+const refService = new AssistantRefService(guarded);
 const tools = Object.fromEntries(
-  [...leadTools({ prisma, edits: {}, assignments: {}, manualLeads: {}, reviews: {} } as never), ...historyTools({} as never, prisma)].map((t) => [t.name, t as any]),
+  [...leadTools({ prisma: guarded, edits: {}, assignments: {}, manualLeads: {}, reviews: {} } as never), ...historyTools({} as never, guarded)].map((t) => [t.name, t as any]),
 );
 
 const orgs: string[] = [];
@@ -183,5 +184,24 @@ describe('refs on the real database', () => {
     await inOrg(() => refService.forThread(owner, id).issue('lead', [leads.priya]));
     await prisma.assistantThread.delete({ where: { id } });
     expect(await prisma.assistantRef.count({ where: { threadId: id } })).toBe(0);
+  });
+});
+
+describe('tenant guard on lead data', () => {
+  it("keeps a lead query in its office even when the filter has no orgId", async () => {
+    const other = await prisma.organization.create({ data: { name: `assistant-refs-int guard ${randomUUID().slice(0, 8)}` } });
+    orgs.push(other.id);
+    // Asked by id alone, from another office: nothing. From its own office: the lead.
+    expect(await inOrg(async () => await guarded.lead.findMany({ where: { id: leads.priya } }), other.id)).toEqual([]);
+    expect(await inOrg(async () => await guarded.lead.count({ where: { id: leads.priya } }))).toBe(1);
+    expect(await inOrg(async () => await guarded.leadEvent.count({ where: { leadId: leads.priya } }), other.id)).toBe(0);
+  });
+
+  it('refuses a lead query outside any office', async () => {
+    await expect(guarded.lead.findMany({ where: { id: leads.priya } })).rejects.toBeInstanceOf(TenancyViolationError);
+  });
+
+  it("refuses to write a lead into another office", async () => {
+    await expect(inOrg(async () => await guarded.lead.update({ where: { id: leads.priya }, data: { orgId: randomUUID() } }))).rejects.toBeInstanceOf(TenancyViolationError);
   });
 });

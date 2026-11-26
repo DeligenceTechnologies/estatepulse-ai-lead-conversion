@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthContext } from '@/auth/auth.types';
 import { PrismaService } from '@/common/prisma/prisma.service';
+import { TenantContext } from '@/common/prisma/tenant-context';
 import { ConnectedAppsService } from '@/integration/connected-apps.service';
 import { AssistantActivityService } from './assistant-activity.service';
 
@@ -13,7 +14,9 @@ import { AssistantActivityService } from './assistant-activity.service';
  */
 
 const prisma = new PrismaService({ get: () => undefined } as unknown as ConfigService);
-const service = new AssistantActivityService(prisma, new ConnectedAppsService(prisma));
+const service = new AssistantActivityService(prisma.withTenancyGuard(), new ConnectedAppsService(prisma));
+/** The feed runs inside a request, so inside its office's tenant context. */
+const feed = (auth: AuthContext) => TenantContext.run(auth.organizationId, () => service.feed(auth));
 
 let orgId: string;
 let owner: AuthContext;
@@ -47,13 +50,13 @@ afterAll(async () => {
 
 describe('activity feed on the real database', () => {
   it("the owner sees the office's last day", async () => {
-    const feed = await service.feed(owner);
-    expect(feed.items.map((i) => `${i.lead?.name}: ${i.text}`).sort()).toEqual(['Maria Lopez: is interested', 'Raj Mehta: asked not to be contacted']);
-    expect(feed.alerts).toEqual([]);
+    const result = await feed(owner);
+    expect(result.items.map((i) => `${i.lead?.name}: ${i.text}`).sort()).toEqual(['Maria Lopez: is interested', 'Raj Mehta: asked not to be contacted']);
+    expect(result.alerts).toEqual([]);
   });
 
   it('an agent sees only their own lead', async () => {
-    const feed = await service.feed(agent);
-    expect(feed.items.map((i) => `${i.lead?.name}: ${i.text}`)).toEqual(['Maria Lopez: is interested']);
+    const result = await feed(agent);
+    expect(result.items.map((i) => `${i.lead?.name}: ${i.text}`)).toEqual(['Maria Lopez: is interested']);
   });
 });

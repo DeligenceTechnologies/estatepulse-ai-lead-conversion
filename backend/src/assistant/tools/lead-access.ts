@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma } from '@/common/prisma/prisma.service';
 import { OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from '@/lead/lead-scope';
 import type { RefTable } from './refs';
 
@@ -11,7 +11,7 @@ export const visible = (auth: AuthContext, extra: Prisma.LeadWhereInput = {}): P
 });
 
 /** The lead behind a ref, if the user may see it and it is not still waiting in import or consent review. */
-export async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: PrismaService, auth: AuthContext, refs: RefTable, ref: string, select: S) {
+export async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: GuardedPrisma, auth: AuthContext, refs: RefTable, ref: string, select: S) {
   const id = await refs.resolve('lead', ref);
   const lead = await prisma.lead.findFirst({ where: visible(auth, { id }), select });
   if (!lead) throw new AppError('NOT_FOUND', `${ref} is still waiting in import or consent review. Finish the review on the Leads screen first.`);
@@ -21,7 +21,7 @@ export async function findVisibleLead<S extends Prisma.LeadSelect>(prisma: Prism
 export const leadName = (l: { firstName: string | null; lastName: string | null }): string => fullName(l.firstName, l.lastName, 'this lead');
 
 /** The office's time zone, which meeting times are shown in. */
-export async function officeTimezone(prisma: PrismaService, orgId: string): Promise<string> {
+export async function officeTimezone(prisma: GuardedPrisma, orgId: string): Promise<string> {
   const settings = await prisma.organizationSetting.findUnique({ where: { orgId }, select: { timezone: true } });
   return settings?.timezone || 'UTC';
 }

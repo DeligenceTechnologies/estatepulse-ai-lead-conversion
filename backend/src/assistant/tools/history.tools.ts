@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma } from '@/common/prisma/prisma.service';
 import { CALL_OUTCOMES } from '@/history/dto/history.query';
 import type { HistoryService } from '@/history/history.service';
 import { callRef, leadRef, type RefTable } from './refs';
@@ -32,7 +32,7 @@ async function shapeCalls<T extends CallRow>(refs: RefTable, calls: T[]) {
   }));
 }
 
-export function historyTools(history: HistoryService, prisma: PrismaService): AssistantTool[] {
+export function historyTools(history: HistoryService, prisma: GuardedPrisma): AssistantTool[] {
   return [
     readTool({
       name: 'call_list',

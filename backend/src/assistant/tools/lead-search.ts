@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import type { PrismaService } from '@/common/prisma/prisma.service';
+import type { GuardedPrisma } from '@/common/prisma/prisma.service';
 import { normalizeEmail, normalizePhone } from '@/lead/duplicates/identity';
 
 /**
@@ -174,7 +174,7 @@ const MIN_PHONE_DIGITS = 4;
  * Searches inside `where`, which already holds the user's visibility and the filters.
  * A phone number matches the stored E.164 number, or its ending when typed without the country code.
  */
-export async function findLeads(prisma: PrismaService, where: Prisma.LeadWhereInput, query: string, limit: number, now = new Date()): Promise<SearchOutcome> {
+export async function findLeads(prisma: GuardedPrisma, where: Prisma.LeadWhereInput, query: string, limit: number, now = new Date()): Promise<SearchOutcome> {
   const q = query.trim();
   const ids = async (match: Prisma.LeadWhereInput) =>
     (await prisma.lead.findMany({ where: { AND: [where, match] }, select: { id: true }, orderBy: { createdAt: 'desc' }, take: MAX_EXACT })).map((r) => r.id);

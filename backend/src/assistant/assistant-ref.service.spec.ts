@@ -62,7 +62,8 @@ function fakePrisma(opts: { gone?: string[] } = {}) {
 function setup(opts: { gone?: string[] } = {}) {
   const db = fakeDb();
   const prisma = fakePrisma(opts);
-  const service = new AssistantRefService(db as any, prisma as any);
+  // One guarded client serves both the refs table and the visibility checks.
+  const service = new AssistantRefService({ ...db, ...prisma } as any);
   return { db, prisma, service };
 }
 
