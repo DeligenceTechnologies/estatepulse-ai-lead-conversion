@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AssistantRole, Prisma, type AssistantAction } from '@prisma/client';
+import { AssistantRole, Prisma, type AssistantAction, type AssistantRating } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
@@ -36,12 +36,24 @@ export interface ActionView {
   bulk?: { total: number; status: string | null; sample?: string[]; skipped?: Record<string, number> };
 }
 
+export const FEEDBACK_REASONS = ['wrong', 'not_done', 'unclear', 'other'] as const;
+export type FeedbackReason = (typeof FEEDBACK_REASONS)[number];
+
+/** A person's thumbs up or down on one answer; a reason and comment only come with a thumbs down. */
+export interface FeedbackView {
+  rating: AssistantRating;
+  reason: FeedbackReason | null;
+  comment: string | null;
+}
+
 export interface MessageView {
   id: string;
   role: AssistantRole;
   text: string;
   createdAt: Date;
   actions: ActionView[];
+  /** On an answer the person rated. */
+  feedback?: FeedbackView;
 }
 
 export const toActionView = (a: AssistantAction): ActionView => {
@@ -105,6 +117,32 @@ export class AssistantThreadService {
     return thread;
   }
 
+  /**
+   * Rates one answer in the person's own chat: up, down (with an optional reason and comment), or
+   * null to take the rating back. Saying it again replaces it.
+   */
+  async rate(
+    auth: AuthContext,
+    messageId: string,
+    input: { rating?: AssistantRating | null; reason?: FeedbackReason | null; comment?: string | null },
+  ): Promise<FeedbackView | null> {
+    const message = await this.prisma.assistantMessage.findFirst({ where: { id: messageId, role: AssistantRole.assistant }, select: { threadId: true } });
+    if (!message) throw new AppError('NOT_FOUND', 'No such answer.');
+    await this.require(auth, message.threadId);
+    if (!input.rating) {
+      await this.prisma.assistantFeedback.deleteMany({ where: { messageId } });
+      return null;
+    }
+    const down = input.rating === 'down';
+    const data = { rating: input.rating, reason: down ? (input.reason ?? null) : null, comment: down ? input.comment?.trim() || null : null };
+    const row = await this.prisma.assistantFeedback.upsert({
+      where: { messageId },
+      create: { orgId: auth.organizationId, threadId: message.threadId, messageId, ...data },
+      update: data,
+    });
+    return { rating: row.rating, reason: row.reason as FeedbackReason | null, comment: row.comment };
+  }
+
   async remove(auth: AuthContext, threadId: string): Promise<void> {
     await this.require(auth, threadId);
     await this.prisma.assistantThread.deleteMany({ where: { id: threadId, orgId: auth.organizationId, userId: auth.userId } });
@@ -112,7 +150,7 @@ export class AssistantThreadService {
 
   async view(auth: AuthContext, threadId: string) {
     const thread = await this.require(auth, threadId);
-    const [messages, actions] = await Promise.all([
+    const [messages, actions, ratings] = await Promise.all([
       this.prisma.assistantMessage.findMany({
         where: { orgId: auth.organizationId, threadId },
         orderBy: { position: 'asc' },
@@ -122,7 +160,9 @@ export class AssistantThreadService {
         where: { orgId: auth.organizationId, threadId, tier: 'write' },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.assistantFeedback.findMany({ where: { threadId }, select: { messageId: true, rating: true, reason: true, comment: true } }),
     ]);
+    const feedback = new Map(ratings.map((r) => [r.messageId, { rating: r.rating, reason: r.reason as FeedbackReason | null, comment: r.comment }]));
     const byMessage = new Map<string, ActionView[]>();
     for (const a of actions) byMessage.set(a.messageId, [...(byMessage.get(a.messageId) ?? []), toActionView(a)]);
 
@@ -131,7 +171,8 @@ export class AssistantThreadService {
       const text = m.role === AssistantRole.user ? (m.text ?? '') : textOf(m.content);
       const own = byMessage.get(m.id) ?? [];
       if (!text && own.length === 0) continue;
-      views.push({ id: m.id, role: m.role, text, createdAt: m.createdAt, actions: own });
+      const rated = feedback.get(m.id);
+      views.push({ id: m.id, role: m.role, text, createdAt: m.createdAt, actions: own, ...(rated ? { feedback: rated } : {}) });
     }
     // Links for the leads the answers name; looked up now, so a lead the user can no longer see has none.
     const { links } = await this.refs.inspect(auth, threadId, views.filter((v) => v.role === AssistantRole.assistant).map((v) => v.text));

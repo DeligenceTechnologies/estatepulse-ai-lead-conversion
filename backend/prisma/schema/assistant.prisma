@@ -12,6 +12,14 @@ enum AssistantRiskTier {
   @@map("assistant_risk_tier")
 }
 
+/// A person's verdict on one answer.
+enum AssistantRating {
+  up
+  down
+
+  @@map("assistant_rating")
+}
+
 enum AssistantActionStatus {
   proposed
   executing
@@ -38,6 +46,7 @@ model AssistantThread {
   messages     AssistantMessage[]
   actions      AssistantAction[]
   refs         AssistantRef[]
+  feedback     AssistantFeedback[]
 
   @@index([orgId, userId, lastMessageAt(sort: Desc)])
   @@map("assistant_threads")
@@ -64,6 +73,7 @@ model AssistantMessage {
   organization Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   thread       AssistantThread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
   actions      AssistantAction[]
+  feedback     AssistantFeedback?
 
   @@unique([threadId, position])
   @@map("assistant_messages")
@@ -168,3 +178,26 @@ model AssistantUsage {
   @@unique([orgId, period])
   @@map("assistant_usage")
 }
+
+/// A thumbs up or down on one answer, from the person whose chat it is, with an optional reason
+/// and comment on a thumbs down. Deleted with its chat. Thumbs-down answers are reviewed each week.
+model AssistantFeedback {
+  id        String          @id @default(uuid(7)) @db.Uuid
+  orgId     String          @map("organization_id") @db.Uuid
+  threadId  String          @map("thread_id") @db.Uuid
+  messageId String          @unique @map("message_id") @db.Uuid
+  rating    AssistantRating
+  /// On a thumbs down: wrong, not_done, unclear or other.
+  reason    String?         @db.VarChar(20)
+  comment   String?         @db.VarChar(1000)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  thread       AssistantThread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message      AssistantMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, rating, createdAt])
+  @@map("assistant_feedback")
+}
+

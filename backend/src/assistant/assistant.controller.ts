@@ -5,6 +5,7 @@ import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantActivityService } from './assistant-activity.service';
 import { ConfirmActionDto } from './dto/confirm-action.dto';
+import { RateAnswerDto } from './dto/rate-answer.dto';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantSettingsService } from './assistant-settings.service';
 import { AssistantConfig } from './assistant.config';
@@ -107,6 +108,12 @@ export class AssistantController {
   @Post('messages')
   send(@CurrentAuth() auth: AuthContext, @Body() body: SendMessageDto, @Res() res: Response): Promise<void> {
     return this.stream(res, (stream) => this.assistant.send(auth, body, stream));
+  }
+
+  /** A thumbs up or down on one answer in the person's own chat. */
+  @Put('messages/:id/feedback')
+  async rate(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: RateAnswerDto) {
+    return { feedback: await this.threads.rate(auth, id, body) };
   }
 
   /** For a bulk card above 10 leads, the body carries the count the user typed. */

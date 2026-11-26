@@ -205,7 +205,7 @@ export const AssistantDock: React.FC<AssistantDockProps> = ({ screen }) => {
                   </div>
                 </div>
               ) : (
-                <ChatMessages compact messages={a.messages} busy={a.busy} onDecide={a.decide} refs={a.refs} />
+                <ChatMessages compact messages={a.messages} busy={a.busy} onDecide={a.decide} refs={a.refs} onRate={a.rate} />
               )}
               <div ref={endRef} />
             </div>

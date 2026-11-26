@@ -8,6 +8,7 @@ import {
   type AssistantMessage,
   type AssistantStatus,
   type AssistantThreadSummary,
+  type Feedback,
   type RefLink,
 } from '../../utils/assistantChatApi';
 
@@ -94,6 +95,8 @@ export interface AssistantContextValue {
   send: (text: string, screen?: string) => void;
   /** `count`: what the user typed to approve a bulk card above 10 leads. */
   decide: (actionId: string, decision: 'confirm' | 'reject', count?: number) => void;
+  /** A thumbs up or down on an answer (null takes it back); false when it could not be saved. */
+  rate: (messageId: string, feedback: Feedback | null) => Promise<boolean>;
   openThread: (id: string) => Promise<void>;
   newChat: () => void;
   removeThread: (id: string) => Promise<void>;
@@ -117,6 +120,7 @@ const OFF: AssistantContextValue = {
   error: null,
   send: noop,
   decide: noop,
+  rate: async () => false,
   openThread: async () => undefined,
   newChat: noop,
   removeThread: async () => undefined,
@@ -296,6 +300,26 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [busy, run, onEvent],
   );
 
+  // Shown at once; put back if the server refuses.
+  const rate = useCallback(async (messageId: string, feedback: Feedback | null) => {
+    let before: Feedback | undefined;
+    setMessages((ms) =>
+      ms.map((m) => {
+        if (m.id !== messageId) return m;
+        before = m.feedback;
+        return { ...m, feedback: feedback ?? undefined };
+      }),
+    );
+    try {
+      await assistantChatApi.rate(messageId, feedback);
+      return true;
+    } catch (e) {
+      setMessages((ms) => ms.map((m) => (m.id === messageId ? { ...m, feedback: before } : m)));
+      setError(messageFor(e));
+      return false;
+    }
+  }, []);
+
   const openThread = useCallback(
     async (id: string) => {
       if (threadRef.current === id) return;
@@ -354,6 +378,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       error,
       send,
       decide,
+      rate,
       openThread,
       newChat,
       removeThread,
@@ -362,7 +387,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       dockOpen,
       setDockOpen,
     }),
-    [availability, status, overBudget, threads, threadId, messages, refs, busy, error, send, decide, openThread, newChat, removeThread, stop, dockOpen],
+    [availability, status, overBudget, threads, threadId, messages, refs, busy, error, send, decide, rate, openThread, newChat, removeThread, stop, dockOpen],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

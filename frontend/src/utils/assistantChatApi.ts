@@ -34,12 +34,23 @@ export interface BulkProgress {
   problems: { leadId: string; name: string; status: string; reason: string | null }[];
 }
 
+export type FeedbackReason = 'wrong' | 'not_done' | 'unclear' | 'other';
+
+/** A thumbs up or down on an answer; a reason and comment only come with a thumbs down. */
+export interface Feedback {
+  rating: 'up' | 'down';
+  reason: FeedbackReason | null;
+  comment: string | null;
+}
+
 export interface AssistantMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
   actions: AssistantAction[];
+  /** On an answer the person rated. */
+  feedback?: Feedback;
 }
 
 export interface AssistantThreadSummary {
@@ -86,6 +97,9 @@ export const assistantChatApi = {
     apiFetch<{ thread: AssistantThreadSummary; messages: AssistantMessage[]; refs?: Record<string, RefLink> }>(`/v1/assistant/threads/${id}`, { auth: true }),
   removeThread: (id: string) => apiFetch<void>(`/v1/assistant/threads/${id}`, { method: 'DELETE', auth: true }),
   stop: (threadId: string) => apiFetch<void>(`/v1/assistant/threads/${threadId}/stop`, { method: 'POST', auth: true }),
+  /** null takes the rating back. */
+  rate: (messageId: string, feedback: Feedback | null) =>
+    apiFetch<{ feedback: Feedback | null }>(`/v1/assistant/messages/${messageId}/feedback`, { method: 'PUT', auth: true, body: feedback ?? { rating: null } }),
 
   send: (body: { threadId?: string; text: string; screen?: string }, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream('/v1/assistant/messages', body, onEvent, signal),

@@ -23,7 +23,7 @@ const call = (route: keyof AssistantController, auth: AuthContext) => {
   }
 };
 
-const CHAT_ROUTES = ['send', 'confirm', 'reject', 'list', 'thread', 'remove', 'stop', 'feed', 'progress', 'stopBulk'] as const;
+const CHAT_ROUTES = ['send', 'confirm', 'reject', 'list', 'thread', 'remove', 'stop', 'feed', 'progress', 'stopBulk', 'rate'] as const;
 
 describe('assistant.use', () => {
   it('a role without it cannot chat, approve, read chats or see the Activity panel', () => {

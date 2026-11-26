@@ -1,8 +1,9 @@
 import React from 'react';
 import { Check, CircleAlert, Loader2, Sparkles } from 'lucide-react';
 import { ApprovalCard } from './ApprovalCard';
-import type { RefLink } from '../../utils/assistantChatApi';
-import type { ChatMessage } from './AssistantProvider';
+import type { Feedback, RefLink } from '../../utils/assistantChatApi';
+import { AnswerFeedback } from './AnswerFeedback';
+import { DRAFT_ID, type ChatMessage } from './AssistantProvider';
 import { RichText } from './RichText';
 
 interface ChatMessagesProps {
@@ -13,23 +14,29 @@ interface ChatMessagesProps {
   compact?: boolean;
   /** Links for the leads the answers name. */
   refs?: Record<string, RefLink>;
+  /** A thumbs up or down on a saved answer; without it no thumbs are shown. */
+  onRate?: (messageId: string, feedback: Feedback | null) => Promise<boolean>;
 }
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, busy, onDecide, compact = false, refs = {} }) => (
+/** An answer the server has saved (not the one being written, nor a question not yet sent back). */
+const isSaved = (m: ChatMessage) => !m.pending && m.id !== DRAFT_ID && !m.id.startsWith('local-');
+
+export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, busy, onDecide, compact = false, refs = {}, onRate }) => (
   <div className={compact ? 'space-y-3' : 'space-y-5'} aria-live="polite">
     {messages.map((m) => (
-      <Message key={m.id} message={m} busy={busy} onDecide={onDecide} compact={compact} refs={refs} />
+      <Message key={m.id} message={m} busy={busy} onDecide={onDecide} compact={compact} refs={refs} onRate={onRate} />
     ))}
   </div>
 );
 
-const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMessagesProps['onDecide']; compact: boolean; refs: Record<string, RefLink> }> = ({
-  message,
-  busy,
-  onDecide,
-  compact,
-  refs,
-}) => {
+const Message: React.FC<{
+  message: ChatMessage;
+  busy: boolean;
+  onDecide: ChatMessagesProps['onDecide'];
+  compact: boolean;
+  refs: Record<string, RefLink>;
+  onRate?: ChatMessagesProps['onRate'];
+}> = ({ message, busy, onDecide, compact, refs, onRate }) => {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -69,6 +76,7 @@ const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMes
       {message.actions.map((a) => (
         <ApprovalCard key={a.id} action={a} disabled={busy} onDecide={(d, count) => onDecide(a.id, d, count)} />
       ))}
+      {onRate && message.text && isSaved(message) && <AnswerFeedback feedback={message.feedback} onRate={(f) => onRate(message.id, f)} />}
     </div>
   );
 
