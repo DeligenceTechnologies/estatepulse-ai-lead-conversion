@@ -1,3 +1,4 @@
+import { AssistantSettingsService } from './assistant-settings.service';
 import { Injectable } from '@nestjs/common';
 import { AssistantRole } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
@@ -37,14 +38,22 @@ export class AssistantService {
     private readonly actions: AssistantActionService,
     private readonly orchestrator: AssistantOrchestrator,
     private readonly refs: AssistantRefService,
+    private readonly settings: AssistantSettingsService,
   ) {}
 
   async status(auth: AuthContext) {
-    const entitlements = await this.entitlements.get(auth.organizationId);
+    const [entitlements, settings, usage] = await Promise.all([
+      this.entitlements.get(auth.organizationId),
+      this.settings.get(auth.organizationId),
+      this.usage.summary(auth.organizationId),
+    ]);
     return {
-      enabled: this.config.enabled,
+      // On for this server and for this office.
+      enabled: this.config.enabled && settings.enabled,
+      officeEnabled: settings.enabled,
+      voiceEnabled: settings.voiceEnabled,
       included: !entitlements.enforced || entitlements.features.includes(Feature.AI_ASSISTANT),
-      usage: await this.usage.summary(auth.organizationId),
+      usage,
     };
   }
 
@@ -124,6 +133,9 @@ export class AssistantService {
 
   private async admit(auth: AuthContext): Promise<void> {
     if (!this.config.enabled) throw new AppError('ASSISTANT_DISABLED', 'The assistant is not switched on for this server.', undefined, 503);
+    if (!(await this.settings.get(auth.organizationId)).enabled) {
+      throw new AppError('ASSISTANT_OFF_FOR_OFFICE', 'Your office has turned the assistant off. An owner can turn it on in Settings > Ask EstatePulse.', undefined, 403);
+    }
     await this.entitlements.assertFeature(auth.organizationId, Feature.AI_ASSISTANT);
     await this.limits.consume(auth.userId);
     await this.usage.assertWithinBudget(auth.organizationId);

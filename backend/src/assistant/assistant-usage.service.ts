@@ -1,3 +1,4 @@
+import { AssistantSettingsService, usdToMicros } from './assistant-settings.service';
 import { Inject, Injectable } from '@nestjs/common';
 import { PLANS } from '@/billing/billing-plans';
 import { EntitlementService } from '@/billing/entitlements/entitlement.service';
@@ -37,7 +38,12 @@ const UNENFORCED_BUDGET_MICROS = Math.max(...Object.values(PLANS).map((p) => p.l
 export interface UsageSummary {
   period: string;
   usedMicros: number;
+  /** What this month may spend: the plan's allowance, or the office's own limit when lower. */
   budgetMicros: number;
+  planBudgetMicros: number;
+  /** The owner's monthly limit, null when the plan's allowance applies. */
+  officeLimitMicros: number | null;
+  requests: number;
 }
 
 const currentPeriod = (now = new Date()) => now.toISOString().slice(0, 7);
@@ -53,25 +59,32 @@ export class AssistantUsageService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
     private readonly entitlements: EntitlementService,
+    private readonly settings: AssistantSettingsService,
   ) {}
 
   async summary(orgId: string): Promise<UsageSummary> {
     const period = currentPeriod();
-    const [entitlements, row] = await Promise.all([
+    const [entitlements, row, settings] = await Promise.all([
       this.entitlements.get(orgId),
-      this.prisma.assistantUsage.findUnique({ where: { orgId_period: { orgId, period } }, select: { costMicros: true } }),
+      this.prisma.assistantUsage.findUnique({ where: { orgId_period: { orgId, period } }, select: { costMicros: true, requests: true } }),
+      this.settings.get(orgId),
     ]);
+    const planBudgetMicros = entitlements.enforced ? entitlements.limits.assistantMonthlyBudgetMicros : UNENFORCED_BUDGET_MICROS;
+    const officeLimitMicros = settings.monthlyLimitUsd === null ? null : usdToMicros(settings.monthlyLimitUsd);
     return {
       period,
       usedMicros: Number(row?.costMicros ?? 0n),
-      budgetMicros: entitlements.enforced ? entitlements.limits.assistantMonthlyBudgetMicros : UNENFORCED_BUDGET_MICROS,
+      budgetMicros: officeLimitMicros === null ? planBudgetMicros : Math.min(planBudgetMicros, officeLimitMicros),
+      planBudgetMicros,
+      officeLimitMicros,
+      requests: row?.requests ?? 0,
     };
   }
 
   async assertWithinBudget(orgId: string): Promise<void> {
     const { usedMicros, budgetMicros } = await this.summary(orgId);
     if (usedMicros >= budgetMicros) {
-      throw new AppError('ASSISTANT_BUDGET_EXCEEDED', "The assistant has reached this month's limit for your plan. It resets on the 1st.", undefined, 429);
+      throw new AppError('ASSISTANT_BUDGET_EXCEEDED', "The assistant has reached this month's limit. It resets on the 1st; an owner can change the limit in Settings > Ask EstatePulse.", undefined, 429);
     }
   }
 

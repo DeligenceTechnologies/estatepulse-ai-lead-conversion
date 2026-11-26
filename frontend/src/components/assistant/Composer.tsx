@@ -12,6 +12,8 @@ interface ComposerProps {
   large?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** The office's microphone setting (Settings > Ask EstatePulse); on unless turned off. */
+  voice?: boolean;
 }
 
 /** What a parent may do to the box: put the cursor in it, or listen while a button is held. */
@@ -26,7 +28,7 @@ const MAX_CHARS = 4000;
 
 /** The box people type (or speak) into. Enter sends, Shift+Enter adds a line. */
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { placeholder, busy, disabled = false, large = false, onSend, onStop },
+  { placeholder, busy, disabled = false, large = false, onSend, onStop, voice = true },
   ref,
 ) {
   const [value, setValue] = useState('');
@@ -88,7 +90,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none max-h-40 custom-scrollbar disabled:opacity-60"
       />
       <div className="flex items-center justify-end gap-2 pt-1">
-        {speech.supported && (
+        {voice && speech.supported && (
           <IconButton
             onClick={() => (speech.listening ? speech.stop() : beginVoice(false))}
             disabled={busy || disabled || speech.denied}

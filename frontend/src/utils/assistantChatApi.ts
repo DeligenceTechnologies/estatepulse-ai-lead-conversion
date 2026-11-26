@@ -33,7 +33,12 @@ export interface AssistantThreadSummary {
 }
 
 export interface AssistantStatus {
+  /** On for this server and for this office. */
   enabled: boolean;
+  /** The owner's switch in Settings > Ask EstatePulse. */
+  officeEnabled?: boolean;
+  /** The office's microphone setting. */
+  voiceEnabled?: boolean;
   included: boolean;
   usage: { period: string; usedMicros: number; budgetMicros: number };
 }

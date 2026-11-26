@@ -6,7 +6,7 @@ import { AssistantService } from './assistant.service';
 
 const auth: AuthContext = { userId: 'user-1', organizationId: 'org-1', sessionId: 's', roleIds: [], permissions: [] };
 
-function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopped' } = {}) {
+function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopped'; officeEnabled?: boolean } = {}) {
   const controller = new AbortController();
   const lock = { release: vi.fn(async () => undefined) };
   const turn = { signal: controller.signal, dispose: vi.fn() };
@@ -43,11 +43,20 @@ function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopp
     actions as any,
     orchestrator as any,
     { forThread: () => ({ issue: vi.fn(async (_kind: string, ids: string[]) => new Map(ids.map((id) => [id, 'U1']))) }) } as any,
+    { get: vi.fn(async () => ({ enabled: opts.officeEnabled ?? true, monthlyLimitUsd: null, voiceEnabled: true })) } as any,
   );
   const events: AssistantEvent[] = [];
   const stream = { send: (e: AssistantEvent) => events.push(e) };
   return { service, limits, lock, turn, threads, actions, orchestrator, events, stream };
 }
+
+describe('AssistantService: the office switch', () => {
+  it('refuses a new message once an owner has turned the assistant off for the office', async () => {
+    const s = setup({ officeEnabled: false });
+    await expect(s.service.send(auth, { text: 'Hi' } as any, s.stream as any)).rejects.toMatchObject({ code: 'ASSISTANT_OFF_FOR_OFFICE' });
+    expect(s.threads.create).not.toHaveBeenCalled();
+  });
+});
 
 describe('AssistantService.send', () => {
   it('stores the message with its context block and runs the turn', async () => {

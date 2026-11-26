@@ -1,9 +1,16 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AssistantActivityService } from './assistant-activity.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
+import { AssistantSettingsService } from './assistant-settings.service';
+import { AssistantConfig } from './assistant.config';
+import { ToolRegistry } from './tools/tool-registry.service';
+import { UpdateAssistantSettingsDto } from './dto/update-assistant-settings.dto';
+import { AssistantUsageService } from './assistant-usage.service';
+import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
+import { PERMISSIONS } from '@/role/permissions';
 import { AssistantThreadService } from './assistant-thread.service';
 import { AssistantService } from './assistant.service';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -20,7 +27,34 @@ export class AssistantController {
     private readonly threads: AssistantThreadService,
     private readonly orchestrator: AssistantOrchestrator,
     private readonly activity: AssistantActivityService,
+    private readonly settings: AssistantSettingsService,
+    private readonly usage: AssistantUsageService,
+    private readonly config: AssistantConfig,
+    private readonly registry: ToolRegistry,
   ) {}
+
+  /** Settings > Ask EstatePulse: the office's switch, monthly limit and microphone, with this month's spend. */
+  @Get('settings')
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
+  async getSettings(@CurrentAuth() auth: AuthContext) {
+    const [settings, usage] = await Promise.all([this.settings.get(auth.organizationId), this.usage.summary(auth.organizationId)]);
+    return { settings, usage, serverEnabled: this.config.enabled, canEdit: this.settings.canEdit(auth) };
+  }
+
+  @Put('settings')
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  async updateSettings(@CurrentAuth() auth: AuthContext, @Body() body: UpdateAssistantSettingsDto) {
+    const settings = await this.settings.update(auth, body);
+    return { settings, usage: await this.usage.summary(auth.organizationId), serverEnabled: this.config.enabled, canEdit: true };
+  }
+
+  /** Everything the assistant did in the office, for owners to review. */
+  @Get('log')
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
+  log(@CurrentAuth() auth: AuthContext, @Query('before') before?: string) {
+    const cursor = before ? new Date(before) : undefined;
+    return this.settings.log(auth, (tool) => this.registry.label(tool), cursor && !Number.isNaN(cursor.getTime()) ? cursor : undefined);
+  }
 
   @Get('status')
   status(@CurrentAuth() auth: AuthContext) {

@@ -41,7 +41,8 @@ export const AssistantDock: React.FC<AssistantDockProps> = ({ screen }) => {
   const wasHold = useRef(false);
   // A hold opened the panel; start listening once the box is on screen.
   const listenOnOpen = useRef(false);
-  const canSpeak = speechSupported();
+  // Hold-to-speak needs the browser's speech input and the office's microphone setting.
+  const canSpeak = speechSupported() && a.status?.voiceEnabled !== false;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -223,6 +224,7 @@ export const AssistantDock: React.FC<AssistantDockProps> = ({ screen }) => {
           )}
           <div className="shrink-0 px-3 pb-3">
             <Composer
+              voice={a.status?.voiceEnabled !== false}
               ref={composer}
               busy={a.busy}
               disabled={a.overBudget}

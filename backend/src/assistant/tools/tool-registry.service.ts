@@ -78,6 +78,11 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  /** What a tool does, in the words shown while it runs; the name itself for a tool since removed. */
+  label(name: string): string {
+    return this.tools.get(name)?.label ?? name;
+  }
+
   allows(auth: AuthContext, tool: AssistantTool): boolean {
     return tool.permissions.every((p) => auth.permissions.includes(p));
   }

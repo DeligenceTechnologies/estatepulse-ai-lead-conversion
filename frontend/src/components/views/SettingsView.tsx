@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   UserCheck,
   CreditCard,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
@@ -42,13 +43,15 @@ import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
 import { Button } from '../common/Button';
 import { AppearanceSettings } from '../settings/AppearanceSettings';
 import { BillingSettings } from '../billing/BillingSettings';
+import { AssistantSettings } from '../settings/AssistantSettings';
 
-type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'billing' | 'appearance';
+type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'assistant' | 'billing' | 'appearance';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
   { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com, and booked meetings', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
+  { id: 'assistant', label: 'Ask EstatePulse', hint: 'On or off, monthly limit, microphone, log', icon: Sparkles },
   { id: 'billing', label: 'Billing', hint: 'Plan, usage & invoices', icon: CreditCard },
   { id: 'appearance', label: 'Appearance', hint: 'Theme, brand colour & buttons', icon: Palette },
 ];
@@ -580,6 +583,7 @@ export const SettingsView: React.FC = () => {
           )}
 
           {tab === 'calendar' && <ConnectCalendar />}
+          {tab === 'assistant' && <AssistantSettings />}
 
           {tab === 'billing' && <BillingSettings />}
 

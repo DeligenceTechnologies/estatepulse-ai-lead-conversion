@@ -11,6 +11,7 @@ import { AssistantActivityService } from './assistant-activity.service';
 import { AssistantLimitsService } from './assistant-limits.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantRefService } from './assistant-ref.service';
+import { AssistantSettingsService } from './assistant-settings.service';
 import { AssistantThreadService } from './assistant-thread.service';
 import { AssistantUsageService } from './assistant-usage.service';
 import { AssistantConfig, createModelProvider } from './assistant.config';
@@ -27,6 +28,7 @@ import { ToolRegistry } from './tools/tool-registry.service';
     { provide: MODEL_PROVIDER, inject: [AssistantConfig], useFactory: createModelProvider },
     ToolRegistry,
     AssistantRefService,
+    AssistantSettingsService,
     AssistantActivityService,
     AssistantUsageService,
     AssistantLimitsService,

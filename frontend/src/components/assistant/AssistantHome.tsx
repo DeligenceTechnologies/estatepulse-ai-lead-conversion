@@ -110,6 +110,7 @@ export const AssistantHome: React.FC = () => {
       )}
       <Composer
         ref={inputRef}
+        voice={a.status?.voiceEnabled !== false}
         large={empty}
         busy={a.busy}
         disabled={disabled}
