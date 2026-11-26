@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { AuthContext } from '@/auth/auth.types';
-import { AssistantActionService } from './assistant-action.service';
+import { AssistantActionService, SWITCHED_OFF } from './assistant-action.service';
 
 const ORG = 'org-1';
 const V1 = new Date('2026-11-25T10:00:00Z');
@@ -112,6 +112,7 @@ function setup() {
     get: (name: string) => tools[name],
     allows: (a: AuthContext, t: { permissions: string[] }) => t.permissions.every((p) => a.permissions.includes(p)),
     entityVersion: vi.fn(async () => currentVersion),
+    switchedOff: vi.fn((_name: string) => false),
   };
   /** Each chat gets its own ref table; the tool must be handed the one of the chat the call came from. */
   const refs = { forThread: vi.fn((_a: AuthContext, threadId: string) => ({ threadId, resolve: vi.fn(), issue: vi.fn() })) };
@@ -340,3 +341,27 @@ describe('AssistantActionService.closeOpenCalls', () => {
     ]);
   });
 });
+
+describe('a tool switched off without a deploy (ASSISTANT_DISABLED_TOOLS)', () => {
+  it('answers "switched off" instead of reading, or building a card', async () => {
+    const s = setup();
+    s.registry.switchedOff.mockImplementation((name: string) => name === 'lead_search' || name === 'lead_update');
+    const messageId = await s.modelAsked([{ id: 'tu-1', name: 'lead_search', input: { query: 'Maria' } }]);
+    const read = await s.service.handle(auth(), 'thread-1', messageId, { id: 'tu-1', name: 'lead_search', input: { query: 'Maria' } });
+    expect(read).toMatchObject({ status: 'failed', error: SWITCHED_OFF });
+    expect(s.search.run).not.toHaveBeenCalled();
+    const write = await s.propose();
+    expect(write).toMatchObject({ status: 'failed', error: SWITCHED_OFF });
+    expect(s.update.preview).not.toHaveBeenCalled();
+  });
+
+  it('a card made before the switch cannot be approved: it closes and nothing runs', async () => {
+    const s = setup();
+    const card = await s.propose();
+    s.registry.switchedOff.mockReturnValue(true);
+    await expect(s.service.confirm(auth(), card.id)).rejects.toMatchObject({ code: 'TOOL_SWITCHED_OFF' });
+    expect(s.update.run).not.toHaveBeenCalled();
+    expect(await s.service.require(auth(), card.id)).toMatchObject({ status: 'failed', error: SWITCHED_OFF });
+  });
+});
+

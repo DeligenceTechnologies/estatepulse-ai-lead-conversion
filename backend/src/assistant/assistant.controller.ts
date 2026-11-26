@@ -7,6 +7,7 @@ import { AssistantActivityService } from './assistant-activity.service';
 import { ConfirmActionDto } from './dto/confirm-action.dto';
 import { RateAnswerDto } from './dto/rate-answer.dto';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
+import { CHAT_RETENTION_DAYS } from './assistant-retention.service';
 import { AssistantSettingsService } from './assistant-settings.service';
 import { AssistantConfig } from './assistant.config';
 import { ToolRegistry } from './tools/tool-registry.service';
@@ -49,7 +50,7 @@ export class AssistantController {
       this.usage.summary(auth.organizationId),
       this.settings.rolesWithAccess(auth.organizationId),
     ]);
-    return { settings, usage, rolesWithAccess, serverEnabled: this.config.enabled, canEdit: this.settings.canEdit(auth) };
+    return { settings, usage, rolesWithAccess, chatRetentionDays: CHAT_RETENTION_DAYS, serverEnabled: this.config.enabled, canEdit: this.settings.canEdit(auth) };
   }
 
   @Put('settings')
@@ -57,7 +58,7 @@ export class AssistantController {
   async updateSettings(@CurrentAuth() auth: AuthContext, @Body() body: UpdateAssistantSettingsDto) {
     const settings = await this.settings.update(auth, body);
     const [usage, rolesWithAccess] = await Promise.all([this.usage.summary(auth.organizationId), this.settings.rolesWithAccess(auth.organizationId)]);
-    return { settings, usage, rolesWithAccess, serverEnabled: this.config.enabled, canEdit: true };
+    return { settings, usage, rolesWithAccess, chatRetentionDays: CHAT_RETENTION_DAYS, serverEnabled: this.config.enabled, canEdit: true };
   }
 
   /** Everything the assistant did in the office, for owners to review. */

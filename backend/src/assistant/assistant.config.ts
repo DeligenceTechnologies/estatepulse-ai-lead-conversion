@@ -11,6 +11,8 @@ export class AssistantConfig {
     readonly provider: AiProvider,
     readonly model: string,
     readonly apiKey: string | undefined,
+    /** Tools switched off without a deploy (ASSISTANT_DISABLED_TOOLS). */
+    readonly disabledTools: ReadonlySet<string> = new Set(),
   ) {}
 
   static fromConfigService(config: ConfigService): AssistantConfig {
@@ -20,6 +22,12 @@ export class AssistantConfig {
       provider,
       provider === 'openai' ? config.get<string>('OPENAI_MODEL')! : config.get<string>('ANTHROPIC_MODEL')!,
       (provider === 'openai' ? config.get<string>('OPENAI_API_KEY') : config.get<string>('ANTHROPIC_API_KEY')) || undefined,
+      new Set(
+        (config.get<string>('ASSISTANT_DISABLED_TOOLS') ?? '')
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean),
+      ),
     );
   }
 }

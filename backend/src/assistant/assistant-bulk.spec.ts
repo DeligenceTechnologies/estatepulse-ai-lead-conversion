@@ -81,8 +81,8 @@ function store(opts: { total?: number; bulkStatus?: string | null; status?: stri
 
 function worker(db: ReturnType<typeof store>, runOne: (leadId: string) => Promise<unknown>) {
   const tool = { name: 'leads_outreach_pause', tier: 'write', permissions: ['lead.update'], input: { safeParse: (v: unknown) => ({ success: true, data: v }) }, bulk: { runOne: vi.fn((_c: unknown, _i: unknown, id: string) => runOne(id)) } };
-  const registry = { get: () => tool, allows: (a: AuthContext, t: any) => t.permissions.every((p: string) => a.permissions.includes(p)) };
-  return { tool, w: new AssistantBulkRunner(db as any, {} as any, registry as any, { forThread: () => ({}) } as any) };
+  const registry = { get: () => tool, allows: (a: AuthContext, t: any) => t.permissions.every((p: string) => a.permissions.includes(p)), switchedOff: vi.fn(() => false) };
+  return { tool, registry, w: new AssistantBulkRunner(db as any, {} as any, registry as any, { forThread: () => ({}) } as any) };
 }
 
 describe('the bulk job', () => {
@@ -137,6 +137,16 @@ describe('the bulk job', () => {
     expect(gone.action.bulkStatus).toBe('stopped');
   });
 
+  it('stops when the step is switched off mid-job (ASSISTANT_DISABLED_TOOLS), leaving the rest not attempted', async () => {
+    const db = store({ total: 3 });
+    const { w, tool, registry } = worker(db, async () => undefined);
+    registry.switchedOff.mockReturnValue(true);
+    await w.runAction(ORG, 'act-1');
+    expect(tool.bulk.runOne).not.toHaveBeenCalled();
+    expect(db.action.bulkStatus).toBe('stopped');
+    expect(db.items.every((i) => i.status === 'not_attempted' && i.reason?.includes('switched off'))).toBe(true);
+  });
+
   it('stops when the approver may no longer use the assistant, even with every other permission', async () => {
     const db = store({ total: 12, roles: [{ isSystem: false, permissions: ['lead.read', 'lead.update', 'assistant.bulk'] }] });
     const { w, tool } = worker(db, async () => undefined);
@@ -161,7 +171,7 @@ describe('the bulk job', () => {
 describe('approving a bulk card', () => {
   function service(db: ReturnType<typeof store>) {
     const tool = { name: 'leads_outreach_pause', tier: 'write', permissions: ['lead.update'], input: { safeParse: (v: unknown) => ({ success: true, data: v }) }, bulk: { runOne: vi.fn() } };
-    const registry = { get: () => tool, allows: () => true };
+    const registry = { get: () => tool, allows: () => true, switchedOff: () => false };
     const runner = { start: vi.fn() };
     const svc = new AssistantActionService(db as any, registry as any, {} as any, { quietly: vi.fn() } as any, { forThread: () => ({}) } as any, runner as any);
     return { svc, runner };
@@ -209,7 +219,7 @@ describe('approving a bulk card', () => {
     const make = (auth: AuthContext) => {
       const db = store({ total: 12, status: 'proposed', bulkStatus: null });
       const tool = { name: 'leads_outreach_pause', tier: 'write', permissions: ['lead.update'], input: { safeParse: (v: unknown) => ({ success: true, data: v }) }, preview: vi.fn(async () => ({ title: 'Pause AI outreach to 12 leads', bulk })), bulk: { runOne: vi.fn() } };
-      const svc = new AssistantActionService(db as any, { get: () => tool, allows: () => true } as any, {} as any, { quietly: vi.fn() } as any, { forThread: () => ({}) } as any, { start: vi.fn() } as any);
+      const svc = new AssistantActionService(db as any, { get: () => tool, allows: () => true, switchedOff: () => false } as any, {} as any, { quietly: vi.fn() } as any, { forThread: () => ({}) } as any, { start: vi.fn() } as any);
       return { db, run: () => svc.handle(auth, 'thread-1', 'msg-1', { id: 'tu-1', name: 'leads_outreach_pause', input: { filter: {} } }) };
     };
     const ok = make(owner);

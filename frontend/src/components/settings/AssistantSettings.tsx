@@ -102,7 +102,7 @@ export const AssistantSettings: React.FC = () => {
 
       <Section
         title="Ask EstatePulse for your office"
-        hint="When off, nobody in the office can use the assistant. Past chats are kept."
+        hint={`When off, nobody in the office can use the assistant. Chats are kept${view.chatRetentionDays ? ` for ${view.chatRetentionDays} days after their last message` : ''}.`}
         icon={<Sparkles className="w-4 h-4" />}
         aside={
           <Switch
@@ -168,7 +168,7 @@ export const AssistantSettings: React.FC = () => {
         </p>
       </Section>
 
-      <AssistantLog />
+      <AssistantLog retentionDays={view.chatRetentionDays} />
     </div>
   );
 };
@@ -216,8 +216,8 @@ export const AssistantSpend: React.FC<{ view: AssistantSettingsView }> = ({ view
   );
 };
 
-/** Everything the assistant looked up or changed, newest first. */
-const AssistantLog: React.FC = () => {
+/** Everything the assistant looked up or changed, newest first, from chats not yet deleted. */
+const AssistantLog: React.FC<{ retentionDays?: number }> = ({ retentionDays }) => {
   const [entries, setEntries] = useState<AssistantLogEntry[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -244,7 +244,13 @@ const AssistantLog: React.FC = () => {
   };
 
   return (
-    <Section title="Activity log" hint="Every look-up and every change the assistant made, and who asked for it." icon={<ScrollText className="w-4 h-4" />}>
+    <Section
+      title="Activity log"
+      hint={`Every look-up and every change the assistant made, and who asked for it${
+        retentionDays ? `, from the last ${retentionDays} days of chats. Changes stay in the audit log after that` : ''
+      }.`}
+      icon={<ScrollText className="w-4 h-4" />}
+    >
       {entries === null ? (
         <Loader2 className="w-4 h-4 animate-spin text-slate-500" aria-label="Loading" />
       ) : entries.length === 0 ? (

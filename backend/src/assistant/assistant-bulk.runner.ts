@@ -131,6 +131,7 @@ export class AssistantBulkRunner implements OnApplicationBootstrap, OnModuleDest
     for (;;) {
       const now = await this.db.assistantAction.findFirst({ where: { id: actionId }, select: { bulkStatus: true } });
       if (now?.bulkStatus === 'cancelled') return this.closeRest(actionId, 'Stopped by the user before this lead');
+      if (this.registry.switchedOff(tool.name)) return this.giveUp(actionId, 'This step was switched off while it is being fixed');
       const auth = await this.approver(orgId, action.userId);
       if (!auth || !this.mayRun(auth, tool, action.bulkTotal)) return this.giveUp(actionId, 'The person who approved it can no longer do this');
 

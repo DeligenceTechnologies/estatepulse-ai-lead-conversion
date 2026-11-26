@@ -9,6 +9,7 @@ import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantActivityService } from './assistant-activity.service';
 import { AssistantBulkRunner } from './assistant-bulk.runner';
+import { AssistantRetentionService } from './assistant-retention.service';
 import { AssistantLimitsService } from './assistant-limits.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantRefService } from './assistant-ref.service';
@@ -32,6 +33,7 @@ import { ToolRegistry } from './tools/tool-registry.service';
     AssistantSettingsService,
     AssistantActivityService,
     AssistantBulkRunner,
+    AssistantRetentionService,
     AssistantUsageService,
     AssistantLimitsService,
     AssistantThreadService,

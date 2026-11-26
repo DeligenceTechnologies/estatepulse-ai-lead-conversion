@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssistantLimitsService, TURN_TIMEOUT_MS } from './assistant-limits.service';
+import { AssistantLimitsService, REDIS_TIMEOUT_MS, TURN_TIMEOUT_MS } from './assistant-limits.service';
 
 /** The few Redis commands the service uses, in memory. TTLs are ignored. */
 function fakeRedis() {
@@ -85,3 +85,42 @@ describe('AssistantLimitsService', () => {
     expect(redis.client.get).not.toHaveBeenCalled();
   });
 });
+
+describe('when Redis is down or slow', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('asking, locking a chat and Stop answer 503 "try again", not a server error', async () => {
+    const redis = fakeRedis();
+    const down = Object.assign(new Error('Reached the max retries per request limit'), { name: 'MaxRetriesPerRequestError' });
+    redis.client.incr.mockRejectedValue(down);
+    redis.client.set.mockRejectedValue(down);
+    const service = new AssistantLimitsService(redis as any);
+    const unavailable = { code: 'ASSISTANT_UNAVAILABLE', message: 'The assistant is briefly unavailable. Try again in a minute.' };
+    await expect(service.consume('user-1')).rejects.toMatchObject(unavailable);
+    await expect(service.lockThread('thread-1')).rejects.toMatchObject(unavailable);
+    await expect(service.requestStop('thread-1')).rejects.toMatchObject(unavailable);
+    await expect(service.consume('user-1')).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('a Redis call that never answers gives up after the timeout instead of hanging', async () => {
+    const redis = fakeRedis();
+    redis.client.incr.mockReturnValue(new Promise(() => undefined));
+    const service = new AssistantLimitsService(redis as any);
+    const asked = service.consume('user-1');
+    const settled = expect(asked).rejects.toMatchObject({ code: 'ASSISTANT_UNAVAILABLE' });
+    await vi.advanceTimersByTimeAsync(REDIS_TIMEOUT_MS + 1);
+    await settled;
+  });
+
+  it('a rate limit is still a rate limit, and releasing a lock never fails the turn', async () => {
+    const redis = fakeRedis();
+    const service = new AssistantLimitsService(redis as any);
+    for (let i = 0; i < 20; i++) await service.consume('user-1');
+    await expect(service.consume('user-1')).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    const lock = await service.lockThread('thread-1');
+    redis.client.eval.mockRejectedValue(new Error('connection reset'));
+    await expect(lock.release()).resolves.toBeUndefined();
+  });
+});
+

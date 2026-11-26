@@ -65,7 +65,8 @@ export type ErrorCode =
   | 'BILLING_PRICE_MISMATCH'
   | 'PAYMENT_FAILED'
   | 'SUBSCRIPTION_EXISTS'
-  | 'SUBSCRIPTION_PENDING';
+  | 'SUBSCRIPTION_PENDING'
+  | 'ASSISTANT_UNAVAILABLE';
 
 /**
  * Which application shell a user gets. The backend has free-form roles; the
@@ -210,6 +211,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   PAYMENT_FAILED: 'The payment did not go through.',
   SUBSCRIPTION_EXISTS: 'Your organization already has a subscription.',
   SUBSCRIPTION_PENDING: 'Your payment is still being confirmed.',
+  ASSISTANT_UNAVAILABLE: 'The assistant is briefly unavailable. Try again in a minute.',
 };
 
 /** Codes whose server message is written for people and beats our generic one. */
@@ -223,6 +225,8 @@ const SERVER_WORDED: ErrorCode[] = [
   'PAYMENT_FAILED',
   'SUBSCRIPTION_EXISTS',
   'SUBSCRIPTION_PENDING',
+  // A 503 whose words are written for the person ("try again in a minute").
+  'ASSISTANT_UNAVAILABLE',
 ];
 
 /**

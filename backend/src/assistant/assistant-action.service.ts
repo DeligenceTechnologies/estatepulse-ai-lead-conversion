@@ -50,6 +50,9 @@ function reasonOf(error: unknown, logger: Logger, tool: string): string {
   return 'Something went wrong running this step.';
 }
 
+/** What the model hears when a tool is switched off (ASSISTANT_DISABLED_TOOLS). */
+export const SWITCHED_OFF = 'This step is switched off for now while it is being fixed; nothing was done. Tell the user it is temporarily unavailable and suggest doing it from the app or trying later.';
+
 @Injectable()
 export class AssistantActionService {
   private readonly logger = new Logger(AssistantActionService.name);
@@ -77,6 +80,10 @@ export class AssistantActionService {
       return this.prisma.assistantAction.create({
         data: { ...base, tier: tool?.tier ?? 'read', status: 'failed', error: 'This tool is not available to this user.' },
       });
+    }
+
+    if (this.registry.switchedOff(tool.name)) {
+      return this.prisma.assistantAction.create({ data: { ...base, tier: tool.tier, status: 'failed', error: SWITCHED_OFF } });
     }
 
     const parsed = tool.input.safeParse(call.input);
@@ -157,6 +164,10 @@ export class AssistantActionService {
     if (!tool || tool.tier !== 'write' || !this.registry.allows(auth, tool)) {
       await this.close(action.id, 'failed', 'This tool is no longer available to this user.');
       throw new AppError('FORBIDDEN', 'You no longer have permission for this action.');
+    }
+    if (this.registry.switchedOff(tool.name)) {
+      await this.close(action.id, 'failed', SWITCHED_OFF);
+      throw new AppError('TOOL_SWITCHED_OFF', 'This step is switched off for now, so nothing was changed. Try again later.', undefined, 409);
     }
     // Valid when proposed; a deploy since then can change the tool's input shape.
     const parsed = tool.input.safeParse(action.input);

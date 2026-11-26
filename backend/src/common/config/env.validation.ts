@@ -266,4 +266,7 @@ export const envValidationSchema = Joi.object({
       .empty('')
       .when('AI_PROVIDER', { is: 'openai', then: Joi.when('ASSISTANT_ENABLED', { is: true, then: Joi.required() }) }),
     OPENAI_MODEL: Joi.string().empty('').default('gpt-5'),
+    // Assistant tools to switch off without a deploy, comma-separated (e.g. "text_send,meeting_book").
+    // They stay in the model's tool list, so the prompt cache holds, but answer "switched off for now".
+    ASSISTANT_DISABLED_TOOLS: Joi.string().empty('').default(''),
 }).and('AWS_SES_ACCESS_KEY_ID', 'AWS_SES_SECRET_ACCESS_KEY');

@@ -32,6 +32,7 @@ import { leadTools, leadVersion } from './lead.tools';
 import { outreachTools } from './outreach.tools';
 import type { ToolSpec } from '../providers/model-provider';
 import type { AssistantTool } from './tool';
+import { AssistantConfig } from '../assistant.config';
 
 /** The catalog of what the assistant can do. Each tool wraps a service the UI already uses. */
 @Injectable()
@@ -61,6 +62,7 @@ export class ToolRegistry {
     control: OutreachControlService,
     connectedApps: ConnectedAppsService,
     activity: AssistantActivityService,
+    private readonly config: AssistantConfig,
   ) {
     const text: LeadTextDeps = { prisma, sms, conversations, optOuts, followup, state, events };
     const all = [
@@ -83,6 +85,14 @@ export class ToolRegistry {
   /** What a tool does, in the words shown while it runs; the name itself for a tool since removed. */
   label(name: string): string {
     return this.tools.get(name)?.label ?? name;
+  }
+
+  /**
+   * A tool switched off with ASSISTANT_DISABLED_TOOLS: still offered to the model (the cached prompt
+   * stays the same) but it answers "switched off" instead of running. Stops a broken tool without a deploy.
+   */
+  switchedOff(name: string): boolean {
+    return this.config.disabledTools.has(name);
   }
 
   allows(auth: AuthContext, tool: AssistantTool): boolean {

@@ -24,7 +24,7 @@ const pause = vi.fn(async (_auth: AuthContext, leadId: string) => {
   ran.push(leadId);
 });
 const [pauseTool] = bulkTools({ prisma: guarded, assignments: {}, engine: {}, followup: {}, control: { pause, resume: vi.fn() } } as never).filter((t) => t.name === 'leads_outreach_pause');
-const registry = { get: () => pauseTool, allows: () => true, entityVersion: async () => null };
+const registry = { get: () => pauseTool, allows: () => true, entityVersion: async () => null, switchedOff: () => false };
 const runner = { start: vi.fn() };
 const actions = new AssistantActionService(guarded, registry as never, {} as never, { quietly: vi.fn() } as never, refService, runner as never);
 const worker = new AssistantBulkRunner(guarded, prisma, registry as never, refService);

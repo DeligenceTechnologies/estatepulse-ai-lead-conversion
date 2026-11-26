@@ -21,6 +21,8 @@ export interface AssistantSettingsView {
   usage: AssistantUsage;
   /** The roles that may use the assistant (assistant.use), Owner first. Set on the Roles screen. */
   rolesWithAccess?: string[];
+  /** Chats are deleted this many days after their last message. */
+  chatRetentionDays?: number;
   /** Whether the assistant is switched on for this server at all. */
   serverEnabled: boolean;
   canEdit: boolean;
