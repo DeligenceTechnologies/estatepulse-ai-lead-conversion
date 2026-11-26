@@ -2,7 +2,9 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import type { Response } from 'express';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { AssistantActionService } from './assistant-action.service';
 import { AssistantActivityService } from './assistant-activity.service';
+import { ConfirmActionDto } from './dto/confirm-action.dto';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantSettingsService } from './assistant-settings.service';
 import { AssistantConfig } from './assistant.config';
@@ -31,6 +33,7 @@ export class AssistantController {
     private readonly usage: AssistantUsageService,
     private readonly config: AssistantConfig,
     private readonly registry: ToolRegistry,
+    private readonly actions: AssistantActionService,
   ) {}
 
   /** Settings > Ask EstatePulse: the office's switch, monthly limit and microphone, with this month's spend. */
@@ -96,9 +99,22 @@ export class AssistantController {
     return this.stream(res, (stream) => this.assistant.send(auth, body, stream));
   }
 
+  /** For a bulk card above 10 leads, the body carries the count the user typed. */
   @Post('actions/:id/confirm')
-  confirm(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response): Promise<void> {
-    return this.stream(res, (stream) => this.assistant.decide(auth, id, 'confirm', stream));
+  confirm(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ConfirmActionDto, @Res() res: Response): Promise<void> {
+    return this.stream(res, (stream) => this.assistant.decide(auth, id, 'confirm', stream, body?.count));
+  }
+
+  /** A bulk card's job: how far it got, and the first leads that failed or were skipped. */
+  @Get('actions/:id/progress')
+  progress(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    return this.actions.bulkProgress(auth, id);
+  }
+
+  @Post('actions/:id/stop')
+  @HttpCode(HttpStatus.OK)
+  stopBulk(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    return this.actions.stopBulk(auth, id);
   }
 
   @Post('actions/:id/reject')

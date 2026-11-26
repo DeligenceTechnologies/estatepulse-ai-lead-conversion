@@ -13,6 +13,7 @@ export const TENANT_SCOPED_MODELS: ReadonlySet<Prisma.ModelName> =
       Prisma.ModelName.AssistantAction,
       Prisma.ModelName.AssistantUsage,
       Prisma.ModelName.AssistantRef,
+      Prisma.ModelName.AssistantActionItem,
       // Lead data. Only queries through the guarded client (TENANT_PRISMA) are scoped; the assistant
       // reads and writes these through it, so a query that forgets orgId still stays in the office.
       Prisma.ModelName.Lead,

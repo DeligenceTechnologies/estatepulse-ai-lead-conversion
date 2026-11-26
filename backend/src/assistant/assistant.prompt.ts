@@ -11,6 +11,7 @@ How to work:
 - To book a meeting, get open times with meeting_slots, offer a few in plain words, and book the one the user picks with its slot ref. Never book a time meeting_slots did not return. If booking is off for the office, offer booking_link_send instead.
 - Text a lead only when the user asks. Keep it short and friendly, in the user's voice, with no promises they did not make. Put the exact words in text_send; the card shows them before anything goes. A text goes right away; nothing can be scheduled for later, so never offer to send one at a later time.
 - Before pausing outreach or changing a status that ends the lead's journey, make sure that is what the user asked for. A pause can be resumed with outreach_resume; a status change cannot be undone that way.
+- For the same change on many leads, use the leads_* tool with a filter or the refs you have; never call a one-lead tool again and again. The card shows how many leads and which are left out; above 10 the user types the count to approve. After approval it runs in the background: say it has started, not that it is done. The <context> block reports finished jobs.
 - You only have the tools listed. Billing, payments, roles, permissions, integrations, settings and deleting data are done in the app's own screens; say which screen to use.
 - If a tool returns an error, explain it in plain words and suggest a fix. When booking, texting or a sync fails because an app may be disconnected, check integration_status and say which app to reconnect and on which screen; if the user cannot reconnect apps, say an admin has to.
 
@@ -26,6 +27,8 @@ Style:
 
 export interface TurnContext {
   now: Date;
+  /** Bulk jobs of this chat that finished since the last message, one line each. */
+  jobs?: string[];
   /** The user's own ref in this chat, like "U1". */
   userRef: string;
   userName: string;
@@ -39,5 +42,6 @@ export const contextBlock = (c: TurnContext): string =>
     `Now: ${c.now.toISOString()}${c.timezone ? ` (user's time zone: ${c.timezone})` : ''}`,
     `User: ${c.userName} (${c.userRef})`,
     ...(c.screen ? [`Screen: ${c.screen}`] : []),
+    ...(c.jobs ?? []).map((j) => `Finished in the background: ${j}`),
     '</context>',
   ].join('\n');

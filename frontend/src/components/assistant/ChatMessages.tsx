@@ -7,7 +7,7 @@ import { RichText } from './RichText';
 interface ChatMessagesProps {
   messages: ChatMessage[];
   busy: boolean;
-  onDecide: (actionId: string, decision: 'confirm' | 'reject') => void;
+  onDecide: (actionId: string, decision: 'confirm' | 'reject', count?: number) => void;
   /** The drop-down under the top bar: no avatars, tighter spacing. */
   compact?: boolean;
 }
@@ -63,7 +63,7 @@ const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMes
       )}
       {message.text && <RichText text={message.text} />}
       {message.actions.map((a) => (
-        <ApprovalCard key={a.id} action={a} disabled={busy} onDecide={(d) => onDecide(a.id, d)} />
+        <ApprovalCard key={a.id} action={a} disabled={busy} onDecide={(d, count) => onDecide(a.id, d, count)} />
       ))}
     </div>
   );

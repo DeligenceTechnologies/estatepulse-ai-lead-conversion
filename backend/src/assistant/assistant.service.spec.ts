@@ -6,7 +6,7 @@ import { AssistantService } from './assistant.service';
 
 const auth: AuthContext = { userId: 'user-1', organizationId: 'org-1', sessionId: 's', roleIds: [], permissions: [] };
 
-function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopped'; officeEnabled?: boolean } = {}) {
+function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopped'; officeEnabled?: boolean; endedJobs?: object[] } = {}) {
   const controller = new AbortController();
   const lock = { release: vi.fn(async () => undefined) };
   const turn = { signal: controller.signal, dispose: vi.fn() };
@@ -27,6 +27,11 @@ function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopp
   const actions = {
     closeOpenCalls: vi.fn(async () => false),
     awaitingResults: vi.fn(async () => opts.awaitingResults ?? false),
+    bulkProgress: vi.fn(async () => ({ status: 'done', total: 12, done: 10, skipped: 1, failed: 1, notAttempted: 0, pending: 0, problems: [] })),
+  };
+  const prisma = {
+    user: { findFirst: vi.fn(async () => ({ firstName: 'Sarah', lastName: 'Owens', email: 's@x.test', timezone: 'America/Chicago' })) },
+    assistantAction: { findMany: vi.fn(async () => opts.endedJobs ?? []), update: vi.fn(async () => ({})) },
   };
   const orchestrator = {
     run: vi.fn(async () => {
@@ -35,7 +40,7 @@ function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopp
   };
   const service = new AssistantService(
     { enabled: true } as any,
-    { user: { findFirst: vi.fn(async () => ({ firstName: 'Sarah', lastName: 'Owens', email: 's@x.test', timezone: 'America/Chicago' })) } } as any,
+    prisma as any,
     { assertFeature: vi.fn(async () => undefined) } as any,
     limits as any,
     { assertWithinBudget: vi.fn(async () => undefined) } as any,
@@ -47,7 +52,7 @@ function setup(opts: { awaitingResults?: boolean; abortWith?: 'timeout' | 'stopp
   );
   const events: AssistantEvent[] = [];
   const stream = { send: (e: AssistantEvent) => events.push(e) };
-  return { service, limits, lock, turn, threads, actions, orchestrator, events, stream };
+  return { service, limits, lock, turn, threads, actions, orchestrator, events, stream, prisma };
 }
 
 describe('AssistantService: the office switch', () => {
@@ -55,6 +60,16 @@ describe('AssistantService: the office switch', () => {
     const s = setup({ officeEnabled: false });
     await expect(s.service.send(auth, { text: 'Hi' } as any, s.stream as any)).rejects.toMatchObject({ code: 'ASSISTANT_OFF_FOR_OFFICE' });
     expect(s.threads.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('AssistantService: finished bulk jobs', () => {
+  it('tells the model once, in the next message, how a background job ended', async () => {
+    const s = setup({ endedJobs: [{ id: 'a1', preview: { title: 'Assign 12 leads to Priya Shah' }, result: { started: true } }] });
+    await s.service.send(auth, { text: 'Done?', threadId: 'thread-1' } as any, s.stream as any);
+    const context = (s.threads.append.mock.calls[0] as any[])[2].content[0].text;
+    expect(context).toContain('Finished in the background: Assign 12 leads to Priya Shah: finished. 10 done, 1 skipped, 1 failed.');
+    expect(s.prisma.assistantAction.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { result: { started: true, reported: true } } });
   });
 });
 

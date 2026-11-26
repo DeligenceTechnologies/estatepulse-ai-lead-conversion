@@ -15,13 +15,28 @@ export interface PreviewChange {
   to: string | null;
 }
 
+/** The leads a bulk card will act on, frozen when the card is built. */
+export interface BulkPreview {
+  /** In the order they will run. */
+  leadIds: string[];
+  /** Left out, by reason: { 'already with Priya Shah': 6 }. */
+  skipped: Record<string, number>;
+  /** A few names for the card. */
+  sample: string[];
+}
+
 /** What the confirmation card shows before a write runs. */
 export interface ActionPreview {
   title: string;
   summary?: string;
   changes?: PreviewChange[];
   entity?: { type: 'lead'; id: string; version: Date };
+  /** Set by a bulk tool: the card acts on these leads, in a background job. */
+  bulk?: BulkPreview;
 }
+
+/** What one lead of a bulk job came to: done, or left alone with the reason. */
+export type BulkOutcome = void | { skipped: string };
 
 interface ToolBase<TSchema extends z.ZodType> {
   name: string;
@@ -43,6 +58,11 @@ export interface WriteTool<TSchema extends z.ZodType = z.ZodType> extends ToolBa
   /** Read-only: describes the change for the user to confirm. Throws when the target is not visible. */
   preview(ctx: ToolContext, input: z.infer<TSchema>): Promise<ActionPreview>;
   run(ctx: ToolContext, input: z.infer<TSchema>): Promise<unknown>;
+  /**
+   * A bulk tool: its preview returns `bulk`, and approving runs `runOne` for each frozen lead in a
+   * background job instead of `run`. A refusal for one lead (an AppError) skips that lead only.
+   */
+  bulk?: { runOne(ctx: ToolContext, input: z.infer<TSchema>, leadId: string): Promise<BulkOutcome> };
 }
 
 export type AssistantTool = ReadTool | WriteTool;

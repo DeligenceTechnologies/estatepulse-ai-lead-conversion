@@ -115,7 +115,8 @@ function setup() {
   };
   /** Each chat gets its own ref table; the tool must be handed the one of the chat the call came from. */
   const refs = { forThread: vi.fn((_a: AuthContext, threadId: string) => ({ threadId, resolve: vi.fn(), issue: vi.fn() })) };
-  const service = new AssistantActionService(prisma as any, registry as any, threads as any, audit as any, refs as any);
+  const bulkRunner = { start: vi.fn() };
+  const service = new AssistantActionService(prisma as any, registry as any, threads as any, audit as any, refs as any, bulkRunner as any);
 
   /** The model's message that asked for these tool calls, as the orchestrator stores it before calling handle(). */
   const modelAsked = async (calls: { id: string; name: string; input: unknown }[]) => {

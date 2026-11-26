@@ -8,6 +8,7 @@ import { LeadModule } from '@/lead/lead.module';
 import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantActivityService } from './assistant-activity.service';
+import { AssistantBulkRunner } from './assistant-bulk.runner';
 import { AssistantLimitsService } from './assistant-limits.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantRefService } from './assistant-ref.service';
@@ -30,6 +31,7 @@ import { ToolRegistry } from './tools/tool-registry.service';
     AssistantRefService,
     AssistantSettingsService,
     AssistantActivityService,
+    AssistantBulkRunner,
     AssistantUsageService,
     AssistantLimitsService,
     AssistantThreadService,

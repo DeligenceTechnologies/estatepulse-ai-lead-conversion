@@ -88,7 +88,8 @@ export interface AssistantContextValue {
   error: string | null;
   /** `screen` names the page the question was asked from, so "these leads" means something. */
   send: (text: string, screen?: string) => void;
-  decide: (actionId: string, decision: 'confirm' | 'reject') => void;
+  /** `count`: what the user typed to approve a bulk card above 10 leads. */
+  decide: (actionId: string, decision: 'confirm' | 'reject', count?: number) => void;
   openThread: (id: string) => Promise<void>;
   newChat: () => void;
   removeThread: (id: string) => Promise<void>;
@@ -271,11 +272,11 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
 
   const decide = useCallback(
-    (actionId: string, decision: 'confirm' | 'reject') => {
+    (actionId: string, decision: 'confirm' | 'reject', count?: number) => {
       if (busy) return;
       setMessages((ms) => [...ms.filter((m) => m.id !== DRAFT_ID), draft()]);
       void run((signal) =>
-        decision === 'confirm' ? assistantChatApi.confirm(actionId, onEvent, signal) : assistantChatApi.reject(actionId, onEvent, signal),
+        decision === 'confirm' ? assistantChatApi.confirm(actionId, onEvent, signal, count) : assistantChatApi.reject(actionId, onEvent, signal),
       );
     },
     [busy, run, onEvent],

@@ -37,6 +37,7 @@ model Organization {
   assistantActions    AssistantAction[]
   assistantUsage      AssistantUsage[]
   assistantRefs       AssistantRef[]
+  assistantActionItems AssistantActionItem[]
 
   @@map("organizations")
 }

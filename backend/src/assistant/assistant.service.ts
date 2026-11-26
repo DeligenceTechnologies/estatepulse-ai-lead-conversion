@@ -76,6 +76,7 @@ export class AssistantService {
         select: { firstName: true, lastName: true, email: true, timezone: true },
       });
       const context = contextBlock({
+        jobs: await this.finishedJobs(auth, thread.id),
         now: new Date(),
         // The user's own ref, so "give it to me" needs no look-up.
         userRef: await refOf(this.refs.forThread(auth, thread.id), 'user', auth.userId),
@@ -100,14 +101,14 @@ export class AssistantService {
     }
   }
 
-  async decide(auth: AuthContext, actionId: string, decision: 'confirm' | 'reject', stream: EventStream): Promise<void> {
+  async decide(auth: AuthContext, actionId: string, decision: 'confirm' | 'reject', stream: EventStream, count?: number): Promise<void> {
     await this.admit(auth);
     const pending = await this.actions.require(auth, actionId);
 
     const lock = await this.limits.lockThread(pending.threadId);
     const turn = await this.limits.turnSignal(pending.threadId);
     try {
-      const action = decision === 'confirm' ? await this.actions.confirm(auth, actionId) : await this.actions.reject(auth, actionId);
+      const action = decision === 'confirm' ? await this.actions.confirm(auth, actionId, { count }) : await this.actions.reject(auth, actionId);
       stream.send({ type: 'action', action: toActionView(action) });
 
       if (!(await this.actions.settled(auth.organizationId, action.messageId))) {
@@ -123,6 +124,29 @@ export class AssistantService {
       turn.dispose();
       await lock.release();
     }
+  }
+
+  /**
+   * Bulk jobs of this chat that ended since the model last heard: one line each with the totals,
+   * reported once (the action's result remembers), so the history stays append-only.
+   */
+  private async finishedJobs(auth: AuthContext, threadId: string): Promise<string[]> {
+    const ended = await this.prisma.assistantAction.findMany({
+      where: { orgId: auth.organizationId, threadId, bulkStatus: { in: ['done', 'stopped', 'cancelled'] }, NOT: { result: { path: ['reported'], equals: true } } },
+      select: { id: true, preview: true, result: true },
+    });
+    const lines: string[] = [];
+    for (const a of ended) {
+      const p = await this.actions.bulkProgress(auth, a.id);
+      const title = (a.preview as { title?: string } | null)?.title ?? 'Bulk action';
+      const ending = p.status === 'cancelled' ? 'stopped by the user' : p.status === 'stopped' ? 'stopped early' : 'finished';
+      lines.push(`${title}: ${ending}. ${p.done} done, ${p.skipped} skipped, ${p.failed} failed${p.notAttempted ? `, ${p.notAttempted} not attempted` : ''}.`);
+      await this.prisma.assistantAction.update({
+        where: { id: a.id },
+        data: { result: { ...((a.result as Record<string, unknown> | null) ?? {}), reported: true } },
+      });
+    }
+    return lines;
   }
 
   /** Stops the turn running in one of the user's chats, after the step it is on. A write already confirmed still finishes. */

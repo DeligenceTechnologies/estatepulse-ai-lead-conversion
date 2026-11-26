@@ -31,6 +31,8 @@ export interface ActionView {
   error: string | null;
   expiresAt: Date | null;
   decidedAt: Date | null;
+  /** A bulk card: how many leads, a few names, what was left out; `status` is its job's, once approved. */
+  bulk?: { total: number; status: string | null; sample?: string[]; skipped?: Record<string, number> };
 }
 
 export interface MessageView {
@@ -54,6 +56,9 @@ export const toActionView = (a: AssistantAction): ActionView => {
     error: a.error,
     expiresAt: a.expiresAt,
     decidedAt: a.decidedAt,
+    ...(a.bulkTotal !== null
+      ? { bulk: { total: a.bulkTotal, status: a.bulkStatus, ...((preview as { bulk?: { sample?: string[]; skipped?: Record<string, number> } } | null)?.bulk ?? {}) } }
+      : {}),
   };
 };
 

@@ -90,15 +90,41 @@ model AssistantAction {
   expiresAt     DateTime?             @map("expires_at") @db.Timestamptz(6)
   decidedAt     DateTime?             @map("decided_at") @db.Timestamptz(6)
   createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// A bulk action (one tool on many leads): how many leads it holds, and where its background job is:
+  /// queued, running, done, cancelled (Stop) or stopped (it gave up). Null for a one-lead action.
+  bulkTotal     Int?                  @map("bulk_total")
+  bulkStatus    String?               @map("bulk_status") @db.VarChar(20)
 
-  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  thread       AssistantThread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  message      AssistantMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  organization Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  thread       AssistantThread       @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message      AssistantMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  items        AssistantActionItem[]
 
   @@unique([messageId, toolUseId])
   @@index([threadId, status])
   @@index([orgId, entityType, entityId])
   @@map("assistant_actions")
+}
+
+/// One lead of a bulk action, frozen when its card was built: approving runs on these rows only, so a
+/// lead that starts matching the filter later is never added. Each row ends as succeeded, failed,
+/// skipped (a check said no, with the reason) or not_attempted (the job was stopped first).
+model AssistantActionItem {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  orgId      String    @map("organization_id") @db.Uuid
+  actionId   String    @map("action_id") @db.Uuid
+  leadId     String    @map("lead_id") @db.Uuid
+  position   Int
+  status     String    @default("pending") @db.VarChar(20)
+  reason     String?   @db.VarChar(500)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  organization Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  action       AssistantAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@unique([actionId, leadId])
+  @@index([actionId, status, position])
+  @@map("assistant_action_items")
 }
 
 /// The short handles the model uses instead of ids: lead 7 of this chat is "L7". Issued when a tool

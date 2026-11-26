@@ -23,6 +23,9 @@ export const PERMISSIONS = {
   AUTOMATION_READ: 'automation.read',
   AUTOMATION_UPDATE: 'automation.update',
 
+  /** Approve one Ask EstatePulse action on more than 10 leads at once. */
+  ASSISTANT_BULK: 'assistant.bulk',
+
   BILLING_READ: 'billing.read',
   BILLING_MANAGE: 'billing.manage',
 } as const;
@@ -90,6 +93,7 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     permissions: [
       { key: PERMISSIONS.AUTOMATION_READ, label: 'View the AI assistant, outreach strategy and sequences' },
       { key: PERMISSIONS.AUTOMATION_UPDATE, label: 'Edit the AI assistant, outreach strategy and sequences' },
+      { key: PERMISSIONS.ASSISTANT_BULK, label: 'Approve an Ask EstatePulse action on more than 10 leads at once' },
     ],
   },
   {

@@ -24,6 +24,7 @@ import { StrategyStoreService } from '@/telnyx/strategy-store.service';
 import { AssistantActivityService } from '../assistant-activity.service';
 import { activityTools } from './activity.tools';
 import { appTools } from './app.tools';
+import { bulkTools } from './bulk.tools';
 import { calendarTools } from './calendar.tools';
 import { historyTools } from './history.tools';
 import type { LeadTextDeps } from './lead-text';
@@ -69,6 +70,7 @@ export class ToolRegistry {
       ...outreachTools({ prisma, engine, strategies, followup, control, text }),
       ...appTools(connectedApps),
       ...activityTools(activity),
+      ...bulkTools({ prisma, assignments, engine, followup, control }),
     ].sort((a, b) => a.name.localeCompare(b.name));
     this.tools = new Map(all.map((t) => [t.name, t]));
     this.definitions = new Map(all.map((t) => [t.name, toDefinition(t)]));

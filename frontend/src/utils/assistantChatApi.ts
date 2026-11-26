@@ -15,6 +15,23 @@ export interface AssistantAction {
   error: string | null;
   expiresAt: string | null;
   decidedAt: string | null;
+  /** A bulk card: how many leads, a few names, what was left out; `status` is its job's once approved. */
+  bulk?: { total: number; status: BulkJobStatus | null; sample?: string[]; skipped?: Record<string, number> };
+}
+
+export type BulkJobStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'stopped';
+
+/** Where a bulk card's background job is. */
+export interface BulkProgress {
+  actionId: string;
+  status: BulkJobStatus | null;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  notAttempted: number;
+  pending: number;
+  problems: { leadId: string; name: string; status: string; reason: string | null }[];
 }
 
 export interface AssistantMessage {
@@ -62,8 +79,11 @@ export const assistantChatApi = {
 
   send: (body: { threadId?: string; text: string; screen?: string }, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream('/v1/assistant/messages', body, onEvent, signal),
-  confirm: (actionId: string, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
-    stream(`/v1/assistant/actions/${actionId}/confirm`, undefined, onEvent, signal),
+  /** `count` is the number of leads the user typed to approve a bulk card above 10 leads. */
+  confirm: (actionId: string, onEvent: (e: AssistantEvent) => void, signal: AbortSignal, count?: number) =>
+    stream(`/v1/assistant/actions/${actionId}/confirm`, count === undefined ? undefined : { count }, onEvent, signal),
+  bulkProgress: (actionId: string) => apiFetch<BulkProgress>(`/v1/assistant/actions/${actionId}/progress`, { auth: true }),
+  stopBulk: (actionId: string) => apiFetch<BulkProgress>(`/v1/assistant/actions/${actionId}/stop`, { method: 'POST', auth: true }),
   reject: (actionId: string, onEvent: (e: AssistantEvent) => void, signal: AbortSignal) =>
     stream(`/v1/assistant/actions/${actionId}/reject`, undefined, onEvent, signal),
 };

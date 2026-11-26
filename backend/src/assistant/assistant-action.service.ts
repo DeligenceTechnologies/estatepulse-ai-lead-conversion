@@ -4,9 +4,12 @@ import { AuditService } from '@/audit/audit.service';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
+import { PERMISSIONS } from '@/role/permissions';
+import { AssistantBulkRunner } from './assistant-bulk.runner';
 import { AssistantRefService } from './assistant-ref.service';
 import { AssistantThreadService } from './assistant-thread.service';
 import type { StoredBlock, ToolCall } from './providers/model-provider';
+import { TYPED_CONFIRM_ABOVE } from './tools/bulk';
 import type { ActionPreview, AssistantTool, ToolContext } from './tools/tool';
 import { ToolRegistry } from './tools/tool-registry.service';
 
@@ -16,6 +19,20 @@ const EXECUTING_STALE_MS = 2 * 60_000;
 const MAX_RESULT_CHARS = 20_000;
 
 type ToolResult = Extract<StoredBlock, { type: 'tool_result' }>;
+
+export interface BulkProgress {
+  actionId: string;
+  /** queued, running, done, cancelled or stopped; null before approval. */
+  status: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  notAttempted: number;
+  pending: number;
+  /** The first leads that failed or were skipped, with why. */
+  problems: { leadId: string; name: string; status: string; reason: string | null }[];
+}
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
 
@@ -43,6 +60,7 @@ export class AssistantActionService {
     private readonly threads: AssistantThreadService,
     private readonly audit: AuditService,
     private readonly refs: AssistantRefService,
+    private readonly bulkRunner: AssistantBulkRunner,
   ) {}
 
   /** What a tool runs with: the user, and the refs of the chat the call came from. */
@@ -82,18 +100,42 @@ export class AssistantActionService {
     } catch (error) {
       return this.prisma.assistantAction.create({ data: { ...base, tier: 'write', status: 'failed', error: reasonOf(error, this.logger, tool.name) } });
     }
-    return this.prisma.assistantAction.create({
+    const bulk = preview.bulk;
+    if (bulk && bulk.leadIds.length > TYPED_CONFIRM_ABOVE && !auth.permissions.includes(PERMISSIONS.ASSISTANT_BULK)) {
+      return this.prisma.assistantAction.create({
+        data: {
+          ...base,
+          tier: 'write',
+          status: 'failed',
+          error: `This would act on ${bulk.leadIds.length} leads. More than ${TYPED_CONFIRM_ABOVE} at once needs the assistant.bulk permission; ask an owner, or narrow it to ${TYPED_CONFIRM_ABOVE}.`,
+        },
+      });
+    }
+    const action = await this.prisma.assistantAction.create({
       data: {
         ...base,
         tier: 'write',
         status: 'proposed',
-        preview: json({ title: preview.title, summary: preview.summary, changes: preview.changes }),
+        preview: json({
+          title: preview.title,
+          summary: preview.summary,
+          changes: preview.changes,
+          ...(bulk ? { bulk: { total: bulk.leadIds.length, sample: bulk.sample, skipped: bulk.skipped } } : {}),
+        }),
         entityType: preview.entity?.type,
         entityId: preview.entity?.id,
         entityVersion: preview.entity?.version,
         expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS),
+        ...(bulk ? { bulkTotal: bulk.leadIds.length } : {}),
       },
     });
+    // The leads are frozen with the card: approving acts on exactly these.
+    if (bulk) {
+      await this.prisma.assistantActionItem.createMany({
+        data: bulk.leadIds.map((leadId, position) => ({ orgId: auth.organizationId, actionId: action.id, leadId, position })),
+      });
+    }
+    return action;
   }
 
   async require(auth: AuthContext, actionId: string): Promise<AssistantAction> {
@@ -102,7 +144,7 @@ export class AssistantActionService {
     return action;
   }
 
-  async confirm(auth: AuthContext, actionId: string): Promise<AssistantAction> {
+  async confirm(auth: AuthContext, actionId: string, opts: { count?: number } = {}): Promise<AssistantAction> {
     const action = await this.require(auth, actionId);
     this.assertOpen(action);
 
@@ -124,6 +166,8 @@ export class AssistantActionService {
     }
     const input = parsed.data;
     const ctx = this.context(auth, action.threadId);
+
+    if (action.bulkTotal !== null && tool.bulk) return this.startBulk(auth, action, tool.name, opts.count);
 
     await this.assertFresh(ctx, action, tool, input);
 
@@ -151,6 +195,84 @@ export class AssistantActionService {
         data: { status: 'failed', error: reasonOf(error, this.logger, tool.name) },
       });
     }
+  }
+
+  /**
+   * Approving a bulk card: above TYPED_CONFIRM_ABOVE leads the user typed the count, and still holds
+   * assistant.bulk. The card is claimed (so a retried approve cannot start it twice), closed for the
+   * chat with "started", and its job started in this process.
+   */
+  private async startBulk(auth: AuthContext, action: AssistantAction, toolName: string, count: number | undefined): Promise<AssistantAction> {
+    const total = action.bulkTotal!;
+    if (total > TYPED_CONFIRM_ABOVE) {
+      if (!auth.permissions.includes(PERMISSIONS.ASSISTANT_BULK)) {
+        throw new AppError('FORBIDDEN', `Approving an action on more than ${TYPED_CONFIRM_ABOVE} leads needs the assistant.bulk permission.`);
+      }
+      if (count !== total) throw new AppError('BULK_COUNT_MISMATCH', `Type the number of leads, ${total}, to approve.`, undefined, 422);
+    }
+    const claimed = await this.prisma.assistantAction.updateMany({
+      where: { id: action.id, orgId: auth.organizationId, status: 'proposed' },
+      data: {
+        status: 'executed',
+        decidedAt: new Date(),
+        bulkStatus: 'queued',
+        result: json({ started: true, total, note: 'Running in the background. The card shows progress; the user can stop it there.' }),
+      },
+    });
+    if (claimed.count === 0) throw new AppError('ACTION_DECIDED', 'This action was already handled.', undefined, 409);
+    this.bulkRunner.start(auth.organizationId, action.id);
+    this.audit.quietly({
+      orgId: auth.organizationId,
+      actorType: 'ai',
+      actorId: auth.userId,
+      action: `assistant.${toolName}`,
+      entityType: 'assistant_action',
+      entityId: action.id,
+      payload: { assistantActionId: action.id, threadId: action.threadId, leads: total },
+    });
+    return this.require(auth, action.id);
+  }
+
+  /** Stop on a running bulk card: the job finishes the lead it is on, and the rest are not attempted. */
+  async stopBulk(auth: AuthContext, actionId: string): Promise<BulkProgress> {
+    const action = await this.require(auth, actionId);
+    if (action.bulkTotal === null) throw new AppError('NOT_FOUND', 'No such action.');
+    await this.prisma.assistantAction.updateMany({
+      where: { id: action.id, orgId: auth.organizationId, bulkStatus: { in: ['queued', 'running'] } },
+      data: { bulkStatus: 'cancelled' },
+    });
+    return this.bulkProgress(auth, actionId);
+  }
+
+  /** Where a bulk card's job is: counts by outcome, and the first leads that failed or were skipped. */
+  async bulkProgress(auth: AuthContext, actionId: string): Promise<BulkProgress> {
+    const action = await this.require(auth, actionId);
+    if (action.bulkTotal === null) throw new AppError('NOT_FOUND', 'No such action.');
+    const [groups, problems] = await Promise.all([
+      this.prisma.assistantActionItem.groupBy({ by: ['status'], where: { actionId }, _count: { _all: true } }),
+      this.prisma.assistantActionItem.findMany({
+        where: { actionId, status: { in: ['failed', 'skipped'] } },
+        orderBy: { position: 'asc' },
+        take: 10,
+        select: { leadId: true, status: true, reason: true },
+      }),
+    ]);
+    const count = (status: string) => groups.find((g) => g.status === status)?._count._all ?? 0;
+    const named = problems.length
+      ? await this.prisma.lead.findMany({ where: { id: { in: problems.map((p) => p.leadId) } }, select: { id: true, firstName: true, lastName: true } })
+      : [];
+    const names = new Map(named.map((l) => [l.id, [l.firstName, l.lastName].filter(Boolean).join(' ') || 'Unnamed lead']));
+    return {
+      actionId,
+      status: action.bulkStatus,
+      total: action.bulkTotal,
+      done: count('succeeded'),
+      failed: count('failed'),
+      skipped: count('skipped'),
+      notAttempted: count('not_attempted'),
+      pending: count('pending'),
+      problems: problems.map((p) => ({ leadId: p.leadId, name: names.get(p.leadId) ?? 'A lead', status: p.status, reason: p.reason })),
+    };
   }
 
   async reject(auth: AuthContext, actionId: string): Promise<AssistantAction> {

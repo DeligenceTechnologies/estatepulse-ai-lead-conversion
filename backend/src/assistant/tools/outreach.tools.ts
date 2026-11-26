@@ -25,7 +25,7 @@ export interface OutreachToolDeps {
 
 const LIVE_ENROLLMENT = [EnrollmentStatus.active, EnrollmentStatus.paused];
 
-const STATUS_LABEL: Record<LeadStatus, string> = {
+export const STATUS_LABEL: Record<LeadStatus, string> = {
   new: 'New',
   contacting: 'Contacting',
   engaged: 'Engaged',
@@ -42,7 +42,7 @@ const STATUS_LABEL: Record<LeadStatus, string> = {
 const label = (s: LeadStatus) => STATUS_LABEL[s];
 
 /** What a status change sets off, for the card. */
-function statusEffect(status: LeadStatus): string | undefined {
+export function statusEffect(status: LeadStatus): string | undefined {
   if (INACTIVE_STATUSES.includes(status)) return 'AI outreach and follow-up sequences for this lead stop.';
   if (status === LeadStatus.follow_up) return "AI outreach stops, and the lead joins the follow-up sequence set up for the reason, if there is one.";
   if (!IN_STRATEGY_STATUSES.includes(status)) return 'AI outreach for this lead stops.';
