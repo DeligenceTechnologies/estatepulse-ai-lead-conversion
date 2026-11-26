@@ -44,6 +44,8 @@ export interface IntegrationEnv {
   INGEST_MAX_BODY_BYTES: number;
   TALLY_API_BASE_URL: string;
   TYPEFORM_API_BASE_URL: string;
+  JOTFORM_API_BASE_URL: string;
+  JOTFORM_EU_API_BASE_URL: string;
   PROVIDER_HTTP_TIMEOUT_MS: number;
   WORKER_ENABLED: boolean;
   WORKER_POLL_INTERVAL_MS: number;

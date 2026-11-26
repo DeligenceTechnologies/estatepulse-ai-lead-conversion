@@ -1,4 +1,5 @@
-import { Controller, Headers, Logger, Param, Post, Req, Res, type RawBodyRequest } from '@nestjs/common';
+import { Controller, Headers, Logger, Param, Post, Req, Res, UseInterceptors, type RawBodyRequest } from '@nestjs/common';
+import { NoFilesInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { Public } from '@/auth/decorators/public.decorator';
@@ -44,6 +45,42 @@ export class IngestController {
   }
 
   /**
+   * Jotform posts each submission as multipart form fields, which the global
+   * body parsers do not read, so there is no raw body to store. Multer reads
+   * the fields here, and the parts that matter are stored as JSON instead:
+   * the same bytes then feed the payload hash, the stored delivery and the
+   * adapter. Jotform signs nothing; the token in the path is the credential.
+   * A urlencoded or JSON post with the same fields works too.
+   */
+  @Post('ingest/v1/jotform/:token')
+  // A submission is a few dozen short fields; the caps keep an oversized post
+  // to this public URL from being read into memory at all.
+  @UseInterceptors(NoFilesInterceptor({ limits: { fields: 300, fieldSize: 1024 * 1024, parts: 300 } }))
+  jotform(@Param('token') token: string, @Req() req: RawBodyRequest<Request>, @Res() res: Response) {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    let rawBody = req.rawBody;
+    if (body.rawRequest !== undefined) {
+      let rawRequest: unknown = body.rawRequest;
+      if (typeof rawRequest === 'string') {
+        try {
+          rawRequest = JSON.parse(rawRequest);
+        } catch {
+          // Left as a string; the adapter records it as an invalid payload.
+        }
+      }
+      rawBody = Buffer.from(
+        JSON.stringify({
+          submissionID: body.submissionID ?? null,
+          formID: body.formID ?? null,
+          formTitle: body.formTitle ?? null,
+          rawRequest,
+        }),
+      );
+    }
+    return this.handle('JOTFORM', token, req, res, undefined, rawBody);
+  }
+
+  /**
    * Where the Apps Script on an owner's Google Form posts each response. The
    * script is an external client like any other provider: the token in the
    * path and the HMAC over the body are the whole credential, and switching
@@ -75,8 +112,8 @@ export class IngestController {
     req: RawBodyRequest<Request>,
     res: Response,
     signature: string | undefined,
+    rawBody: Buffer | undefined = req.rawBody,
   ): Promise<void> {
-    const rawBody = req.rawBody;
     if (!rawBody?.byteLength) {
       res.status(400).json({ error: 'empty_body' });
       return;

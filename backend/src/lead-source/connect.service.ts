@@ -27,6 +27,13 @@ import { ProviderApiError, type FormProviderAdapter, type ProviderCredential } f
 import { LeadSourcesService } from './lead-sources.service';
 import { prebuildMappings, schemaFingerprint } from './prebuild-mapping';
 
+/** The lead source provider a form connected through each adapter becomes. */
+const SOURCE_PROVIDER: Record<string, LeadSourceProvider> = {
+  TALLY: LeadSourceProvider.TALLY,
+  TYPEFORM: LeadSourceProvider.TYPEFORM,
+  JOTFORM: LeadSourceProvider.JOTFORM,
+};
+
 export interface ConnectFormInput {
   credentialId: string;
   externalFormId: string;
@@ -139,7 +146,7 @@ export class ConnectService implements OnApplicationBootstrap {
 
     const name = input.name?.trim() || remoteName;
     const fresh = this.leadSources.newSourceSecrets(orgId);
-    const sourceProvider = cred.provider === 'TYPEFORM' ? LeadSourceProvider.TYPEFORM : LeadSourceProvider.TALLY;
+    const sourceProvider = SOURCE_PROVIDER[cred.provider] ?? LeadSourceProvider.TALLY;
     const url = this.leadSources.ingestUrl(fresh.token, sourceProvider);
     try {
       await this.prisma.leadSource.create({

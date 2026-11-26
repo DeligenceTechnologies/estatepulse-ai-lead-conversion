@@ -134,7 +134,7 @@ const ErrorBlock: React.FC<{ e: PanelError }> = ({ e }) => (
 );
 
 export const ConnectFormPanel: React.FC<{
-  /** Provider code as the registry reports it: 'TALLY' | 'TYPEFORM'. */
+  /** Provider code as the registry reports it: 'TALLY' | 'TYPEFORM' | 'JOTFORM'. */
   provider: string;
   onClose: () => void;
   onConnected: (leadSourceId: string) => void;
@@ -377,7 +377,9 @@ export const ConnectFormPanel: React.FC<{
       )}
 
       {/* --- 4. done ------------------------------------------------------ */}
-      {step.k === 'done' && <DoneCard result={step.result} onClose={onClose} />}
+      {step.k === 'done' && (
+        <DoneCard result={step.result} signed={provider?.capabilities.supportsSigningSecret ?? true} onClose={onClose} />
+      )}
     </div>
   );
 };
@@ -387,7 +389,12 @@ export const ConnectFormPanel: React.FC<{
  * card: the signing secret was installed by us, so the customer never needs to
  * see it. That removes the whole "shown once, don't lose it" anxiety here.
  */
-const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = ({ result, onClose }) => {
+const DoneCard: React.FC<{
+  result: ConnectFormResult;
+  /** False for a provider that cannot sign deliveries (Jotform): its private URL is the credential. */
+  signed: boolean;
+  onClose: () => void;
+}> = ({ result, signed, onClose }) => {
   const p = result.prebuild;
   const needsReview = p?.needsReview.length ?? 0;
 
@@ -408,7 +415,10 @@ const DoneCard: React.FC<{ result: ConnectFormResult; onClose: () => void }> = (
           <CheckCircle2 className="w-3 h-3" /> Webhook installed on your form — nothing to paste
         </div>
         <div className="text-emerald-300 flex items-center gap-1.5">
-          <CheckCircle2 className="w-3 h-3" /> Signing secret generated and registered on both sides
+          <CheckCircle2 className="w-3 h-3" />
+          {signed
+            ? 'Signing secret generated and registered on both sides'
+            : 'Delivered to a private URL only your form knows'}
         </div>
         {p ? (
           <div className={needsReview ? 'text-amber-300 flex items-center gap-1.5' : 'text-emerald-300 flex items-center gap-1.5'}>

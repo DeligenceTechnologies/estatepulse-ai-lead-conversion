@@ -16,7 +16,7 @@ import { ConnectFormPanel } from './ConnectFormPanel';
  * which `onManual` opens for someone who would rather not share an API key.
  */
 export const ConnectModal: React.FC<{
-  /** The form provider's code, e.g. 'TALLY' or 'TYPEFORM'. */
+  /** The form provider's code, e.g. 'TALLY', 'TYPEFORM' or 'JOTFORM'. */
   provider: string;
   onClose: () => void;
   /** A source now exists — refresh whatever list the caller is showing. */
