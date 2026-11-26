@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ChevronRight, Menu, Sparkles } from 'lucide-react';
 import { ProfileMenu } from '../auth/ProfileMenu';
+import { ConnectedApps } from './ConnectedApps';
 import { DashboardSidebar, type NavGroup } from './DashboardSidebar';
 import { AppearanceButton } from './AppearanceButton';
 import { IconButton } from '../common/Button';
@@ -70,6 +71,7 @@ export const AppShell: React.FC<AppShellProps> = ({ groups, activeId, onNavigate
         mobileOpen={mobileOpen}
         onToggle={toggleCollapsed}
         onMobileClose={() => setMobileOpen(false)}
+        footer={<ConnectedApps collapsed={collapsed} onNavigate={() => setMobileOpen(false)} />}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

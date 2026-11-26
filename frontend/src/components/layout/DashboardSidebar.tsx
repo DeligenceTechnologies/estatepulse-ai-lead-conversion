@@ -29,6 +29,8 @@ interface DashboardSidebarProps {
   mobileOpen: boolean;
   onToggle: () => void;
   onMobileClose: () => void;
+  /** Shown under the links, e.g. the Connected apps list. */
+  footer?: React.ReactNode;
 }
 
 const NavRow: React.FC<{ item: NavItem; active: boolean; collapsed: boolean; onClick: () => void }> = ({
@@ -96,6 +98,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   mobileOpen,
   onToggle,
   onMobileClose,
+  footer,
 }) => {
   const { organization } = useAuth();
 
@@ -164,6 +167,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             </ul>
           </div>
         ))}
+        {footer}
       </nav>
 
       {/* Collapse (desktop only) */}

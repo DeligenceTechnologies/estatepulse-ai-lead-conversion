@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { ConnectedAppsController } from './connected-apps.controller';
+import { ConnectedAppsService } from './connected-apps.service';
 import { IntegrationsController, OrgIntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
 import { FORM_PROVIDER_ADAPTERS, ProviderRegistry } from './providers/provider.registry';
@@ -11,7 +13,7 @@ import { TypeformProviderAdapter } from './providers/typeform/typeform.provider'
 import type { FormProviderAdapter } from './providers/types';
 
 @Module({
-  controllers: [IntegrationsController, OrgIntegrationsController],
+  controllers: [ConnectedAppsController, IntegrationsController, OrgIntegrationsController],
   providers: [
     {
       provide: TallyClient,
@@ -34,7 +36,8 @@ import type { FormProviderAdapter } from './providers/types';
     },
     ProviderRegistry,
     IntegrationsService,
+    ConnectedAppsService,
   ],
-  exports: [IntegrationsService, ProviderRegistry],
+  exports: [IntegrationsService, ProviderRegistry, ConnectedAppsService],
 })
 export class IntegrationModule {}

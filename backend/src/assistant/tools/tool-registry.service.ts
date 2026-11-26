@@ -9,6 +9,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { FollowupService } from '@/followup/followup.service';
 import { HistoryService } from '@/history/history.service';
+import { ConnectedAppsService } from '@/integration/connected-apps.service';
 import { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import { LeadEditService } from '@/lead/lead-edit.service';
 import { LeadReviewService } from '@/lead/lead-review.service';
@@ -20,6 +21,7 @@ import { OptOutService } from '@/telnyx/opt-out.service';
 import { SmsService } from '@/telnyx/sms.service';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
+import { appTools } from './app.tools';
 import { calendarTools } from './calendar.tools';
 import { historyTools } from './history.tools';
 import type { LeadTextDeps } from './lead-text';
@@ -54,6 +56,7 @@ export class ToolRegistry {
     state: LeadStateService,
     events: EventsBus,
     control: OutreachControlService,
+    connectedApps: ConnectedAppsService,
   ) {
     const text: LeadTextDeps = { prisma, sms, conversations, optOuts, followup, state, events };
     const all = [
@@ -61,6 +64,7 @@ export class ToolRegistry {
       ...historyTools(history, prisma),
       ...calendarTools({ prisma, appointments, booking, bookingSettings, leadBooking, text }),
       ...outreachTools({ prisma, engine, strategies, followup, control, text }),
+      ...appTools(connectedApps),
     ].sort((a, b) => a.name.localeCompare(b.name));
     this.tools = new Map(all.map((t) => [t.name, t]));
     this.definitions = new Map(all.map((t) => [t.name, toDefinition(t)]));
