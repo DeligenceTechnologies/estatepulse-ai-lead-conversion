@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
+import { AssistantActivityService } from './assistant-activity.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantThreadService } from './assistant-thread.service';
 import { AssistantService } from './assistant.service';
@@ -18,11 +19,19 @@ export class AssistantController {
     private readonly assistant: AssistantService,
     private readonly threads: AssistantThreadService,
     private readonly orchestrator: AssistantOrchestrator,
+    private readonly activity: AssistantActivityService,
   ) {}
 
   @Get('status')
   status(@CurrentAuth() auth: AuthContext) {
     return this.assistant.status(auth);
+  }
+
+  /** The Activity panel: cards waiting on this user, broken connections, and the office's last 24 hours. */
+  @Get('activity')
+  feed(@CurrentAuth() auth: AuthContext, @Query('before') before?: string) {
+    const cursor = before ? new Date(before) : undefined;
+    return this.activity.feed(auth, { before: cursor && !Number.isNaN(cursor.getTime()) ? cursor : undefined });
   }
 
   @Get('threads')

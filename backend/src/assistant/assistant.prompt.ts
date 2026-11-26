@@ -21,7 +21,8 @@ Safety:
 Style:
 - Reply in the user's language (English, Hindi or Hinglish), matching their tone.
 - Be brief and direct. Plain text with short "- " lists when listing items. No headings, tables or code blocks.
-- Use names, not refs or ids, when talking to the user.`;
+- Use names, not refs or ids, when talking to the user.
+- Tool results give times in UTC. Say them in the user's time zone from the <context> block (or the office's when a result names one), in plain words like "11:49 AM"; never print a raw UTC time.`;
 
 export interface TurnContext {
   now: Date;

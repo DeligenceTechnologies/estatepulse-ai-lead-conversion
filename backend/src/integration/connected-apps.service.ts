@@ -19,6 +19,8 @@ export interface ConnectedApp {
   lastSyncAt: string | null;
   /** What is wrong and what it stops, in plain words; null when connected. */
   message: string | null;
+  /** Only what a broken connection stops, for places that already say it is broken; null when connected. */
+  impact: string | null;
   /** The app page where it is fixed. */
   reconnectPath: string;
 }
@@ -108,6 +110,7 @@ export class ConnectedAppsService {
         state,
         lastSyncAt: iso(latest(run?.finishedAt, i.lastVerifiedAt)),
         message,
+        impact: state === 'connected' || state === 'syncing' ? null : state === 'needs_reconnect' ? impact : message,
         reconnectPath: i.provider === 'telnyx' ? '/settings?tab=telnyx' : '/integrations',
       };
     });
@@ -128,6 +131,7 @@ export class ConnectedAppsService {
             : syncProblem
               ? `Syncing with ${label} is failing: ${syncProblem}`
               : null,
+        impact: calendar.status === 'error' ? CALENDAR_IMPACT : syncProblem ? `Syncing with ${label} is failing: ${syncProblem}` : null,
         reconnectPath: '/settings?tab=calendar',
       });
     }

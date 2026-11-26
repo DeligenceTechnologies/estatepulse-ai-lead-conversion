@@ -12,6 +12,8 @@ export interface ConnectedApp {
   state: AppState;
   lastSyncAt: string | null;
   message: string | null;
+  /** Only what a broken connection stops; null when connected. */
+  impact: string | null;
   /** The app page where it is fixed, e.g. "/settings?tab=calendar". */
   reconnectPath: string;
 }

@@ -11,6 +11,7 @@ const app = (over: Partial<ConnectedApp>): ConnectedApp => ({
   state: 'connected',
   lastSyncAt: null,
   message: null,
+  impact: null,
   reconnectPath: '/settings?tab=telnyx',
   ...over,
 });

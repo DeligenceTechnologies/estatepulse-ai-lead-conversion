@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
-import { CircleAlert, Loader2, MessageSquare, SquarePen, Trash2, X } from 'lucide-react';
+import { Activity, CircleAlert, Loader2, MessageSquare, SquarePen, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { IconButton } from '../common/Button';
+import { ActivityPanel } from './ActivityPanel';
 import { useAssistant } from './AssistantProvider';
 import { ChatMessages } from './ChatMessages';
 import { Composer, type ComposerHandle } from './Composer';
@@ -23,6 +24,8 @@ export const AssistantHome: React.FC = () => {
   const chat = params.get('chat');
   const inputRef = useRef<ComposerHandle>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  // The right-hand panel: the office's activity (with cards waiting on the user first), or past chats.
+  const [panel, setPanel] = useState<'activity' | 'chats'>('activity');
 
   // The URL names a chat: open it.
   useEffect(() => {
@@ -170,13 +173,35 @@ export const AssistantHome: React.FC = () => {
         )}
       </section>
 
-      <aside className="hidden xl:flex w-[300px] shrink-0 flex-col border-l border-slate-800 bg-slate-900/60" aria-label="Your chats">
-        <div className="h-12 shrink-0 flex items-center gap-2 px-4 border-b border-slate-800">
-          <MessageSquare className="w-4 h-4 text-emerald-400" aria-hidden />
-          <p className="flex-1 text-sm font-bold text-white">Your chats</p>
+      <aside className="hidden xl:flex w-[300px] shrink-0 flex-col border-l border-slate-800 bg-slate-900/60" aria-label={panel === 'activity' ? 'Activity' : 'Your chats'}>
+        <div className="h-12 shrink-0 flex items-center gap-1 px-2 border-b border-slate-800" role="tablist">
+          {([
+            ['activity', 'Activity', Activity],
+            ['chats', 'Your chats', MessageSquare],
+          ] as const).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={panel === id}
+              onClick={() => setPanel(id)}
+              className={`cursor-pointer inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-bold transition-colors ${
+                panel === id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Icon className={`w-3.5 h-3.5 ${panel === id ? 'text-emerald-400' : ''}`} aria-hidden />
+              {label}
+            </button>
+          ))}
+          <span className="flex-1" />
           <IconButton size="sm" aria-label="New chat" title="New chat" icon={<SquarePen />} onClick={newChat} />
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+        {panel === 'activity' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar">
+            <ActivityPanel onOpenChat={(id) => setParams({ chat: id })} refreshKey={a.busy} />
+          </div>
+        )}
+        <div className={`flex-1 overflow-y-auto custom-scrollbar p-2 ${panel === 'chats' ? '' : 'hidden'}`}>
           {a.threads.length === 0 && <p className="p-4 text-center text-xs text-slate-500">No chats yet. Your questions will be listed here.</p>}
           <ul className="space-y-0.5">
             {a.threads.map((t) => (

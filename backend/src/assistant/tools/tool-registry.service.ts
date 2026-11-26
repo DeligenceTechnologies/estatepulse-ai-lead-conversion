@@ -21,6 +21,8 @@ import { OptOutService } from '@/telnyx/opt-out.service';
 import { SmsService } from '@/telnyx/sms.service';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
 import { StrategyStoreService } from '@/telnyx/strategy-store.service';
+import { AssistantActivityService } from '../assistant-activity.service';
+import { activityTools } from './activity.tools';
 import { appTools } from './app.tools';
 import { calendarTools } from './calendar.tools';
 import { historyTools } from './history.tools';
@@ -57,6 +59,7 @@ export class ToolRegistry {
     events: EventsBus,
     control: OutreachControlService,
     connectedApps: ConnectedAppsService,
+    activity: AssistantActivityService,
   ) {
     const text: LeadTextDeps = { prisma, sms, conversations, optOuts, followup, state, events };
     const all = [
@@ -65,6 +68,7 @@ export class ToolRegistry {
       ...calendarTools({ prisma, appointments, booking, bookingSettings, leadBooking, text }),
       ...outreachTools({ prisma, engine, strategies, followup, control, text }),
       ...appTools(connectedApps),
+      ...activityTools(activity),
     ].sort((a, b) => a.name.localeCompare(b.name));
     this.tools = new Map(all.map((t) => [t.name, t]));
     this.definitions = new Map(all.map((t) => [t.name, toDefinition(t)]));

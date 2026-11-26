@@ -7,6 +7,7 @@ import { IntegrationModule } from '@/integration/integration.module';
 import { LeadModule } from '@/lead/lead.module';
 import { TelnyxModule } from '@/telnyx/telnyx.module';
 import { AssistantActionService } from './assistant-action.service';
+import { AssistantActivityService } from './assistant-activity.service';
 import { AssistantLimitsService } from './assistant-limits.service';
 import { AssistantOrchestrator } from './assistant-orchestrator.service';
 import { AssistantRefService } from './assistant-ref.service';
@@ -26,6 +27,7 @@ import { ToolRegistry } from './tools/tool-registry.service';
     { provide: MODEL_PROVIDER, inject: [AssistantConfig], useFactory: createModelProvider },
     ToolRegistry,
     AssistantRefService,
+    AssistantActivityService,
     AssistantUsageService,
     AssistantLimitsService,
     AssistantThreadService,

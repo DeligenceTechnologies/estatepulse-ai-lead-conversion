@@ -36,7 +36,7 @@ describe('connected apps', () => {
   it('a working phone connection is connected, fixed under Settings > Telnyx', async () => {
     const { apps } = await setup({ integrations: [integration({})] }).service.list(owner);
     expect(apps).toEqual([
-      { id: 'int-1', provider: 'telnyx', label: 'Telnyx', account: '+15125550100', state: 'connected', lastSyncAt: VERIFIED.toISOString(), message: null, reconnectPath: '/settings?tab=telnyx' },
+      { id: 'int-1', provider: 'telnyx', label: 'Telnyx', account: '+15125550100', state: 'connected', lastSyncAt: VERIFIED.toISOString(), message: null, impact: null, reconnectPath: '/settings?tab=telnyx' },
     ]);
   });
 
@@ -49,6 +49,7 @@ describe('connected apps', () => {
       ['Google', 'needs_reconnect', 'Google stopped accepting the connection. New leads from Google Sheets and Forms are not being imported.'],
     ]);
     expect(apps[1].reconnectPath).toBe('/integrations');
+    expect(apps[0].impact).toBe('AI calls and text messages to leads are failing.');
   });
 
   it("a CRM's newest sync run says whether it is syncing or failing", async () => {
