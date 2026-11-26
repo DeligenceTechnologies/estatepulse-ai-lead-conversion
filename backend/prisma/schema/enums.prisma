@@ -285,6 +285,7 @@ enum SequenceTrigger {
   follow_up_callback_requested
   follow_up_needs_time
   follow_up_other
+  follow_up_appointment_canceled
 
   @@map("sequence_trigger")
 }

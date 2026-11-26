@@ -76,8 +76,10 @@ describe('who may control a lead', () => {
     const s = setup();
     await s.service.state(agent, LEAD);
     expect((s.prisma.lead.findFirst.mock.calls[0] as any[])[0].where).toMatchObject({ id: LEAD, orgId: ORG, assignedToId: 'agent-1' });
+    // The state also asks the plans, which look the lead up again: the admin's first lookup comes after the agent's.
+    const before = s.prisma.lead.findFirst.mock.calls.length;
     await s.service.state(admin, LEAD);
-    expect((s.prisma.lead.findFirst.mock.calls[1] as any[])[0].where).not.toHaveProperty('assignedToId');
+    expect((s.prisma.lead.findFirst.mock.calls[before] as any[])[0].where).not.toHaveProperty('assignedToId');
   });
 
   it('a lead out of reach is not found; a user without lead.update may look but not control', async () => {
@@ -88,7 +90,10 @@ describe('who may control a lead', () => {
 
   it('says who paused it and why, when a person did', async () => {
     const s = setup({ lead: { automationPaused: true }, lastControl: { type: 'outreach_paused', actorId: 'admin-1', reason: 'On holiday', createdAt: EARLIER, payload: {} } });
-    expect(await s.service.state(admin, LEAD)).toEqual({ paused: true, pausedAt: EARLIER.toISOString(), pausedBy: 'Sunny Patel', reason: 'On holiday', canControl: true });
+    const state = await s.service.state(admin, LEAD);
+    expect(state).toMatchObject({ paused: true, pausedAt: EARLIER.toISOString(), pausedBy: 'Sunny Patel', reason: 'On holiday', canControl: true });
+    expect(state).toHaveProperty('canResume');
+    expect(state.canPause).toBe(false);
   });
 });
 

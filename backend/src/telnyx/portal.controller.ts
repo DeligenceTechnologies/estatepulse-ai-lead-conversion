@@ -1,10 +1,11 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
-import { FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
+import { ConsentStatus, FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { leadZone } from '@/common/utils/lead-timezone';
+import { mayContact } from '@/lead/consent';
 import { LeadOutcomeDto, LeadQualifiedDto, SetLeadStatusDto } from '@/lead/dto/lead-status.dto';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
 import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from '@/lead/lead-scope';
@@ -293,6 +294,15 @@ export class PortalLeadsController {
     // An agent only on their own leads, an admin on any: the same rule as viewing the lead.
     await this.requireVisible(auth, id);
     // Started by hand, so the person is told why nothing would happen, rather than the lead quietly waiting.
+    const consent = await this.prisma.lead.findFirst({ where: { id, orgId: auth.organizationId }, select: { consentStatus: true } });
+    if (consent && !mayContact(consent)) {
+      throw new AppError(
+        'CONFLICT',
+        consent.consentStatus === ConsentStatus.revoked
+          ? 'This lead withdrew consent to be contacted.'
+          : "This lead has not given consent to be contacted. Record their consent first; outreach then starts by itself.",
+      );
+    }
     if (!(await this.engine.canReachLeads(auth.organizationId))) {
       throw new AppError('CONFLICT', 'Connect a phone number in AI Settings before starting outreach.');
     }

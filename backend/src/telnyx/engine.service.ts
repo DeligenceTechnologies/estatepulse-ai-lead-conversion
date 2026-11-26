@@ -1,11 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
-import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
+import { CallDisposition, CallStatus, ConsentStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { leadZone } from '@/common/utils/lead-timezone';
 import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, quietHoursOf, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
+import { mayContact, noConsentReason } from '@/lead/consent';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
@@ -130,8 +131,9 @@ interface Enrollment {
  * Runs the outreach strategy for each new lead: the configured SMS and AI call
  * steps one after another, each waiting its own time after the step before,
  * held back during quiet hours, while a call is open and while the lead is
- * texting with the AI, and stopped the moment the lead books, opts out or
- * reaches any outcome. Enrolment is claimed in the database (first_contact_at),
+ * texting with the AI, and stopped the moment the lead books, opts out,
+ * withdraws consent or reaches any outcome. A lead without consent is never
+ * started. Enrolment is claimed in the database (first_contact_at),
  * so only one instance ever runs a lead; in-flight leads are resumed after a
  * restart by LeadWatcherService.
  */
@@ -184,7 +186,9 @@ export class EngineService implements OnModuleDestroy {
   async enroll(orgId: string, leadId: string): Promise<void> {
     if (this.isRunning(leadId)) return;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId } });
-    if (!lead || lead.dncStatus || lead.automationPaused) return;
+    // Without consent nobody is contacted: the lead stays new and unclaimed, and the watcher offers it
+    // again on every poll, so it starts by itself once its consent is recorded.
+    if (!lead || lead.dncStatus || lead.automationPaused || !mayContact(lead)) return;
     // Not claimed and not moved to "contacting": nobody has been contacted. The
     // watcher offers the lead again on every poll, so it starts by itself once a
     // number is connected.
@@ -244,9 +248,9 @@ export class EngineService implements OnModuleDestroy {
   private async resumeClaimed(orgId: string, leadId: string): Promise<boolean> {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, orgId },
-      select: { firstContactAt: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true },
+      select: { firstContactAt: true, status: true, dncStatus: true, automationPaused: true, callbackAt: true, consentStatus: true },
     });
-    if (!lead?.firstContactAt || lead.dncStatus || lead.automationPaused || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
+    if (!lead?.firstContactAt || lead.dncStatus || lead.automationPaused || !mayContact(lead) || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
     if (callbackPending(lead)) return false;
 
     const since = lead.firstContactAt;
@@ -303,8 +307,8 @@ export class EngineService implements OnModuleDestroy {
    * a strategy status, never left it. A callback ahead only delays it; the watcher resumes after.
    */
   async canResume(orgId: string, leadId: string): Promise<boolean> {
-    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { firstContactAt: true, status: true, dncStatus: true } });
-    if (!lead?.firstContactAt || lead.dncStatus || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { firstContactAt: true, status: true, dncStatus: true, consentStatus: true } });
+    if (!lead?.firstContactAt || lead.dncStatus || !mayContact(lead) || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
     return !(await this.leftStrategy(leadId, lead.firstContactAt));
   }
 
@@ -383,6 +387,28 @@ export class EngineService implements OnModuleDestroy {
   }
 
   /**
+   * The lead's meeting was canceled and none other is ahead: the booking no longer holds. The lead goes
+   * back to follow-up (appointment_canceled), with the office's sequence for that reason when it has one;
+   * otherwise it waits there for an agent. Only from appointment_booked: a lead a person has already
+   * moved on is left alone.
+   */
+  async appointmentCanceled(orgId: string, leadId: string, source = 'calendar'): Promise<boolean> {
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { status: true } });
+    if (lead?.status !== LeadStatus.appointment_booked) return false;
+    if (await hasUpcomingMeeting(this.prisma, orgId, leadId)) return false;
+    const { moved } = await this.state.move(leadId, LeadStatus.follow_up, {
+      source,
+      reason: 'The meeting was canceled',
+      alsoFrom: [LeadStatus.appointment_booked],
+      onlyFrom: [LeadStatus.appointment_booked],
+      data: { followUpReason: FollowUpReason.appointment_canceled },
+    });
+    if (!moved) return false;
+    await this.enrolOnFollowUp(orgId, leadId);
+    return true;
+  }
+
+  /**
    * Sets a status. A person (actor type user) may set any; anything else is
    * held to the automation rules and returns false when refused.
    */
@@ -455,6 +481,13 @@ export class EngineService implements OnModuleDestroy {
     if (e.sent.has(step.id)) return this.next(e, Date.now() + (e.queue[0] ? offsetMs(e.queue[0].after) : 0), office, guardrails);
     const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
     if (!lead || lead.dncStatus || lead.automationPaused || OUTCOME_STATUSES.includes(lead.status)) return this.stop(e);
+    if (!mayContact(lead)) {
+      // Withdrawn: the strategy is over for this lead. Back to pending (rare): it waits, and the watcher resumes it once consent is recorded.
+      if (lead.consentStatus === ConsentStatus.revoked) {
+        this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: noConsentReason(lead.consentStatus) });
+      }
+      return this.stop(e);
+    }
     if (callbackPending(lead)) {
       this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: 'A callback the lead asked for is due' });
       return this.stop(e);
@@ -569,7 +602,7 @@ export class EngineService implements OnModuleDestroy {
       // pause may have come in while the step was being decided.
       const fresh = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
       if (e.stopped) return;
-      if (!fresh || fresh.dncStatus || fresh.automationPaused || OUTCOME_STATUSES.includes(fresh.status) || callbackPending(fresh)) return this.stop(e);
+      if (!fresh || fresh.dncStatus || fresh.automationPaused || !mayContact(fresh) || OUTCOME_STATUSES.includes(fresh.status) || callbackPending(fresh)) return this.stop(e);
       if (textBackPending(fresh)) return this.fireStep(e, step, office, guardrails, heldSince);
       if (step.channel === 'sms' && (await this.chatState(e)).replied) return this.fireStep(e, step, office, guardrails, heldSince);
       phone = fresh.phone;

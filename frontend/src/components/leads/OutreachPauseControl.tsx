@@ -71,6 +71,9 @@ export const OutreachPauseControl: React.FC<Props> = ({ leadId, state, onChanged
   }, [open]);
 
   if (!state?.canControl) return null;
+  // Only a button that would do something: nothing to pause (booked, closed, strategy over) or nothing to restart shows why instead.
+  const offered = state.paused ? state.canResume !== false : state.canPause !== false;
+  if (!offered) return <OutreachIdleNote note={state.note ?? null} />;
 
   const confirm = async (): Promise<void> => {
     setSaving(true);
@@ -165,3 +168,12 @@ export const OutreachPauseControl: React.FC<Props> = ({ leadId, state, onChanged
     </div>
   );
 };
+
+/** Shown in place of the button when pausing or resuming would change nothing. */
+export const OutreachIdleNote: React.FC<{ note: string | null }> = ({ note }) =>
+  note ? (
+    <span className="self-center text-xs text-slate-500 max-w-[22rem] truncate" title={note}>
+      {note}
+    </span>
+  ) : null;
+

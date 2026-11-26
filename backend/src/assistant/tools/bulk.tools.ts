@@ -120,13 +120,14 @@ export function bulkTools({ prisma, assignments, engine, followup, control }: Bu
         const sequence = await followup.getSequence(orgId, await refs.resolve('sequence', input.sequence));
         if (sequence.status !== SequenceStatus.active) throw new AppError('CONFLICT', `"${sequence.name}" is not active, so nothing can be added to it.`);
         if (sequence.steps.length === 0) throw new AppError('CONFLICT', `"${sequence.name}" has no steps yet.`);
-        const rows = await selectLeads(prisma, auth, refs, input, { dncStatus: true, automationPaused: true, status: true, firstContactAt: true });
+        const rows = await selectLeads(prisma, auth, refs, input, { dncStatus: true, automationPaused: true, status: true, firstContactAt: true, consentStatus: true });
         const enrolled = new Set(
           (await prisma.sequenceEnrollment.findMany({ where: { orgId, leadId: { in: rows.map((r) => r.id) }, status: { in: LIVE_ENROLLMENT } }, select: { leadId: true } })).map((e) => e.leadId),
         );
         const skipped: Record<string, number> = {};
         const leads = rows.filter((l) => {
           if (l.dncStatus) skip(skipped, 'opted out');
+          else if (l.consentStatus === 'revoked') skip(skipped, 'who withdrew consent');
           else if (enrolled.has(l.id)) skip(skipped, 'already in a sequence');
           else if (l.automationPaused) skip(skipped, 'with outreach paused');
           else if (l.firstContactAt && IN_STRATEGY_STATUSES.includes(l.status)) skip(skipped, 'still in the outreach strategy');

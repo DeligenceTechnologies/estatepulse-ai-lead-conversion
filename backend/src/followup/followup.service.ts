@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  ConsentStatus,
   EnrollmentStatus,
   FollowUpReason,
   LeadStatus,
@@ -30,6 +31,7 @@ export const TRIGGER_LABELS: Record<SequenceTrigger, string> = {
   follow_up_callback_requested: 'Follow-up: Callback requested',
   follow_up_needs_time: 'Follow-up: Needs time',
   follow_up_other: 'Follow-up: Other',
+  follow_up_appointment_canceled: 'Follow-up: Meeting canceled',
 };
 
 export interface SequenceStep {
@@ -54,7 +56,7 @@ export interface Guardrails {
 export interface EnrollSkip {
   leadId: string;
   leadName: string;
-  reason: 'dnc' | 'already_enrolled' | 'not_found' | 'in_strategy';
+  reason: 'dnc' | 'already_enrolled' | 'not_found' | 'in_strategy' | 'consent_revoked';
 }
 
 const MAX_ENROLL_PER_CALL = 500;
@@ -165,9 +167,10 @@ export class FollowupService {
   async enroll(orgId: string, leadId: string, code: string): Promise<boolean> {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, orgId },
-      select: { dncStatus: true, status: true, firstContactAt: true, automationPaused: true, callbackAt: true },
+      select: { dncStatus: true, status: true, firstContactAt: true, automationPaused: true, callbackAt: true, consentStatus: true },
     });
-    if (!lead || lead.dncStatus || isInStrategy(lead)) return false;
+    // Withdrawn consent: never enrolled. Still pending: enrolled, and the runner holds its steps until consent is recorded.
+    if (!lead || lead.dncStatus || lead.consentStatus === ConsentStatus.revoked || isInStrategy(lead)) return false;
     // The lead asked to be called at a set time: nothing else contacts them before it.
     if (callbackPending(lead)) {
       this.logger.log(`lead ${leadId} not enrolled into ${code}: a callback is due ${lead.callbackAt?.toISOString()}`);
@@ -350,7 +353,7 @@ export class FollowupService {
         where,
         orderBy: { createdAt: 'desc' },
         take: MAX_ENROLL_PER_CALL,
-        select: { id: true, firstName: true, lastName: true, dncStatus: true, status: true, firstContactAt: true, automationPaused: true },
+        select: { id: true, firstName: true, lastName: true, dncStatus: true, status: true, firstContactAt: true, automationPaused: true, consentStatus: true },
       }),
       this.prisma.lead.count({ where }),
     ]);
@@ -362,6 +365,7 @@ export class FollowupService {
     }
     const eligible = matchedRows.filter((lead) => {
       if (lead.dncStatus) skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'dnc' });
+      else if (lead.consentStatus === ConsentStatus.revoked) skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'consent_revoked' });
       else if (isInStrategy(lead)) skipped.push({ leadId: lead.id, leadName: nameOf(lead), reason: 'in_strategy' });
       else return true;
       return false;

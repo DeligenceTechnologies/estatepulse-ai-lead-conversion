@@ -155,6 +155,9 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
         });
         if (lead.dncStatus) throw new AppError('CONFLICT', 'This lead asked not to be contacted.');
         if (lead.consentStatus === ConsentStatus.revoked) throw new AppError('CONFLICT', 'This lead withdrew consent to be contacted.');
+        if (lead.consentStatus !== ConsentStatus.granted) {
+          throw new AppError('CONFLICT', "This lead has not given consent to be contacted, so AI outreach does not start. Record their consent on the lead's page; outreach then starts by itself.");
+        }
         if (lead.firstContactAt) {
           throw new AppError('CONFLICT', `Outreach already started for this lead on ${lead.firstContactAt.toISOString().slice(0, 10)}. To reach them now, send a text.`);
         }
@@ -166,10 +169,7 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
         return {
           title: `Start AI outreach for ${leadName(lead)}`,
           changes: [{ field: 'Strategy', from: null, to: `${strategy.name} (${strategy.steps.length} steps)` }],
-          summary: [
-            'The AI calls and texts the lead step by step, only within contact hours, until they respond or the steps run out.',
-            ...(lead.consentStatus === ConsentStatus.pending ? ['This lead has not confirmed consent yet.'] : []),
-          ].join(' '),
+          summary: 'The AI calls and texts the lead step by step, only within contact hours, until they respond or the steps run out.',
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },
@@ -261,7 +261,7 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
       async preview({ auth, refs }, input) {
         const orgId = auth.organizationId;
         const [lead, sequenceId] = await Promise.all([
-          findVisibleLead(prisma, auth, refs, input.lead, { id: true, firstName: true, lastName: true, automationPaused: true, updatedAt: true }),
+          findVisibleLead(prisma, auth, refs, input.lead, { id: true, firstName: true, lastName: true, automationPaused: true, consentStatus: true, updatedAt: true }),
           refs.resolve('sequence', input.sequence),
         ]);
         const sequence = await deps.followup.getSequence(orgId, sequenceId);
@@ -276,6 +276,7 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
         const check = await deps.followup.enrollLeads(orgId, sequenceId, { leadIds: [lead.id], dryRun: true }, auth.userId);
         const skip = check.skipped[0];
         if (skip?.reason === 'dnc') throw new AppError('CONFLICT', 'This lead asked not to be contacted.');
+        if (skip?.reason === 'consent_revoked') throw new AppError('CONFLICT', 'This lead withdrew consent to be contacted.');
         if (skip?.reason === 'in_strategy') {
           throw new AppError('CONFLICT', 'The lead is still in the AI outreach strategy, so it cannot join a sequence yet. Moving it to follow-up ends the strategy.');
         }
@@ -283,7 +284,10 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
         return {
           title: `Add ${leadName(lead)} to "${sequence.name}"`,
           changes: [{ field: 'Sequence', from: null, to: `${sequence.name} (${sequence.steps.length} steps)` }],
-          summary: `The first ${first.actionType === 'sms' ? 'text' : 'AI call'} goes ${after(first.delayMinutes)}, within contact hours. The lead's status becomes follow-up.`,
+          summary: [
+            `The first ${first.actionType === 'sms' ? 'text' : 'AI call'} goes ${after(first.delayMinutes)}, within contact hours. The lead's status becomes follow-up.`,
+            ...(lead.consentStatus === ConsentStatus.pending ? ["The lead has not given consent yet, so nothing goes out until it is recorded."] : []),
+          ].join(' '),
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },

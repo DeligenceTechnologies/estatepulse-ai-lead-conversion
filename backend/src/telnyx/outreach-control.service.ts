@@ -15,6 +15,7 @@ import { liveReviewReasons } from '@/lead/review-reasons';
 import { PERMISSIONS } from '@/role/permissions';
 import { EngineService } from './engine.service';
 import { TextBackService } from './tools/text-back.service';
+import { mayContact } from '@/lead/consent';
 
 const PAUSED = 'outreach_paused';
 const RESUMED = 'outreach_resumed';
@@ -53,6 +54,12 @@ export interface OutreachState {
   reason: string | null;
   /** Whether this user may pause or resume this lead. */
   canControl: boolean;
+  /** Pausing would hold something (a strategy step, a sequence, a promised text or callback, or a strategy not yet started). */
+  canPause: boolean;
+  /** Resuming would restart something, or lets outreach start once a pending consent is recorded. */
+  canResume: boolean;
+  /** Why neither applies, in words for the lead's page ("No outreach is running to pause: the lead is appointment booked."). */
+  note: string | null;
 }
 
 export interface ControlPlan {
@@ -106,13 +113,39 @@ export class OutreachControlService {
     const who = byPerson?.actorId
       ? await this.prisma.user.findFirst({ where: { id: byPerson.actorId, orgId: auth.organizationId }, select: { firstName: true, lastName: true, email: true } })
       : null;
+    const control = await this.controls(auth, lead);
     return {
       paused: lead.automationPaused,
       pausedAt: byPerson ? byPerson.createdAt.toISOString() : null,
       pausedBy: who ? fullName(who.firstName, who.lastName, who.email) : null,
       reason: byPerson?.reason ?? null,
       canControl: auth.permissions.includes(PERMISSIONS.LEAD_UPDATE),
+      ...control,
     };
+  }
+
+  /**
+   * Which button the lead's page offers, from the same plans the buttons open, so a button is only
+   * shown when it would do something: Pause while something would hold, Resume while something would
+   * restart (or start once a pending consent is recorded). Otherwise the page says why.
+   */
+  private async controls(auth: AuthContext, lead: ControlledLead): Promise<Pick<OutreachState, 'canPause' | 'canResume' | 'note'>> {
+    const why = (error: unknown) => (error instanceof AppError ? error.message : null);
+    if (!lead.automationPaused) {
+      try {
+        await this.pausePlan(auth, lead.id);
+        return { canPause: true, canResume: false, note: null };
+      } catch (error) {
+        return { canPause: false, canResume: false, note: why(error) };
+      }
+    }
+    try {
+      const plan = await this.resumePlan(auth, lead.id);
+      if (plan.lines.length > 0 || !mayContact(lead)) return { canPause: false, canResume: true, note: null };
+      return { canPause: false, canResume: false, note: plan.notes[0] ?? null };
+    } catch (error) {
+      return { canPause: false, canResume: false, note: why(error) };
+    }
   }
 
   /** What a pause would hold, or why there is nothing to pause. */
@@ -120,6 +153,7 @@ export class OutreachControlService {
     const lead = await this.lead(auth, leadId);
     if (lead.automationPaused) throw new AppError('CONFLICT', 'Outreach is already paused for this lead.');
     if (lead.dncStatus) throw new AppError('CONFLICT', 'This lead asked not to be contacted, so no outreach is running.');
+    if (lead.consentStatus === ConsentStatus.revoked) throw new AppError('CONFLICT', 'This lead withdrew consent to be contacted, so no outreach is running.');
     const [zone, sequences] = await Promise.all([this.clock(lead), this.liveSequences(lead, EnrollmentStatus.active)]);
     const fresh = lead.status === LeadStatus.new && !lead.firstContactAt;
     const inStrategy = this.engine.isRunning(lead.id) || (await this.engine.canResume(lead.orgId, lead.id));
@@ -174,21 +208,23 @@ export class OutreachControlService {
     ]);
     const lines: string[] = [];
     const notes: string[] = [];
+    // Without consent the pause still lifts, but nothing reaches the lead until consent is recorded; then it starts or goes on by itself.
+    const consented = mayContact(lead);
+    if (!consented) notes.push("This lead has not given consent to be contacted: outreach starts or goes on by itself once it is recorded.");
     if (lead.status === LeadStatus.new && !lead.firstContactAt) {
-      lines.push('The outreach strategy starts from its first step');
-      if (!canReach) notes.push('No phone number is connected in AI Settings, so it starts once one is.');
+      if (consented) lines.push('The outreach strategy starts from its first step');
+      if (consented && !canReach) notes.push('No phone number is connected in AI Settings, so it starts once one is.');
     } else if (await this.engine.canResume(lead.orgId, lead.id)) {
       lines.push(ahead(lead.callbackAt) ? `The outreach strategy goes on after the callback on ${spoken(lead.callbackAt, zone)}` : 'The outreach strategy goes on from its next step');
     } else if (ahead(lead.callbackAt)) {
       lines.push(`The callback the AI promised for ${spoken(lead.callbackAt, zone)}`);
     }
-    for (const s of sequences) lines.push(`Sequence "${s.sequence.name}" goes on from step ${s.currentStep}`);
+    for (const s of sequences) lines.push(consented ? `Sequence "${s.sequence.name}" goes on from step ${s.currentStep}` : `Sequence "${s.sequence.name}" waits for the lead's consent`);
     const promised = snapshot?.textBackAt ? new Date(snapshot.textBackAt) : null;
     if (ahead(promised)) lines.push(`The text the AI promised for ${spoken(promised, zone)}`);
     else if (promised) notes.push(`The text the AI promised for ${spoken(promised, zone)} passed during the pause and is not sent.`);
     if (lead.callbackAt && !ahead(lead.callbackAt)) notes.push(`The callback the AI promised for ${spoken(lead.callbackAt, zone)} passed during the pause.`);
-    if (lead.consentStatus === ConsentStatus.pending) notes.push('This lead has not confirmed consent yet.');
-    if (lines.length === 0) {
+    if (lines.length === 0 && consented) {
       notes.push(
         OUTCOME_STATUSES.includes(lead.status)
           ? `Nothing restarts by itself: the lead is ${lead.status.replace(/_/g, ' ')}. Change its status or add it to a sequence.`

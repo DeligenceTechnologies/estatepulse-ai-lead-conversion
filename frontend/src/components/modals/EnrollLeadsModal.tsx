@@ -47,6 +47,7 @@ const SKIP_REASONS: Record<string, string> = {
   already_enrolled: 'already in a sequence',
   in_strategy: 'still in the strategy',
   not_found: 'not found',
+  consent_revoked: 'withdrew consent',
 };
 
 export const EnrollLeadsModal: React.FC<Props> = ({ sequence, onClose, onEnrolled }) => {

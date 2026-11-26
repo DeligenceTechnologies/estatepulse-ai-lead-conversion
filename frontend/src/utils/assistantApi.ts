@@ -439,6 +439,12 @@ export interface LeadOutreachState {
   pausedBy: string | null;
   reason: string | null;
   canControl: boolean;
+  /** Pausing would hold something. Missing from an older server: the button shows as before. */
+  canPause?: boolean;
+  /** Resuming would restart something, or lets outreach start once consent is recorded. */
+  canResume?: boolean;
+  /** Why neither applies, for the lead's page. */
+  note?: string | null;
 }
 /** What a pause or resume would change (lines) and what to know (notes), shown before it happens. */
 export interface OutreachPlan {
