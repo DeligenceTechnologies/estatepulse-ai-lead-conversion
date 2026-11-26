@@ -7,7 +7,7 @@ import type { IntegrationEnv } from '@/common/utils/interface';
 import { jurisdictionCode, leadZone } from '@/common/utils/lead-timezone';
 import { nextLeadContactAt, type ContactRules } from '@/common/utils/quiet-hours';
 import { skipDaysOf } from '@/followup/journey';
-import { RELEASABLE_LEAD } from '@/google-sheets/approval';
+import { RELEASABLE_LEAD } from '@/lead/lead-scope';
 import { CallSlots } from '@/telnyx/calls/call-slots';
 import { DEFAULT_CALL_LIMIT } from '@/telnyx/calls/call.types';
 import { StrategyStoreService, type Strategy } from '@/telnyx/strategy-store.service';

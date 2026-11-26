@@ -8,7 +8,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { EventsBus } from '@/events/events.bus';
 import { startsDoNotContact } from './contact-suppression';
 import type { UpdateLeadDto } from './dto/update-lead.dto';
-import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from './lead-scope';
+import { OUTSIDE_CONSENT_REVIEW, visibleLeads } from './lead-scope';
 import { LeadStateService } from './lead-state.service';
 import { DuplicateScannerService } from './duplicates/duplicate-scanner.service';
 import { normalizeEmail } from './duplicates/identity';
@@ -90,7 +90,7 @@ export class LeadEditService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Only a lead the user may see: an assigned-only agent edits their own leads alone.
       const lead = await tx.lead.findFirst({
-        where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW },
+        where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_CONSENT_REVIEW },
         select: CURRENT,
       });
       if (!lead) throw new AppError('NOT_FOUND', 'No such lead, or it is still waiting in Import Review.');

@@ -23,8 +23,6 @@ export interface Submission {
   values: FillableValues;
   customFields?: Record<string, unknown>;
   submittedAt: Date;
-  ingestEventId?: string | null;
-  sheetImportRowId?: string | null;
   actor?: Actor;
 }
 
@@ -221,8 +219,6 @@ export class LeadIntakeService {
       leadId,
       leadSourceId: s.leadSourceId,
       channel: s.channel,
-      ingestEventId: s.ingestEventId ?? null,
-      sheetImportRowId: s.sheetImportRowId ?? null,
       matchedBy: extra.matchedBy,
       isOriginal: extra.isOriginal,
       values: JSON.parse(JSON.stringify(values)) as Prisma.InputJsonValue,

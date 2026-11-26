@@ -1,7 +1,7 @@
 import { apiFetch } from '../lib/api';
 
 /**
- * Import Review's "Consent needed" tab: leads added by hand without their
+ * Consent Review: leads added by hand without their
  * consent box ticked. They are not called or texted, and stay out of All Leads,
  * until the owner records the consent or rejects them.
  */

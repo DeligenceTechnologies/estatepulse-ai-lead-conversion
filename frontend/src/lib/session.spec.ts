@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api as ingestApi } from '../api/client';
+import { api as clientApi } from '../api/client';
 import {
   SESSION_ENDED_EVENT,
   api,
@@ -168,7 +168,7 @@ describe('api/client request', () => {
   it('clears the token on an authentication 401', async () => {
     stubFetch(() => authError(401, 'SESSION_EXPIRED'));
 
-    await expect(ingestApi.listLeadSources()).rejects.toThrow();
+    await expect(clientApi.health()).rejects.toThrow();
     expect(getToken()).toBeNull();
   });
 
@@ -176,7 +176,7 @@ describe('api/client request', () => {
     // A proxy's HTML error page. Still a rejected token.
     stubFetch(() => new Response('<html>401</html>', { status: 401 }));
 
-    await expect(ingestApi.listLeadSources()).rejects.toThrow();
+    await expect(clientApi.health()).rejects.toThrow();
     expect(getToken()).toBeNull();
   });
 
@@ -189,21 +189,21 @@ describe('api/client request', () => {
   ])('keeps the session on %i %s', async (status, code) => {
     stubFetch(() => authError(status, code));
 
-    await expect(ingestApi.listLeadSources()).rejects.toThrow();
+    await expect(clientApi.health()).rejects.toThrow();
     expect(getToken()).toBe('a-live-token');
   });
 
   it('ends the session when the account is switched off', async () => {
     stubFetch(() => authError(403, 'ACCOUNT_INACTIVE'));
 
-    await expect(ingestApi.listLeadSources()).rejects.toThrow();
+    await expect(clientApi.health()).rejects.toThrow();
     expect(getToken()).toBeNull();
   });
 
   it('keeps the session when the API is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('failed to fetch')));
 
-    await expect(ingestApi.listLeadSources()).rejects.toThrow();
+    await expect(clientApi.health()).rejects.toThrow();
     expect(getToken()).toBe('a-live-token');
   });
 });

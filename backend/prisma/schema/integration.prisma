@@ -1,5 +1,4 @@
-/// An organization's account with an outside service: Telnyx (voice/SMS),
-/// Tally (forms) or Google (Sheets). Credentials are sealed with SecretBox.
+/// An organization's Telnyx (voice/SMS) account. Credentials are sealed with SecretBox.
 model Integration {
   id                String              @id @default(uuid(7)) @db.Uuid
   orgId             String              @map("organization_id") @db.Uuid
@@ -22,7 +21,6 @@ model Integration {
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  leadSources  LeadSource[]
 
   @@index([orgId, provider, status])
   @@index([provider, phoneNumber])

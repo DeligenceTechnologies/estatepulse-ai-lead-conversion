@@ -1,5 +1,7 @@
-import { NO_NAME_REASON_PREFIX } from '@/crm/crm-records';
-import { PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
+/** Written on a lead whose phone could not be parsed. */
+export const PHONE_UNPARSED_REASON = 'Phone number could not be parsed — this lead must not be auto-dialled';
+/** Starts the reason written on an imported lead that came without a name. */
+const NO_NAME_REASON_PREFIX = 'No name in ';
 
 /** The lead as it is now, which is what a stored reason is checked against. */
 export interface ReviewFacts {

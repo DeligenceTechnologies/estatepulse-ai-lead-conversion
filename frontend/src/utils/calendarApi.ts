@@ -19,24 +19,9 @@ export interface CalendarConnection {
   lastError: string | null;
 }
 
-export interface CalendarProviderStatus {
-  id: CalendarProviderId;
-  label: string;
-  canConnect: boolean;
-  reason: string | null;
-  saved: CalendarConnection | null;
-}
-
 export interface OrganizationCalendarStatus {
   provider: CalendarProviderId | null;
-  providers: CalendarProviderStatus[];
   connection: CalendarConnection | null;
-}
-
-export interface CalComTeamOption {
-  id: number;
-  name: string;
-  slug: string | null;
 }
 
 /**
@@ -179,36 +164,6 @@ const ORG_CALENDAR = '/org-settings/calendar';
 export const getOrganizationCalendar = (): Promise<OrganizationCalendarStatus> =>
   apiFetch<OrganizationCalendarStatus>(ORG_CALENDAR, { auth: true });
 
-export const startCalendlyConnect = (): Promise<{ authorizeUrl: string }> =>
-  apiFetch<{ authorizeUrl: string }>(`${ORG_CALENDAR}/calendly/authorize`, {
-    method: 'POST',
-    auth: true,
-    // The response sets the cookie that lets only this browser finish the sign-in.
-    withCookies: true,
-  });
-
-export interface CalComAccountCheck {
-  account: { email: string | null; name: string | null; username: string | null };
-  teams: CalComTeamOption[];
-}
-
-export const listCalComTeams = (apiKey: string): Promise<CalComAccountCheck> =>
-  apiFetch<CalComAccountCheck>(`${ORG_CALENDAR}/cal/teams`, {
-    method: 'POST',
-    body: { apiKey },
-    auth: true,
-  });
-
-export const connectCalCom = (apiKey: string, teamId: number | null): Promise<OrganizationCalendarStatus> =>
-  apiFetch<OrganizationCalendarStatus>(`${ORG_CALENDAR}/cal/connect`, {
-    method: 'POST',
-    body: { apiKey, teamId },
-    auth: true,
-  });
-
-export const activateCalendar = (provider: CalendarProviderId): Promise<OrganizationCalendarStatus> =>
-  apiFetch<OrganizationCalendarStatus>(`${ORG_CALENDAR}/activate`, { method: 'POST', body: { provider }, auth: true });
-
 export const disconnectOrganizationCalendar = (): Promise<void> =>
   apiFetch<void>(ORG_CALENDAR, { method: 'DELETE', auth: true });
 
@@ -342,67 +297,6 @@ export const listAppointments = (params?: {
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-export type CalendlyPopupResult = { outcome: 'ok' | 'failed' | 'closed'; message: string | null };
-
-/** The backend callback page's postMessage source, and the channel /settings?calendar=… reports on. */
-export const CALENDLY_CHANNEL = 'estatepulse:calendly';
-const CALENDLY_TIMEOUT_MS = 10 * 60 * 1000;
-
-/** Tell the tab that opened the Calendly popup how it ended. Called from inside that popup. */
-export function announceCalendlyResult(ok: boolean): void {
-  if (!('BroadcastChannel' in window)) return;
-  const channel = new BroadcastChannel(CALENDLY_CHANNEL);
-  channel.postMessage({ source: CALENDLY_CHANNEL, ok, message: null });
-  channel.close();
-}
-
-export function openCalendlyPopup(authorizeUrl: string, signal?: AbortSignal): Promise<CalendlyPopupResult> {
-  return new Promise((resolve) => {
-    const width = 600;
-    const height = 760;
-    const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2);
-    const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2);
-    const popup = window.open(authorizeUrl, 'calendly-oauth', `width=${width},height=${height},left=${left},top=${top}`);
-    if (!popup) {
-      window.location.assign(authorizeUrl);
-      return;
-    }
-    popup.focus();
-
-    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CALENDLY_CHANNEL) : null;
-    let settled = false;
-
-    const finish = (result: CalendlyPopupResult) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', onMessage);
-      channel?.close();
-      clearTimeout(timer);
-      resolve(result);
-    };
-
-    const accept = (raw: unknown) => {
-      const data = raw as { source?: unknown; ok?: unknown; message?: unknown } | null;
-      if (data?.source !== CALENDLY_CHANNEL) return;
-      finish({ outcome: data.ok === true ? 'ok' : 'failed', message: typeof data.message === 'string' ? data.message : null });
-    };
-    const onMessage = (event: MessageEvent) => {
-      if (event.source === popup) accept(event.data);
-    };
-
-    window.addEventListener('message', onMessage);
-    if (channel) channel.onmessage = (e) => accept(e.data);
-
-    // ponytail: no popup.closed polling. Calendly's login page sends
-    // Cross-Origin-Opener-Policy: same-origin, which severs the opener, after
-    // which `closed` reads true while the owner is still signing in. The
-    // callback then lands the popup on /settings?calendar=…, which reports on
-    // CALENDLY_CHANNEL. Cancel and this timeout end an abandoned attempt.
-    const timer = setTimeout(() => finish({ outcome: 'closed', message: null }), CALENDLY_TIMEOUT_MS);
-    signal?.addEventListener('abort', () => finish({ outcome: 'closed', message: null }));
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Booking for a lead

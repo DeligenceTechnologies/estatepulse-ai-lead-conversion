@@ -1,6 +1,6 @@
 import parsePhoneNumberFromString from 'libphonenumber-js';
 import { AppError } from '@/common/errors/app-error';
-import { isValidEmail } from '@/ingest/processing/transforms';
+import { isValidEmail } from '@/common/utils/email';
 
 /** Lead contact fields a person may correct from Import Review, by the lead field each one fills. */
 export const CONTACT_EDIT_TARGETS = ['first_name', 'last_name', 'phone', 'email', 'timezone'] as const;

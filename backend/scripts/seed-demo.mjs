@@ -239,10 +239,6 @@ async function buildDemo(prisma) {
       code: 'demo-import',
       provider: 'FILE_UPLOAD',
       connectionMethod: 'UPLOAD',
-      ingestStatus: 'COMPLETED',
-      mappingStatus: 'CONFIGURED',
-      lastEventAt: ago(2 * HOUR),
-      lastSuccessAt: ago(2 * HOUR),
     },
   });
 

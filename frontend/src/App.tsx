@@ -17,8 +17,7 @@ import { AgentsView } from './components/views/AgentsView';
 import { IntegrationsView } from './components/views/IntegrationsView';
 import { AISettingsView } from './components/views/AISettingsView';
 import { ComingSoonView } from './components/views/ComingSoonView';
-import { LeadSourcesView } from './components/views/LeadSourcesView';
-import { ImportReviewView } from './components/views/ImportReviewView';
+import { ConsentReviewView } from './components/views/ConsentReviewView';
 import { DuplicatesView } from './components/views/DuplicatesView';
 import { AppointmentsView } from './components/views/AppointmentsView';
 import { CallsView } from './components/views/CallsView';
@@ -55,8 +54,7 @@ const AppContent: React.FC = () => {
         {activeView === 'meetings' && <Navigate to="/settings?tab=calendar" replace />}
         {activeView === 'my_availability' && <AgentAvailability />}
         {activeView === 'integrations' && <IntegrationsView />}
-        {activeView === 'lead_sources' && <LeadSourcesView />}
-        {activeView === 'import_review' && <ImportReviewView />}
+        {activeView === 'consent_review' && <ConsentReviewView />}
         {activeView === 'duplicates' && <DuplicatesView />}
         {activeView === 'ai_settings' && <AISettingsView />}
         {activeView === 'settings' && <SettingsView />}

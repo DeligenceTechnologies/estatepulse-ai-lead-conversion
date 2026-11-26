@@ -5,7 +5,6 @@ import {
   ArrowRight,
   BellRing,
   CalendarClock,
-  FileCheck2,
   Flag,
   Flame,
   Inbox,
@@ -470,16 +469,6 @@ export const DashboardContent: React.FC<ReturnType<typeof useDashboardData>> = (
           to: '/leads',
           tone: 'amber' as const,
           icon: <Flag />,
-        },
-        {
-          label: 'Waiting for approval',
-          sentence: (n: number) => `${n} imported lead${n === 1 ? '' : 's'} waiting for approval`,
-          hint: 'Imported leads. Approve them so the AI can start.',
-          action: 'Open Import Review',
-          count: data.attention.awaitingImportReview,
-          to: '/import-review',
-          tone: 'sky' as const,
-          icon: <FileCheck2 />,
         },
       ].filter((a) => a.count > 0)
     : [];

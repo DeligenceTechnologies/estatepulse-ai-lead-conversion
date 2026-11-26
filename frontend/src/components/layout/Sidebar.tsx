@@ -10,7 +10,6 @@ import {
   UserCheck,
   Plug,
   Bot,
-  Webhook,
   Clock,
   ShieldCheck,
   Settings,
@@ -23,7 +22,6 @@ import { useAuth } from '../../context/AuthContext';
 import { LEADS_CHANGED_EVENT, leadsApi } from '../../api/client';
 import { consentReviewCount } from '../../utils/consentReviewApi';
 import { duplicateCount } from '../../utils/duplicatesApi';
-import { importReviewEnabled } from '../../utils/fileImportApi';
 import type { NavGroup, NavItem } from './DashboardSidebar';
 
 type OwnerNavItem = NavItem & { id: AppView };
@@ -38,11 +36,11 @@ type OwnerNavItem = NavItem & { id: AppView };
 export function useOwnerNav(): NavGroup[] {
   const { role, agentProfileId, can } = useAuth();
   const isOwner = role === 'owner';
-  const [sheetsOn, setSheetsOn] = useState(false);
-  // Import Review is open while an import is switched on, or while a lead added by hand waits there for its consent.
+  const [consentOn, setConsentOn] = useState(false);
+  // Consent Review shows while a lead added by hand waits there for its consent.
   useEffect(() => {
     if (!isOwner) return;
-    const check = () => void Promise.all([importReviewEnabled(), consentReviewCount()]).then(([imports, awaiting]) => setSheetsOn(imports || awaiting > 0));
+    const check = () => void consentReviewCount().then((awaiting) => setConsentOn(awaiting > 0));
     check();
     window.addEventListener(LEADS_CHANGED_EVENT, check);
     return () => window.removeEventListener(LEADS_CHANGED_EVENT, check);
@@ -97,7 +95,7 @@ export function useOwnerNav(): NavGroup[] {
         { id: 'conversations', label: 'Conversations', icon: MessageSquare },
         { id: 'calls', label: 'AI Calls', icon: PhoneCall },
         { id: 'followups', label: 'Follow-ups', icon: Repeat },
-        ...(sheetsOn ? [{ id: 'import_review' as const, label: 'Import Review', icon: ClipboardCheck }] : []),
+        ...(consentOn ? [{ id: 'consent_review' as const, label: 'Consent Review', icon: ClipboardCheck }] : []),
         ...(canMerge
           ? [{ id: 'duplicates' as const, label: 'Duplicates', icon: Copy, badge: duplicates, badgeTitle: `${duplicates} possible duplicate${duplicates === 1 ? '' : 's'} to review` }]
           : []),
@@ -133,12 +131,8 @@ export function useOwnerNav(): NavGroup[] {
       ],
     },
     {
-      // Where leads come from: connect a channel once, then watch what it sends.
       label: 'Lead Intake',
-      items: [
-        { id: 'integrations', label: 'Lead Integrations', icon: Plug },
-        { id: 'lead_sources', label: 'Lead Sources', icon: Webhook },
-      ],
+      items: [{ id: 'integrations', label: 'Lead Integrations', icon: Plug }],
     },
     {
       label: 'Setup',

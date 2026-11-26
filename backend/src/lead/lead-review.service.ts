@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AuditService } from '@/audit/audit.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { RELEASABLE_LEAD } from '@/google-sheets/approval';
+import { RELEASABLE_LEAD } from './lead-scope';
 import { LeadStateService } from './lead-state.service';
 
 export interface ReviewApproval {

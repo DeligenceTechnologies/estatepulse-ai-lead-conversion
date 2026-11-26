@@ -131,12 +131,6 @@ enum CallDisposition {
 
 enum IntegrationProvider {
   telnyx
-  tally
-  google
-  typeform
-  hubspot
-  airtable
-  retell
 
   @@map("integration_provider")
 }
@@ -175,94 +169,6 @@ enum ConnectionMethod {
   UPLOAD
 
   @@map("lead_source_connection_method")
-}
-
-enum IngestStatus {
-  AWAITING_FIRST_EVENT
-  NEEDS_MAPPING
-  ACTIVE
-  PAUSED
-  IMPORTING
-  COMPLETED
-  REMOVED
-
-  @@map("lead_source_ingest_status")
-}
-
-enum MappingStatus {
-  UNCONFIGURED
-  NEEDS_REVIEW
-  CONFIGURED
-
-  @@map("lead_source_mapping_status")
-}
-
-enum RemoteWebhookState {
-  PENDING
-  INSTALLED
-  DRIFTED
-  UNINSTALLED
-  ORPHANED
-  ERROR
-
-  @@map("remote_webhook_state")
-}
-
-enum FieldStatus {
-  NEW
-  ACTIVE
-  MISSING
-
-  @@map("lead_source_field_status")
-}
-
-enum MappingOrigin {
-  HEURISTIC
-  USER
-  IMPORTED
-  PREBUILT
-
-  @@map("mapping_origin")
-}
-
-enum QueueState {
-  PENDING
-  PROCESSING
-  DONE
-  FAILED
-  DEAD_LETTER
-
-  @@map("ingest_queue_state")
-}
-
-enum DeliveryOutcome {
-  PROCESSED
-  PROCESSED_WITH_WARNINGS
-  DUPLICATE
-  NEEDS_MAPPING
-  NEEDS_IDENTITY
-  QUARANTINED_SIGNATURE
-  INVALID_PAYLOAD
-  ERROR
-
-  @@map("ingest_outcome")
-}
-
-enum SignatureState {
-  VALID
-  INVALID
-  MISSING
-  NOT_CONFIGURED
-
-  @@map("signature_state")
-}
-
-enum ReviewState {
-  pending
-  approved
-  rejected
-
-  @@map("import_review_state")
 }
 
 enum SequenceStatus {

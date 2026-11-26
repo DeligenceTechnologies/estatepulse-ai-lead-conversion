@@ -72,12 +72,6 @@ export class SchedulingProvider {
     return this.cal.scheduledMeetings(secret, from, to, teamId);
   }
 
-  /** Cheap authenticated call that proves the credentials still work. */
-  async verify(provider: CalendarProvider, secret: string): Promise<void> {
-    if (provider === 'calendly') await this.calendly.currentUser(secret);
-    else await this.cal.me(secret);
-  }
-
   async deleteWebhook(provider: CalendarProvider, secret: string, webhookId: string): Promise<void> {
     if (provider === 'calendly') await this.calendly.deleteWebhook(secret, webhookId);
     else await this.cal.deleteWebhook(secret, webhookId);

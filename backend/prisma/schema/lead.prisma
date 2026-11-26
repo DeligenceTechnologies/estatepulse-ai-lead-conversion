@@ -80,8 +80,6 @@ model Lead {
   messages        Message[]
   calls           Call[]
   enrollments     SequenceEnrollment[]
-  ingestEvents    IngestEvent[]
-  sheetImportRows SheetImportRow[]
   meetings        CalendarMeeting[]
   callTransfers   CallTransfer[]
   outreachItems   OutreachBatchLead[]
@@ -235,8 +233,6 @@ model LeadSubmission {
   leadSourceId     String?  @map("lead_source_id") @db.Uuid
   /// webhook, manual, import, crm, sms, backfill
   channel          String   @db.VarChar(20)
-  ingestEventId    String?  @map("ingest_event_id") @db.Uuid
-  sheetImportRowId String?  @map("sheet_import_row_id") @db.Uuid
   /// What matched it to an existing lead: phone or email. Null when it created the lead.
   matchedBy        String?  @map("matched_by") @db.VarChar(10)
   isOriginal       Boolean  @default(false) @map("is_original")

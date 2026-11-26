@@ -12,7 +12,7 @@ import {
   type DuplicatePair,
   type DuplicateStatus,
 } from '../../utils/duplicatesApi';
-import { errorText } from '../sheets/SheetModal';
+import { errorText } from '../common/SheetModal';
 import { Button } from '../common/Button';
 
 const card = 'bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg';

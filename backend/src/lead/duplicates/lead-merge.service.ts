@@ -10,7 +10,7 @@ import { MERGE_LEAD_SELECT, resolveMerge, restoreFromSnapshot, snapshotForUndo }
 type Tx = Prisma.TransactionClient;
 
 /** Child tables whose rows simply follow the person: moved to the survivor, moved back on undo. */
-const MOVABLE = ['message', 'call', 'leadEvent', 'callTransfer', 'calendarMeeting', 'ingestEvent', 'sheetImportRow', 'leadSubmission', 'sequenceEnrollment'] as const;
+const MOVABLE = ['message', 'call', 'leadEvent', 'callTransfer', 'calendarMeeting', 'leadSubmission', 'sequenceEnrollment'] as const;
 type Movable = (typeof MOVABLE)[number];
 type MovedRows = Partial<Record<Movable | 'outreachBatchLead', string[]>> & { mergedLeads?: string[] };
 
@@ -22,8 +22,6 @@ interface RemovedRows {
   stoppedEnrollments?: { id: string; status: EnrollmentStatus }[];
   /** Outreach rows deleted because the survivor was already in the same batch. */
   outreachRows?: Prisma.OutreachBatchLeadCreateManyInput[];
-  /** Import rows a person decided by merging: id -> review state before. */
-  sheetRowStates?: { id: string; reviewState: string }[];
 }
 
 const LIVE: EnrollmentStatus[] = [EnrollmentStatus.active, EnrollmentStatus.paused];
@@ -83,19 +81,6 @@ export class LeadMergeService {
           data: { status: EnrollmentStatus.stopped, stoppedAt: new Date(), stoppedReason: 'merged' },
         });
       }
-    }
-
-    // Import rows: a pending or rejected row hides its lead from every list; the merge is the decision.
-    const undecided = await tx.sheetImportRow.findMany({
-      where: { leadId: mergedId, reviewState: { in: ['pending', 'rejected'] } },
-      select: { id: true, reviewState: true },
-    });
-    if (undecided.length) {
-      removed.sheetRowStates = undecided;
-      await tx.sheetImportRow.updateMany({
-        where: { id: { in: undecided.map((r) => r.id) } },
-        data: { reviewState: 'approved', reviewedAt: new Date(), reviewedBy: actor.type === 'user' ? (actor.id ?? null) : null },
-      });
     }
 
     for (const table of MOVABLE) {
@@ -282,9 +267,6 @@ export class LeadMergeService {
             where: { id: e.id, stoppedReason: 'merged' },
             data: { status: e.status, stoppedAt: null, stoppedReason: null },
           });
-        }
-        for (const r of removed.sheetRowStates ?? []) {
-          await tx.sheetImportRow.updateMany({ where: { id: r.id }, data: { reviewState: r.reviewState as 'pending' | 'rejected' } });
         }
         if (moved.mergedLeads?.length) {
           await tx.lead.updateMany({ where: { id: { in: moved.mergedLeads }, mergedIntoId: log.survivorId }, data: { mergedIntoId: log.mergedId } });

@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeftRight, ArrowRight, CalendarDays, ShieldAlert, Unlink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, CalendarDays, Unlink } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../../context/AuthContext';
 import { messageFor } from '../../../lib/api';
 import {
-  announceCalendlyResult,
   disconnectOrganizationCalendar,
   getOrganizationCalendar,
   type CalendarConnection,
@@ -13,9 +12,6 @@ import {
   type OrganizationCalendarStatus,
 } from '../../../utils/calendarApi';
 import { Button } from '../../common/Button';
-import { CalComConnect } from './CalComConnect';
-import { CalendlyConnect } from './CalendlyConnect';
-import { ConnectFlow } from './ConnectFlow';
 import {
   Notice,
   PROVIDERS,
@@ -53,10 +49,8 @@ const ConnectionSummary: React.FC<{
   provider: CalendarProviderId;
   connection: CalendarConnection;
   canEdit: boolean;
-  onReconnected: () => Promise<boolean>;
-  onSwitch: () => void;
   onDisconnected: () => Promise<void>;
-}> = ({ provider, connection, canEdit, onReconnected, onSwitch, onDisconnected }) => {
+}> = ({ provider, connection, canEdit, onDisconnected }) => {
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -100,23 +94,10 @@ const ConnectionSummary: React.FC<{
         </Notice>
       )}
 
-      {canEdit && broken && (
-        <div className="pt-1">
-          {provider === 'calendly' ? (
-            <CalendlyConnect onConnected={onReconnected} reconnect />
-          ) : (
-            <CalComConnect onConnected={onReconnected} reconnect />
-          )}
-        </div>
-      )}
-
       {(canEdit || !broken) && (
         <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800">
           {canEdit && (
             <>
-              <Button variant="outline" size="sm" onClick={onSwitch} disabled={disconnecting} icon={<ArrowLeftRight />}>
-                Change calendar
-              </Button>
               {confirming ? (
                 <>
                   <span className="text-2xs text-slate-400">Disconnect {label}?</span>
@@ -160,11 +141,9 @@ const ConnectionSummary: React.FC<{
 export const ConnectCalendar: React.FC = () => {
   const { can } = useAuth();
   const canEdit = can('organization.update');
-  const [params, setParams] = useSearchParams();
 
   const [status, setStatus] = useState<OrganizationCalendarStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [switching, setSwitching] = useState(false);
   /** Bumped by the Sync button; Meetings reloads when it changes. */
   const [syncVersion, setSyncVersion] = useState(0);
   const statusRef = useRef(status);
@@ -182,41 +161,6 @@ export const ConnectCalendar: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    const outcome = params.get('calendar');
-    if (!outcome) return;
-    // Calendly severs window.opener, so its callback lands the popup here.
-    // Report to the tab that opened it, then close (a no-op in an ordinary tab).
-    announceCalendlyResult(outcome === 'connected');
-    window.close();
-    // toastId: StrictMode runs this effect twice before the param is cleared.
-    if (outcome === 'connected') toast.success('Calendly connected.', { toastId: 'calendly-return' });
-    else toast.error('Calendly was not connected. Please try again.', { toastId: 'calendly-return' });
-    const next = new URLSearchParams(params);
-    next.delete('calendar');
-    setParams(next, { replace: true });
-  }, [params, setParams]);
-
-  const refreshAfterConnect = useCallback(async (): Promise<boolean> => {
-    const connectionKey = (value: OrganizationCalendarStatus | null) =>
-      value?.provider && value.connection ? `${value.provider}:${value.connection.connectedAt}` : null;
-    const before = connectionKey(statusRef.current);
-    try {
-      const next = await getOrganizationCalendar();
-      setStatus(next);
-      setLoadError(null);
-      const connected = next.connection?.status === 'active' && connectionKey(next) !== before;
-      if (connected && next.provider) {
-        toast.success(`${PROVIDERS[next.provider].label} connected.`);
-        setSwitching(false);
-      }
-      return connected;
-    } catch (e) {
-      setLoadError(messageFor(e));
-      return false;
-    }
-  }, []);
 
   const afterDisconnect = useCallback(async () => {
     const label = statusRef.current?.provider ? PROVIDERS[statusRef.current.provider].label : 'Calendar';
@@ -256,45 +200,14 @@ export const ConnectCalendar: React.FC = () => {
   } else if (!status) {
     body = <LoadingState />;
   } else if (!provider || !connection) {
-    body = canEdit ? (
-      <ConnectFlow
-        status={status}
-        initial={status.providers.find((entry) => entry.saved)?.id ?? 'calendly'}
-        onConnected={refreshAfterConnect}
-      />
-    ) : (
-      <div className={`${panel} p-4 text-xs text-slate-400 flex items-start gap-2`}>
-        <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-        No calendar is connected yet. Connecting one needs the “Edit organization settings” permission.
-      </div>
-    );
-  } else if (switching) {
-    body = (
-      <ConnectFlow
-        status={status}
-        initial={provider === 'calendly' ? 'cal' : 'calendly'}
-        onConnected={refreshAfterConnect}
-        onCancel={() => setSwitching(false)}
-      />
-    );
+    body = <div className={`${panel} p-4 text-xs text-slate-400`}>No calendar is connected yet.</div>;
   } else {
-    body = (
-      <div className="space-y-4">
-        <ConnectionSummary
-          provider={provider}
-          connection={connection}
-          canEdit={canEdit}
-          onReconnected={refreshAfterConnect}
-          onSwitch={() => setSwitching(true)}
-          onDisconnected={afterDisconnect}
-        />
-      </div>
-    );
+    body = <ConnectionSummary provider={provider} connection={connection} canEdit={canEdit} onDisconnected={afterDisconnect} />;
   }
 
   // What the connected calendar has booked lives here, next to the connection
   // it is read from, rather than as its own page.
-  const showMeetings = Boolean(provider && connection?.status === 'active' && !switching);
+  const showMeetings = Boolean(provider && connection?.status === 'active');
 
   return (
     <div className="space-y-5">
@@ -306,9 +219,7 @@ export const ConnectCalendar: React.FC = () => {
             </span>
             <div className="min-w-0">
               <h3 className="text-sm font-bold text-white">Scheduling calendar</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Connect Calendly or Cal.com. One calendar at a time.
-              </p>
+              <p className="text-xs text-slate-400 mt-0.5">Calendly or Cal.com. One calendar at a time.</p>
             </div>
           </div>
           {pill}

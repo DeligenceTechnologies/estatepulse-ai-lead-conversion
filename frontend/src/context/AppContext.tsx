@@ -40,15 +40,12 @@ const APP_VIEWS = [
   'integrations',
   'ai_settings',
   'analytics',
-  // Live-backend screen. Its data comes from the real API, NOT from this
-  // context — see src/api/client.ts. Only the view id lives here.
-  'lead_sources',
-  // Leads imported from Google Sheets waiting for the owner. Live API.
-  'import_review',
+  // Live API: leads added by hand waiting for their consent.
+  'consent_review',
   // Live API: leads that look like the same person, to merge or dismiss.
   'duplicates',
   // An owner who also takes leads: their own working hours and calendar
-  // status, the same screen an agent sees. Live API, like lead_sources.
+  // status, the same screen an agent sees. Live API.
   'my_availability',
   // Live API: the organization's roles and what each may do.
   'roles',
@@ -67,7 +64,7 @@ const APP_VIEWS = [
 
 export type AppView = (typeof APP_VIEWS)[number];
 
-/** `lead_sources` <-> `/lead-sources`. The URL is the one source of truth for the active view. */
+/** `team_availability` <-> `/team-availability`. The URL is the one source of truth for the active view. */
 export const pathForView = (view: AppView): string => '/' + view.replace(/_/g, '-');
 /** Old URLs that still open their page after a rename (bookmarks, shared links). */
 const RENAMED_VIEWS: Record<string, AppView> = {

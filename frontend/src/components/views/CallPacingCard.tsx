@@ -55,10 +55,10 @@ export const CallPacingCard: React.FC<{ limit?: number }> = ({ limit: saved }) =
       <div>
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Gauge className="w-4 h-4 text-emerald-400" />
-          Call Pacing for Launched Imports
+          Call Pacing for Outreach Batches
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          A batch you launch from Import Review is released a few leads at a time, within your concurrent call limit (Call Capacity, above).
+          An outreach batch is released a few leads at a time, within your concurrent call limit (Call Capacity, above).
           New form leads and follow-ups are never held back; the slots kept free are room for them.
         </p>
       </div>

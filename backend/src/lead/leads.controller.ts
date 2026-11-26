@@ -17,7 +17,7 @@ import { LeadAssignmentService } from './lead-assignment.service';
 import { LeadEditService } from './lead-edit.service';
 import { LeadReviewService } from './lead-review.service';
 import { LeadTimezoneService } from './lead-timezone.service';
-import { OUTSIDE_IMPORT_REVIEW, fullName, visibleLeads } from './lead-scope';
+import { OUTSIDE_CONSENT_REVIEW, fullName, visibleLeads } from './lead-scope';
 import { IN_STRATEGY_STATUSES } from './lead-status';
 import { ManualLeadService } from './manual-lead.service';
 import { liveReviewReasons } from './review-reasons';
@@ -174,7 +174,7 @@ export class LeadsController {
     const page = await paginate(rest, {
       where: {
         orgId,
-        ...OUTSIDE_IMPORT_REVIEW,
+        ...OUTSIDE_CONSENT_REVIEW,
         ...(unassigned === 'true' ? { assignedToId: null } : {}),
       } as Prisma.LeadWhereInput,
       searchFields: ['firstName', 'lastName', 'phone', 'email', 'location'],
@@ -214,7 +214,7 @@ export class LeadsController {
   @RequirePermissions(PERMISSIONS.LEAD_READ)
   async stats(@CurrentAuth() auth: AuthContext) {
     const orgId = auth.organizationId;
-    const where = { orgId, ...OUTSIDE_IMPORT_REVIEW } satisfies Prisma.LeadWhereInput;
+    const where = { orgId, ...OUTSIDE_CONSENT_REVIEW } satisfies Prisma.LeadWhereInput;
     const [byStatusRows, byTemperatureRows, sources, agents] = await Promise.all([
       this.prisma.lead.groupBy({ by: ['status'], where, _count: { _all: true } }),
       this.prisma.lead.groupBy({ by: ['temperature'], where, _count: { _all: true } }),
@@ -268,7 +268,7 @@ export class LeadsController {
 
   private async row(auth: AuthContext, leadId: string) {
     const lead = await this.prisma.lead.findFirst({
-      where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_IMPORT_REVIEW } as Prisma.LeadWhereInput,
+      where: { id: leadId, ...visibleLeads(auth), ...OUTSIDE_CONSENT_REVIEW } as Prisma.LeadWhereInput,
       select: LEAD_FIELDS,
     });
     if (!lead) {

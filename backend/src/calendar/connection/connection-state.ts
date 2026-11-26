@@ -8,8 +8,7 @@ import type { CalendarConnectionStatus, Prisma } from '@prisma/client';
  * - `inactive` saved but not in use, so the organization can switch back
  *              without signing in again
  *
- * An organization has at most one connection in use. Every change to which
- * one is in use happens under `lockOrganization`.
+ * An organization has at most one connection in use.
  */
 export const IN_USE_STATUSES = ['active', 'error'] as const satisfies readonly CalendarConnectionStatus[];
 

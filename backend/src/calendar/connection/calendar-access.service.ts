@@ -11,15 +11,9 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { SecretBoxService } from '@/common/service/secret-box.service';
 import { ConnectionAlertService } from '@/common/service/connection-alert.service';
 import { PROVIDER_LABEL, type CalCredentials, type CalendlyCredentials } from '../calendar.types';
-import { CalendlyClient, type CalendlyGrant } from '../providers/calendly.client';
 import { ProviderHttpError } from '../providers/provider-http';
 import { SchedulingProvider } from '../providers/scheduling-provider';
 import { inUse } from './connection-state';
-
-const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
-/** The refresh holds a row lock across one Calendly call (15s timeout, never retried). */
-const REFRESH_LOCK_WAIT_MS = 10_000;
-const REFRESH_LOCK_TIMEOUT_MS = 30_000;
 
 export const CALENDAR_UNAVAILABLE = 'Calendar connections are not available yet. Please contact support.';
 
@@ -47,20 +41,16 @@ class CredentialsChanged extends Error {}
 
 /**
  * The one gate to a connection's credentials. Everything that calls Calendly
- * or Cal.com for an organization goes through here, so decrypting, refreshing
- * Calendly tokens and parking a connection the provider has stopped accepting
- * happen in exactly one place.
+ * or Cal.com for an organization goes through here, so decrypting and parking
+ * a connection the provider has stopped accepting happen in exactly one place.
  */
 @Injectable()
 export class CalendarAccessService {
   private readonly logger = new Logger(CalendarAccessService.name);
-  /** In-flight Calendly refreshes per connection, so concurrent calls share one. */
-  private readonly refreshes = new Map<string, Promise<string>>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly secrets: SecretBoxService,
-    private readonly calendly: CalendlyClient,
     private readonly provider: SchedulingProvider,
     private readonly connectionAlerts: ConnectionAlertService,
   ) {}
@@ -93,16 +83,6 @@ export class CalendarAccessService {
     }
   }
 
-  /** Proves a stored (possibly inactive) connection still works before it is switched on. */
-  async verify(orgId: string, connection: UsableConnection): Promise<void> {
-    try {
-      await this.withCredentials(orgId, connection, (secret) => this.provider.verify(connection.provider, secret));
-    } catch (error) {
-      if (error instanceof CredentialsChanged) throw new ConflictException(error.message);
-      throw error;
-    }
-  }
-
   /** Best effort: a webhook left behind only costs the provider a failed delivery. */
   async removeWebhook(connection: UsableConnection): Promise<void> {
     if (!connection.webhookId || connection.status !== 'active') return;
@@ -114,23 +94,8 @@ export class CalendarAccessService {
     }
   }
 
-  /** Best effort: revokes the Calendly grant stored in `sealed`, which we are about to forget. */
-  async revokeStoredCalendly(sealed: string): Promise<void> {
-    await this.revokeCalendly(this.unseal<CalendlyCredentials>(sealed)?.refreshToken);
-  }
-
-  /** Best effort: revokes a Calendly token we are about to forget. */
-  async revokeCalendly(token: string | undefined): Promise<void> {
-    if (!token || !this.calendly.configured) return;
-    try {
-      await this.calendly.revoke(token);
-    } catch (error) {
-      this.logger.warn(`Calendly token revocation failed: ${(error as Error).message}`);
-    }
-  }
-
   /** Decrypts a sealed JSON value; null when it cannot be read. */
-  unseal<T>(sealed: string): T | null {
+  private unseal<T>(sealed: string): T | null {
     if (!this.secrets.enabled) return null;
     try {
       return JSON.parse(this.secrets.open(sealed)) as T;
@@ -181,61 +146,7 @@ export class CalendarAccessService {
     if (connection.provider === 'cal') {
       return this.requireCredentials<CalCredentials>(connection.credentials).apiKey;
     }
-
-    const credentials = this.requireCredentials<CalendlyCredentials>(connection.credentials);
-    const expiresAt = connection.tokenExpiresAt?.getTime() ?? 0;
-    if (expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
-      return credentials.accessToken;
-    }
-
-    let pending = this.refreshes.get(connection.id);
-    if (!pending) {
-      pending = this.refreshCalendly(connection, credentials.refreshToken).finally(() =>
-        this.refreshes.delete(connection.id),
-      );
-      this.refreshes.set(connection.id, pending);
-    }
-    return pending;
-  }
-
-  /**
-   * Calendly refresh tokens are single-use, so two servers refreshing the same
-   * connection at once would leave one holding a dead token. The row lock makes
-   * every other server wait, then see the new credentials and retry with them.
-   */
-  private async refreshCalendly(connection: UsableConnection, refreshToken: string): Promise<string> {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const [row] = await tx.$queryRaw<{ credentials: string }[]>`
-          SELECT credentials FROM calendar_connections WHERE id = ${connection.id}::uuid FOR UPDATE`;
-        if (!row || row.credentials !== connection.credentials) {
-          throw new CredentialsChanged('The calendar connection changed. Try again.');
-        }
-
-        let grant: CalendlyGrant;
-        try {
-          grant = await this.calendly.refresh(refreshToken);
-        } catch (error) {
-          // Calendly answers a dead refresh token with 400; treat it as a rejected credential.
-          if (error instanceof ProviderHttpError && error.status === 400) {
-            throw new ProviderHttpError(error.provider, 401, error.message);
-          }
-          throw error;
-        }
-
-        const credentials: CalendlyCredentials = { accessToken: grant.accessToken, refreshToken: grant.refreshToken };
-        await tx.calendarConnection.updateMany({
-          where: { id: connection.id },
-          data: {
-            credentials: this.secrets.seal(JSON.stringify(credentials)),
-            tokenExpiresAt: grant.expiresAt,
-            ...(grant.scope ? { scope: grant.scope } : {}),
-          },
-        });
-        return grant.accessToken;
-      },
-      { maxWait: REFRESH_LOCK_WAIT_MS, timeout: REFRESH_LOCK_TIMEOUT_MS },
-    );
+    return this.requireCredentials<CalendlyCredentials>(connection.credentials).accessToken;
   }
 
   private requireCredentials<T>(sealed: string): T {

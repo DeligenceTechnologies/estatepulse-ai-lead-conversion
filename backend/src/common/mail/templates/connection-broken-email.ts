@@ -3,7 +3,7 @@ import { detailRows, escapeHtml, note, paragraph, renderEmailLayout } from '@/co
 export interface ConnectionBrokenEmailInput {
   firstName: string;
   organizationName: string;
-  /** e.g. "Google Sheets", "HubSpot". */
+  /** e.g. "Telnyx", "Calendly". */
   providerLabel: string;
   /** The connected account, when known: an email or account name. */
   account: string | null;

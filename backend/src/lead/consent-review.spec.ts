@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AWAITING_CONSENT_REVIEW, CONSENT_REVIEW_REASON } from './consent';
 import { ConsentReviewService } from './consent-review.service';
-import { OUTSIDE_IMPORT_REVIEW } from './lead-scope';
+import { OUTSIDE_CONSENT_REVIEW } from './lead-scope';
 import { ManualLeadService } from './manual-lead.service';
 
 const ORG = 'org-1';
@@ -47,7 +47,7 @@ describe('manual lead consent review', () => {
   });
 
   it('held leads are left out of every lead list', () => {
-    expect(OUTSIDE_IMPORT_REVIEW).toMatchObject({ NOT: AWAITING_CONSENT_REVIEW });
+    expect(OUTSIDE_CONSENT_REVIEW).toMatchObject({ NOT: AWAITING_CONSENT_REVIEW });
   });
 
   const review = (ids: string[]) => {

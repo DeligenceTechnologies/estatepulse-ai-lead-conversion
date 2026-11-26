@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { crmNoNameReason } from '@/crm/crm-records';
-import { PHONE_UNPARSED_REASON } from '@/google-sheets/sheet-rows';
-import { PHONE_NO_CODE_REASON, PHONE_UNREADABLE_REASON, liveReviewReasons } from './review-reasons';
+import { PHONE_NO_CODE_REASON, PHONE_UNPARSED_REASON, PHONE_UNREADABLE_REASON, liveReviewReasons } from './review-reasons';
 
-const HUBSPOT = { displayName: 'HubSpot' } as Parameters<typeof crmNoNameReason>[0];
 const DNC = 'This contact previously opted out — imported as do-not-contact';
 
 const lead = (over: Partial<Parameters<typeof liveReviewReasons>[0]> = {}) => ({
@@ -42,7 +39,7 @@ describe('warnings a lead has outgrown', () => {
   });
 
   test('the no-name warning goes once a name arrives', () => {
-    const reasons = [crmNoNameReason(HUBSPOT)];
+    const reasons = ['No name in HubSpot — check who this is before contacting them'];
     expect(liveReviewReasons(lead({ firstName: 'Manish', reviewReasons: reasons }))).toEqual([]);
     expect(liveReviewReasons(lead({ reviewReasons: reasons }))).toEqual(reasons);
   });

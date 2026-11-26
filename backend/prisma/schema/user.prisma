@@ -37,8 +37,6 @@ model User {
   takenOverLeads      Lead[]               @relation("LeadChatTakeover")
   sentMessages        Message[]
   enrollments         SequenceEnrollment[]
-  reviewedImportRows  SheetImportRow[]
-  crmSyncRuns         CrmSyncRun[]
   hostedMeetings      CalendarMeeting[]
   transferAttempts    TransferAttempt[]
 

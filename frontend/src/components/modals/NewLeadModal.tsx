@@ -11,7 +11,7 @@ import {
 } from '../../api/client';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { Select } from '../common/Select';
-import { SheetError, SheetModal, errorDetails, errorText } from '../sheets/SheetModal';
+import { SheetError, SheetModal, errorDetails, errorText } from '../common/SheetModal';
 import { Button } from '../common/Button';
 
 interface CreateProps {
@@ -207,11 +207,11 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = (props) => {
       return;
     }
     // Not "outreach is starting": the server keeps a lead that once opted out paused, and says only { id }.
-    // Without consent it waits in Import Review, out of the Leads list, until the owner marks it.
+    // Without consent it waits in Consent Review, out of the Leads list, until the owner marks it.
     toast.success(
       consent
         ? 'Lead added.'
-        : 'Lead added. Without consent it waits in Import Review → Consent needed; it is not called or texted until you mark its consent there.',
+        : 'Lead added. Without consent it waits in Consent Review; it is not called or texted until you mark its consent there.',
     );
     if (!consent) window.dispatchEvent(new Event(LEADS_CHANGED_EVENT));
     if (!editing) props.onCreated(id);

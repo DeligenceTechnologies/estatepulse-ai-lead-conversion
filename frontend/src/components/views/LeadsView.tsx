@@ -26,9 +26,7 @@ import { useApp } from '../../context/AppContext';
 import { LEADS_CHANGED_EVENT, leadsApi, type LeadStats, type ListLeadsParams, type LiveLead } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveEvents } from '../../lib/liveEvents';
-import { fileImportEnabled } from '../../utils/fileImportApi';
 import { startLabel } from '../../utils/outreachApi';
-import { FileImportModal } from '../imports/FileImportModal';
 import { NewLeadModal } from '../modals/NewLeadModal';
 import { PAGE_SIZE_OPTIONS, Pagination } from '../common/Pagination';
 import { useLiveQuery } from '../../lib/useLiveQuery';
@@ -81,8 +79,7 @@ const GENERIC_WEBHOOK_PROVIDERS = new Set(['WEBHOOK', 'CUSTOM']);
  *
  * This column answers "which form did this person fill in", so it is keyed off
  * the PROVIDER, never off `connectionMethod`. Connection method is how we were
- * wired up, which belongs on the Lead Sources page's connection pill — reading
- * it here badged every `MANUAL` source "webhook", so a Google Form (connected
+ * wired up — reading it here badged every `MANUAL` source "webhook", so a Google Form (connected
  * through Google, but delivering via a script the owner installs rather than a
  * webhook we create over Google's API) read exactly like a pasted URL.
  *
@@ -100,8 +97,6 @@ const sourceLabel = (l: LiveLead): string => {
  * The channel as a glyph, so a column of sources is told apart at a glance
  * without a colour per source: colour in this table already means urgency
  * (temperature) and lifecycle (status), and a third rainbow would drown both.
- * Same icons the rest of the app uses for each channel (Lead Sources, the
- * Google Sheets card, the file import).
  */
 const sourceIcon = (l: LiveLead): LucideIcon => {
   const s = l.source;
@@ -276,14 +271,8 @@ export const LeadsView: React.FC = () => {
   // Set when the reader takes leads: their own entry in the agent filter reads "Mine".
   const { user, role } = useAuth();
   const isOwner = role === 'owner';
-  // "Add leads" (owner only): one lead typed in by hand, or a file import where the server has it switched on.
-  const [canImport, setCanImport] = useState(false);
-  const [addMenu, setAddMenu] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
+  // "Add Lead" (owner only): one lead typed in by hand.
   const [addOpen, setAddOpen] = useState(false);
-  useEffect(() => {
-    if (isOwner) void fileImportEnabled().then(setCanImport);
-  }, [isOwner]);
   const {
     setSelectedLeadId,
     setPreCallLeadId,
@@ -429,71 +418,8 @@ export const LeadsView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {isOwner && (
-            <div
-              className="relative"
-              onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAddMenu(false);
-              }}
-            >
-              <Button
-                onClick={() => setAddMenu((v) => !v)}
-                aria-haspopup="menu"
-                aria-expanded={addMenu}
-              >
-                Add Leads
-              </Button>
-              {addMenu && (
-                <div
-                  role="menu"
-                  className="absolute right-0 mt-1 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-1 z-20 text-xs"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAddMenu(false);
-                      setAddOpen(true);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
-                  >
-                    <PenLine className="w-3.5 h-3.5 text-emerald-300" />
-                    <span>
-                      Add a lead
-                      <span className="block text-2xs text-slate-500">Type in one person's details</span>
-                    </span>
-                  </button>
-                  {canImport && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAddMenu(false);
-                        setImportOpen(true);
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-100 flex items-center gap-2 cursor-pointer"
-                    >
-                      <FileUp className="w-3.5 h-3.5 text-sky-300" />
-                      <span>
-                        Import from CSV / Excel
-                        <span className="block text-2xs text-slate-500">Reviewed before anyone is contacted</span>
-                      </span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {isOwner && <Button onClick={() => setAddOpen(true)}>Add Lead</Button>}
           {addOpen && <NewLeadModal onClose={() => setAddOpen(false)} onCreated={() => refresh()} />}
-          {importOpen && (
-            <FileImportModal
-              onClose={() => setImportOpen(false)}
-              onImported={() => {
-                // Approved leads appear here; the rest are on Import Review.
-                refresh();
-              }}
-            />
-          )}
         </div>
       </div>
 
@@ -782,9 +708,7 @@ export const LeadsView: React.FC = () => {
                     <Webhook className="w-6 h-6 text-slate-600 mx-auto" />
                     <div className="text-xs text-slate-400">No live leads yet.</div>
                     <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                      Connect a form under <strong className="text-slate-400">Lead Sources</strong> and
-                      submit it — a lead appears here within a couple of seconds, with status{' '}
-                      <span className="text-cyan-300 font-semibold">new</span>.
+                      Add a lead to get started.
                     </div>
                   </td>
                 </tr>

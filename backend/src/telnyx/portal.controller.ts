@@ -7,7 +7,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import { leadZone } from '@/common/utils/lead-timezone';
 import { LeadOutcomeDto, LeadQualifiedDto, SetLeadStatusDto } from '@/lead/dto/lead-status.dto';
 import { OUTCOME_STATUSES } from '@/lead/lead-status';
-import { OUTSIDE_IMPORT_REVIEW, visibleLeads } from '@/lead/lead-scope';
+import { OUTSIDE_CONSENT_REVIEW, visibleLeads } from '@/lead/lead-scope';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { AssistantService } from './assistant.service';
@@ -278,7 +278,7 @@ export class PortalLeadsController {
   @RequirePermissions(PERMISSIONS.LEAD_READ)
   async list(@CurrentAuth() auth: AuthContext) {
     const rows = await this.prisma.lead.findMany({
-      where: { orgId: auth.organizationId, ...OUTSIDE_IMPORT_REVIEW },
+      where: { orgId: auth.organizationId, ...OUTSIDE_CONSENT_REVIEW },
       orderBy: { createdAt: 'desc' },
       take: 500,
       select: PORTAL_LEAD_FIELDS,

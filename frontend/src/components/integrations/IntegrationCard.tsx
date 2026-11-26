@@ -3,12 +3,8 @@ import { Check, Loader2 } from 'lucide-react';
 import { Button, type ButtonVariant } from '../common/Button';
 
 /**
- * The shell every card on Lead Integrations is built from.
- *
- * It lived inside ConnectionCards while the page only had lead sources on it.
- * The Telnyx connection moved here from AI Agent settings and needs the same
- * object — header, connected badge, body, one action at the bottom — so the
- * shell is its own file rather than a copy that drifts.
+ * An integration card's shell: header, connected badge, body, one action at
+ * the bottom. Used by the Telnyx card.
  */
 export const IntegrationCard: React.FC<{
   icon: React.ReactNode;

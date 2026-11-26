@@ -1,11 +1,26 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, CanActivate, Controller, Get, HttpCode, Injectable, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import type { AuthContext } from '@/auth/auth.types';
-import { OutreachSchedulingEnabledGuard } from '@/google-sheets/import-enabled.guard';
+import { httpError } from '@/common/errors/app-error';
+import type { IntegrationEnv } from '@/common/utils/interface';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
 import { RescheduleDto } from './outreach.dto';
 import { OutreachService } from './outreach.service';
+
+/** Switched off, every /outreach route answers 404. */
+@Injectable()
+class OutreachSchedulingEnabledGuard implements CanActivate {
+  constructor(private readonly config: ConfigService<IntegrationEnv, true>) {}
+
+  canActivate(): boolean {
+    if (!this.config.get('OUTREACH_SCHEDULING_ENABLED', { infer: true })) {
+      throw httpError(404, 'OUTREACH_SCHEDULING_DISABLED', 'Outreach scheduling is not enabled on this server.');
+    }
+    return true;
+  }
+}
 
 @Controller('outreach')
 @UseGuards(OutreachSchedulingEnabledGuard)

@@ -12,8 +12,8 @@ import { ROOT_ROUTES } from './root-routes';
 import { AppError } from './common/errors/app-error';
 import { sha256Hex } from './common/utils/crypto';
 
-/** Provider deliveries (lead webhooks, Telnyx, calendars, booking tools) get their own generous per-IP bucket. */
-const INBOUND_PREFIXES = ['/ingest/', '/webhooks/', '/tools/', '/calendar/webhooks/', '/billing/webhook'];
+/** Provider deliveries (Telnyx, calendars, booking tools, Stripe) get their own generous per-IP bucket. */
+const INBOUND_PREFIXES = ['/webhooks/', '/tools/', '/calendar/webhooks/', '/billing/webhook'];
 
 /** Every route the app's own frontend calls lives under this, in development and production alike. */
 const API_PREFIX = '/api';
@@ -47,7 +47,7 @@ async function bootstrap() {
   app.set('trust proxy', config.get<string>('TRUST_PROXY')?.trim() || false);
   app.disable('x-powered-by');
   app.use(helmet());
-  app.useBodyParser('json', { limit: config.get<number>('INGEST_MAX_BODY_BYTES') ?? 1_048_576 });
+  app.useBodyParser('json', { limit: '1mb' });
   app.enableShutdownHooks();
 
   const limited = (message: string) => (_req: Request, _res: Response, next: NextFunction) =>

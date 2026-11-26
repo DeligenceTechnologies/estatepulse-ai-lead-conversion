@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '@/audit/audit.service';
 import { PrismaService } from '@/common/prisma/prisma.service';
-import { isValidEmail } from '@/ingest/processing/transforms';
+import { isValidEmail } from '@/common/utils/email';
 import { LeadAssignmentService } from '@/lead/lead-assignment.service';
 import { fullName } from '@/lead/lead-scope';
 import { nextMeeting } from '@/lead/upcoming-meeting';
