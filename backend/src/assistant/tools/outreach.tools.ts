@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { AppError } from '@/common/errors/app-error';
 import type { PrismaService } from '@/common/prisma/prisma.service';
 import type { FollowupService } from '@/followup/followup.service';
-import type { LeadStateService } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { PERMISSIONS } from '@/role/permissions';
 import type { EngineService } from '@/telnyx/engine.service';
+import type { OutreachControlService } from '@/telnyx/outreach-control.service';
 import type { StrategyStoreService } from '@/telnyx/strategy-store.service';
 import { sent } from './calendar.tools';
 import { findVisibleLead, leadName } from './lead-access';
@@ -19,12 +19,11 @@ export interface OutreachToolDeps {
   engine: EngineService;
   strategies: StrategyStoreService;
   followup: FollowupService;
-  state: LeadStateService;
+  control: OutreachControlService;
   text: LeadTextDeps;
 }
 
 const LIVE_ENROLLMENT = [EnrollmentStatus.active, EnrollmentStatus.paused];
-const STOP_REASON = 'Stopped through Ask EstatePulse';
 
 const STATUS_LABEL: Record<LeadStatus, string> = {
   new: 'New',
@@ -184,60 +183,51 @@ export function outreachTools(deps: OutreachToolDeps): AssistantTool[] {
     }),
 
     writeTool({
-      name: 'outreach_stop',
-      label: 'Preparing to stop outreach',
+      name: 'outreach_pause',
+      label: 'Preparing to pause outreach',
       description:
-        'Stop all AI outreach to a lead: the strategy, its follow-up sequences and any call or text the AI promised. If the lead texts, the AI still answers. It cannot be restarted from the assistant.',
+        "Pause a lead's AI outreach: the strategy's next steps, its follow-up sequences and any text the AI promised. Nothing is lost; outreach_resume carries each on where it stopped. If the lead texts meanwhile, the AI still answers.",
       permissions: [PERMISSIONS.LEAD_UPDATE],
       input: z.object({ lead: leadRef, reason: z.string().trim().max(300).optional() }).strict(),
       async preview({ auth, refs }, input) {
-        const orgId = auth.organizationId;
-        const lead = await findVisibleLead(prisma, auth, refs, input.lead, {
-          id: true,
-          firstName: true,
-          lastName: true,
-          automationPaused: true,
-          callbackAt: true,
-          textBackAt: true,
-          updatedAt: true,
-        });
-        const sequences = await prisma.sequenceEnrollment.findMany({
-          where: { orgId, leadId: lead.id, status: { in: LIVE_ENROLLMENT } },
-          select: { sequence: { select: { name: true } } },
-        });
-        const running = deps.engine.isRunning(lead.id);
-        if (lead.automationPaused && !running && sequences.length === 0 && !lead.callbackAt && !lead.textBackAt) {
-          throw new AppError('CONFLICT', 'AI outreach is already stopped for this lead.');
-        }
-        const stops = [
-          ...(running || !lead.automationPaused ? ['Outreach strategy'] : []),
-          ...sequences.map((s) => `Sequence "${s.sequence.name}"`),
-          ...(lead.callbackAt ? ['A callback the AI promised'] : []),
-          ...(lead.textBackAt ? ['A text the AI promised'] : []),
-        ];
+        const leadId = await refs.resolve('lead', input.lead);
+        const { lead, lines, notes } = await deps.control.pausePlan(auth, leadId);
         return {
-          title: `Stop AI outreach to ${leadName(lead)}`,
+          title: `Pause AI outreach to ${leadName(lead)}`,
           changes: [
-            { field: 'Stops', from: null, to: stops.join(', ') || 'Outreach strategy' },
+            { field: 'Pauses', from: null, to: lines.join('; ') },
             ...(input.reason ? [{ field: 'Reason', from: null, to: input.reason }] : []),
           ],
-          summary: 'No more AI calls or texts go out to this lead. If they text, the AI still answers; their agent can take over the chat. This cannot be restarted from the assistant.',
+          summary: [...notes, 'Resume it any time.'].join(' '),
           entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
         };
       },
       async run({ auth, refs }, input) {
-        const orgId = auth.organizationId;
         const leadId = await refs.resolve('lead', input.lead);
-        const reason = input.reason || STOP_REASON;
-        const stoppedSequences = await prisma.$transaction(async (tx) => {
-          await tx.lead.update({ where: { id: leadId }, data: { automationPaused: true, callbackAt: null, textBackAt: null } });
-          const stopped = await deps.followup.stopForLead(orgId, leadId, 'stopped_by_user', tx);
-          await deps.state.record({ orgId, leadId, type: 'outreach_stopped', source: 'assistant', actor: { type: 'user', id: auth.userId }, reason }, tx);
-          return stopped;
-        });
-        deps.engine.stopStrategy(orgId, leadId, 'assistant', reason);
-        deps.text.events.publish({ organizationId: orgId, type: 'lead.updated', leadSourceId: null, leadId });
-        return { stopped: true, sequencesStopped: stoppedSequences };
+        return deps.control.pause(auth, leadId, { source: 'assistant', reason: input.reason });
+      },
+    }),
+
+    writeTool({
+      name: 'outreach_resume',
+      label: 'Preparing to resume outreach',
+      description:
+        "Lift a pause on a lead's AI outreach, whoever or whatever paused it: the strategy goes on from its next step (or starts, for a lead never contacted), paused sequences go on, and a promised text still ahead is put back.",
+      permissions: [PERMISSIONS.LEAD_UPDATE],
+      input: z.object({ lead: leadRef }).strict(),
+      async preview({ auth, refs }, input) {
+        const leadId = await refs.resolve('lead', input.lead);
+        const { lead, lines, notes } = await deps.control.resumePlan(auth, leadId);
+        return {
+          title: `Resume AI outreach to ${leadName(lead)}`,
+          changes: [{ field: 'Restarts', from: null, to: lines.join('; ') || 'Nothing right away' }],
+          ...(notes.length ? { summary: notes.join(' ') } : {}),
+          entity: { type: 'lead', id: lead.id, version: lead.updatedAt },
+        };
+      },
+      async run({ auth, refs }, input) {
+        const leadId = await refs.resolve('lead', input.lead);
+        return { resumed: true, ...(await deps.control.resume(auth, leadId, { source: 'assistant' })) };
       },
     }),
 

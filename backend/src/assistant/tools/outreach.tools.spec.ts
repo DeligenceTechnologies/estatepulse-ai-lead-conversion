@@ -76,8 +76,15 @@ function setup(opts: { lead?: Partial<typeof baseLead>; enrollments?: object[]; 
   };
   const state = { quietly: vi.fn(), record: vi.fn(async () => undefined) };
   const events = { publish: vi.fn() };
+  const control = {
+    pausePlan: vi.fn(async () => ({ lead, lines: ['The outreach strategy, from its next step', 'Sequence "Nurture 30", at step 2'], notes: ['If the lead texts, the AI still answers.'] })),
+    pause: vi.fn(async () => ({ paused: true, sequences: 1 })),
+    resumePlan: vi.fn(async () => ({ lead, lines: ['The outreach strategy goes on from its next step'], notes: ['The text the AI promised passed during the pause and is not sent.'], snapshot: null })),
+    resume: vi.fn(async () => ({ strategy: 'continued', sequences: 0, textBackRestored: false })),
+  };
   const deps = {
     prisma,
+    control,
     engine: {
       setStatus: vi.fn(async () => true),
       enroll: vi.fn(async () => undefined),
@@ -87,7 +94,6 @@ function setup(opts: { lead?: Partial<typeof baseLead>; enrollments?: object[]; 
     },
     strategies: { getStrategy: vi.fn(async () => ({ name: 'Speed to lead', steps: [{}, {}, {}, {}, {}] })) },
     followup,
-    state,
     text: {
       prisma,
       sms: { sendSms: vi.fn(async (_o: string, _t: string, text: string) => ({ id: 'tx-1', text })) },
@@ -198,29 +204,34 @@ describe('outreach_start', () => {
   });
 });
 
-describe('outreach_stop', () => {
-  it('lists what stops, including a promised callback and a sequence', async () => {
-    const s = await withLead(setup({ running: true, lead: { callbackAt: new Date('2026-11-26T15:00:00Z') }, enrollments: [{ sequence: { name: 'Nurture 30' } }] }));
-    const card = await s.tools.outreach_stop.preview(s.ctx, { lead: 'L1' });
-    expect(card.changes[0]).toEqual({ field: 'Stops', from: null, to: 'Outreach strategy, Sequence "Nurture 30", A callback the AI promised' });
-    expect(card.summary).toMatch(/AI still answers/);
+describe('outreach pause and resume', () => {
+  it('shows what the pause holds and pauses as the confirming person, from the assistant', async () => {
+    const s = await withLead(setup());
+    const card = await s.tools.outreach_pause.preview(s.ctx, { lead: 'L1', reason: 'On holiday' });
+    expect(s.deps.control.pausePlan).toHaveBeenCalledWith(owner, LEAD);
+    expect(card.changes).toEqual([
+      { field: 'Pauses', from: null, to: 'The outreach strategy, from its next step; Sequence "Nurture 30", at step 2' },
+      { field: 'Reason', from: null, to: 'On holiday' },
+    ]);
+    expect(card.summary).toBe('If the lead texts, the AI still answers. Resume it any time.');
+    expect(card.entity).toEqual({ type: 'lead', id: LEAD, version: NOON_AUSTIN });
+    await s.tools.outreach_pause.run(s.ctx, { lead: 'L1', reason: 'On holiday' });
+    expect(s.deps.control.pause).toHaveBeenCalledWith(owner, LEAD, { source: 'assistant', reason: 'On holiday' });
   });
 
-  it('pauses the lead, drops promises, stops sequences and the strategy, and logs who did it', async () => {
-    const s = await withLead(setup({ running: true }));
-    expect(await s.tools.outreach_stop.run(s.ctx, { lead: 'L1', reason: 'Working with another agent' })).toEqual({ stopped: true, sequencesStopped: 1 });
-    expect(s.tx.lead.update).toHaveBeenCalledWith({ where: { id: LEAD }, data: { automationPaused: true, callbackAt: null, textBackAt: null } });
-    expect(s.deps.followup.stopForLead).toHaveBeenCalledWith(ORG, LEAD, 'stopped_by_user', s.tx);
-    expect(s.deps.state.record).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'outreach_stopped', source: 'assistant', actor: { type: 'user', id: 'owner-1' }, reason: 'Working with another agent' }),
-      s.tx,
-    );
-    expect(s.deps.engine.stopStrategy).toHaveBeenCalledWith(ORG, LEAD, 'assistant', 'Working with another agent');
+  it('shows what a resume restarts and what it cannot bring back', async () => {
+    const s = await withLead(setup());
+    const card = await s.tools.outreach_resume.preview(s.ctx, { lead: 'L1' });
+    expect(card.changes).toEqual([{ field: 'Restarts', from: null, to: 'The outreach strategy goes on from its next step' }]);
+    expect(card.summary).toBe('The text the AI promised passed during the pause and is not sent.');
+    expect(await s.tools.outreach_resume.run(s.ctx, { lead: 'L1' })).toEqual({ resumed: true, strategy: 'continued', sequences: 0, textBackRestored: false });
+    expect(s.deps.control.resume).toHaveBeenCalledWith(owner, LEAD, { source: 'assistant' });
   });
 
-  it('refuses when nothing is left to stop', async () => {
-    const s = await withLead(setup({ lead: { automationPaused: true } }));
-    await expect(s.tools.outreach_stop.preview(s.ctx, { lead: 'L1' })).rejects.toThrow(/already stopped/);
+  it('passes on why there is nothing to pause', async () => {
+    const s = await withLead(setup());
+    s.deps.control.pausePlan.mockRejectedValueOnce(new Error('Outreach is already paused for this lead.'));
+    await expect(s.tools.outreach_pause.preview(s.ctx, { lead: 'L1' })).rejects.toThrow(/already paused/);
   });
 });
 

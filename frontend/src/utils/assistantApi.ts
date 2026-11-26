@@ -430,3 +430,25 @@ export const getLeadFlow = (id: string) => apiFetch<LeadFlow>(`/leads/${id}/flow
 /** Start the strategy now. A no-op server-side for a lead already contacted. */
 export const enrollLead = (id: string) =>
   apiFetch<{ ok: boolean }>(`/leads/${id}/enroll`, { method: 'POST', auth: true });
+
+// ---- Pausing and resuming a lead's outreach (an agent on their own leads, an admin on any) ----
+export interface LeadOutreachState {
+  paused: boolean;
+  /** Set when a person paused it; null when the system did (a reply, a takeover) or it is not paused. */
+  pausedAt: string | null;
+  pausedBy: string | null;
+  reason: string | null;
+  canControl: boolean;
+}
+/** What a pause or resume would change (lines) and what to know (notes), shown before it happens. */
+export interface OutreachPlan {
+  lines: string[];
+  notes: string[];
+}
+export const getLeadOutreach = (id: string) => apiFetch<LeadOutreachState>(`/leads/${id}/outreach`, { auth: true });
+export const getOutreachPlan = (id: string, action: 'pause' | 'resume') =>
+  apiFetch<OutreachPlan>(`/leads/${id}/outreach/${action}-plan`, { auth: true });
+export const pauseLeadOutreach = (id: string, reason?: string) =>
+  apiFetch<{ paused: true; sequences: number }>(`/leads/${id}/outreach/pause`, { method: 'POST', auth: true, body: reason ? { reason } : {} });
+export const resumeLeadOutreach = (id: string) =>
+  apiFetch<{ strategy: string; sequences: number; textBackRestored: boolean }>(`/leads/${id}/outreach/resume`, { method: 'POST', auth: true });

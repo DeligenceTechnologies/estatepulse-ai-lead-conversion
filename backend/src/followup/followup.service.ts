@@ -203,11 +203,21 @@ export class FollowupService {
     return count;
   }
 
-  async pauseForLead(orgId: string, leadId: string): Promise<void> {
-    await this.prisma.sequenceEnrollment.updateMany({
+  async pauseForLead(orgId: string, leadId: string, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<number> {
+    const { count } = await db.sequenceEnrollment.updateMany({
       where: { orgId, leadId, status: EnrollmentStatus.active },
       data: { status: EnrollmentStatus.paused, nextActionAt: null },
     });
+    return count;
+  }
+
+  /** Paused enrolments go on from their current step, which is due at `at`. */
+  async resumeForLead(orgId: string, leadId: string, at: Date, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<number> {
+    const { count } = await db.sequenceEnrollment.updateMany({
+      where: { orgId, leadId, status: EnrollmentStatus.paused },
+      data: { status: EnrollmentStatus.active, nextActionAt: at, attempts: 0, lockedBy: null, lockedAt: null },
+    });
+    return count;
   }
 
   async createSequence(orgId: string, input: CreateSequenceDto) {

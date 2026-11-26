@@ -250,13 +250,7 @@ export class EngineService implements OnModuleDestroy {
     if (callbackPending(lead)) return false;
 
     const since = lead.firstContactAt;
-    // A lead that left the strategy (stopped, or moved to follow-up or an outcome) and is back in an
-    // in-strategy status, as a reply from follow-up makes it engaged, is not in the strategy again.
-    const left = await this.prisma.leadEvent.findFirst({
-      where: { leadId, createdAt: { gte: since }, OR: [{ type: 'strategy_stopped' }, { type: 'status_changed', toStatus: { notIn: IN_STRATEGY_STATUSES } }] },
-      select: { id: true },
-    });
-    if (left) return false;
+    if (await this.leftStrategy(leadId, since)) return false;
     const [calls, texts, logged, strategy, office] = await Promise.all([
       this.prisma.call.count({ where: { orgId, leadId, createdAt: { gte: since } } }),
       // The fallback for leads from before the step log; it cannot tell the AI's chat replies from our steps.
@@ -290,6 +284,38 @@ export class EngineService implements OnModuleDestroy {
     this.logger.log(`resumed lead ${leadId} — ${remaining.length} of ${enrollment.total} step(s) left`);
     this.next(enrollment, dueAt, office, strategy.guardrails as Guardrails);
     return true;
+  }
+
+  /**
+   * A lead that left the strategy (stopped, or moved to follow-up or an outcome) and is back in an
+   * in-strategy status, as a reply from follow-up makes it engaged, is not in the strategy again.
+   */
+  private async leftStrategy(leadId: string, since: Date): Promise<boolean> {
+    const left = await this.prisma.leadEvent.findFirst({
+      where: { leadId, createdAt: { gte: since }, OR: [{ type: 'strategy_stopped' }, { type: 'status_changed', toStatus: { notIn: IN_STRATEGY_STATUSES } }] },
+      select: { id: true },
+    });
+    return left !== null;
+  }
+
+  /**
+   * Whether resume() can pick the lead's strategy up once nothing holds it back: contacted, still in
+   * a strategy status, never left it. A callback ahead only delays it; the watcher resumes after.
+   */
+  async canResume(orgId: string, leadId: string): Promise<boolean> {
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId }, select: { firstContactAt: true, status: true, dncStatus: true } });
+    if (!lead?.firstContactAt || lead.dncStatus || !IN_STRATEGY_STATUSES.includes(lead.status)) return false;
+    return !(await this.leftStrategy(leadId, lead.firstContactAt));
+  }
+
+  /**
+   * A person paused the lead's outreach: its steps stop here without leaving the strategy, so
+   * resume() carries on from the next step once the pause is lifted. Nothing is logged as stopped.
+   */
+  pauseStrategy(leadId: string): boolean {
+    const running = this.active.has(leadId);
+    this.stopFor(leadId);
+    return running;
   }
 
   /** A lead whose strategy was interrupted for longer than it could resume is parked for follow-up. */

@@ -15,6 +15,7 @@ import { LeadReviewService } from '@/lead/lead-review.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { ManualLeadService } from '@/lead/manual-lead.service';
 import { EngineService } from '@/telnyx/engine.service';
+import { OutreachControlService } from '@/telnyx/outreach-control.service';
 import { OptOutService } from '@/telnyx/opt-out.service';
 import { SmsService } from '@/telnyx/sms.service';
 import { SmsConversationService } from '@/telnyx/sms/sms-conversation.service';
@@ -52,13 +53,14 @@ export class ToolRegistry {
     followup: FollowupService,
     state: LeadStateService,
     events: EventsBus,
+    control: OutreachControlService,
   ) {
     const text: LeadTextDeps = { prisma, sms, conversations, optOuts, followup, state, events };
     const all = [
       ...leadTools({ prisma, edits, assignments, manualLeads, reviews }),
       ...historyTools(history, prisma),
       ...calendarTools({ prisma, appointments, booking, bookingSettings, leadBooking, text }),
-      ...outreachTools({ prisma, engine, strategies, followup, state, text }),
+      ...outreachTools({ prisma, engine, strategies, followup, control, text }),
     ].sort((a, b) => a.name.localeCompare(b.name));
     this.tools = new Map(all.map((t) => [t.name, t]));
     this.definitions = new Map(all.map((t) => [t.name, toDefinition(t)]));

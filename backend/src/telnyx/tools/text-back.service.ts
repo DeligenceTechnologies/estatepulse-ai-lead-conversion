@@ -128,9 +128,18 @@ export class TextBackService {
     if (count) this.state.quietly({ orgId, leadId, type: 'text_back_cancelled', source: 'sms_reply', channel: 'sms', reason: 'The lead texted again before it' });
   }
 
-  private async enqueue(data: TextBackJobData, at: Date): Promise<void> {
+  /**
+   * Puts back a text the AI promised, after a person paused the lead's outreach and resumed it
+   * before the promised time. A fresh job: the one for the same time dropped itself during the pause.
+   */
+  async restore(orgId: string, leadId: string, at: Date): Promise<void> {
+    await this.prisma.lead.update({ where: { id: leadId }, data: { textBackAt: at } });
+    await this.enqueue({ orgId, leadId, at: at.toISOString() }, at, `restored:${Date.now()}`);
+  }
+
+  private async enqueue(data: TextBackJobData, at: Date, attempt = ''): Promise<void> {
     const add = this.queue.add(TextJob.TextBack, data, {
-      jobId: `text-${sha256Hex(`text:${data.leadId}:${data.at}`).slice(0, 40)}`,
+      jobId: `text-${sha256Hex(`text:${data.leadId}:${data.at}${attempt ? `:${attempt}` : ''}`).slice(0, 40)}`,
       delay: Math.max(0, at.getTime() - Date.now()),
     });
     let timer: NodeJS.Timeout | undefined;

@@ -39,6 +39,8 @@ import { CallbackService } from './tools/callback.service';
 import { MeetingToolService } from './tools/meeting-tool.service';
 import { OutcomeService } from './tools/outcome.service';
 import { TextBackService } from './tools/text-back.service';
+import { OutreachControlController } from './outreach-control.controller';
+import { OutreachControlService } from './outreach-control.service';
 import { TextBackWorker } from './tools/text-back.worker';
 import { VoicemailController } from './voicemail/voicemail.controller';
 import { VoicemailService } from './voicemail/voicemail.service';
@@ -52,6 +54,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     LeadScoringController,
     QualificationQuestionsController,
     PortalLeadsController,
+    OutreachControlController,
     TelnyxWebhookController,
     SmsConversationController,
     VoicemailController,
@@ -61,6 +64,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     CallToolsSettingsController,
   ],
   providers: [
+    OutreachControlService,
     TelnyxCredentialsService,
     ActivityService,
     AssistantService,
@@ -97,6 +101,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
     TransferLegs,
   ],
   exports: [
+    OutreachControlService,
     CallQueue,
     OptOutService,
     CallSlots,
