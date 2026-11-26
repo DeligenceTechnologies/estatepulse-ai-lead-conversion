@@ -137,6 +137,17 @@ describe('the bulk job', () => {
     expect(gone.action.bulkStatus).toBe('stopped');
   });
 
+  it('stops when the approver may no longer use the assistant, even with every other permission', async () => {
+    const db = store({ total: 12, roles: [{ isSystem: false, permissions: ['lead.read', 'lead.update', 'assistant.bulk'] }] });
+    const { w, tool } = worker(db, async () => undefined);
+    await w.runAction(ORG, 'act-1');
+    expect(tool.bulk.runOne).not.toHaveBeenCalled();
+    expect(db.action.bulkStatus).toBe('stopped');
+    const allowed = store({ total: 12, roles: [{ isSystem: false, permissions: ['lead.read', 'lead.update', 'assistant.bulk', 'assistant.use'] }] });
+    await worker(allowed, async () => undefined).w.runAction(ORG, 'act-1');
+    expect(allowed.action.bulkStatus).toBe('done');
+  });
+
   it('does nothing for a job already finished, or one another server is running', async () => {
     for (const bulkStatus of ['done', 'running']) {
       const db = store({ bulkStatus });

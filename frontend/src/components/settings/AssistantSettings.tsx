@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, Mic, ScrollText, Sparkles, Wallet } from 'lucide-react';
+import { AlertTriangle, Loader2, Mic, ScrollText, Sparkles, Users, Wallet } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import { useAuth } from '../../context/AuthContext';
 import { messageFor } from '../../lib/api';
 import { formatDateTime } from '../../lib/datetime';
 import {
@@ -113,6 +115,8 @@ export const AssistantSettings: React.FC = () => {
         }
       />
 
+      <WhoCanUse roles={view.rolesWithAccess} />
+
       <AssistantSpend view={view} />
 
       <Section title="Monthly limit" hint="Stop the assistant for the month once this much is spent. Leave it empty to use your plan's allowance." icon={<Wallet className="w-4 h-4" />}>
@@ -166,6 +170,26 @@ export const AssistantSettings: React.FC = () => {
 
       <AssistantLog />
     </div>
+  );
+};
+
+/** Which roles may use the assistant. It is set per role on the Roles screen, so this only shows it. */
+export const WhoCanUse: React.FC<{ roles?: string[] }> = ({ roles }) => {
+  const { can } = useAuth();
+  if (!roles) return null;
+  return (
+    <Section
+      title="Who can use it"
+      hint="Roles with the “Use Ask EstatePulse” permission. Approving a change to more than 10 leads at once needs its own permission."
+      icon={<Users className="w-4 h-4" />}
+    >
+      <p className="text-sm text-slate-200">{roles.length > 0 ? roles.join(', ') : 'No role yet.'}</p>
+      {can('role.read') && (
+        <Link to="/roles" className="mt-2 inline-block text-xs font-semibold text-emerald-400 hover:underline">
+          Change in Roles &amp; Permissions
+        </Link>
+      )}
+    </Section>
   );
 };
 

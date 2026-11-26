@@ -59,8 +59,9 @@ const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && 
  * build on: you cannot edit users you cannot see. Granting any other permission
  * of a module grants its read too, and revoking read revokes the module.
  */
+/** A module's base permission, which its others need: .read, or assistant.use for Ask EstatePulse. */
 const readKeyOf = (group: PermissionGroup): string | undefined =>
-  group.permissions.find((p) => p.key.endsWith('.read'))?.key;
+  group.permissions.find((p) => p.key.endsWith('.read') || p.key === 'assistant.use')?.key;
 
 /**
  * Roles & permissions: the owner creates roles and chooses, module by module,
@@ -595,7 +596,7 @@ const PermissionGroupCard: React.FC<{
                 <div className={`text-xs font-medium ${on ? 'text-slate-100' : 'text-slate-400'}`}>{permission.label}</div>
                 <div className="text-2xs text-slate-600 font-mono truncate">
                   {permission.key}
-                  {needsRead && <span className="font-sans"> · includes view</span>}
+                  {needsRead && <span className="font-sans"> · {readKey === 'assistant.use' ? 'includes use' : 'includes view'}</span>}
                 </div>
               </div>
               <Switch checked={on} disabled={disabled} onChange={() => onToggle(permission.key)} label={permission.label} />

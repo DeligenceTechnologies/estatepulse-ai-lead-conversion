@@ -56,6 +56,19 @@ export class AssistantSettingsService {
     private readonly audit: AuditService,
   ) {}
 
+  /**
+   * The office's roles that may use the assistant (assistant.use), Owner first. Who may use it is
+   * set on the Roles screen; the Ask EstatePulse tab only shows it.
+   */
+  async rolesWithAccess(orgId: string): Promise<string[]> {
+    const roles = await this.prisma.role.findMany({
+      where: { orgId, OR: [{ isSystem: true }, { permissions: { has: PERMISSIONS.ASSISTANT_USE } }] },
+      orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
+      select: { name: true },
+    });
+    return roles.map((r) => r.name);
+  }
+
   async get(orgId: string): Promise<AssistantSettings> {
     const row = await this.prisma.organizationSetting.findUnique({ where: { orgId }, select: { assistant: true } });
     return assistantSettings(row?.assistant);

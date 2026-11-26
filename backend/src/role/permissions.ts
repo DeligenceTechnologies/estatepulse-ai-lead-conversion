@@ -23,6 +23,8 @@ export const PERMISSIONS = {
   AUTOMATION_READ: 'automation.read',
   AUTOMATION_UPDATE: 'automation.update',
 
+  /** Use Ask EstatePulse at all: the home page chat, the bar on other pages and the Activity panel. */
+  ASSISTANT_USE: 'assistant.use',
   /** Approve one Ask EstatePulse action on more than 10 leads at once. */
   ASSISTANT_BULK: 'assistant.bulk',
 
@@ -93,6 +95,15 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     permissions: [
       { key: PERMISSIONS.AUTOMATION_READ, label: 'View the AI assistant, outreach strategy and sequences' },
       { key: PERMISSIONS.AUTOMATION_UPDATE, label: 'Edit the AI assistant, outreach strategy and sequences' },
+    ],
+  },
+  {
+    // assistant.use is this module's base permission, as .read is for the others: the Roles screen
+    // adds it with assistant.bulk, and taking it away takes assistant.bulk too.
+    module: 'assistant',
+    label: 'Ask EstatePulse',
+    permissions: [
+      { key: PERMISSIONS.ASSISTANT_USE, label: 'Use Ask EstatePulse (chat, the bar on every page, Activity panel)' },
       { key: PERMISSIONS.ASSISTANT_BULK, label: 'Approve an Ask EstatePulse action on more than 10 leads at once' },
     ],
   },
@@ -117,7 +128,7 @@ export const DEFAULT_ROLES = {
     name: 'Agent',
     description: 'Works leads assigned to them.',
     isSystem: false,
-    permissions: [] as Permission[],
+    permissions: [PERMISSIONS.ASSISTANT_USE] as Permission[],
   },
 } as const;
 

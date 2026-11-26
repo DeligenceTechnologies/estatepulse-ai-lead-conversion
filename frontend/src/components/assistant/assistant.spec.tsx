@@ -102,6 +102,9 @@ describe('chat state', () => {
     expect(availabilityOf({ enabled: false, included: true, usage })).toBe('off');
     expect(availabilityOf({ enabled: true, included: false, usage })).toBe('not_in_plan');
     expect(availabilityOf({ enabled: true, included: true, usage })).toBe('ready');
+    // The user's roles lack assistant.use; an older server that does not say counts as allowed.
+    expect(availabilityOf({ enabled: true, included: true, allowed: false, usage })).toBe('no_access');
+    expect(availabilityOf({ enabled: true, included: true, allowed: true, usage })).toBe('ready');
   });
 });
 

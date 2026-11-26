@@ -151,7 +151,11 @@ export class AssistantBulkRunner implements OnApplicationBootstrap, OnModuleDest
   }
 
   private mayRun(auth: AuthContext, tool: AssistantTool, total: number): boolean {
-    return this.registry.allows(auth, tool) && (total <= TYPED_CONFIRM_ABOVE || auth.permissions.includes(PERMISSIONS.ASSISTANT_BULK));
+    return (
+      auth.permissions.includes(PERMISSIONS.ASSISTANT_USE) &&
+      this.registry.allows(auth, tool) &&
+      (total <= TYPED_CONFIRM_ABOVE || auth.permissions.includes(PERMISSIONS.ASSISTANT_BULK))
+    );
   }
 
   /** One lead: still visible to the approver, then the tool's own step. */

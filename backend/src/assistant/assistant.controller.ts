@@ -19,10 +19,13 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { EventStream } from './event-stream';
 
 /**
- * Ask EstatePulse, the in-app assistant. Open to every signed-in user: each tool checks the same permissions as the screen it stands in for.
+ * Ask EstatePulse, the in-app assistant, for users whose role has assistant.use. Each tool also checks
+ * the same permissions as the screen it stands in for. A route's own @RequirePermissions replaces the
+ * class one: the settings routes are for owners, and status answers everyone so the app knows to hide it.
  * Streaming routes answer text/event-stream; a check that fails before the stream opens answers as JSON.
  */
 @Controller('v1/assistant')
+@RequirePermissions(PERMISSIONS.ASSISTANT_USE)
 export class AssistantController {
   constructor(
     private readonly assistant: AssistantService,
@@ -40,15 +43,20 @@ export class AssistantController {
   @Get('settings')
   @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
   async getSettings(@CurrentAuth() auth: AuthContext) {
-    const [settings, usage] = await Promise.all([this.settings.get(auth.organizationId), this.usage.summary(auth.organizationId)]);
-    return { settings, usage, serverEnabled: this.config.enabled, canEdit: this.settings.canEdit(auth) };
+    const [settings, usage, rolesWithAccess] = await Promise.all([
+      this.settings.get(auth.organizationId),
+      this.usage.summary(auth.organizationId),
+      this.settings.rolesWithAccess(auth.organizationId),
+    ]);
+    return { settings, usage, rolesWithAccess, serverEnabled: this.config.enabled, canEdit: this.settings.canEdit(auth) };
   }
 
   @Put('settings')
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   async updateSettings(@CurrentAuth() auth: AuthContext, @Body() body: UpdateAssistantSettingsDto) {
     const settings = await this.settings.update(auth, body);
-    return { settings, usage: await this.usage.summary(auth.organizationId), serverEnabled: this.config.enabled, canEdit: true };
+    const [usage, rolesWithAccess] = await Promise.all([this.usage.summary(auth.organizationId), this.settings.rolesWithAccess(auth.organizationId)]);
+    return { settings, usage, rolesWithAccess, serverEnabled: this.config.enabled, canEdit: true };
   }
 
   /** Everything the assistant did in the office, for owners to review. */
@@ -59,7 +67,9 @@ export class AssistantController {
     return this.settings.log(auth, (tool) => this.registry.label(tool), cursor && !Number.isNaN(cursor.getTime()) ? cursor : undefined);
   }
 
+  /** Open to every signed-in user (an empty list replaces the class's assistant.use). */
   @Get('status')
+  @RequirePermissions()
   status(@CurrentAuth() auth: AuthContext) {
     return this.assistant.status(auth);
   }

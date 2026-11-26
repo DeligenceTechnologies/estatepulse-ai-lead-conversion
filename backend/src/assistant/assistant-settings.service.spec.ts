@@ -12,6 +12,7 @@ function setup(stored: unknown = null, actions: object[] = []) {
     organizationSetting: { findUnique: vi.fn(async () => ({ assistant: stored })) },
     assistantAction: { findMany: vi.fn(async () => actions) },
     user: { findMany: vi.fn(async () => [{ id: 'owner-1', firstName: 'Sunny', lastName: 'Patel', email: 's@x.test' }]) },
+    role: { findMany: vi.fn(async () => [{ name: 'Owner' }, { name: 'Agent' }]) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const audit = { record: vi.fn(async () => undefined) };
@@ -19,6 +20,14 @@ function setup(stored: unknown = null, actions: object[] = []) {
 }
 
 describe('assistant settings', () => {
+  it('lists the roles that may use it: the system role, and roles holding assistant.use', async () => {
+    const s = setup();
+    expect(await s.service.rolesWithAccess(ORG)).toEqual(['Owner', 'Agent']);
+    expect(s.prisma.role.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { orgId: ORG, OR: [{ isSystem: true }, { permissions: { has: 'assistant.use' } }] } }),
+    );
+  });
+
   it('defaults to on, the plan allowance and the microphone on; a bad value counts as missing', () => {
     expect(assistantSettings(null)).toEqual({ enabled: true, monthlyLimitUsd: null, voiceEnabled: true });
     expect(assistantSettings({ enabled: 'no', monthlyLimitUsd: -5, voiceEnabled: false })).toEqual({ enabled: true, monthlyLimitUsd: null, voiceEnabled: false });

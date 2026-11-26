@@ -56,6 +56,8 @@ export interface AssistantStatus {
   officeEnabled?: boolean;
   /** The office's microphone setting. */
   voiceEnabled?: boolean;
+  /** This user's roles let them use it (assistant.use). Missing from an older server means yes. */
+  allowed?: boolean;
   included: boolean;
   usage: { period: string; usedMicros: number; budgetMicros: number };
 }

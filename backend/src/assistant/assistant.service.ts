@@ -7,6 +7,7 @@ import { EntitlementService } from '@/billing/entitlements/entitlement.service';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { fullName } from '@/lead/lead-scope';
+import { PERMISSIONS } from '@/role/permissions';
 import { AssistantActionService } from './assistant-action.service';
 import { AssistantLimitsService, type TurnAbortReason } from './assistant-limits.service';
 import { AssistantOrchestrator, type Emit } from './assistant-orchestrator.service';
@@ -50,6 +51,8 @@ export class AssistantService {
     return {
       // On for this server and for this office.
       enabled: this.config.enabled && settings.enabled,
+      // This user's roles let them use it (assistant.use).
+      allowed: auth.permissions.includes(PERMISSIONS.ASSISTANT_USE),
       officeEnabled: settings.enabled,
       voiceEnabled: settings.voiceEnabled,
       included: !entitlements.enforced || entitlements.features.includes(Feature.AI_ASSISTANT),

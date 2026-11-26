@@ -59,7 +59,7 @@ export const AssistantHome: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (a.availability === 'off' || a.availability === 'not_in_plan') return <Navigate to="/dashboard" replace />;
+  if (a.availability === 'off' || a.availability === 'not_in_plan' || a.availability === 'no_access') return <Navigate to="/dashboard" replace />;
   if (a.availability === 'loading') {
     return (
       <div className="h-full flex items-center justify-center text-slate-500">

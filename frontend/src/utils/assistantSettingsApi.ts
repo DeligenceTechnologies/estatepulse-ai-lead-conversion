@@ -19,6 +19,8 @@ export interface AssistantUsage {
 export interface AssistantSettingsView {
   settings: AssistantSettings;
   usage: AssistantUsage;
+  /** The roles that may use the assistant (assistant.use), Owner first. Set on the Roles screen. */
+  rolesWithAccess?: string[];
   /** Whether the assistant is switched on for this server at all. */
   serverEnabled: boolean;
   canEdit: boolean;

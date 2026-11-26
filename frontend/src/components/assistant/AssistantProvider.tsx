@@ -25,9 +25,10 @@ export interface ChatMessage extends AssistantMessage {
 
 /**
  * Whether the assistant can be used here.
- * `off`: switched off on this server. `not_in_plan`: the office's plan does not include it.
+ * `off`: switched off on this server or for the office. `no_access`: this user's roles lack assistant.use.
+ * `not_in_plan`: the office's plan does not include it.
  */
-export type Availability = 'loading' | 'ready' | 'off' | 'not_in_plan' | 'error';
+export type Availability = 'loading' | 'ready' | 'off' | 'not_in_plan' | 'no_access' | 'error';
 
 export const DRAFT_ID = 'draft';
 
@@ -64,7 +65,7 @@ export const rememberChat = (key: string | null, threadId: string | null): void 
 };
 
 export const availabilityOf = (status: AssistantStatus | null): Availability =>
-  !status ? 'loading' : !status.enabled ? 'off' : !status.included ? 'not_in_plan' : 'ready';
+  !status ? 'loading' : !status.enabled ? 'off' : status.allowed === false ? 'no_access' : !status.included ? 'not_in_plan' : 'ready';
 
 const draft = (): ChatMessage => ({
   id: DRAFT_ID,
