@@ -163,7 +163,7 @@ export const AssistantHome: React.FC = () => {
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
               <div className="mx-auto max-w-3xl">
-                <ChatMessages messages={a.messages} busy={a.busy} onDecide={a.decide} />
+                <ChatMessages messages={a.messages} busy={a.busy} onDecide={a.decide} refs={a.refs} />
                 <div ref={endRef} />
               </div>
             </div>

@@ -3,6 +3,7 @@ import { AssistantRole } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { AssistantActionService } from './assistant-action.service';
+import { AssistantRefService, type RefLink } from './assistant-ref.service';
 import { SYSTEM_PROMPT } from './assistant.prompt';
 import { AssistantThreadService, toActionView, type ActionView } from './assistant-thread.service';
 import { AssistantUsageService } from './assistant-usage.service';
@@ -18,6 +19,8 @@ export type AssistantEvent =
   | { type: 'tool.started'; toolUseId: string; tool: string; label: string }
   | { type: 'tool.finished'; toolUseId: string; tool: string; ok: boolean }
   | { type: 'action'; action: ActionView }
+  /** Links for the leads an answer names, sent before the turn moves on. */
+  | { type: 'refs'; refs: Record<string, RefLink> }
   | { type: 'done'; awaitingConfirmation: boolean }
   | { type: 'error'; code: string; message: string };
 
@@ -33,6 +36,7 @@ export class AssistantOrchestrator {
     private readonly threads: AssistantThreadService,
     private readonly actions: AssistantActionService,
     private readonly usage: AssistantUsageService,
+    private readonly refs: AssistantRefService,
   ) {}
 
   /** Runs model and tools until the model answers, a write needs confirming, or the step limit is reached. */
@@ -69,6 +73,8 @@ export class AssistantOrchestrator {
         stopReason: turn.stop,
       });
 
+      await this.linkRefs(auth, threadId, saved.id, turn.content, emit);
+
       if (turn.stop === 'refusal') {
         emit({ type: 'error', code: 'ASSISTANT_DECLINED', message: "The assistant can't help with that request." });
         return emit({ type: 'done', awaitingConfirmation: false });
@@ -93,6 +99,22 @@ export class AssistantOrchestrator {
 
     emit({ type: 'error', code: 'ASSISTANT_STEP_LIMIT', message: 'That took too many steps. Try asking for one thing at a time.' });
     emit({ type: 'done', awaitingConfirmation: false });
+  }
+
+  /** Sends links for the leads this reply names, and counts any ref it made up. Never fails the turn. */
+  private async linkRefs(auth: AuthContext, threadId: string, messageId: string, content: ModelTurn['content'], emit: Emit): Promise<void> {
+    const text = content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
+    if (!text.includes('[')) return;
+    try {
+      const { links, madeUp } = await this.refs.inspect(auth, threadId, text);
+      if (Object.keys(links).length) emit({ type: 'refs', refs: links });
+      if (madeUp.length) {
+        this.logger.warn(`made-up refs ${madeUp.join(', ')} in thread ${threadId}, message ${messageId}`);
+        await this.usage.countMadeUpRefs(auth.organizationId, madeUp.length);
+      }
+    } catch (error) {
+      this.logger.error(`ref links for thread ${threadId}: ${(error as Error)?.message ?? String(error)}`);
+    }
   }
 
   /** Turns a failure into something the dock can show; the details stay in the server log. */

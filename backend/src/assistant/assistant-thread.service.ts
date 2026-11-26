@@ -4,6 +4,7 @@ import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
 import type { StoredBlock, StoredMessage, TokenUsage } from './providers/model-provider';
+import { AssistantRefService } from './assistant-ref.service';
 import type { ActionPreview } from './tools/tool';
 
 /** Long enough for real work; past it a fresh chat is cheaper and sharper than replaying everything. */
@@ -72,7 +73,10 @@ const textOf = (content: unknown): string =>
 
 @Injectable()
 export class AssistantThreadService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: GuardedPrisma,
+    private readonly refs: AssistantRefService,
+  ) {}
 
   create(auth: AuthContext, firstMessage: string) {
     const title = firstMessage.replace(/\s+/g, ' ').trim().slice(0, TITLE_CHARS);
@@ -129,7 +133,9 @@ export class AssistantThreadService {
       if (!text && own.length === 0) continue;
       views.push({ id: m.id, role: m.role, text, createdAt: m.createdAt, actions: own });
     }
-    return { thread, messages: views };
+    // Links for the leads the answers name; looked up now, so a lead the user can no longer see has none.
+    const { links } = await this.refs.inspect(auth, threadId, views.filter((v) => v.role === AssistantRole.assistant).map((v) => v.text));
+    return { thread, messages: views, refs: links };
   }
 
   async history(orgId: string, threadId: string): Promise<StoredMessage[]> {

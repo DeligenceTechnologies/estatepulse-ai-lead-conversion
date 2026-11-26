@@ -62,8 +62,16 @@ export interface AssistantStatus {
   usage: { period: string; usedMicros: number; budgetMicros: number };
 }
 
+/** A lead an answer names ("Maria Lopez [L1]"), for the chat to link to. */
+export interface RefLink {
+  kind: 'lead';
+  id: string;
+  name: string;
+}
+
 export type AssistantEvent =
   | { type: 'thread'; threadId: string; title: string | null }
+  | { type: 'refs'; refs: Record<string, RefLink> }
   | { type: 'text'; text: string }
   | { type: 'tool.started'; toolUseId: string; tool: string; label: string }
   | { type: 'tool.finished'; toolUseId: string; tool: string; ok: boolean }
@@ -75,7 +83,7 @@ export const assistantChatApi = {
   status: () => apiFetch<AssistantStatus>('/v1/assistant/status', { auth: true }),
   threads: () => apiFetch<AssistantThreadSummary[]>('/v1/assistant/threads', { auth: true }),
   thread: (id: string) =>
-    apiFetch<{ thread: AssistantThreadSummary; messages: AssistantMessage[] }>(`/v1/assistant/threads/${id}`, { auth: true }),
+    apiFetch<{ thread: AssistantThreadSummary; messages: AssistantMessage[]; refs?: Record<string, RefLink> }>(`/v1/assistant/threads/${id}`, { auth: true }),
   removeThread: (id: string) => apiFetch<void>(`/v1/assistant/threads/${id}`, { method: 'DELETE', auth: true }),
   stop: (threadId: string) => apiFetch<void>(`/v1/assistant/threads/${threadId}/stop`, { method: 'POST', auth: true }),
 

@@ -15,7 +15,7 @@ const asks = (...calls: { id: string; name: string }[]): ModelTurn => ({
   usage,
 });
 
-function setup(turns: ModelTurn[], opts: { proposeWrites?: boolean } = {}) {
+function setup(turns: ModelTurn[], opts: { proposeWrites?: boolean; inspect?: { links: Record<string, unknown>; madeUp: string[] } } = {}) {
   const script = [...turns];
   const provider = {
     name: 'claude' as const,
@@ -51,11 +51,12 @@ function setup(turns: ModelTurn[], opts: { proposeWrites?: boolean } = {}) {
     }),
     closeOpenCalls: vi.fn(async () => true),
   };
-  const usageService = { assertWithinBudget: vi.fn(async () => undefined), record: vi.fn(async () => undefined) };
-  const orchestrator = new AssistantOrchestrator(provider as any, registry as any, threads as any, actions as any, usageService as any);
+  const usageService = { assertWithinBudget: vi.fn(async () => undefined), record: vi.fn(async () => undefined), countMadeUpRefs: vi.fn(async () => undefined) };
+  const refs = { inspect: vi.fn(async () => opts.inspect ?? { links: {}, madeUp: [] }) };
+  const orchestrator = new AssistantOrchestrator(provider as any, registry as any, threads as any, actions as any, usageService as any, refs as any);
   const events: AssistantEvent[] = [];
   const run = (signal = new AbortController().signal) => orchestrator.run(auth, 'thread-1', (e) => events.push(e), signal);
-  return { orchestrator, provider, threads, actions, usageService, events, run };
+  return { orchestrator, provider, threads, actions, usageService, refs, events, run };
 }
 
 describe('AssistantOrchestrator', () => {
@@ -123,8 +124,32 @@ describe('AssistantOrchestrator', () => {
 
   it('refuses to run when no model is configured', async () => {
     const s = setup([answer('x')]);
-    const off = new AssistantOrchestrator(null, {} as any, {} as any, {} as any, {} as any);
+    const off = new AssistantOrchestrator(null, {} as any, {} as any, {} as any, {} as any, {} as any);
     await expect(off.run(auth, 'thread-1', () => undefined, new AbortController().signal)).rejects.toMatchObject({ code: 'ASSISTANT_DISABLED' });
     expect(s.provider.complete).not.toHaveBeenCalled();
   });
 });
+
+describe('leads named in an answer', () => {
+  it('sends their links before the turn ends, and counts refs the model made up', async () => {
+    const link = { kind: 'lead', id: 'lead-maria', name: 'Maria Lopez' };
+    const t = setup([answer('Maria Lopez [L1] is warm. Also [L9].')], { inspect: { links: { L1: link }, madeUp: ['L9'] } });
+    await t.run();
+    expect(t.refs.inspect).toHaveBeenCalledWith(auth, 'thread-1', 'Maria Lopez [L1] is warm. Also [L9].');
+    const types = t.events.map((e) => e.type);
+    expect(types.indexOf('refs')).toBeLessThan(types.indexOf('done'));
+    expect(t.events).toContainEqual({ type: 'refs', refs: { L1: link } });
+    expect(t.usageService.countMadeUpRefs).toHaveBeenCalledWith('org-1', 1);
+  });
+
+  it('skips the look-up when the answer names nothing, and a failed look-up never fails the turn', async () => {
+    const plain = setup([answer('You have 6 new leads.')]);
+    await plain.run();
+    expect(plain.refs.inspect).not.toHaveBeenCalled();
+    const broken = setup([answer('Maria Lopez [L1].')]);
+    broken.refs.inspect.mockRejectedValueOnce(new Error('db down'));
+    await broken.run();
+    expect(broken.events.at(-1)).toEqual({ type: 'done', awaitingConfirmation: false });
+  });
+});
+

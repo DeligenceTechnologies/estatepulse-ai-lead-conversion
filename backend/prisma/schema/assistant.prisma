@@ -159,6 +159,8 @@ model AssistantUsage {
   outputTokens BigInt   @default(0) @map("output_tokens")
   costMicros   BigInt   @default(0) @map("cost_micros")
   requests     Int      @default(0)
+  /// Refs answers named that their chat never issued (made up by the model), a quality alarm.
+  madeUpRefs   Int      @default(0) @map("made_up_refs")
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)

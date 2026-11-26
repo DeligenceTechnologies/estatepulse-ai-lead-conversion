@@ -5,7 +5,7 @@ import type { AssistantAction } from '../../utils/assistantChatApi';
 import { AssistantDock, dockHint } from './AssistantDock';
 import { ApprovalCard, minutesLeft } from './ApprovalCard';
 import { availabilityOf, chatStoreKey, readRememberedChat, rememberChat, upsertAction, type ChatMessage } from './AssistantProvider';
-import { blocksOf, RichText } from './RichText';
+import { blocksOf, linkRefs, RichText } from './RichText';
 import { greeting, starterPrompts, whenShort } from './starterPrompts';
 
 const assistant = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
@@ -64,6 +64,39 @@ describe('reply formatting', () => {
     const html = renderToString(<RichText text={'**3 hot leads** <script>x</script>'} />);
     expect(html).toContain('<strong class="font-semibold text-white">3 hot leads</strong>');
     expect(html).not.toContain('<script>');
+  });
+});
+
+describe('leads named in an answer', () => {
+  const maria = { kind: 'lead' as const, id: 'lead-maria', name: 'Maria Lopez' };
+  const refs = { L1: maria };
+
+  it("turns a known lead's name into a link and hides its ref", () => {
+    expect(linkRefs('Call Maria Lopez [L1] today.', refs)).toEqual(['Call ', { link: maria, label: 'Maria Lopez', bold: false }, ' today.']);
+    // First name only, bold, and bold around the ref.
+    expect(linkRefs('Maria [L1] is warm', refs)).toEqual([{ link: maria, label: 'Maria', bold: false }, ' is warm']);
+    expect(linkRefs('- **Maria Lopez** [L1], Austin', refs)).toEqual(['- ', { link: maria, label: 'Maria Lopez', bold: true }, ', Austin']);
+    expect(linkRefs('**Maria Lopez [L1]**', refs)).toEqual([{ link: maria, label: 'Maria Lopez', bold: true }]);
+  });
+
+  it('a known lead without its name before the ref gets a small link; any other ref is dropped', () => {
+    expect(linkRefs('She [L1] booked.', refs)).toEqual(['She', { icon: maria }, ' booked.']);
+    expect(linkRefs('Olivia [U1] and Priya Shah [L7].', refs)).toEqual(['Olivia', ' and Priya Shah', '.']);
+    // A word that only ends with the name is not the name.
+    expect(linkRefs('AnnaMaria [L1]', refs)).toEqual(['AnnaMaria', { icon: maria }]);
+    expect(linkRefs('No refs here, just L1 in prose.', refs)).toEqual(['No refs here, just L1 in prose.']);
+  });
+
+  it('renders the link to the lead in both shells', () => {
+    const html = renderToString(
+      <MemoryRouter>
+        <RichText text={'Maria Lopez [L1] wants a 3-bed home. [L9]'} refs={refs} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('href="/leads?lead=lead-maria"');
+    expect(html).toContain('>Maria Lopez</a>');
+    expect(html).not.toContain('[L1]');
+    expect(html).not.toContain('[L9]');
   });
 });
 

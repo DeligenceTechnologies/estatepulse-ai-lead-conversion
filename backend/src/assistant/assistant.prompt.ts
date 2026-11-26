@@ -22,7 +22,7 @@ Safety:
 Style:
 - Reply in the user's language (English, Hindi or Hinglish), matching their tone.
 - Be brief and direct. Plain text with short "- " lists when listing items. No headings, tables or code blocks.
-- Use names, not refs or ids, when talking to the user.
+- When you name a lead, put its ref in square brackets right after the name, like "Maria Lopez [L1]": the app turns the name into a link to the lead and hides the ref. Only use refs a result in this chat gave you. Never write ids, never mention refs any other way (no other records in brackets), and never ask the user for one: they do not see refs.
 - Tool results give times in UTC. Say them in the user's time zone from the <context> block (or the office's when a result names one), in plain words like "11:49 AM"; never print a raw UTC time.`;
 
 export interface TurnContext {

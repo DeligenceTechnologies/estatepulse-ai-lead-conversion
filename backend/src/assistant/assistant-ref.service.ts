@@ -2,8 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AuthContext } from '@/auth/auth.types';
 import { AppError } from '@/common/errors/app-error';
 import { TENANT_PRISMA, type GuardedPrisma } from '@/common/prisma/prisma.service';
-import { visibleLeads } from '@/lead/lead-scope';
-import { formatRef, parseRef, type RefKind, type RefTable } from './tools/refs';
+import { fullName, visibleLeads } from '@/lead/lead-scope';
+import { formatRef, parseRef, refsInAnswer, type RefKind, type RefTable } from './tools/refs';
 
 /** Two turns of one chat never run at once, so a clash on a number is rare; a few retries settle it. */
 const MAX_ATTEMPTS = 3;
@@ -25,6 +25,44 @@ export class AssistantRefService {
   forThread(auth: AuthContext, threadId: string): RefTable {
     return new ThreadRefs(this.db, auth, threadId);
   }
+
+  /**
+   * The refs that answers in this chat name in brackets: a link for each lead the user may see
+   * (the app turns its name into a link and hides the ref), and the refs this chat never issued,
+   * which the model made up. A lead the user can no longer see gets no link and is not made up.
+   */
+  async inspect(auth: AuthContext, threadId: string, texts: string | readonly string[]): Promise<{ links: Record<string, RefLink>; madeUp: string[] }> {
+    const named = refsInAnswer(typeof texts === 'string' ? texts : texts.join('\n'));
+    if (named.length === 0) return { links: {}, madeUp: [] };
+    const rows = await this.db.assistantRef.findMany({
+      where: { threadId, OR: named.map(({ kind, number }) => ({ entityType: kind, number })) },
+      select: { entityType: true, number: true, entityId: true },
+    });
+    const issued = new Map(rows.map((r) => [formatRef(r.entityType as RefKind, r.number), r]));
+    const madeUp = named.filter((n) => !issued.has(n.ref)).map((n) => n.ref);
+
+    const leadRefs = named.filter((n) => n.kind === 'lead' && issued.has(n.ref));
+    const leads = leadRefs.length
+      ? await this.db.lead.findMany({
+          where: { id: { in: leadRefs.map((n) => issued.get(n.ref)!.entityId) }, ...visibleLeads(auth) },
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+        })
+      : [];
+    const byId = new Map(leads.map((l) => [l.id, l]));
+    const links: Record<string, RefLink> = {};
+    for (const n of leadRefs) {
+      const lead = byId.get(issued.get(n.ref)!.entityId);
+      if (lead) links[n.ref] = { kind: 'lead', id: lead.id, name: fullName(lead.firstName, lead.lastName) || lead.email || lead.phone || 'Lead' };
+    }
+    return { links, madeUp };
+  }
+}
+
+/** A record an answer names, for the app to link to. Only leads for now. */
+export interface RefLink {
+  kind: 'lead';
+  id: string;
+  name: string;
 }
 
 class ThreadRefs implements RefTable {

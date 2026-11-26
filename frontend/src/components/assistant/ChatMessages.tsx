@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, CircleAlert, Loader2, Sparkles } from 'lucide-react';
 import { ApprovalCard } from './ApprovalCard';
+import type { RefLink } from '../../utils/assistantChatApi';
 import type { ChatMessage } from './AssistantProvider';
 import { RichText } from './RichText';
 
@@ -10,21 +11,24 @@ interface ChatMessagesProps {
   onDecide: (actionId: string, decision: 'confirm' | 'reject', count?: number) => void;
   /** The drop-down under the top bar: no avatars, tighter spacing. */
   compact?: boolean;
+  /** Links for the leads the answers name. */
+  refs?: Record<string, RefLink>;
 }
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, busy, onDecide, compact = false }) => (
+export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, busy, onDecide, compact = false, refs = {} }) => (
   <div className={compact ? 'space-y-3' : 'space-y-5'} aria-live="polite">
     {messages.map((m) => (
-      <Message key={m.id} message={m} busy={busy} onDecide={onDecide} compact={compact} />
+      <Message key={m.id} message={m} busy={busy} onDecide={onDecide} compact={compact} refs={refs} />
     ))}
   </div>
 );
 
-const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMessagesProps['onDecide']; compact: boolean }> = ({
+const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMessagesProps['onDecide']; compact: boolean; refs: Record<string, RefLink> }> = ({
   message,
   busy,
   onDecide,
   compact,
+  refs,
 }) => {
   if (message.role === 'user') {
     return (
@@ -61,7 +65,7 @@ const Message: React.FC<{ message: ChatMessage; busy: boolean; onDecide: ChatMes
           Thinking…
         </p>
       )}
-      {message.text && <RichText text={message.text} />}
+      {message.text && <RichText text={message.text} refs={refs} />}
       {message.actions.map((a) => (
         <ApprovalCard key={a.id} action={a} disabled={busy} onDecide={(d, count) => onDecide(a.id, d, count)} />
       ))}

@@ -8,6 +8,7 @@ import {
   type AssistantMessage,
   type AssistantStatus,
   type AssistantThreadSummary,
+  type RefLink,
 } from '../../utils/assistantChatApi';
 
 /** A tool the assistant ran while answering, shown as a line such as "Searching leads ✓". */
@@ -85,6 +86,8 @@ export interface AssistantContextValue {
   threads: AssistantThreadSummary[];
   threadId: string | null;
   messages: ChatMessage[];
+  /** Links for the leads this chat's answers name, by ref ("L1"). */
+  refs: Record<string, RefLink>;
   busy: boolean;
   error: string | null;
   /** `screen` names the page the question was asked from, so "these leads" means something. */
@@ -109,6 +112,7 @@ const OFF: AssistantContextValue = {
   threads: [],
   threadId: null,
   messages: [],
+  refs: {},
   busy: false,
   error: null,
   send: noop,
@@ -143,6 +147,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [threads, setThreads] = useState<AssistantThreadSummary[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [refs, setRefs] = useState<Record<string, RefLink>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -185,7 +190,9 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     assistantChatApi
       .thread(id)
       .then((view) => {
-        if (threadRef.current === id) setMessages(view.messages);
+        if (threadRef.current !== id) return;
+        setMessages(view.messages);
+        setRefs(view.refs ?? {});
       })
       .catch(() => {
         // Deleted, or another user's on a shared browser: start fresh without an error.
@@ -193,12 +200,15 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setThreadId(null);
         threadRef.current = null;
         setMessages([]);
+        setRefs({});
       });
   }, [ready, restoreId]);
 
   const reload = useCallback(async (id: string) => {
     const view = await assistantChatApi.thread(id);
-    if (threadRef.current === id) setMessages(view.messages);
+    if (threadRef.current !== id) return;
+    setMessages(view.messages);
+    setRefs(view.refs ?? {});
   }, []);
 
   const onEvent = useCallback((event: AssistantEvent) => {
@@ -209,6 +219,9 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         break;
       case 'text':
         setMessages((ms) => ms.map((m) => (m.id === DRAFT_ID ? { ...m, text: m.text + event.text } : m)));
+        break;
+      case 'refs':
+        setRefs((r) => ({ ...r, ...event.refs }));
         break;
       case 'tool.started':
         setMessages((ms) =>
@@ -293,6 +306,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setThreadId(id);
       threadRef.current = id;
       setMessages([]);
+      setRefs({});
       await reload(id).catch((e) => setError(messageFor(e)));
     },
     [reload],
@@ -305,6 +319,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setThreadId(null);
     threadRef.current = null;
     setMessages([]);
+    setRefs({});
   }, []);
 
   const removeThread = useCallback(
@@ -334,6 +349,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       threads,
       threadId,
       messages,
+      refs,
       busy,
       error,
       send,
@@ -346,7 +362,7 @@ export const AssistantProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       dockOpen,
       setDockOpen,
     }),
-    [availability, status, overBudget, threads, threadId, messages, busy, error, send, decide, openThread, newChat, removeThread, stop, dockOpen],
+    [availability, status, overBudget, threads, threadId, messages, refs, busy, error, send, decide, openThread, newChat, removeThread, stop, dockOpen],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

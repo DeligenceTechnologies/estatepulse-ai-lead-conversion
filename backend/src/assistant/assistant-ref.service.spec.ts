@@ -17,8 +17,10 @@ interface RefRow {
 /** assistant_refs in memory, with both unique keys enforced the way createMany's skipDuplicates does. */
 function fakeDb() {
   const rows: RefRow[] = [];
-  const matches = (r: RefRow, where: Record<string, any>) =>
-    Object.entries(where).every(([k, v]) => (v && typeof v === 'object' && 'in' in v ? v.in.includes((r as any)[k]) : (r as any)[k] === v));
+  const matches = (r: RefRow, where: Record<string, any>): boolean =>
+    Object.entries(where).every(([k, v]) =>
+      k === 'OR' ? (v as Record<string, any>[]).some((w) => matches(r, w)) : v && typeof v === 'object' && 'in' in v ? v.in.includes((r as any)[k]) : (r as any)[k] === v,
+    );
   const db = {
     rows,
     /** Rows another request writes between our read and our insert, to force a clash. */
@@ -50,7 +52,12 @@ function fakeDb() {
 function fakePrisma(opts: { gone?: string[] } = {}) {
   const visibleTo = (where: Record<string, any>, id: string) => !opts.gone?.includes(id) && (!where.assignedToId || id === 'lead-mine');
   return {
-    lead: { count: vi.fn(async ({ where }: any) => (visibleTo(where, where.id) ? 1 : 0)) },
+    lead: {
+      count: vi.fn(async ({ where }: any) => (visibleTo(where, where.id) ? 1 : 0)),
+      findMany: vi.fn(async ({ where }: any) =>
+        (where.id.in as string[]).filter((id) => visibleTo(where, id)).map((id) => ({ id, firstName: id === 'lead-mine' ? 'Maria' : 'Priya', lastName: id === 'lead-mine' ? 'Lopez' : 'Shah', email: null, phone: null })),
+      ),
+    },
     call: { count: vi.fn(async ({ where }: any) => (visibleTo(where.lead, 'lead-mine') ? 1 : 0)) },
     user: { count: vi.fn(async ({ where }: any) => (where.orgId === ORG ? 1 : 0)) },
     // Only meeting-mine passes the visibility filter (asserted below); seq-1 belongs to the office.
@@ -185,3 +192,22 @@ describe('refs: resolving', () => {
     expect(s.prisma.call.count).toHaveBeenCalledWith({ where: { id: 'call-a', orgId: ORG, lead: expect.objectContaining({ assignedToId: 'agent-1' }) } });
   });
 });
+
+describe('refs named in answers', () => {
+  it('links the leads the user can see, and lists refs the chat never issued', async () => {
+    const s = setup();
+    await s.service.forThread(owner, 'thread-1').issue('lead', ['lead-mine', 'lead-theirs']);
+    await s.service.forThread(owner, 'thread-1').issue('user', ['user-a']);
+    const got = await s.service.inspect(agent, 'thread-1', 'Maria Lopez [L1] and Priya Shah [L2], with Olivia [U1]. Also [L7] and [M3].');
+    // The agent sees only their own lead: Priya gets no link, but her ref is real, so it is not made up.
+    expect(got.links).toEqual({ L1: { kind: 'lead', id: 'lead-mine', name: 'Maria Lopez' } });
+    expect(got.madeUp).toEqual(['L7', 'M3']);
+  });
+
+  it('reads nothing when no ref is written in brackets', async () => {
+    const s = setup();
+    expect(await s.service.inspect(owner, 'thread-1', ['You have 6 new leads.', 'L1 alone is not a ref here.'])).toEqual({ links: {}, madeUp: [] });
+    expect(s.db.assistantRef.findMany).not.toHaveBeenCalled();
+  });
+});
+

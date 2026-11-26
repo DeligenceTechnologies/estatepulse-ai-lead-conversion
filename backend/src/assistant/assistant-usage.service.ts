@@ -88,6 +88,20 @@ export class AssistantUsageService {
     }
   }
 
+  /**
+   * Refs an answer named that its chat never issued: the model made them up. Counted per office per
+   * month next to the number of model replies (requests), as a quality alarm: more than 1 per 100 is bad.
+   */
+  async countMadeUpRefs(orgId: string, count: number): Promise<void> {
+    if (count <= 0) return;
+    const period = currentPeriod();
+    await this.prisma.assistantUsage.upsert({
+      where: { orgId_period: { orgId, period } },
+      create: { orgId, period, madeUpRefs: count },
+      update: { madeUpRefs: { increment: count } },
+    });
+  }
+
   async record(orgId: string, model: string, usage: TokenUsage): Promise<void> {
     const period = currentPeriod();
     const input = BigInt(usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);

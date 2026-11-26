@@ -41,6 +41,20 @@ export const callRef = refInput('call', 'call', 'from call_list');
 export const sequenceRef = refInput('sequence', 'sequence', 'from sequence_list');
 export const slotRef = refInput('slot', 'time slot', 'from meeting_slots');
 
+const KIND_OF_LETTER = Object.fromEntries(Object.entries(REF_LETTER).map(([kind, letter]) => [letter, kind])) as Record<string, RefKind>;
+/** A ref in square brackets, the way an answer writes it after a record's name: "Maria Lopez [L1]". */
+const IN_ANSWER = /\[([LUCMST])([1-9]\d{0,5})\]/g;
+
+/** The refs an answer names in brackets, each once, in the order written. */
+export function refsInAnswer(text: string): { ref: string; kind: RefKind; number: number }[] {
+  const seen = new Map<string, { ref: string; kind: RefKind; number: number }>();
+  for (const [, letter, digits] of text.matchAll(IN_ANSWER)) {
+    const ref = `${letter}${digits}`;
+    if (!seen.has(ref)) seen.set(ref, { ref, kind: KIND_OF_LETTER[letter], number: Number(digits) });
+  }
+  return [...seen.values()];
+}
+
 /** One record's ref. */
 export async function refOf(refs: RefTable, kind: RefKind, id: string): Promise<string> {
   return (await refs.issue(kind, [id])).get(id)!;
