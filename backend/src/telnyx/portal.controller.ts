@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
-import { ConsentStatus, FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
+import { FollowUpReason, LeadStatus, type Prisma } from '@prisma/client';
 import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { AppError } from '@/common/errors/app-error';
@@ -295,14 +295,7 @@ export class PortalLeadsController {
     await this.requireVisible(auth, id);
     // Started by hand, so the person is told why nothing would happen, rather than the lead quietly waiting.
     const consent = await this.prisma.lead.findFirst({ where: { id, orgId: auth.organizationId }, select: { consentStatus: true } });
-    if (consent && !mayContact(consent)) {
-      throw new AppError(
-        'CONFLICT',
-        consent.consentStatus === ConsentStatus.revoked
-          ? 'This lead withdrew consent to be contacted.'
-          : "This lead has not given consent to be contacted. Record their consent first; outreach then starts by itself.",
-      );
-    }
+    if (consent && !mayContact(consent)) throw new AppError('CONFLICT', 'This lead withdrew consent to be contacted.');
     if (!(await this.engine.canReachLeads(auth.organizationId))) {
       throw new AppError('CONFLICT', 'Connect a phone number in AI Settings before starting outreach.');
     }

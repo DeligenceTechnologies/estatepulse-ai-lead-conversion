@@ -424,15 +424,10 @@ describe('FollowupRunner consent', () => {
     );
   });
 
-  it('holds the step for a lead whose consent is pending, says why once, and looks again in an hour', async () => {
+  it('sends as usual to a lead whose consent is pending (a lead who filled in a form)', async () => {
     const s = setup([smsStep('one'), smsStep('two')], 1);
     s.prisma.lead.findUnique.mockResolvedValue({ firstName: 'Ana', phone: '+12895550100', timezone: 'UTC', status: 'follow_up', dncStatus: false, consentStatus: 'pending', automationPaused: false } as any);
     await s.execute();
-    expect(s.sms.sendSms).not.toHaveBeenCalled();
-    expect(s.followup.holdOnce).toHaveBeenCalledWith('org-1', 'lead-1', "Waiting for the lead's consent to be contacted", 'followup');
-    expect(s.prisma.sequenceEnrollment.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ nextActionAt: new Date(NOW.getTime() + 60 * 60_000) }) }),
-    );
+    expect(s.sms.sendSms).toHaveBeenCalledTimes(1);
   });
 });
-

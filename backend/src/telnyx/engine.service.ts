@@ -1,12 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, forwardRef } from '@nestjs/common';
-import { CallDisposition, CallStatus, ConsentStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
+import { CallDisposition, CallStatus, FollowUpReason, LeadStatus, type LeadTemperature, type SequenceTrigger } from '@prisma/client';
 import { AppError } from '@/common/errors/app-error';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { leadZone } from '@/common/utils/lead-timezone';
 import { TZ_RECHECK_MS, gateLine, nextLeadContactAt, quietHoursOf, type QuietHours } from '@/common/utils/quiet-hours';
 import { FollowupService } from '@/followup/followup.service';
 import { skipDaysOf, unmetCondition } from '@/followup/journey';
-import { mayContact, noConsentReason } from '@/lead/consent';
+import { CONSENT_WITHDRAWN, mayContact } from '@/lead/consent';
 import { LeadStateService, type Actor } from '@/lead/lead-state.service';
 import { INACTIVE_STATUSES, IN_STRATEGY_STATUSES, OUTCOME_STATUSES, callbackPending, textBackPending, textBackRecheckAt } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
@@ -132,8 +132,8 @@ interface Enrollment {
  * steps one after another, each waiting its own time after the step before,
  * held back during quiet hours, while a call is open and while the lead is
  * texting with the AI, and stopped the moment the lead books, opts out,
- * withdraws consent or reaches any outcome. A lead without consent is never
- * started. Enrolment is claimed in the database (first_contact_at),
+ * withdraws consent or reaches any outcome. A lead who withdrew consent is
+ * never started. Enrolment is claimed in the database (first_contact_at),
  * so only one instance ever runs a lead; in-flight leads are resumed after a
  * restart by LeadWatcherService.
  */
@@ -186,8 +186,7 @@ export class EngineService implements OnModuleDestroy {
   async enroll(orgId: string, leadId: string): Promise<void> {
     if (this.isRunning(leadId)) return;
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, orgId } });
-    // Without consent nobody is contacted: the lead stays new and unclaimed, and the watcher offers it
-    // again on every poll, so it starts by itself once its consent is recorded.
+    // A lead who withdrew consent is never started.
     if (!lead || lead.dncStatus || lead.automationPaused || !mayContact(lead)) return;
     // Not claimed and not moved to "contacting": nobody has been contacted. The
     // watcher offers the lead again on every poll, so it starts by itself once a
@@ -482,10 +481,8 @@ export class EngineService implements OnModuleDestroy {
     const lead = await this.prisma.lead.findUnique({ where: { id: e.leadId } });
     if (!lead || lead.dncStatus || lead.automationPaused || OUTCOME_STATUSES.includes(lead.status)) return this.stop(e);
     if (!mayContact(lead)) {
-      // Withdrawn: the strategy is over for this lead. Back to pending (rare): it waits, and the watcher resumes it once consent is recorded.
-      if (lead.consentStatus === ConsentStatus.revoked) {
-        this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: noConsentReason(lead.consentStatus) });
-      }
+      // Withdrawn consent ends the strategy for this lead.
+      this.state.quietly({ orgId: e.orgId, leadId: e.leadId, type: 'strategy_stopped', source: 'strategy', reason: CONSENT_WITHDRAWN });
       return this.stop(e);
     }
     if (callbackPending(lead)) {

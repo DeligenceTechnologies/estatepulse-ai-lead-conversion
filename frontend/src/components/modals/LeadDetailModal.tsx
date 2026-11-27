@@ -375,9 +375,9 @@ export const LeadDetailModal: React.FC = () => {
 
             {isLive && <OutreachPauseControl leadId={lead.id} state={outreach} onChanged={reloadOutreach} />}
 
-            {/* Only offered while the strategy has not started (a second enrol does nothing), the lead
-                has consent (none, and nothing is sent) and outreach is not paused. */}
-            {flow?.phase === 'not_started' && lead.consentStatus === 'granted' && !outreach?.paused && (
+            {/* Only offered while the strategy has not started (a second enrol does nothing), the lead has
+                not withdrawn consent, and outreach is not paused. */}
+            {flow?.phase === 'not_started' && lead.consentStatus !== 'revoked' && !outreach?.paused && (
               <Button
                 size="sm"
                 onClick={() => void startOutreach()}
@@ -471,11 +471,7 @@ export const LeadDetailModal: React.FC = () => {
             )}
             {flow.phase === 'not_started' && (
               <span className="text-slate-500">
-                {lead.consentStatus === 'revoked'
-                  ? 'Not contacted: the lead withdrew consent'
-                  : lead.consentStatus === 'pending'
-                    ? "Waiting for the lead's consent: outreach starts once it is recorded"
-                    : 'Waiting to enter the strategy'}
+                {lead.consentStatus === 'revoked' ? 'Not contacted: the lead withdrew consent' : 'Waiting to enter the strategy'}
               </span>
             )}
           </div>

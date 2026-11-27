@@ -6,7 +6,6 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { leadZone } from '@/common/utils/lead-timezone';
 import { TZ_RECHECK_MS, gateLine, nextLeadContactAt } from '@/common/utils/quiet-hours';
-import { mayContact, noConsentReason } from '@/lead/consent';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { AFTER_TEXT_BACK_MS, OUTCOME_STATUSES, TEXT_BACK_RECHECK_MS } from '@/lead/lead-status';
 import { hasUpcomingMeeting } from '@/lead/upcoming-meeting';
@@ -29,8 +28,6 @@ interface ClaimedEnrollment {
   enrolled_at: Date;
 }
 
-/** A step held for a lead's consent looks again this often. */
-const CONSENT_RECHECK_MS = 60 * 60_000;
 const MAX_ATTEMPTS = 6;
 
 /** What became of a step: done (sent, failed for good, or its call queued), due again at a time, or the enrolment ended with it. */
@@ -209,11 +206,6 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
     else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
     else if (lead.consentStatus === ConsentStatus.revoked) await this.finish(row.id, EnrollmentStatus.stopped, 'consent_revoked');
     else if (lead.automationPaused) await this.pause(row.id);
-    else if (!mayContact(lead)) {
-      // Still pending: nothing goes out, and the enrolment looks again every hour, so it carries on once consent is recorded.
-      await this.followup.holdOnce(row.organization_id, row.lead_id, noConsentReason(lead.consentStatus), 'followup');
-      await this.deferTo(row, new Date(Date.now() + CONSENT_RECHECK_MS));
-    }
     else if (OUTCOME_STATUSES.includes(lead.status)) await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`);
     // A meeting on the calendar ends the sequence whatever the status says, and the status follows it.
     else if (await hasUpcomingMeeting(this.prisma, row.organization_id, row.lead_id)) {

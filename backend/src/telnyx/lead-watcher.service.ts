@@ -58,7 +58,7 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
         distinct: ['orgId'],
       });
       for (const { orgId } of orgs) {
-        // Only leads who agreed to be contacted: one still pending is picked up by the first poll after its consent is recorded.
+        // Never a lead who withdrew consent (one typed in by hand without consent is already paused for consent review).
         const workable = { orgId, automationPaused: false, dncStatus: false, ...MAY_CONTACT };
         // Every poll, not only the first: a lead whose start failed after its claim is claimed but not
         // running. resume() skips the steps already logged and leads that left the strategy.

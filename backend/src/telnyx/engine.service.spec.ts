@@ -305,16 +305,19 @@ describe('EngineService strategy', () => {
     expect(s.queue.enqueue).toHaveBeenCalledOnce();
   });
 
-  it('never starts a lead without consent: nothing is claimed or sent, so it starts by itself once consent is recorded', async () => {
-    for (const consentStatus of ['pending', 'revoked']) {
-      const s = setup();
-      s.prisma.lead.findFirst.mockResolvedValue({ ...s.lead, consentStatus });
-      await s.engine.enroll(ORG, LEAD);
-      await vi.advanceTimersByTimeAsync(15 * MIN);
-      expect(s.prisma.lead.updateMany).not.toHaveBeenCalled();
-      expect(s.texts()).toEqual([]);
-      expect(s.engine.isRunning(LEAD)).toBe(false);
-    }
+  it('never starts a lead who withdrew consent; a pending consent (a lead who filled in a form) starts as usual', async () => {
+    const withdrawn = setup();
+    withdrawn.prisma.lead.findFirst.mockResolvedValue({ ...withdrawn.lead, consentStatus: 'revoked' });
+    await withdrawn.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(withdrawn.prisma.lead.updateMany).not.toHaveBeenCalled();
+    expect(withdrawn.texts()).toEqual([]);
+    const pending = setup();
+    pending.prisma.lead.findFirst.mockResolvedValue({ ...pending.lead, consentStatus: 'pending' });
+    pending.prisma.lead.findUnique.mockResolvedValue({ ...pending.lead, consentStatus: 'pending' });
+    await pending.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending.texts()).toEqual(['text s1']);
   });
 
   it('stops once the lead withdraws consent mid-strategy, and says why', async () => {

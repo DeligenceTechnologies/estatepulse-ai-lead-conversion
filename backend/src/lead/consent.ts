@@ -10,15 +10,15 @@ export const CONSENT_REVIEW_REASON = 'Added manually without consent to be conta
 export const AWAITING_CONSENT_REVIEW = { reviewReasons: { has: CONSENT_REVIEW_REASON } } satisfies Prisma.LeadWhereInput;
 
 /**
- * Only a lead who agreed to be contacted gets the AI's calls and texts: the outreach strategy, the
- * follow-up sequences, and a resume of either. A lead still pending waits, and joins on its own
- * once its consent is recorded; one who withdrew consent is never contacted.
+ * Who the AI may reach. A lead that came in by itself (a form, a webhook, a CRM, a sheet) filled in its
+ * own details, so a pending consent does not hold it back. A lead typed in by hand without consent is
+ * held by consent review instead (paused, CONSENT_REVIEW_REASON) until the owner records it. A lead who
+ * withdrew consent is never contacted, whichever way it came in: the strategy, sequences and resume all
+ * skip it.
  */
-export const MAY_CONTACT = { consentStatus: ConsentStatus.granted } satisfies Prisma.LeadWhereInput;
+export const MAY_CONTACT = { consentStatus: { not: ConsentStatus.revoked } } satisfies Prisma.LeadWhereInput;
 
-export const mayContact = (lead: { consentStatus: ConsentStatus }): boolean => lead.consentStatus === ConsentStatus.granted;
+export const mayContact = (lead: { consentStatus: ConsentStatus }): boolean => lead.consentStatus !== ConsentStatus.revoked;
 
-/** Why the AI does not reach a lead, in the words shown on the lead and its timeline. */
-export const noConsentReason = (status: ConsentStatus): string =>
-  status === ConsentStatus.revoked ? 'The lead withdrew consent to be contacted' : "Waiting for the lead's consent to be contacted";
-
+/** Why the AI does not reach a lead who withdrew consent, in the words shown on its timeline. */
+export const CONSENT_WITHDRAWN = 'The lead withdrew consent to be contacted';

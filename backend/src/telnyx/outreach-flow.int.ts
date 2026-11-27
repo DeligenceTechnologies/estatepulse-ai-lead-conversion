@@ -6,6 +6,8 @@ import { AuditService } from '@/audit/audit.service';
 import type { AuthContext } from '@/auth/auth.types';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { FollowupService } from '@/followup/followup.service';
+import { CONSENT_REVIEW_REASON } from '@/lead/consent';
+import { ConsentReviewService } from '@/lead/consent-review.service';
 import { LeadReviewService } from '@/lead/lead-review.service';
 import { LeadStateService } from '@/lead/lead-state.service';
 import { ActivityService } from './activity.service';
@@ -85,6 +87,7 @@ const newEngine = () => {
 const engine = newEngine();
 const control = new OutreachControlService(prisma, engine, followup, { restore: vi.fn(async () => undefined) } as never, state, audit, { publish: vi.fn() } as never);
 const review = new LeadReviewService(prisma, audit, state);
+const consentReview = new ConsentReviewService(prisma, audit, state);
 
 /** The real watcher, limited to one office: every other office in the database is invisible to it. */
 function watcherFor(e: EngineService, office: () => string = () => orgId): () => Promise<void> {
@@ -216,17 +219,22 @@ describe('outreach: new leads, pause, resume, statuses', () => {
         return `sent ${stepsOf(id)}; follow_up (no_answer); nurture active`;
       }),
 
-      scenario('New lead, consent pending', 'not contacted while pending; starts by itself once consent is recorded', async () => {
+      scenario('New lead from a form, consent pending', 'contacted as usual: the lead filled in its own details', async () => {
         const id = await lead('Pending', { consentStatus: 'pending' });
         await poll();
-        await sleep(6_000);
-        const waiting = await leadNow(id);
-        check(sent(id).length === 0, `contacted while pending: sent ${stepsOf(id)}, status ${waiting.status}`);
-        check(waiting.status === 'new' && !waiting.firstContactAt, `while pending: ${JSON.stringify(waiting)}`);
-        await prisma.lead.update({ where: { id }, data: { consentStatus: 'granted', consentAt: new Date(), consentSource: 'agent' } });
+        await waitFor(() => sent(id, 's1').length === 1, 20_000, 'first text');
+        return `sent ${stepsOf(id)}, status ${(await leadNow(id)).status}`;
+      }),
+
+      scenario('Manual lead added without consent', 'held for consent review; recording the consent starts the strategy', async () => {
+        const id = await lead('Manual', { consentStatus: 'pending', automationPaused: true, needsReview: true, reviewReasons: [CONSENT_REVIEW_REASON] });
+        await poll();
+        await sleep(4_000);
+        check(sent(id).length === 0, `contacted before consent: ${stepsOf(id)}`);
+        await consentReview.approve(orgId, admin.userId, [id]);
         await poll();
         await waitFor(() => sent(id, 's1').length === 1, 20_000, 'first text after consent');
-        return `nothing while pending; after consent: ${stepsOf(id)}, status ${(await leadNow(id)).status}`;
+        return `held, then ${stepsOf(id)} once consent was recorded (consent ${(await prisma.lead.findUniqueOrThrow({ where: { id }, select: { consentStatus: true } })).consentStatus})`;
       }),
 
       scenario('New lead, consent revoked', 'never contacted', async () => {
@@ -430,20 +438,14 @@ describe('outreach: new leads, pause, resume, statuses', () => {
         return `sent ${stepsOf(id)}`;
       }),
 
-      scenario('Resume a paused lead whose consent is pending', 'the pause lifts but nothing starts; the plan says it waits for consent', async () => {
+      scenario('Resume a paused form lead whose consent is pending', 'resume is offered and starts the strategy as usual', async () => {
         const id = await lead('PausedPending', { consentStatus: 'pending' });
         await control.pause(admin, id, { source: 'agent' });
         const page = await control.state(admin, id);
         check(page.canResume, `no resume offered: ${JSON.stringify(page)}`);
-        const plan = await control.resumePlan(admin, id);
         const resumed = await control.resume(admin, id, { source: 'agent' });
-        await poll();
-        await sleep(4_000);
-        const l = await leadNow(id);
-        check(sent(id).length === 0, `contacted: ${stepsOf(id)}`);
-        check(!l.automationPaused && resumed.strategy === 'waiting', `after resume: ${JSON.stringify(l)}, strategy ${resumed.strategy}`);
-        check(plan.notes.some((n) => n.includes('consent')), `plan notes: ${plan.notes.join(' | ')}`);
-        return `resume: ${resumed.strategy}; plan note: ${plan.notes.find((n) => n.includes('consent'))}`;
+        await waitFor(() => sent(id, 's1').length === 1, 20_000, 'first text after resume');
+        return `resume: ${resumed.strategy}, then ${stepsOf(id)}`;
       }),
 
       scenario('Meeting canceled', 'a booked lead with no other meeting goes back to follow-up (meeting canceled) and its sequence starts', async () => {
