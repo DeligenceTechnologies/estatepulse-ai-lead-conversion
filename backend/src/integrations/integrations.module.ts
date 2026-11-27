@@ -6,8 +6,10 @@ import type { IntegrationAdapter } from './adapters/adapter.interface';
 import { AirtableAdapter } from './adapters/airtable/airtable.adapter';
 import { CalComAdapter } from './adapters/cal-com/cal-com.adapter';
 import { CalendlyAdapter } from './adapters/calendly/calendly.adapter';
+import { GoogleSheetsAdapter } from './adapters/google-sheets/google-sheets.adapter';
 import { HubSpotAdapter } from './adapters/hubspot/hubspot.adapter';
 import { TallyAdapter } from './adapters/tally/tally.adapter';
+import { TypeformAdapter } from './adapters/typeform/typeform.adapter';
 import { ConnectionsController } from './connections/connections.controller';
 import { ConnectionsService } from './connections/connections.service';
 import { INTEGRATION_ADAPTERS } from './integrations.constants';
@@ -28,7 +30,7 @@ import { NangoWebhooksService } from './webhooks/webhooks.service';
  * (adapters/<provider>/) and list it here; the marketplace, connect flow,
  * sync queue and webhooks pick it up unchanged.
  */
-const ADAPTERS = [AirtableAdapter, HubSpotAdapter, TallyAdapter, CalComAdapter, CalendlyAdapter];
+const ADAPTERS = [AirtableAdapter, HubSpotAdapter, TallyAdapter, TypeformAdapter, GoogleSheetsAdapter, CalComAdapter, CalendlyAdapter];
 
 /**
  * The Integration Marketplace on Nango: catalog, connections, syncs and

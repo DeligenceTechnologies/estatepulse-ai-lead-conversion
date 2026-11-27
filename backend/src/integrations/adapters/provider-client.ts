@@ -15,13 +15,18 @@ export class ProviderClient {
     readonly nangoConnectionId: string,
   ) {}
 
-  get<T>(endpoint: string, params?: Params): Promise<T> {
+  /**
+   * `baseUrlOverride` calls another host of the same provider with the same
+   * grant (Google's userinfo for a Sheets connection). Never a host of another provider.
+   */
+  get<T>(endpoint: string, params?: Params, opts: { baseUrlOverride?: string } = {}): Promise<T> {
     return this.nango.proxy<T>({
       method: 'GET',
       endpoint,
       providerConfigKey: this.providerConfigKey,
       connectionId: this.nangoConnectionId,
       ...(params ? { params } : {}),
+      ...(opts.baseUrlOverride ? { baseUrlOverride: opts.baseUrlOverride } : {}),
       retries: 3,
     });
   }

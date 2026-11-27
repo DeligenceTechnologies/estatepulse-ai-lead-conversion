@@ -29,6 +29,8 @@ or **Needs attention**.
 | Airtable | ✓ | **Fully supported, two-way** | You pick a base and a table, check the field mapping, and the table's rows are imported as leads. Lead changes made in EstatePulse are written back to the row. |
 | HubSpot | ✓ | **Supported: contacts, two-way** | Contacts are imported as leads, and lead changes go back to the contact. Budget, bedrooms, timeline etc. can be mapped to your own contact properties. Companies and deals are not implemented yet. |
 | Tally (`tally`) | ✓ | **Supported: form submissions, one-way** | The customer pastes a Tally API key in Nango's Connect UI, picks a form, and checks which question holds the name, email, phone, budget etc. Completed submissions are imported as leads; answers to other questions become custom fields. Read-only: nothing is written back to Tally. |
+| Typeform (`typeform`) | ✓ | **Supported: form responses, one-way** | The customer signs in with Typeform (OAuth through Nango), picks a form, and checks which field holds the name, email, phone, budget etc. Contact-info blocks and hidden fields can be mapped too. Completed responses are imported as leads; other answers become custom fields. Read-only: nothing is written back to Typeform. |
+| Google Sheets (`google-sheet`) | ✓ | **Supported: sheet rows, one-way** | The customer signs in with Google (OAuth through Nango), pastes the sheet link, picks the tab, and checks which column holds the name, email, phone, budget etc. Rows with an email or phone are imported as leads; other columns become custom fields. Read-only: nothing is written back to the sheet. |
 | Cal.com (`cal-com-v2`) | ✓ | **Supported: scheduling calendar** | The customer enters their Cal.com API key in Nango's Connect UI, then picks their own calendar or a team. That account becomes the organization's calendar: availability, booking links, the AI assistant booking on live calls, and meeting sync all use it. |
 | Calendly (`calendly`) | ✓ | **Supported: scheduling calendar** | The customer signs in with Calendly (OAuth through Nango) and confirms their Calendly organization. They must be an owner or admin of it. It then works exactly like Cal.com: availability, booking links, AI booking on live calls, and meeting sync. Nango refreshes the 2-hour tokens. |
 | Cal.com (v1 / OAuth) | ✓ | Not supported | Use **Cal.com (v2)**. |
@@ -56,6 +58,8 @@ page shows it live.
    | HubSpot | OAuth 2 | `oauth crm.objects.contacts.read`, plus **`crm.objects.contacts.write`** for two-way sync and **`crm.schemas.contacts.read`** for the optional field mapping |
    | Calendly | OAuth 2 (template **"Calendly"**, provider `calendly`) | No Nango scopes. Register an OAuth app in Calendly's developer portal with Nango's callback as its redirect URL, then paste its client id and secret into Nango. Webhooks for booking updates need a paid Calendly plan; without one, meetings sync every 5 minutes. |
    | Tally | API key (template **"Tally"**, provider `tally`) | None. Each customer creates a key at tally.so → Settings → API keys (`tly-…`) and pastes it into Connect UI. The key can see what its Tally user can see. Tally allows 100 requests/minute per key; a sync reads 500 submissions per request. |
+   | Typeform | OAuth 2 (template **"Typeform"**, provider `typeform`) | `accounts:read forms:read responses:read offline`. Register an app at admin.typeform.com → Developer apps with Nango's callback as its redirect URL. `offline` is required: without it Typeform issues no refresh token, so Nango cannot renew the access token. Typeform allows 2 requests/second per account; a sync reads 1000 responses per request. |
+   | Google Sheets | OAuth 2 (template **"Google Sheets"**, provider `google-sheet`) | `https://www.googleapis.com/auth/spreadsheets.readonly openid email`. Create an OAuth client (Web application) in Google Cloud Console with Nango's callback as its redirect URL, and enable the **Google Sheets API** on the project. `spreadsheets.readonly` is a *sensitive* scope: Google's app verification is needed before customers outside your organization can connect. No Drive scope is requested (the owner pastes the link instead of browsing files). Google allows 60 reads/minute per user; a sync reads 2000 rows per request. |
 | Cal.com | API key (template **"Cal.com (v2)"**, provider `cal-com-v2`) | None. No OAuth app: each customer pastes their own Cal.com API key into Connect UI. To book for a team, the key's owner must be an owner or admin of that team. |
 
    For each OAuth provider, create an OAuth app in that provider's developer
@@ -125,6 +129,8 @@ owner switches it on; accounts connected after it is applied start with it on.
    - HubSpot starts importing right away.
    - Airtable waits for the base, table and field-map setup, then imports.
    - Tally waits for the form and question-map setup, then imports.
+   - Typeform waits for the form and field-map setup, then imports.
+   - Google Sheets waits for the sheet, tab and column-map setup, then imports.
 
 Connecting another account repeats this flow and never touches the existing accounts.
 
@@ -236,6 +242,23 @@ Airtable and HubSpot sync both ways. It is controlled per account by the **Two-w
 - **Answers.** Tally does not document the answer shape per question type, so the adapter takes a plain string/number answer as is, otherwise Tally's `formattedAnswer`, otherwise the text inside arrays/objects. Budget answers that are ranges ("50L – 75L") are not guessed as a number; they stay in the custom fields only if unmapped. File uploads, signatures and payments are not kept.
 - **Errors.** A deleted form, or one the key can no longer see (404), fails the run with "choose another form". A revoked key (401) marks the account `reauth_required`. A mapped question that was deleted just leaves that lead field empty (logged).
 - **No webhooks yet.** Submissions arrive with the manual **Sync** or the `INTEGRATION_SYNC_INTERVAL_SECONDS` timer. Tally's own webhooks could be added later for real-time leads.
+
+## Typeform
+
+- **Setup.** Choose a form, then map fields to lead fields. The setup screen is shared with Tally (`TallySetup.tsx` → `TypeformSetup`). Blocks (`group`, `contact_info`, `address`, `matrix`) are flattened into their inner fields, titled "Block · Field"; statements are skipped. Hidden fields are offered as `hidden:<name>`, so a `utm_source` on the form URL can be kept or mapped. Email and phone fields are matched automatically; others are guessed from titles. Email or phone must be mapped.
+- **What is imported.** Only completed responses (`response_type=completed`, and `submitted_at` set). Each response is one record (`typeform:<formId>`, external id = `response_id`). Responses are read newest first and paged with `before=<token>` until a short page. The quiz score, when the form has one, is kept as a custom field.
+- **Answers.** Typeform names the answer's value key in `answer.type` (`text`, `email`, `choice`, `choices`, `number`…); choice answers use the label, or the "Other" text. Budget ranges are not guessed as a number. File uploads and payments are not kept.
+- **Errors.** A deleted form, or one the account can no longer see (404), fails the run with "choose another form". A revoked grant marks the account `reauth_required`. A mapped field that was deleted just leaves that lead field empty (logged).
+- **EU data centre.** Nango's `typeform` provider calls `api.typeform.com`. Accounts on Typeform's EU data centre (`api.eu.typeform.com`) are not supported yet.
+- **No webhooks yet.** Responses arrive with the manual **Sync** or the `INTEGRATION_SYNC_INTERVAL_SECONDS` timer.
+
+## Google Sheets
+
+- **Setup.** Paste the sheet link (or its id), choose the tab, then map columns to lead fields. Row 1 is the header. Columns are identified by their header text, so moving a column keeps its mapping and renaming its header loses it. Repeated headers become "Notes (2)" and so on; blank headers are skipped. The tab is stored by its numeric `sheetId`, so renaming the tab is fine. Email or phone must be mapped.
+- **Row identity.** A sheet has no row ids, and row numbers change when the sheet is sorted or a row is inserted. So each row is keyed by its email (lowercased), else its phone (digits only): `google-sheets:<spreadsheetId>:<sheetId>`, external id `email:…` / `phone:…`. Rows with neither are skipped. If the same person appears twice on one page, the first row wins. Changing a row's email in the sheet makes it a new record (the importer still attaches it to the existing lead by phone/email).
+- **What is imported.** Values as the owner sees them (`FORMATTED_VALUE`), so a phone typed as text keeps its "+". Pages of 2000 rows until the tab's row count; blank rows mid-sheet do not end the run. Budget ranges are not guessed as a number.
+- **Errors.** 404: "check the link". 403: "share the sheet with this Google account". A deleted tab, or email and phone headers both renamed, fails the run with "check the mapping". A revoked grant marks the account `reauth_required`.
+- **Not done yet.** No write-back (it would need finding the row by its email/phone on every write, and the `spreadsheets` write scope). No real-time import: rows arrive with **Sync** or the `INTEGRATION_SYNC_INTERVAL_SECONDS` timer.
 
 ## Cal.com, Calendly and the calendar module
 

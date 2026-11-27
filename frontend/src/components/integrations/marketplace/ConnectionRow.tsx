@@ -6,8 +6,9 @@ import { integrationsApi, isSyncActive, type IntegrationConnection } from '../..
 import { Button } from '../../common/Button';
 import { AirtableSetup } from './AirtableSetup';
 import { CalendarSetup } from './CalendarSetup';
+import { GoogleSheetsSetup } from './GoogleSheetsSetup';
 import { HubSpotSetup } from './HubSpotSetup';
-import { TallySetup } from './TallySetup';
+import { TallySetup, TypeformSetup } from './TallySetup';
 import { TwoWaySyncPanel } from './TwoWaySyncPanel';
 import { ConnectionStatusBadge, describeRun, relativeTime } from './parts';
 
@@ -19,8 +20,10 @@ const SETUP_PANELS: Partial<Record<string, React.FC<{ connection: IntegrationCon
   airtable: AirtableSetup,
   'cal-com-v2': CalendarSetup,
   calendly: CalendarSetup,
+  'google-sheet': GoogleSheetsSetup,
   hubspot: HubSpotSetup,
   tally: TallySetup,
+  typeform: TypeformSetup,
 };
 
 /** One connected account, with everything that can be done to it. Other accounts of the provider are unaffected. */

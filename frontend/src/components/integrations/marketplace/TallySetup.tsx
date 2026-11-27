@@ -7,8 +7,8 @@ import { Button } from '../../common/Button';
 import { Select } from '../../common/Select';
 import { Notice } from '../../calendar/shared/ui';
 
-/** Lead fields a Tally question can fill, in the order the form shows them. Mirrors tally.mapping.ts. */
-const LEAD_FIELDS: { key: string; label: string; hint?: string }[] = [
+/** Lead fields a form question can fill, in the order the form shows them. Mirrors tally.mapping.ts and typeform.mapping.ts. */
+export const LEAD_FIELDS: { key: string; label: string; hint?: string }[] = [
   { key: 'fullName', label: 'Full name', hint: 'Split into first and last name' },
   { key: 'firstName', label: 'First name' },
   { key: 'lastName', label: 'Last name' },
@@ -51,15 +51,19 @@ const formLabel = (f: SetupResource): string => {
   return bits.length ? `${f.name} (${bits.join(', ')})` : f.name;
 };
 
-/**
- * Tally's setup: choose a form, check which question fills which lead field, save.
- * Every choice is re-validated by the server against Tally before it is stored.
- */
-export const TallySetup: React.FC<{
+type SetupProps = {
   connection: IntegrationConnection;
   onSaved: (connection: IntegrationConnection) => void;
   onCancel: () => void;
-}> = ({ connection, onSaved, onCancel }) => {
+};
+
+/**
+ * A form provider's setup (Tally, Typeform): choose a form, check which
+ * question fills which lead field, save. Both adapters expose the same
+ * resources ('forms', 'questions') and settings ({ formId, fieldMap }).
+ * Every choice is re-validated by the server against the provider before it is stored.
+ */
+const FormSetup: React.FC<SetupProps & { providerName: string }> = ({ connection, onSaved, onCancel, providerName }) => {
   const saved = connection.settings as { formId?: string; fieldMap?: Record<string, string> };
   const [forms, setForms] = useState<SetupResource[] | null>(null);
   const [questions, setQuestions] = useState<SetupResource[] | null>(null);
@@ -118,7 +122,7 @@ export const TallySetup: React.FC<{
     setError(null);
     try {
       const updated = await integrationsApi.updateSettings(connection.id, { formId, fieldMap });
-      toast.success(updated.latestRun ? 'Saved. Importing submissions from Tally now.' : 'Saved.');
+      toast.success(updated.latestRun ? `Saved. Importing submissions from ${providerName} now.` : 'Saved.');
       onSaved(updated);
     } catch (e) {
       setError(messageFor(e));
@@ -150,7 +154,7 @@ export const TallySetup: React.FC<{
             setFieldMap({});
           }}
         >
-          <option value="">{forms ? (forms.length ? 'Choose a form…' : 'No forms in this Tally account') : 'Loading forms…'}</option>
+          <option value="">{forms ? (forms.length ? 'Choose a form…' : `No forms in this ${providerName} account`) : 'Loading forms…'}</option>
           {forms?.map((f) => (
             <option key={f.id} value={f.id}>
               {formLabel(f)}
@@ -220,3 +224,6 @@ export const TallySetup: React.FC<{
     </div>
   );
 };
+
+export const TallySetup: React.FC<SetupProps> = (props) => <FormSetup {...props} providerName="Tally" />;
+export const TypeformSetup: React.FC<SetupProps> = (props) => <FormSetup {...props} providerName="Typeform" />;
