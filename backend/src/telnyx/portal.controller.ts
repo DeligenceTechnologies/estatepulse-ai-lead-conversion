@@ -20,6 +20,7 @@ import { DEFAULT_POINTS } from './lead-scoring';
 import { LeadScoringService } from './lead-scoring.service';
 import { QualificationQuestionsService } from './qualification-questions.service';
 import { StrategyStoreService, type Strategy } from './strategy-store.service';
+import { VoiceCatalogService } from './voices/voice-catalog.service';
 
 export const ASSISTANT_NOT_UPDATED = 'Saved, but the AI assistant could not be updated yet. It will be updated before the next call.';
 
@@ -118,7 +119,10 @@ function toPortalLead(r: PortalLeadRow) {
 
 @Controller('assistant')
 export class AssistantController {
-  constructor(private readonly assistant: AssistantService) {}
+  constructor(
+    private readonly assistant: AssistantService,
+    private readonly voiceCatalog: VoiceCatalogService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
@@ -133,6 +137,20 @@ export class AssistantController {
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
   async update(@CurrentAuth() auth: AuthContext, @Body() body: Record<string, unknown>) {
     return { assistant: await this.assistant.updateAssistant(auth.organizationId, body ?? {}) };
+  }
+
+  /** The voices an admin can pick from; any other voice id is a custom voice. */
+  @Get('voices')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  async voices(@CurrentAuth() auth: AuthContext) {
+    return { voices: await this.voiceCatalog.catalog(auth.organizationId) };
+  }
+
+  /** A short English sample of one card's voice, as base64 audio (made once, then cached). */
+  @Get('voices/:key/preview')
+  @RequirePermissions(PERMISSIONS.AUTOMATION_READ)
+  async voicePreview(@CurrentAuth() auth: AuthContext, @Param('key') key: string) {
+    return this.voiceCatalog.preview(auth.organizationId, key);
   }
 
   @Get('models')

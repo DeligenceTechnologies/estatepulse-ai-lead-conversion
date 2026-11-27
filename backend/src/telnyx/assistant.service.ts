@@ -10,6 +10,7 @@ import { RECORDING_NOTICE } from './recording-notice';
 import { withSmsSection } from './sms/sms-prompt';
 import { TelnyxCredentialsService, type TelnyxCreds } from './telnyx-credentials.service';
 import { callToolsSettings, withCallToolsSection } from './tools/call-tools';
+import { DEFAULT_VOICE_ID } from './voices/voice-catalog';
 
 const BASE = 'https://api.telnyx.com/v2/ai/assistants';
 
@@ -688,6 +689,8 @@ export class AssistantService {
         instructions,
         dynamic_variables: await this.memoryDefaults(orgId),
         greeting,
+        // A tested voice from the start, so live calls and voicemail sound the same.
+        voice_settings: { voice: DEFAULT_VOICE_ID },
         tools: [HANGUP_TOOL],
       };
       const res = await fetch(BASE, { method: 'POST', headers: { ...authHeaders(c.apiKey), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

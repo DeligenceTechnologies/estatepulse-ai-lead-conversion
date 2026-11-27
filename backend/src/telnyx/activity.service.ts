@@ -553,8 +553,12 @@ export class ActivityService {
     const message = await machine.ready;
     if (!message) return this.endVoicemail(ccid, false);
     const { payload, voice } = message;
+    if (!voice) this.logger.warn(`voicemail fell back to ${FALLBACK_TTS_VOICE} for org ${machine.orgId}: the assistant's voice could not be read`);
     let spoken = await this.action(ccid, machine.apiKey, 'speak', { payload, voice: voice ?? FALLBACK_TTS_VOICE });
-    if (!spoken && voice) spoken = await this.action(ccid, machine.apiKey, 'speak', { payload, voice: FALLBACK_TTS_VOICE });
+    if (!spoken && voice) {
+      this.logger.warn(`voicemail fell back to ${FALLBACK_TTS_VOICE} for org ${machine.orgId}: speak refused voice ${voice}`);
+      spoken = await this.action(ccid, machine.apiKey, 'speak', { payload, voice: FALLBACK_TTS_VOICE });
+    }
     if (!spoken) await this.endVoicemail(ccid, false);
   }
 
@@ -596,7 +600,10 @@ export class ActivityService {
 
   /** The voice the organization's assistant speaks with, for our own prompts on a call; a stock voice when it cannot be read. */
   async voiceOf(orgId: string): Promise<string> {
-    return (await this.assistants.voiceFor(orgId).catch(() => null)) ?? FALLBACK_TTS_VOICE;
+    const voice = await this.assistants.voiceFor(orgId).catch(() => null);
+    if (voice) return voice;
+    this.logger.warn(`call prompt fell back to ${FALLBACK_TTS_VOICE} for org ${orgId}: the assistant's voice could not be read`);
+    return FALLBACK_TTS_VOICE;
   }
 
   /** Stops the assistant on a live call, for a transfer: the lead is put on hold and agents are rung. */

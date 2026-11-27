@@ -281,6 +281,25 @@ describe('ActivityService call opening', () => {
       expect(actions.map((a) => a.body.voice ?? a.name)).toEqual(['Telnyx.Ultra.v1', 'AWS.Polly.Joanna-Neural']);
     });
 
+    it('logs a warning naming the voice when voicemail falls back, so a mismatched voice is visible', async () => {
+      const { service } = make();
+      const warn = vi.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      refuse = (name, body) => name === 'speak' && body.voice === 'Telnyx.Ultra.v1';
+      await attach(service);
+      await service.onMachineDetection('cc-1', 'machine');
+      await service.onGreetingEnded('cc-1');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('speak refused voice Telnyx.Ultra.v1'));
+    });
+
+    it('does not warn when the assistant voice speaks the voicemail', async () => {
+      const { service } = make();
+      const warn = vi.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      await attach(service);
+      await service.onMachineDetection('cc-1', 'machine');
+      await service.onGreetingEnded('cc-1');
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('fell back'));
+    });
+
     it('hangs up without a message when speaking fails entirely', async () => {
       const { service, state } = make({ voice: null });
       refuse = (name) => name === 'speak';

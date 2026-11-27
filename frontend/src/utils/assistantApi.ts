@@ -232,6 +232,23 @@ export const updateAssistant = (patch: AssistantPatch) =>
 export const listModels = () =>
   apiFetch<{ models: string[] }>('/assistant/models', { auth: true }).then((d) => d.models).catch(() => [] as string[]);
 
+/** A voice an admin can pick from the cards. */
+export interface CatalogVoice {
+  key: string;
+  name: string;
+  description: string;
+  gender: 'female' | 'male' | 'unknown';
+  language: string;
+  telnyxVoiceId: string;
+}
+export const listVoices = () =>
+  apiFetch<{ voices: CatalogVoice[] }>('/assistant/voices', { auth: true }).then((d) => d.voices);
+/** A short English sample of a card's voice, made by the provider's TTS once and cached by the server. */
+export const getVoicePreview = (key: string) =>
+  apiFetch<{ audio: string; contentType: string }>(`/assistant/voices/${encodeURIComponent(key)}/preview`, { auth: true });
+/** Voice ids compare without regard to case ("AWS.Polly…" and "aws.Polly…" are the same voice). */
+export const sameVoice = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+
 // ---- Tools ----
 /**
  * Replaces the assistant's own tools. Pass only the non-shared ones: shared
