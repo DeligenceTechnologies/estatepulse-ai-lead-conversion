@@ -44,7 +44,7 @@ const FIELDS = {
     dataType: 'email',
     merge: 'fill_if_empty',
     requiredGroup: 'contactable',
-    providerTypes: ['INPUT_EMAIL', 'email'],
+    providerTypes: ['INPUT_EMAIL', 'email', 'control_email'],
     synonyms: ['email', 'e mail', 'email address', 'best email', 'contact email'],
   },
   phone: {
@@ -54,7 +54,7 @@ const FIELDS = {
     dataType: 'phone',
     merge: 'fill_if_empty',
     requiredGroup: 'contactable',
-    providerTypes: ['INPUT_PHONE_NUMBER', 'phone_number'],
+    providerTypes: ['INPUT_PHONE_NUMBER', 'phone_number', 'control_phone'],
     synonyms: [
       'phone', 'phone number', 'mobile', 'cell', 'cell phone', 'best number',
       'contact number', 'number we can reach you on', 'whatsapp', 'how can we reach you',

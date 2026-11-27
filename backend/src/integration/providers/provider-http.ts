@@ -23,6 +23,10 @@ export interface ProviderHttpSpec {
   displayName: string;
   /** Anything shaped like one of this provider's credentials, for redaction. */
   tokenPattern: RegExp;
+  /** How the credential travels. Defaults to `Authorization: Bearer <key>`. */
+  authHeaders?: (apiKey: string) => Record<string, string>;
+  /** How a request body is encoded. Defaults to JSON. */
+  bodyEncoding?: 'json' | 'form';
 }
 
 /** Honouring Retry-After is the correct backstop; a token bucket would be a
@@ -77,13 +81,18 @@ export class ProviderHttpClient {
   ): Promise<T> {
     let res: Response;
     try {
+      const form = this.spec.bodyEncoding === 'form';
       res = await this.fetchFn(`${this.baseUrl}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${apiKey}`,
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(this.spec.authHeaders ? this.spec.authHeaders(apiKey) : { Authorization: `Bearer ${apiKey}` }),
+          ...(body === undefined
+            ? {}
+            : { 'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json' }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined
+          ? {}
+          : { body: form ? new URLSearchParams(body as Record<string, string>).toString() : JSON.stringify(body) }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (e) {

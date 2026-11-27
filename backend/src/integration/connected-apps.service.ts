@@ -40,6 +40,7 @@ const LABEL: Record<IntegrationProvider, string> = {
   airtable: 'Airtable',
   retell: 'Retell',
   boldtrail: 'BoldTrail',
+  jotform: 'Jotform',
 };
 
 const CALENDAR_LABEL: Record<CalendarProvider, string> = { calendly: 'Calendly', cal: 'Cal.com' };
@@ -50,6 +51,7 @@ const IMPACT: Partial<Record<IntegrationProvider, string>> = {
   google: 'New leads from Google Sheets and Forms are not being imported.',
   tally: 'New Tally form submissions are not reaching your lead sources.',
   typeform: 'New Typeform submissions are not reaching your lead sources.',
+  jotform: 'New Jotform submissions are not reaching your lead sources.',
   hubspot: 'Leads are not syncing with HubSpot.',
   boldtrail: 'Leads are not syncing with BoldTrail.',
   airtable: 'Leads are not syncing with Airtable.',

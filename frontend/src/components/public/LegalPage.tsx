@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LEGAL_ENTITY, type LegalDocument } from '../../content/legal';
-import { PublicFooter, PublicHeader } from './PublicChrome';
+import { LandingShell } from './landing/LandingShell';
 
 /**
  * One public legal document (/terms, /privacy): title, a table of contents and
- * its sections, inside the same header and footer as the home page.
+ * its sections, inside the same nav, theme and footer as the home page.
  */
 export const LegalPage: React.FC<{
   doc: LegalDocument;
@@ -31,42 +31,41 @@ export const LegalPage: React.FC<{
   }, [doc]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-on-accent">
-      <PublicHeader />
-
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
-        <div className="space-y-3">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">{doc.title}</h1>
-          <p className="text-xs text-slate-500">Last updated {LEGAL_ENTITY.lastUpdated}</p>
-          <p className="text-sm text-slate-400 leading-relaxed">{doc.intro}</p>
+    <LandingShell>
+      <main className="lp-wrap lp-legal">
+        <div className="lp-legal-head">
+          <span className="lp-eyebrow">Legal</span>
+          <h1 className="lp-h2">{doc.title}</h1>
+          <p className="lp-legal-date">Last updated {LEGAL_ENTITY.lastUpdated}</p>
+          <p className="lp-lede">{doc.intro}</p>
         </div>
 
-        <nav aria-label="On this page" className="mt-8 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6">
-          <h2 className="text-xs uppercase tracking-wider font-bold text-slate-300">On this page</h2>
-          <ol className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm text-slate-400">
+        <nav aria-label="On this page" className="lp-legal-toc">
+          <h2>On this page</h2>
+          <ol>
             {doc.sections.map((section, i) => (
               <li key={section.id}>
-                <a href={`#${section.id}`} className="hover:text-emerald-400 transition-colors">
-                  {i + 1}. {section.heading}
+                <a href={`#${section.id}`}>
+                  <span>{String(i + 1).padStart(2, '0')}</span>
+                  {section.heading}
                 </a>
               </li>
             ))}
           </ol>
         </nav>
 
-        <div className="mt-10 space-y-10">
+        <div className="lp-legal-body">
           {doc.sections.map((section, i) => (
-            <section key={section.id} id={section.id} className="scroll-mt-24 space-y-3">
-              <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                {i + 1}. {section.heading}
+            <section id={section.id} key={section.id}>
+              <h2>
+                <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                {section.heading}
               </h2>
               {section.body.map((block, b) =>
                 typeof block === 'string' ? (
-                  <p key={b} className="text-sm text-slate-400 leading-relaxed">
-                    {block}
-                  </p>
+                  <p key={b}>{block}</p>
                 ) : (
-                  <ul key={b} className="list-disc pl-5 space-y-1.5 text-sm text-slate-400 leading-relaxed marker:text-slate-600">
+                  <ul key={b}>
                     {block.map((item) => (
                       <li key={item}>{item}</li>
                     ))}
@@ -77,16 +76,10 @@ export const LegalPage: React.FC<{
           ))}
         </div>
 
-        <p className="mt-12 pt-6 border-t border-slate-800/70 text-sm text-slate-400">
-          See also our{' '}
-          <Link to={related.to} className="text-emerald-400 hover:text-emerald-300 font-medium">
-            {related.label}
-          </Link>
-          .
+        <p className="lp-legal-related">
+          See also our <Link to={related.to}>{related.label}</Link>.
         </p>
       </main>
-
-      <PublicFooter />
-    </div>
+    </LandingShell>
   );
 };

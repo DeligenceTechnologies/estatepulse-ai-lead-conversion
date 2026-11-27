@@ -138,6 +138,7 @@ enum IntegrationProvider {
   airtable
   retell
   boldtrail
+  jotform
 
   @@map("integration_provider")
 }
@@ -167,6 +168,8 @@ enum LeadSourceProvider {
   GOOGLE_FORMS
   /// A BoldTrail (kvCORE) account, read with an owner-supplied API token.
   BOLDTRAIL
+  /// A Jotform form, connected with the owner's API key like Tally and Typeform.
+  JOTFORM
 
   @@map("lead_source_provider")
 }

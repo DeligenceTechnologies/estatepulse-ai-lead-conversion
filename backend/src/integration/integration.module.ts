@@ -5,6 +5,8 @@ import { ConnectedAppsController } from './connected-apps.controller';
 import { ConnectedAppsService } from './connected-apps.service';
 import { IntegrationsController, OrgIntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
+import { JotformClient } from './providers/jotform/jotform.client';
+import { JotformProviderAdapter } from './providers/jotform/jotform.provider';
 import { FORM_PROVIDER_ADAPTERS, ProviderRegistry } from './providers/provider.registry';
 import { TallyClient } from './providers/tally/tally.client';
 import { TallyProviderAdapter } from './providers/tally/tally.provider';
@@ -30,9 +32,23 @@ import type { FormProviderAdapter } from './providers/types';
     },
     TypeformProviderAdapter,
     {
+      provide: JotformClient,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<IntegrationEnv, true>) =>
+        new JotformClient(
+          [config.get('JOTFORM_API_BASE_URL', { infer: true }), config.get('JOTFORM_EU_API_BASE_URL', { infer: true })],
+          config.get('PROVIDER_HTTP_TIMEOUT_MS', { infer: true }),
+        ),
+    },
+    JotformProviderAdapter,
+    {
       provide: FORM_PROVIDER_ADAPTERS,
-      inject: [TallyProviderAdapter, TypeformProviderAdapter],
-      useFactory: (tally: TallyProviderAdapter, typeform: TypeformProviderAdapter): FormProviderAdapter[] => [tally, typeform],
+      inject: [TallyProviderAdapter, TypeformProviderAdapter, JotformProviderAdapter],
+      useFactory: (
+        tally: TallyProviderAdapter,
+        typeform: TypeformProviderAdapter,
+        jotform: JotformProviderAdapter,
+      ): FormProviderAdapter[] => [tally, typeform, jotform],
     },
     ProviderRegistry,
     IntegrationsService,

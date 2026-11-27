@@ -50,6 +50,8 @@ export class LeadSourcesService {
         ? 'tally'
         : provider === LeadSourceProvider.TYPEFORM
           ? 'typeform'
+          : provider === LeadSourceProvider.JOTFORM
+            ? 'jotform'
           : provider === LeadSourceProvider.CUSTOM
             ? 'custom'
             : provider === LeadSourceProvider.GOOGLE_FORMS

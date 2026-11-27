@@ -49,6 +49,9 @@ import { Button, IconButton } from '../common/Button';
 
 const norm = (s: string | null | undefined) => (s ?? '').toUpperCase();
 
+/** Form providers we connect through their API with the owner's key. */
+type FormProviderCode = 'TALLY' | 'TYPEFORM' | 'JOTFORM';
+
 /** Remote states that mean submissions may be going nowhere, silently. */
 const BROKEN = ['UNINSTALLED', 'ORPHANED', 'ERROR', 'DRIFTED'];
 
@@ -154,8 +157,8 @@ export const ConnectionCards: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
-  /** The form provider whose connect flow is open ('TALLY', 'TYPEFORM'), or null. */
-  const [connect, setConnect] = useState<'TALLY' | 'TYPEFORM' | null>(null);
+  /** The form provider whose connect flow is open, or null. */
+  const [connect, setConnect] = useState<FormProviderCode | null>(null);
   /** The webhook wizard: closed, or open on a source (null source = create a new one). */
   const [webhookWizard, setWebhookWizard] = useState<{ sourceId: string | null } | null>(null);
 
@@ -280,11 +283,11 @@ export const ConnectionCards: React.FC = () => {
 
   /**
    * A form provider we hold a key for, so we install and repair the webhook.
-   * Tally and Typeform are the same card with different words. A function, not
+   * Tally, Typeform and Jotform are the same card with different words. A function, not
    * a component: a component declared here would be a new type on every render
    * and remount its rows each time.
    */
-  const formProviderCard = (code: 'TALLY' | 'TYPEFORM', title: string, empty: string) => {
+  const formProviderCard = (code: FormProviderCode, title: string, empty: string) => {
     const mine = providerSources(code);
     const conns = accounts(code);
     return (
@@ -368,7 +371,7 @@ export const ConnectionCards: React.FC = () => {
             The account is not a lead source: bases and tables are picked after connecting. */}
         <AirtableCard />
 
-        {/* Tally and Typeform — we hold the key, so we install and repair the webhook. */}
+        {/* Tally, Typeform and Jotform — we hold the key, so we install and repair the webhook. */}
         {formProviderCard(
           'TALLY',
           'Tally',
@@ -378,6 +381,11 @@ export const ConnectionCards: React.FC = () => {
           'TYPEFORM',
           'Typeform',
           'Add your Typeform token, pick your forms, and we do the rest.',
+        )}
+        {formProviderCard(
+          'JOTFORM',
+          'Jotform',
+          'Add your Jotform API key, pick your forms, and we do the rest.',
         )}
 
         {/* Website & Other Forms — sources made with the plain webhook URL before

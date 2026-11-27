@@ -22,7 +22,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'lead-sources',
     question: 'How do leads get into EstatePulse?',
     answer:
-      'You connect the forms your leads already come through, such as Tally or Typeform, or upload a CSV or Excel file. Every delivery is logged, so you can see what arrived and when.',
+      'You connect the forms your leads already come through, such as Tally, Typeform or Jotform, or upload a CSV or Excel file. Every delivery is logged, so you can see what arrived and when.',
   },
   {
     id: 'call-questions',
