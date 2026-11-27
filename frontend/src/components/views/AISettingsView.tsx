@@ -36,6 +36,9 @@ import {
   getAssistant,
   updateAssistant,
   listModels,
+  listVoices,
+  sameVoice,
+  CatalogVoice,
   getTelnyxStatus,
   listAssistants,
   attachAssistant,
@@ -65,6 +68,7 @@ import { LeadTemperatureCard } from './LeadTemperatureCard';
 import { QualificationQuestionsCard } from './QualificationQuestionsCard';
 import { InCallBookingCard } from './InCallBookingCard';
 import { VoicemailCard } from './VoicemailCard';
+import { VoicePicker } from './VoicePicker';
 import { CallToolsCard } from './CallToolsCard';
 import { LiveTransferCard } from './LiveTransferCard';
 import { TakeoverGreetingCard } from './TakeoverGreetingCard';
@@ -166,6 +170,8 @@ export const AISettingsView: React.FC = () => {
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [voice, setVoice] = useState('');
+  const [voices, setVoices] = useState<CatalogVoice[]>([]);
+  const [voicesLoading, setVoicesLoading] = useState(true);
   const [voiceSpeed, setVoiceSpeed] = useState(1);
   const [backgroundAudio, setBackgroundAudio] = useState('silence');
   const [allowInterruptions, setAllowInterruptions] = useState(true);
@@ -432,6 +438,28 @@ export const AISettingsView: React.FC = () => {
 
   const [tab, setTab] = useState<TabId>('agent');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  useEffect(() => {
+    listVoices()
+      .then(setVoices)
+      .catch(() => setVoices([]))
+      .finally(() => setVoicesLoading(false));
+  }, []);
+  // A saved voice that is not one of the cards is a custom voice, edited under Advanced: open it once so the admin sees it.
+  const customOpened = useRef(false);
+  useEffect(() => {
+    if (customOpened.current || voicesLoading || agentLoading || !voice) return;
+    customOpened.current = true;
+    if (voices.length && !voices.some((v) => sameVoice(v.telnyxVoiceId, voice))) setShowAdvanced(true);
+  }, [voices, voicesLoading, agentLoading, voice]);
+  /** Opens Advanced and brings the custom voice field into view. */
+  const showCustomVoice = () => {
+    setShowAdvanced(true);
+    requestAnimationFrame(() => {
+      const el = document.getElementById('custom-voice-id');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus();
+    });
+  };
   /** Switching tabs starts the new one from the top, under the sticky tab bar. */
   const goTab = (id: TabId) => {
     setTab(id);
@@ -796,14 +824,15 @@ export const AISettingsView: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="md:col-span-2">
               <label className="block text-slate-300 font-semibold mb-1">
-                Voice ID <span className="text-slate-500 font-normal">— from your voice library</span>
+                Voice <span className="text-slate-500 font-normal">— used on calls and voicemail</span>
               </label>
-              <input
-                type="text"
+              <VoicePicker
+                voices={voices}
                 value={voice}
-                onChange={(e) => setVoice(e.target.value)}
-                placeholder="Enter a voice ID"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+                onChange={setVoice}
+                loading={voicesLoading}
+                onShowAdvanced={showCustomVoice}
+                onPreviewFailed={() => void listVoices().then(setVoices).catch(() => undefined)}
               />
             </div>
 
@@ -995,7 +1024,7 @@ export const AISettingsView: React.FC = () => {
               <span className="text-sm font-bold text-white flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-fuchsia-400" /> Advanced voice &amp; transcription
               </span>
-              <span className="text-2xs text-slate-500 block mt-0.5">Voice clarity, expressiveness, speech-to-text model and turn timing.</span>
+              <span className="text-2xs text-slate-500 block mt-0.5">Custom voice ID, voice clarity, expressiveness, speech-to-text model and turn timing.</span>
             </span>
             <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
           </button>
@@ -1007,6 +1036,22 @@ export const AISettingsView: React.FC = () => {
             Advanced Voice
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="md:col-span-2">
+              <label htmlFor="custom-voice-id" className="block text-slate-300 font-semibold mb-1">
+                Custom voice ID <span className="text-slate-500 font-normal">— only if you have your own voice from your voice provider</span>
+              </label>
+              <input
+                id="custom-voice-id"
+                type="text"
+                value={voice}
+                onChange={(e) => setVoice(e.target.value)}
+                placeholder="e.g. ElevenLabs.eleven_multilingual_v2.<voice id>"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-2xs text-slate-500 mt-1">
+                Custom voices are not tested on voicemail. If yours can't be used there, voicemail messages use a standard voice instead.
+              </p>
+            </div>
             <div>
               <label className="block text-slate-300 font-semibold mb-1">Similarity / Clarity ({similarityBoost.toFixed(2)})</label>
               <input type="range" min={0} max={1} step={0.05} value={similarityBoost} onChange={(e) => setSimilarityBoost(Number(e.target.value))} className="w-full accent-emerald-500" />

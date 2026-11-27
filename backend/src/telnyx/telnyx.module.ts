@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { FollowupModule } from '@/followup/followup.module';
 import { ActivityService } from './activity.service';
 import { AssistantService } from './assistant.service';
+import { VoiceCatalogService } from './voices/voice-catalog.service';
 import { CallCapacityService } from './calls/call-capacity.service';
 import { CallSlots } from './calls/call-slots';
 import { CallQueue } from './calls/call.queue';
@@ -65,6 +66,7 @@ import { VoicemailService } from './voicemail/voicemail.service';
   ],
   providers: [
     OutreachControlService,
+    VoiceCatalogService,
     TelnyxCredentialsService,
     ActivityService,
     AssistantService,
