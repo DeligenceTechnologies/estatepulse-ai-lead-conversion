@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { messageFor } from '../../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { isPlanRestriction } from '../../utils/billingApi';
 import {
   createMember,
   updateMember,
@@ -128,6 +130,9 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The plan's member limit was hit: the error gets a way to the plans.
+  const [planLimited, setPlanLimited] = useState(false);
+  const navigate = useNavigate();
   /** Set once a new member is created; the form is replaced by the outcome. */
   const [created, setCreated] = useState<CreatedMember | null>(null);
 
@@ -204,6 +209,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
 
     setSaving(true);
     setError(null);
+    setPlanLimited(false);
     try {
       if (editing) {
         onSaved(await updateMember(member.id, pending));
@@ -233,6 +239,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
       setSaving(false);
     } catch (err) {
       setError(messageFor(err));
+      setPlanLimited(isPlanRestriction(err));
       setSaving(false);
     }
   };
@@ -273,7 +280,14 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
             {error && (
               <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-                <span className="text-rose-200 leading-relaxed">{error}</span>
+                <span className="text-rose-200 leading-relaxed">
+                  {error}
+                  {planLimited && (
+                    <button type="button" onClick={() => navigate('/pricing')} className="ml-1.5 font-semibold text-emerald-300 hover:underline cursor-pointer">
+                      View plans
+                    </button>
+                  )}
+                </span>
               </div>
             )}
 

@@ -8,7 +8,7 @@ import { CrmConnectionsService, type SessionIdentity } from './crm-connections.s
 import { CrmRegistry } from './crm-registry';
 import { CrmRowEditService } from './crm-row-edit.service';
 import { CrmSyncService } from './crm-sync.service';
-import { CompleteCrmOAuthDto, CrmRunsQueryDto, EditCrmContactDto } from './dto/crm.dto';
+import { CompleteCrmOAuthDto, ConnectCrmTokenDto, CrmRunsQueryDto, EditCrmContactDto } from './dto/crm.dto';
 
 const identity = (auth: AuthContext): SessionIdentity => ({
   organizationId: auth.organizationId,
@@ -17,7 +17,8 @@ const identity = (auth: AuthContext): SessionIdentity => ({
 });
 
 /**
- * Connecting a CRM and watching it sync: `/integrations/crm/hubspot/...`.
+ * Connecting a CRM and watching it sync: `/integrations/crm/:provider/...`
+ * (hubspot through OAuth, boldtrail with a pasted API token).
  *
  * The organization, user and session are never parameters: they come from the
  * authenticated session, which is also what an OAuth state is checked against.
@@ -53,7 +54,7 @@ export class CrmController {
   @RequirePermissions(PERMISSIONS.INTEGRATION_READ)
   config(@Param('provider') provider: string) {
     const adapter = this.registry.get(provider);
-    return { provider: adapter.provider, displayName: adapter.label.displayName, configured: adapter.isConfigured() };
+    return { provider: adapter.provider, displayName: adapter.label.displayName, auth: adapter.auth, configured: adapter.isConfigured() };
   }
 
   @Get('status')
@@ -76,6 +77,21 @@ export class CrmController {
     const adapter = this.registry.get(provider);
     await this.connections.complete(adapter, identity(auth), body.code, body.state);
     // The answer first, then the import: the first page must not race the response.
+    const status = await this.sync.status(adapter, auth.organizationId);
+    this.sync.nudge();
+    return status;
+  }
+
+  /**
+   * Connect with an API token, or replace the token of the account already
+   * connected. Answers with the card's status; the first import starts after.
+   */
+  @Post('token')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.INTEGRATION_UPDATE)
+  async connectToken(@CurrentAuth() auth: AuthContext, @Param('provider') provider: string, @Body() body: ConnectCrmTokenDto) {
+    const adapter = this.registry.get(provider);
+    await this.connections.connectWithToken(adapter, identity(auth), body.apiToken);
     const status = await this.sync.status(adapter, auth.organizationId);
     this.sync.nudge();
     return status;

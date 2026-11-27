@@ -22,7 +22,7 @@ import { SecretBoxService } from '@/common/service/secret-box.service';
 import { aad, sha256Hex } from '@/common/utils/crypto';
 import type { SessionIdentity } from '@/google-sheets/google-connections.service';
 import { openState, sealState } from '@/google-sheets/oauth-state';
-import { CrmApiError, type CrmAdapter, type CrmTokens } from './types';
+import { CrmApiError, type ApiTokenCrmAdapter, type CrmAccount, type CrmAdapter, type CrmTokens, type OAuthCrmAdapter } from './types';
 
 export type { SessionIdentity };
 
@@ -30,10 +30,17 @@ export type { SessionIdentity };
  * A CRM account connected to an organization: the OAuth flow, the stored grant,
  * access tokens, and disconnect.
  *
- * Where things live (see migration 20261016000002_crm_hubspot_sync):
- *  - the grant: an integrations row (provider 'hubspot'). The refresh token is
- *    sealed to (organization, row id), opened only here, and never returned,
- *    logged or put in an error. Access tokens live in process memory only.
+ * Two ways in, one stored shape:
+ *  - OAuth (HubSpot): start() + complete(). The stored secret is the refresh
+ *    token; access tokens live in process memory only.
+ *  - API token (BoldTrail): connectWithToken(). The owner pastes a token
+ *    generated in the CRM; it is the stored secret and the bearer token at once.
+ *
+ * Where things live (see migrations 20261016000002_crm_hubspot_sync and
+ * 20261124000002_boldtrail_connection):
+ *  - the grant: an integrations row (provider 'hubspot' / 'boldtrail'). The
+ *    secret is sealed to (organization, row id), opened only here, and never
+ *    returned, logged or put in an error.
  *  - the connection's import: lead_sources (connection_method 'SYNC',
  *    external_form_id = the CRM account id). Its leads point at it.
  *  - an authorization in flight: a sealed state, as for Google, single-use.
@@ -52,23 +59,42 @@ const EARLY_REFRESH_MS = 5 * 60 * 1000;
 /** The integrations.provider value a CRM adapter's grant is stored under. */
 export function integrationProviderOf(adapter: CrmAdapter): IntegrationProvider {
   if (adapter.provider === LeadSourceProvider.HUBSPOT) return IntegrationProvider.hubspot;
+  if (adapter.provider === LeadSourceProvider.BOLDTRAIL) return IntegrationProvider.boldtrail;
   throw new Error(`No integration provider for CRM ${adapter.provider}`);
 }
 
 /** The lead_sources.provider value of a CRM adapter's import. */
 export function sourceProviderOf(adapter: CrmAdapter): LeadSourceProvider {
   if (adapter.provider === LeadSourceProvider.HUBSPOT) return LeadSourceProvider.HUBSPOT;
+  if (adapter.provider === LeadSourceProvider.BOLDTRAIL) return LeadSourceProvider.BOLDTRAIL;
   throw new Error(`No lead source provider for CRM ${adapter.provider}`);
 }
 
 /** A 403 REAUTH is the CRM refusing a scope it was not granted; anything else is a dead grant. */
 const reauthCode = (e: CrmApiError) => (e.status === 403 ? 'CRM_SCOPE_NOT_GRANTED' : 'CRM_REAUTH_REQUIRED');
 
+/** Refused before anything is stored: this CRM connects the other way. */
+function oauthOnly(adapter: CrmAdapter): asserts adapter is OAuthCrmAdapter {
+  if (adapter.auth !== 'oauth') {
+    throw httpError(400, 'CRM_USES_API_TOKEN', `${adapter.label.displayName} connects with an API token, not a sign-in window.`);
+  }
+}
+
+/** How a saved connection is described in integrations.credential_preview: never enough of a secret to use. */
+const tokenPreview = (token: string) => `••••${token.slice(-4)}`;
+
 /** Thrown inside the connect transaction so the caller can hand back what the CRM just issued. */
 class AccountConflict extends Error {
   constructor(readonly accountName: string | null) {
     super('account conflict');
   }
+}
+
+export interface SavedConnection {
+  credentialId: string;
+  sourceId: string;
+  runId: string | null;
+  reconnected: boolean;
 }
 
 /** Selected so the ciphertext can never ride along into a DTO by accident. */
@@ -107,6 +133,7 @@ export class CrmConnectionsService {
   // -------------------------------------------------------------------------
 
   start(adapter: CrmAdapter, who: SessionIdentity): { authorizeUrl: string; state: string } {
+    oauthOnly(adapter);
     if (!adapter.isConfigured()) {
       throw httpError(400, 'CRM_NOT_CONFIGURED', `${adapter.label.displayName} is not configured on this server. Set its client id and secret.`);
     }
@@ -116,6 +143,7 @@ export class CrmConnectionsService {
 
   /** Finish an authorization on the session that started it, once. */
   async complete(adapter: CrmAdapter, who: SessionIdentity, code: string, state: string) {
+    oauthOnly(adapter);
     this.consumeState(adapter, who, state);
 
     let tokens: CrmTokens;
@@ -154,143 +182,215 @@ export class CrmConnectionsService {
       );
     }
 
-    const integrationProvider = integrationProviderOf(adapter);
-    const sourceProvider = sourceProviderOf(adapter);
-    let result: { credentialId: string; sourceId: string; runId: string | null; reconnected: boolean };
+    let result: SavedConnection;
     try {
-      result = await this.prisma.$transaction(async (tx) => {
-        // Serialises completions for one organization: two tabs finishing at once must not both pass the one-account check.
-        await lockOrganization(tx, who.organizationId);
-
-        const live = await tx.integration.findMany({
-          where: { orgId: who.organizationId, provider: integrationProvider, revokedAt: null },
-          select: { id: true, externalAccountId: true, accountName: true },
-        });
-        const other = live.find((c) => c.externalAccountId !== account.externalAccountId);
-        if (other) throw new AccountConflict(other.accountName);
-        const existing = live.find((c) => c.externalAccountId === account.externalAccountId);
-
-        // The id exists before sealing: the AAD binds the ciphertext to its row.
-        const credentialId = existing?.id ?? randomUUID();
-        const data = {
-          credentials: this.secrets.seal(refreshToken, aad.integration(who.organizationId, credentialId)),
-          credentialHash: sha256Hex(refreshToken),
-          credentialPreview: 'oauth',
-          label: account.accountName ?? account.externalAccountId,
-          accountName: account.accountName,
-          accountEmail: account.userEmail,
-          externalAccountId: account.externalAccountId,
-          status: IntegrationStatus.active,
-          lastVerifiedAt: new Date(),
-          lastErrorAt: null,
-          lastErrorCode: null,
-        };
-        if (existing) await tx.integration.update({ where: { id: credentialId }, data });
-        else await tx.integration.create({ data: { id: credentialId, orgId: who.organizationId, provider: integrationProvider, ...data } });
-
-        // The import source for this account: reused on a reconnect, so its tracked records — and their leads — carry on.
-        const name = `${adapter.label.displayName} · ${account.accountName ?? account.externalAccountId}`.slice(0, 100);
-        const prior = await tx.leadSource.findFirst({
-          where: {
-            orgId: who.organizationId,
-            provider: sourceProvider,
-            connectionMethod: ConnectionMethod.SYNC,
-            externalFormId: account.externalAccountId,
-            archivedAt: null,
-          },
-          select: { id: true, remoteSyncedAt: true },
-        });
-        const sourceId = prior?.id ?? randomUUID();
-        const sourceState = {
-          integrationId: credentialId,
-          isActive: true,
-          ingestStatus: IngestStatus.ACTIVE,
-          mappingStatus: MappingStatus.CONFIGURED,
-          externalFormName: account.accountName,
-          remoteErrorCode: null,
-          remoteErrorMessage: null,
-          syncFailures: 0,
-        };
-        if (prior) {
-          await tx.leadSource.update({ where: { id: sourceId }, data: { ...sourceState, name } });
-        } else {
-          await tx.leadSource.create({
-            data: {
-              id: sourceId,
-              orgId: who.organizationId,
-              name,
-              code: `${adapter.provider.toLowerCase()}-${account.externalAccountId}`.slice(0, 50),
-              provider: sourceProvider,
-              connectionMethod: ConnectionMethod.SYNC,
-              externalFormId: account.externalAccountId,
-              // Never from the CRM: no consent basis is asserted for imported contacts.
-              defaultConsentStatus: ConsentStatus.pending,
-              ...sourceState,
-            },
-          });
-        }
-
-        // The first import, or on a reconnect a complete re-read. Never a second one: the partial unique index makes a duplicate a no-op.
-        const runId = randomUUID();
-        const queued = await tx.crmSyncRun.createMany({
-          data: [
-            {
-              id: runId,
-              orgId: who.organizationId,
-              leadSourceId: sourceId,
-              provider: sourceProvider,
-              kind: prior?.remoteSyncedAt ? CrmSyncRunKind.full : CrmSyncRunKind.initial,
-              requestedBy: who.userId,
-            },
-          ],
-          skipDuplicates: true,
-        });
-
-        await this.audit.record(
-          {
-            orgId: who.organizationId,
-            actorType: 'user',
-            actorId: who.userId,
-            action: existing || prior ? 'crm.reconnected' : 'crm.connected',
-            entityType: 'integration',
-            entityId: credentialId,
-            payload: {
-              provider: adapter.provider,
-              accountId: account.externalAccountId,
-              accountName: account.accountName,
-              authorizedBy: account.userEmail,
-              scopes: [...granted].sort(),
-              leadSourceId: sourceId,
-              runId: queued.count ? runId : null,
-            },
-          },
-          tx,
-        );
-        return { credentialId, sourceId, runId: queued.count ? runId : null, reconnected: Boolean(existing || prior) };
-      }, TX_LIMITS);
+      result = await this.saveConnection(adapter, who, {
+        secret: refreshToken,
+        preview: 'oauth',
+        account,
+        scopes: [...granted].sort(),
+        config: {},
+      });
     } catch (e) {
-      if (e instanceof AccountConflict) {
-        throw await refuse(
-          409,
-          'CRM_ACCOUNT_CONFLICT',
-          `This organization is already connected to ${e.accountName ?? `another ${adapter.label.displayName} account`}. Disconnect it first to use a different account.`,
-        );
-      }
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        // integrations_hubspot_account_live: this CRM account is live in another organization. Which one is not said.
-        throw await refuse(
-          409,
-          'CRM_ACCOUNT_IN_USE',
-          `This ${adapter.label.displayName} account is already connected to another EstatePulse organization. It must be disconnected there first.`,
-        );
-      }
+      const refused = this.connectRefusal(adapter, e);
       await this.revokeUnlessLive(adapter, refreshToken);
-      throw e;
+      throw refused ?? e;
     }
 
     this.accessTokens.set(result.credentialId, { token: tokens.accessToken, expiresAt: Date.now() + tokens.expiresIn * 1000 });
     this.logger.log(`${adapter.provider} connected for organization ${who.organizationId} (credential ${result.credentialId})`);
     return result;
+  }
+
+  /**
+   * Connect (or re-key) a CRM that uses a pasted API token. The token is
+   * checked against the CRM first, so a typo or a token without contact
+   * access is refused before anything is stored. Pasting a new token for the
+   * account already connected replaces the old one in place (yearly rotation),
+   * and the sync carries on with the same leads.
+   */
+  async connectWithToken(adapter: CrmAdapter, who: SessionIdentity, rawToken: string): Promise<SavedConnection> {
+    if (adapter.auth !== 'api_token') {
+      throw httpError(400, 'CRM_USES_OAUTH', `${adapter.label.displayName} connects through its sign-in window, not an API token.`);
+    }
+    const name = adapter.label.displayName;
+    const token = rawToken.trim();
+
+    let account;
+    try {
+      account = await adapter.verifyToken(token);
+    } catch (e) {
+      if (e instanceof CrmApiError && (e.kind === 'REAUTH' || e.kind === 'UNAUTHORIZED' || e.kind === 'FORBIDDEN')) {
+        throw httpError(
+          400,
+          'CRM_TOKEN_REJECTED',
+          `${name} did not accept this API token. Check it was copied in full, has not expired, and was generated with Contacts access.`,
+        );
+      }
+      throw this.toHttp(adapter, e);
+    }
+
+    let result: SavedConnection;
+    try {
+      result = await this.saveConnection(adapter, who, {
+        secret: token,
+        preview: tokenPreview(token),
+        account,
+        scopes: [...account.scopes].sort(),
+        config: { tokenExpiresAt: account.expiresAt?.toISOString() ?? null },
+      });
+    } catch (e) {
+      throw this.connectRefusal(adapter, e) ?? e;
+    }
+    this.logger.log(`${adapter.provider} connected for organization ${who.organizationId} (credential ${result.credentialId})`);
+    return result;
+  }
+
+  /**
+   * Stores a verified grant and its import source, and queues the first import
+   * (or, on a reconnect, a complete re-read), in one transaction. Throws
+   * AccountConflict or a unique violation for connectRefusal to word.
+   */
+  private async saveConnection(
+    adapter: CrmAdapter,
+    who: SessionIdentity,
+    grant: { secret: string; preview: string; account: CrmAccount; scopes: string[]; config: Prisma.InputJsonObject },
+  ): Promise<SavedConnection> {
+    const integrationProvider = integrationProviderOf(adapter);
+    const sourceProvider = sourceProviderOf(adapter);
+    const { account } = grant;
+    return this.prisma.$transaction(async (tx) => {
+      // Serialises completions for one organization: two tabs finishing at once must not both pass the one-account check.
+      await lockOrganization(tx, who.organizationId);
+
+      const live = await tx.integration.findMany({
+        where: { orgId: who.organizationId, provider: integrationProvider, revokedAt: null },
+        select: { id: true, externalAccountId: true, accountName: true },
+      });
+      const other = live.find((c) => c.externalAccountId !== account.externalAccountId);
+      if (other) throw new AccountConflict(other.accountName);
+      const existing = live.find((c) => c.externalAccountId === account.externalAccountId);
+
+      // The id exists before sealing: the AAD binds the ciphertext to its row.
+      const credentialId = existing?.id ?? randomUUID();
+      const data = {
+        credentials: this.secrets.seal(grant.secret, aad.integration(who.organizationId, credentialId)),
+        credentialHash: sha256Hex(grant.secret),
+        credentialPreview: grant.preview,
+        config: grant.config,
+        label: account.accountName ?? account.externalAccountId,
+        accountName: account.accountName,
+        accountEmail: account.userEmail,
+        externalAccountId: account.externalAccountId,
+        status: IntegrationStatus.active,
+        lastVerifiedAt: new Date(),
+        lastErrorAt: null,
+        lastErrorCode: null,
+      };
+      if (existing) await tx.integration.update({ where: { id: credentialId }, data });
+      else await tx.integration.create({ data: { id: credentialId, orgId: who.organizationId, provider: integrationProvider, ...data } });
+
+      // The import source for this account: reused on a reconnect, so its tracked records — and their leads — carry on.
+      const name = `${adapter.label.displayName} · ${account.accountName ?? account.externalAccountId}`.slice(0, 100);
+      const prior = await tx.leadSource.findFirst({
+        where: {
+          orgId: who.organizationId,
+          provider: sourceProvider,
+          connectionMethod: ConnectionMethod.SYNC,
+          externalFormId: account.externalAccountId,
+          archivedAt: null,
+        },
+        select: { id: true, remoteSyncedAt: true },
+      });
+      const sourceId = prior?.id ?? randomUUID();
+      const sourceState = {
+        integrationId: credentialId,
+        isActive: true,
+        ingestStatus: IngestStatus.ACTIVE,
+        mappingStatus: MappingStatus.CONFIGURED,
+        externalFormName: account.accountName,
+        remoteErrorCode: null,
+        remoteErrorMessage: null,
+        syncFailures: 0,
+      };
+      if (prior) {
+        await tx.leadSource.update({ where: { id: sourceId }, data: { ...sourceState, name } });
+      } else {
+        await tx.leadSource.create({
+          data: {
+            id: sourceId,
+            orgId: who.organizationId,
+            name,
+            code: `${adapter.provider.toLowerCase()}-${account.externalAccountId}`.slice(0, 50),
+            provider: sourceProvider,
+            connectionMethod: ConnectionMethod.SYNC,
+            externalFormId: account.externalAccountId,
+            // Never from the CRM: no consent basis is asserted for imported contacts.
+            defaultConsentStatus: ConsentStatus.pending,
+            ...sourceState,
+          },
+        });
+      }
+
+      // The first import, or on a reconnect a complete re-read. Never a second one: the partial unique index makes a duplicate a no-op.
+      const runId = randomUUID();
+      const queued = await tx.crmSyncRun.createMany({
+        data: [
+          {
+            id: runId,
+            orgId: who.organizationId,
+            leadSourceId: sourceId,
+            provider: sourceProvider,
+            kind: prior?.remoteSyncedAt ? CrmSyncRunKind.full : CrmSyncRunKind.initial,
+            requestedBy: who.userId,
+          },
+        ],
+        skipDuplicates: true,
+      });
+
+      await this.audit.record(
+        {
+          orgId: who.organizationId,
+          actorType: 'user',
+          actorId: who.userId,
+          action: existing || prior ? 'crm.reconnected' : 'crm.connected',
+          entityType: 'integration',
+          entityId: credentialId,
+          payload: {
+            provider: adapter.provider,
+            accountId: account.externalAccountId,
+            accountName: account.accountName,
+            authorizedBy: account.userEmail,
+            scopes: grant.scopes,
+            leadSourceId: sourceId,
+            runId: queued.count ? runId : null,
+          },
+        },
+        tx,
+      );
+      return { credentialId, sourceId, runId: queued.count ? runId : null, reconnected: Boolean(existing || prior) };
+    }, TX_LIMITS);
+  }
+
+  /** The owner-facing refusal for a connect that hit one of the one-account policies, or null for anything else. */
+  private connectRefusal(adapter: CrmAdapter, e: unknown): unknown {
+    const name = adapter.label.displayName;
+    if (e instanceof AccountConflict) {
+      return httpError(
+        409,
+        'CRM_ACCOUNT_CONFLICT',
+        `This organization is already connected to ${e.accountName ?? `another ${name} account`}. Disconnect it first to use a different account.`,
+      );
+    }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      // integrations_<crm>_account_live: this CRM account is live in another organization. Which one is not said.
+      return httpError(
+        409,
+        'CRM_ACCOUNT_IN_USE',
+        `This ${name} account is already connected to another EstatePulse organization. It must be disconnected there first.`,
+      );
+    }
+    return null;
   }
 
   /** The state must come back to the same session that started it, unexpired, once. */
@@ -317,8 +417,10 @@ export class CrmConnectionsService {
   /**
    * Stop syncing, forget the grant, keep the data. Local state changes first,
    * in one transaction, so disconnect succeeds even when the CRM is down; then,
-   * best effort, the app is uninstalled from the CRM account and the refresh
-   * token revoked. Imported leads and their tracking rows are untouched: a
+   * for an OAuth CRM, best effort, the app is uninstalled from the CRM account
+   * and the refresh token revoked. An API token cannot be revoked from here:
+   * the stored copy is erased, and the owner deletes it in the CRM if they
+   * want it dead. Imported leads and their tracking rows are untouched: a
    * reconnect of the same account picks them straight back up.
    */
   async disconnect(adapter: CrmAdapter, who: SessionIdentity): Promise<{ disconnected: true }> {
@@ -331,10 +433,12 @@ export class CrmConnectionsService {
     if (!cred) throw httpError(404, 'CRM_NOT_CONNECTED', `${adapter.label.displayName} is not connected.`);
 
     let refreshToken: string | null = null;
-    try {
-      refreshToken = cred.credentials ? this.decrypt(cred) : null;
-    } catch (e) {
-      this.logger.warn(`${adapter.provider} credential ${cred.id} could not be decrypted for revocation: ${(e as Error).message}`);
+    if (adapter.auth === 'oauth') {
+      try {
+        refreshToken = cred.credentials ? this.decrypt(cred) : null;
+      } catch (e) {
+        this.logger.warn(`${adapter.provider} credential ${cred.id} could not be decrypted for revocation: ${(e as Error).message}`);
+      }
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -386,7 +490,7 @@ export class CrmConnectionsService {
     }, TX_LIMITS);
     this.accessTokens.delete(cred.id);
 
-    if (refreshToken) {
+    if (adapter.auth === 'oauth' && refreshToken) {
       try {
         const tokens = await adapter.refresh(refreshToken);
         await adapter.uninstall(tokens.accessToken);
@@ -411,9 +515,14 @@ export class CrmConnectionsService {
    * cached token and retries once on a fresh one. A second 401, a dead refresh
    * token, or a call refused for a missing scope parks the connection (invalid)
    * and surfaces as REAUTH, which no caller retries.
+   *
+   * For an API-token CRM the stored token is used as it is: there is nothing
+   * to refresh, so its first 401 parks the connection (expired or deleted in
+   * the CRM) until the owner pastes a new one.
    */
   async withAccessToken<T>(adapter: CrmAdapter, organizationId: string, credentialId: string, fn: (accessToken: string) => Promise<T>): Promise<T> {
     const row = await this.loadCredential(adapter, organizationId, credentialId);
+    if (adapter.auth === 'api_token') return this.withApiToken(adapter, row, fn);
     try {
       return await fn(await this.accessToken(adapter, row));
     } catch (e) {
@@ -433,6 +542,18 @@ export class CrmConnectionsService {
     }
   }
 
+  private async withApiToken<T>(adapter: ApiTokenCrmAdapter, row: CredentialRow, fn: (token: string) => Promise<T>): Promise<T> {
+    try {
+      return await fn(this.decrypt(row));
+    } catch (e) {
+      if (e instanceof CrmApiError && (e.kind === 'UNAUTHORIZED' || e.kind === 'REAUTH')) {
+        await this.markInvalid(adapter, row, 'CRM_TOKEN_REJECTED');
+        throw new CrmApiError('REAUTH', `${adapter.label.displayName} no longer accepts the API token`, e.status);
+      }
+      throw e;
+    }
+  }
+
   private async loadCredential(adapter: CrmAdapter, organizationId: string, credentialId: string): Promise<CredentialRow> {
     // An undefined id would drop the filter and match any row in the organization.
     if (!credentialId) throw new CrmApiError('REAUTH', 'No connection', 0);
@@ -445,7 +566,7 @@ export class CrmConnectionsService {
     return row;
   }
 
-  private accessToken(adapter: CrmAdapter, row: CredentialRow): Promise<string> {
+  private accessToken(adapter: OAuthCrmAdapter, row: CredentialRow): Promise<string> {
     const cached = this.accessTokens.get(row.id);
     if (cached && cached.expiresAt - EARLY_REFRESH_MS > Date.now()) return Promise.resolve(cached.token);
     let inFlight = this.refreshing.get(row.id);
@@ -462,7 +583,7 @@ export class CrmConnectionsService {
    * rotated token is stored with a compare-and-swap on the hash of the token
    * that was presented, so a stale instance never overwrites a newer one.
    */
-  private async refreshNow(adapter: CrmAdapter, row: CredentialRow): Promise<string> {
+  private async refreshNow(adapter: OAuthCrmAdapter, row: CredentialRow): Promise<string> {
     let presented = this.decrypt(row);
     let presentedHash = row.credentialHash;
     let tokens: CrmTokens;
@@ -540,7 +661,7 @@ export class CrmConnectionsService {
   }
 
   /** Hands a grant back to the CRM unless some live connection is still using it. */
-  private async revokeUnlessLive(adapter: CrmAdapter, refreshToken: string): Promise<void> {
+  private async revokeUnlessLive(adapter: OAuthCrmAdapter, refreshToken: string): Promise<void> {
     try {
       const live = await this.prisma.integration.count({
         where: { provider: integrationProviderOf(adapter), credentialHash: sha256Hex(refreshToken), revokedAt: null },

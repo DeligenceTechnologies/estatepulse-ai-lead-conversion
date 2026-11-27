@@ -1,14 +1,15 @@
 import { ApiError, apiFetch } from '../lib/api';
 
 /**
- * A connected CRM (HubSpot today) — owner only.
+ * A connected CRM (HubSpot, BoldTrail) — owner only.
  *
- * The browser never holds a CRM token. It carries the authorization code from
- * the CRM's consent screen to the API, once, and everything after that happens
- * on the server: tokens, imports, webhooks.
+ * HubSpot: the browser never holds a CRM token. It carries the authorization
+ * code from the CRM's consent screen to the API, once.
+ * BoldTrail: the owner pastes an API token, which is sent once and never read
+ * back. Everything after that happens on the server: tokens, imports, webhooks.
  */
 
-export type CrmProvider = 'hubspot';
+export type CrmProvider = 'hubspot' | 'boldtrail';
 
 export interface CrmCounts {
   fetched: number;
@@ -42,7 +43,11 @@ export interface CrmRun {
 export interface CrmStatus {
   provider: string;
   displayName: string;
+  /** How this CRM is connected: a sign-in window, or a pasted API token. */
+  auth: 'oauth' | 'api_token';
   configured: boolean;
+  /** API-token CRMs: when the stored token stops working, if the CRM said. */
+  tokenExpiresAt: string | null;
   status: 'not_connected' | 'connected' | 'reauthorization_required' | 'disconnected' | 'error';
   account: {
     id: string | null;
@@ -92,6 +97,10 @@ export const crmRuns = (p: CrmProvider): Promise<CrmRun[]> =>
 
 /** Stops syncing and forgets the grant. Imported leads are kept. */
 export const disconnectCrm = (p: CrmProvider): Promise<void> => apiFetch<void>(`${base(p)}/connection`, { method: 'DELETE', auth: true });
+
+/** Connect with a pasted API token, or replace the token of the account already connected. */
+export const connectCrmWithToken = (p: CrmProvider, apiToken: string): Promise<CrmStatus> =>
+  apiFetch<CrmStatus>(`${base(p)}/token`, { method: 'POST', auth: true, body: { apiToken } });
 
 /**
  * Run the CRM's consent screen and finish the connection on THIS session.

@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CallDisposition, CallStatus, EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
+import { CallDisposition, CallStatus, ConsentStatus, EnrollmentStatus, LeadStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
@@ -200,10 +200,11 @@ export class FollowupRunner implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ firstName: string | null; phone: string | null; normalizedPhone: string | null; timezone: string | null; textBackAt: Date | null } | null> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: row.lead_id },
-      select: { firstName: true, phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true },
+      select: { firstName: true, phone: true, normalizedPhone: true, timezone: true, status: true, dncStatus: true, automationPaused: true, textBackAt: true, consentStatus: true },
     });
     if (!lead) await this.finish(row.id, EnrollmentStatus.stopped, 'lead_deleted');
     else if (lead.dncStatus) await this.finish(row.id, EnrollmentStatus.stopped, 'opted_out');
+    else if (lead.consentStatus === ConsentStatus.revoked) await this.finish(row.id, EnrollmentStatus.stopped, 'consent_revoked');
     else if (lead.automationPaused) await this.pause(row.id);
     else if (OUTCOME_STATUSES.includes(lead.status)) await this.finish(row.id, EnrollmentStatus.stopped, `lead_${lead.status}`);
     // A meeting on the calendar ends the sequence whatever the status says, and the status follows it.

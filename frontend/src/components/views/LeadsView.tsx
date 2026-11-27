@@ -115,7 +115,7 @@ const sourceIcon = (l: LiveLead): LucideIcon => {
       return Radio;
     case 'SYNC':
       // A connected CRM syncs too; only a spreadsheet gets the sheet glyph.
-      return (s.provider ?? '').toUpperCase() === 'HUBSPOT' ? Contact : FileSpreadsheet;
+      return ['HUBSPOT', 'BOLDTRAIL'].includes((s.provider ?? '').toUpperCase()) ? Contact : FileSpreadsheet;
     case 'UPLOAD':
       return FileUp;
     default:

@@ -139,6 +139,29 @@ ranges, consent) before creating the lead. Connecting a Tally form through its
 API installs the webhook and pre-maps the form's fields before the first
 submission arrives. See `TESTING-TALLY.md` to exercise it end to end.
 
+## Copilot (in-app AI assistant)
+
+`backend/src/assistant`, with the dock in `frontend/src/components/copilot`. A user
+asks in plain words; the model (Claude or OpenAI, set by `AI_PROVIDER`) picks from a fixed set of tools, and each tool calls a
+service the UI already uses (`LeadEditService`, `LeadAssignmentService`,
+`HistoryService`, ...). The model never touches the database and never supplies an
+organization id: every tool runs with the caller's `AuthContext`.
+
+- **Reads** run at once. **Writes** become an `AssistantAction` in `proposed` and
+  run only when the user presses Confirm on the card.
+- A user sees only the tools their permissions allow. The feature is
+  `Feature.AI_ASSISTANT`; monthly spend is capped by `assistantMonthlyBudgetMicros`
+  in `billing-plans.ts` and tracked in `assistant_usage`.
+- History is append-only (`assistant_messages.position`), so turns replay exactly.
+- Adding a capability is one `readTool` / `writeTool` entry in `src/assistant/tools`.
+
+- Providers live in `src/assistant/providers`. History is stored in one shape, so a
+  thread keeps working after the provider is switched.
+
+Switch it on with `ASSISTANT_ENABLED=1`, `AI_PROVIDER=openai` or `claude`, and that
+provider's key (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`; see `.env.example`), then
+`npx prisma migrate deploy`.
+
 ## Production notes
 
 `netlify.toml` builds and serves `frontend/` only. The backend deploys

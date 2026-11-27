@@ -224,7 +224,7 @@ export const sheetRuns = (id: string): Promise<SheetRun[]> =>
 
 // --- review ---------------------------------------------------------------------------
 
-export type ImportKind = 'google_sheets' | 'file_upload' | 'hubspot' | 'airtable';
+export type ImportKind = 'google_sheets' | 'file_upload' | 'hubspot' | 'boldtrail' | 'airtable';
 
 /** The lead fields Import Review can write back into a sheet. */
 export type EditableField = 'first_name' | 'last_name' | 'phone' | 'email' | 'timezone';

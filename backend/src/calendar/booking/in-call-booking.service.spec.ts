@@ -84,6 +84,22 @@ describe('InCallBookingService.book', () => {
     expect(s.assignments.assign).toHaveBeenCalledWith('org-1', LEAD, SANJAY.id, expect.objectContaining({ reason: expect.stringContaining('AI call') }));
   });
 
+  it('through Ask EstatePulse: recorded as booked by the assistant, with the person who confirmed it', async () => {
+    const s = setup();
+    await s.service.book({ ...s.ctx(null), staff: { userId: 'owner-1' } }, { start_time: START });
+
+    expect(s.engine.appointmentBooked).toHaveBeenCalledWith('org-1', LEAD, 'assistant');
+    expect(s.prisma.calendarMeeting.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ bookedVia: 'assistant' }) }),
+    );
+    expect(s.assignments.assign).toHaveBeenCalledWith(
+      'org-1',
+      LEAD,
+      SANJAY.id,
+      expect.objectContaining({ actorId: 'owner-1', reason: 'Booked through Ask EstatePulse; Calendly round robin chose Sanjay K' }),
+    );
+  });
+
   it('leaves the lead unassigned when Calendly picked a host who is not a teammate, and says so in the audit log', async () => {
     const s = setup({ hostEmail: 'someone@elsewhere.com', teammates: [] });
     const result = await s.service.book(s.ctx(null), { start_time: START });

@@ -13,6 +13,7 @@ export const KIND_NAME: Record<ImportKind, string> = {
   google_sheets: 'Google Sheet',
   file_upload: 'Uploaded file',
   hubspot: 'HubSpot',
+  boldtrail: 'BoldTrail',
   airtable: 'Airtable',
 };
 
@@ -21,6 +22,7 @@ const FIX_AT: Record<ImportKind, string> = {
   google_sheets: 'Edit the row in the sheet and sync again.',
   file_upload: 'Fix the row in the file and upload it again.',
   hubspot: 'Change the record in HubSpot and sync again.',
+  boldtrail: 'Change the contact in BoldTrail and sync again.',
   airtable: 'Change the record in Airtable and sync again.',
 };
 
@@ -150,7 +152,7 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
     ...(item.missing
       ? [{
           icon: <FileX className="w-3.5 h-3.5" />,
-          text: kind === 'hubspot' ? 'No longer in HubSpot — reject it if it should not be worked' : 'No longer in the source — reject it if it should not be worked',
+          text: kind === 'hubspot' || kind === 'boldtrail' ? `No longer in ${KIND_NAME[kind]} — reject it if it should not be worked` : 'No longer in the source — reject it if it should not be worked',
         }]
       : []),
     ...(lead && !lead.phone
@@ -176,7 +178,7 @@ export const ReviewLeadDrawer: React.FC<{ item: ReviewItem; warnings: string[]; 
               <div className="mt-2 flex items-center gap-2 text-2xs text-slate-400 flex-wrap">
                 <SourceBadge kind={kind} />
                 <span className="truncate">{item.source?.name ?? '—'}</span>
-                {kind !== 'hubspot' && <span>· row {item.rowNumber}</span>}
+                {kind !== 'hubspot' && kind !== 'boldtrail' && <span>· row {item.rowNumber}</span>}
                 <span>· imported {new Date(item.importedAt).toLocaleDateString()}</span>
               </div>
             </div>

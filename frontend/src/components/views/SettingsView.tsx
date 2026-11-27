@@ -15,6 +15,8 @@ import {
   Settings2,
   ShieldAlert,
   UserCheck,
+  CreditCard,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
@@ -40,13 +42,17 @@ import { TelnyxCard } from '../integrations/TelnyxCard';
 import { WorkingHoursEditor, invalidDay } from '../team/WorkingHoursEditor';
 import { Button } from '../common/Button';
 import { AppearanceSettings } from '../settings/AppearanceSettings';
+import { BillingSettings } from '../billing/BillingSettings';
+import { AssistantSettings } from '../settings/AssistantSettings';
 
-type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'appearance';
+type SettingsTab = 'general' | 'telnyx' | 'calendar' | 'assistant' | 'billing' | 'appearance';
 
 const TABS: { id: SettingsTab; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'general', label: 'General', hint: 'Timezone & business hours', icon: Settings2 },
   { id: 'calendar', label: 'Calendar', hint: 'Calendly or Cal.com, and booked meetings', icon: CalendarDays },
   { id: 'telnyx', label: 'Telnyx', hint: 'Calling & phone numbers', icon: PhoneCall },
+  { id: 'assistant', label: 'Ask EstatePulse', hint: 'On or off, monthly limit, microphone, log', icon: Sparkles },
+  { id: 'billing', label: 'Billing', hint: 'Plan, usage & invoices', icon: CreditCard },
   { id: 'appearance', label: 'Appearance', hint: 'Theme, brand colour & buttons', icon: Palette },
 ];
 
@@ -506,9 +512,12 @@ const GeneralSettings: React.FC = () => {
  */
 export const SettingsView: React.FC = () => {
   const [params, setParams] = useSearchParams();
+  const { can } = useAuth();
+  // Billing only for those who may see it (the server checks billing.read itself).
+  const tabs = TABS.filter((t) => t.id !== 'billing' || can('billing.read'));
   const requested = params.get('tab');
-  const tab: SettingsTab = isTab(requested) ? requested : 'general';
-  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const tab: SettingsTab = isTab(requested) && tabs.some((t) => t.id === requested) ? requested : 'general';
+  const current = tabs.find((t) => t.id === tab) ?? tabs[0];
 
   const select = (id: SettingsTab): void => {
     setParams(id === 'general' ? {} : { tab: id }, { replace: true });
@@ -525,7 +534,7 @@ export const SettingsView: React.FC = () => {
         {/* Section nav: a column on desktop, a scrolling row on phones */}
         <nav aria-label="Settings sections" className="lg:w-60 shrink-0">
           <ul className="flex lg:flex-col gap-1.5 overflow-x-auto custom-scrollbar -mx-1 px-1 pb-1 lg:pb-0 list-none">
-            {TABS.map(({ id, label, hint, icon: Icon }) => {
+            {tabs.map(({ id, label, hint, icon: Icon }) => {
               const active = id === tab;
               return (
                 <li key={id} className="shrink-0">
@@ -574,6 +583,9 @@ export const SettingsView: React.FC = () => {
           )}
 
           {tab === 'calendar' && <ConnectCalendar />}
+          {tab === 'assistant' && <AssistantSettings />}
+
+          {tab === 'billing' && <BillingSettings />}
 
           {tab === 'appearance' && <AppearanceSettings />}
         </div>

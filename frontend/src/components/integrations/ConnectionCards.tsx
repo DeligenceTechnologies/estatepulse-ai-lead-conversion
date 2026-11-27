@@ -26,6 +26,7 @@ import { CustomWebhookCard } from './CustomWebhookCard';
 import { GoogleFormsCard } from './GoogleFormsCard';
 import { GoogleSheetsCard } from './GoogleSheetsCard';
 import { HubSpotCard } from './HubSpotCard';
+import { BoldTrailCard } from './BoldTrailCard';
 import { AirtableCard } from './AirtableCard';
 import { IntegrationCard } from './IntegrationCard';
 import { Button, IconButton } from '../common/Button';
@@ -362,6 +363,9 @@ export const ConnectionCards: React.FC = () => {
         />
         {/* HubSpot — self-loading too; hidden where the server has it switched off. */}
         <HubSpotCard />
+
+        {/* BoldTrail (kvCORE) — connects with a pasted API token; hidden where the server has it switched off. */}
+        <BoldTrailCard />
 
         {/* Airtable — self-loading; hidden where the server has it switched off.
             The account is not a lead source: bases and tables are picked after connecting. */}

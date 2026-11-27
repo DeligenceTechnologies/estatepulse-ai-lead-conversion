@@ -30,6 +30,8 @@ import { formatDate } from '../lib/datetime';
 
 // A runtime list, not just a union, because the URL is parsed back into a view.
 const APP_VIEWS = [
+  // The home page: Ask EstatePulse, the assistant's full-page chat. Live API.
+  'assistant',
   'dashboard',
   'leads',
   'conversations',
@@ -61,6 +63,8 @@ const APP_VIEWS = [
   // Live API: org_settings (timezone, business hours) plus the Telnyx and
   // calendar connections, one tab each.
   'settings',
+  // Live API: plans, Stripe checkout and plan changes (GET /api/billing/*).
+  'pricing',
 ] as const;
 
 export type AppView = (typeof APP_VIEWS)[number];

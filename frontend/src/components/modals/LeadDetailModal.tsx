@@ -21,11 +21,12 @@ import { LEADS_CHANGED_EVENT, leadsApi, type LeadTimezone } from '../../api/clie
 import { useApp } from '../../context/AppContext';
 import { TimezoneSelect } from '../common/TimezoneSelect';
 import { AssignAgentControl } from '../leads/AssignAgentControl';
+import { OutreachPauseControl } from '../leads/OutreachPauseControl';
 import { LeadAppointments, LeadBookMeeting, useLeadBookingOptions } from '../leads/LeadBooking';
 import { LeadQualificationMemory } from '../leads/LeadQualificationMemory';
 import { LeadSourcesPanel } from '../leads/LeadSourcesPanel';
 import { NewLeadModal } from './NewLeadModal';
-import { enrollLead, getLeadFlow, type LeadFlow } from '../../utils/assistantApi';
+import { enrollLead, getLeadFlow, getLeadOutreach, type LeadFlow, type LeadOutreachState } from '../../utils/assistantApi';
 import {
   getCall,
   listCalls,
@@ -176,17 +177,26 @@ export const LeadDetailModal: React.FC = () => {
 
   // Where the lead is in its journey (strategy step vs follow-up), from the API.
   const [flow, setFlow] = useState<LeadFlow | null>(null);
+  // Whether its outreach is paused, by whom, and whether this user may pause or resume it.
+  const [outreach, setOutreach] = useState<LeadOutreachState | null>(null);
   useEffect(() => {
     setAssigned(null);
     setZone(null);
     setReviewed(false);
     setEditing(null);
     setFlow(null);
+    setOutreach(null);
     if (!selectedLeadId) return;
     let alive = true;
     getLeadFlow(selectedLeadId).then((f) => { if (alive) setFlow(f); }).catch(() => {});
+    getLeadOutreach(selectedLeadId).then((o) => { if (alive) setOutreach(o); }).catch(() => {});
     return () => { alive = false; };
   }, [selectedLeadId]);
+  const reloadOutreach = (): void => {
+    if (!selectedLeadId) return;
+    getLeadFlow(selectedLeadId).then(setFlow).catch(() => {});
+    getLeadOutreach(selectedLeadId).then(setOutreach).catch(() => {});
+  };
 
   // The lead's real activity: calls, SMS and appointments from the API.
   const [activity, setActivity] = useState<LeadActivity | null>(null);
@@ -363,9 +373,11 @@ export const LeadDetailModal: React.FC = () => {
               <AssignAgentControl leadId={lead.id} current={liveAgent} onAssigned={setAssigned} />
             )}
 
-            {/* Only offered while the strategy has not started: once it has, the
-                server ignores a second enrol, so the button would do nothing. */}
-            {flow?.phase === 'not_started' && (
+            {isLive && <OutreachPauseControl leadId={lead.id} state={outreach} onChanged={reloadOutreach} />}
+
+            {/* Only offered while the strategy has not started (a second enrol does nothing), the lead has
+                not withdrawn consent, and outreach is not paused. */}
+            {flow?.phase === 'not_started' && lead.consentStatus !== 'revoked' && !outreach?.paused && (
               <Button
                 size="sm"
                 onClick={() => void startOutreach()}
@@ -400,6 +412,18 @@ export const LeadDetailModal: React.FC = () => {
               const m = map[flow.phase];
               return <span className={`px-2 py-0.5 rounded-full border font-bold uppercase text-2xs ${m.cls}`}>{m.label}</span>;
             })()}
+
+            {outreach?.paused && (
+              <span
+                className="px-2 py-0.5 rounded-full border font-bold uppercase text-2xs bg-amber-500/15 text-amber-300 border-amber-500/40"
+                title={outreach.reason ?? undefined}
+              >
+                Paused{outreach.pausedBy ? ` by ${outreach.pausedBy}` : ''}
+              </span>
+            )}
+            {outreach?.paused && outreach.reason && (
+              <span className="text-amber-200/80 break-words">{outreach.reason.slice(0, 80)}</span>
+            )}
 
             {/* The real-world outcome (SMS sent / Call answered / Exited …) */}
             <span className="font-semibold text-slate-200">{flow.outcome}</span>
@@ -445,7 +469,11 @@ export const LeadDetailModal: React.FC = () => {
                 Left the strategy{flow.reason ? `: ${flow.reason.replace(/\s+/g, ' ').slice(0, 80)}` : ''}
               </span>
             )}
-            {flow.phase === 'not_started' && <span className="text-slate-500">Waiting to enter the strategy</span>}
+            {flow.phase === 'not_started' && (
+              <span className="text-slate-500">
+                {lead.consentStatus === 'revoked' ? 'Not contacted: the lead withdrew consent' : 'Waiting to enter the strategy'}
+              </span>
+            )}
           </div>
         )}
 

@@ -309,7 +309,10 @@ export class LeadsController {
   @Post(':leadId/review/approve')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.LEAD_UPDATE)
-  approveReview(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+  async approveReview(@CurrentAuth() auth: AuthContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    // An agent only on their own leads, an admin on any: the same rule as viewing the lead.
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...visibleLeads(auth) }, select: { id: true } });
+    if (!lead) throw new AppError('NOT_FOUND', 'No such lead');
     return this.reviews.approve(auth.organizationId, auth.userId, leadId);
   }
 

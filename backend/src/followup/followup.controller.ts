@@ -3,6 +3,8 @@ import type { AuthContext } from '@/auth/auth.types';
 import { CurrentAuth } from '@/auth/decorators/current-auth.decorator';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { RequireFeature } from '@/billing/entitlements/require-feature.decorator';
+import { Feature } from '@/billing/billing-plans';
 import { CreateSequenceDto, EnrollLeadsDto, LeadFilterDto, ReplaceStepsDto, UpdateSequenceDto } from './dto/sequence.dto';
 import { FollowupService } from './followup.service';
 
@@ -30,6 +32,7 @@ export class FollowupController {
 
   @Post()
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  @RequireFeature(Feature.LEAD_AUTOMATION)
   create(@CurrentAuth() auth: AuthContext, @Body() body: CreateSequenceDto) {
     return this.followup.createSequence(auth.organizationId, body);
   }
@@ -42,6 +45,7 @@ export class FollowupController {
 
   @Put(':id/steps')
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  @RequireFeature(Feature.LEAD_AUTOMATION)
   replaceSteps(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ReplaceStepsDto) {
     return this.followup.replaceSteps(auth.organizationId, id, body);
   }
@@ -62,6 +66,7 @@ export class FollowupController {
   @Post(':id/enroll')
   @HttpCode(200)
   @RequirePermissions(PERMISSIONS.AUTOMATION_UPDATE)
+  @RequireFeature(Feature.LEAD_AUTOMATION)
   enroll(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: EnrollLeadsDto) {
     return this.followup.enrollLeads(auth.organizationId, id, body, auth.userId);
   }

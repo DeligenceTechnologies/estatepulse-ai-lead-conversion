@@ -13,7 +13,7 @@ import { AppError } from './common/errors/app-error';
 import { sha256Hex } from './common/utils/crypto';
 
 /** Provider deliveries (lead webhooks, Telnyx, calendars, booking tools) get their own generous per-IP bucket. */
-const INBOUND_PREFIXES = ['/ingest/', '/webhooks/', '/tools/', '/calendar/webhooks/'];
+const INBOUND_PREFIXES = ['/ingest/', '/webhooks/', '/tools/', '/calendar/webhooks/', '/billing/webhook'];
 
 /** Every route the app's own frontend calls lives under this, in development and production alike. */
 const API_PREFIX = '/api';
@@ -89,6 +89,24 @@ async function bootstrap() {
       keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''),
       skip: (req) => req.method !== 'POST',
       handler: limited('Too many sign-in attempts, please try again later'),
+    }),
+  );
+
+  // Billing writes open Stripe sessions and change subscriptions: a tighter
+  // bucket per session (or address) than the general one.
+  app.use(
+    `${API_PREFIX}/billing`,
+    rateLimit({
+      windowMs: 10 * 60_000,
+      limit: testing ? Number.MAX_SAFE_INTEGER : 30,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      keyGenerator: (req) => {
+        const auth = req.headers.authorization;
+        return auth?.startsWith('Bearer ') ? `b:${sha256Hex(auth.slice(7)).slice(0, 32)}` : `bi:${ipKeyGenerator(req.ip ?? '')}`;
+      },
+      skip: (req) => req.method !== 'POST',
+      handler: limited('Too many billing requests, please try again in a few minutes'),
     }),
   );
 

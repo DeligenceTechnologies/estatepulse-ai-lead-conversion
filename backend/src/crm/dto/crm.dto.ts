@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 /** What the callback page relays from the CRM. Lengths bound the work, not the format. */
 export class CompleteCrmOAuthDto {
@@ -12,6 +12,19 @@ export class CompleteCrmOAuthDto {
   @MinLength(20)
   @MaxLength(4096)
   state!: string;
+}
+
+/**
+ * An API token pasted from the CRM (BoldTrail: Lead Engine > Lead Dropbox >
+ * My API Tokens). Only the shape is checked here: the CRM itself is asked
+ * before anything is stored. JWTs are three base64url parts.
+ */
+export class ConnectCrmTokenDto {
+  @IsString()
+  @MinLength(20)
+  @MaxLength(4096)
+  @Matches(/^\s*[A-Za-z0-9._~+/=-]+\s*$/, { message: 'apiToken must be the token exactly as BoldTrail shows it' })
+  apiToken!: string;
 }
 
 export class CrmRunsQueryDto {

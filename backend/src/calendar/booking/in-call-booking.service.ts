@@ -203,7 +203,7 @@ export class InCallBookingService {
 
     // Calendly has the booking, so outreach ends now even if the event could not be read back; the sync records it later.
     await this.engine
-      .appointmentBooked(ctx.orgId, ctx.leadId, ctx.callId ? 'call' : 'sms_chat')
+      .appointmentBooked(ctx.orgId, ctx.leadId, ctx.staff ? 'assistant' : ctx.callId ? 'call' : 'sms_chat')
       .catch((error) => this.logger.error(`ending outreach after in-call booking for lead ${ctx.leadId}: ${(error as Error).message}`));
     if (event) {
       try {
@@ -227,16 +227,16 @@ export class InCallBookingService {
 
   /** The host Calendly chose takes the lead, unless that would break their lead cap. */
   private async assign(ctx: ToolContext, userId: string, name: string): Promise<void> {
-    const channel = ctx.callId ? 'call' : 'text chat';
+    const during = ctx.staff ? 'through Ask EstatePulse' : `during the AI ${ctx.callId ? 'call' : 'text chat'}`;
     try {
       await this.assignments.assign(ctx.orgId, ctx.leadId, userId, {
         actorType: 'ai',
-        actorId: null,
+        actorId: ctx.staff?.userId ?? null,
         assignmentType: 'ai',
-        reason: `Booked during the AI ${channel}; Calendly round robin chose ${name}`,
+        reason: `Booked ${during}; Calendly round robin chose ${name}`,
       });
     } catch (error) {
-      const why = `Meeting booked with ${name} during the AI ${channel}, but the lead was not assigned: ${(error as Error).message}`;
+      const why = `Meeting booked with ${name} ${during}, but the lead was not assigned: ${(error as Error).message}`;
       this.logger.warn(`lead ${ctx.leadId}: ${why}`);
       this.note(ctx, 'lead.assignment_skipped', { userId, reason: why });
     }
@@ -268,7 +268,7 @@ export class InCallBookingService {
       canceledReason: null,
     };
     const data = meetingRow(meeting, new Date());
-    const bookedVia = ctx.callId ? 'ai_call' : 'ai_text';
+    const bookedVia = ctx.staff ? 'assistant' : ctx.callId ? 'ai_call' : 'ai_text';
     const linked = { leadId: ctx.leadId, ...(hostUserId ? { hostUserId } : {}) };
     await this.prisma.calendarMeeting.upsert({
       where: { connectionId_externalId: { connectionId: connection.id, externalId: data.externalId } },

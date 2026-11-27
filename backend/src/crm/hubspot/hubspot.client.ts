@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CRM_PROVIDER_LABELS, HUBSPOT_PROVIDER } from '../crm-records';
-import { CrmApiError, type CrmAccount, type CrmAdapter, type CrmChangedPage, type CrmContactPage, type CrmContactUpdate, type CrmTokens } from '../types';
+import { CrmApiError, type CrmAccount, type CrmChangedPage, type CrmContactPage, type CrmContactUpdate, type CrmTokens, type OAuthCrmAdapter } from '../types';
 import { HUBSPOT_CONTACT_PROPERTIES, modifiedAtMs, toCrmContact, type HubSpotObject } from './hubspot-contacts';
 
 /**
@@ -42,7 +42,8 @@ const MAX_INLINE_WAIT_MS = 10_000;
 const DAILY_LIMIT_BACKOFF_MS = 3_600_000;
 
 @Injectable()
-export class HubSpotClient implements CrmAdapter {
+export class HubSpotClient implements OAuthCrmAdapter {
+  readonly auth = 'oauth' as const;
   readonly provider = HUBSPOT_PROVIDER;
   readonly label = CRM_PROVIDER_LABELS[HUBSPOT_PROVIDER];
   readonly requiredScopes = REQUIRED_SCOPES;

@@ -28,6 +28,17 @@ model Organization {
   leadSubmissions     LeadSubmission[]
   leadMerges          LeadMerge[]
   duplicateCandidates DuplicateCandidate[]
+  subscription        Subscription?
+  payments            Payment[]
+  invoices            Invoice[]
+  billingEvents       BillingEvent[]
+  assistantThreads    AssistantThread[]
+  assistantMessages   AssistantMessage[]
+  assistantActions    AssistantAction[]
+  assistantUsage      AssistantUsage[]
+  assistantRefs       AssistantRef[]
+  assistantActionItems AssistantActionItem[]
+  assistantFeedback   AssistantFeedback[]
 
   @@map("organizations")
 }
@@ -62,6 +73,8 @@ model OrganizationSetting {
   liveTransfer           Json?   @map("live_transfer")
   /// What is texted to a lead when an agent takes their chat over ({ enabled, message }); unset means on, with the default text.
   chatTakeover           Json?   @map("chat_takeover")
+  /// Ask EstatePulse for the office: { enabled, monthlyLimitUsd, voiceEnabled }; a missing key keeps its default (on, the plan's allowance, on).
+  assistant              Json?   @map("assistant")
   /// Who the organization is in its texts ({ legalName, mailingAddress, email, website }); CASL wants the address for Canadian leads. Unset is all empty.
   businessDetails        Json?   @map("business_details")
   /// The business facts the AI answers a lead's questions from ([{ title, body }], e.g. areas served, commission); NULL means none entered.

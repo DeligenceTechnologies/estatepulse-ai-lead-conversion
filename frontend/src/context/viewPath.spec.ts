@@ -6,6 +6,8 @@ describe('view <-> path', () => {
     expect(pathForView('lead_sources')).toBe('/lead-sources');
     expect(viewForPath('/lead-sources')).toBe('lead_sources');
     expect(viewForPath('/leads/')).toBe('leads');
+    expect(pathForView('assistant')).toBe('/assistant');
+    expect(viewForPath('/assistant')).toBe('assistant');
   });
 
   it('rejects paths that are not a view', () => {

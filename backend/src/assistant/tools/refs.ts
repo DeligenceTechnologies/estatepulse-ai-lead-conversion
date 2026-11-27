@@ -1,0 +1,61 @@
+import { z } from 'zod';
+
+/**
+ * The model never sees a database id. Each record a tool shows it gets a short ref, "L3" for the
+ * third lead of the chat, and tools take those refs back as input. A ref only means something inside
+ * the chat that issued it, and every use is checked again against what the user may see.
+ *
+ * A slot is not a record: its ref stands for a start time a free-times look-up offered, so a booking
+ * can only use a time that was actually open.
+ */
+export const REF_LETTER = { lead: 'L', user: 'U', call: 'C', meeting: 'M', sequence: 'S', slot: 'T' } as const;
+
+export type RefKind = keyof typeof REF_LETTER;
+
+export interface RefTable {
+  /** The id behind a ref this chat issued, if the user may still see the record. NOT_FOUND otherwise. */
+  resolve(kind: RefKind, ref: string): Promise<string>;
+  /** Refs for records about to be shown to the model, keyed by id. A record shown before keeps its ref. */
+  issue(kind: RefKind, ids: readonly string[]): Promise<Map<string, string>>;
+}
+
+export const formatRef = (kind: RefKind, number: number): string => `${REF_LETTER[kind]}${number}`;
+
+const MAX_DIGITS = 6;
+const patternOf = (kind: RefKind) => new RegExp(`^${REF_LETTER[kind]}[1-9]\\d{0,${MAX_DIGITS - 1}}$`);
+
+/** The number in "L3", or null when the text is not a ref of that kind. */
+export function parseRef(kind: RefKind, ref: string): number | null {
+  return patternOf(kind).test(ref) ? Number(ref.slice(REF_LETTER[kind].length)) : null;
+}
+
+const refInput = (kind: RefKind, what: string, from: string) =>
+  z
+    .string()
+    .regex(patternOf(kind), `Expected a ${what} ref like ${REF_LETTER[kind]}1`)
+    .describe(`${what[0].toUpperCase()}${what.slice(1)} ref like ${REF_LETTER[kind]}1, ${from}`);
+
+export const leadRef = refInput('lead', 'lead', 'from lead_search or another result in this chat');
+export const userRef = refInput('user', 'team member', 'from team_list or another result in this chat');
+export const callRef = refInput('call', 'call', 'from call_list');
+export const sequenceRef = refInput('sequence', 'sequence', 'from sequence_list');
+export const slotRef = refInput('slot', 'time slot', 'from meeting_slots');
+
+const KIND_OF_LETTER = Object.fromEntries(Object.entries(REF_LETTER).map(([kind, letter]) => [letter, kind])) as Record<string, RefKind>;
+/** A ref in square brackets, the way an answer writes it after a record's name: "Maria Lopez [L1]". */
+const IN_ANSWER = /\[([LUCMST])([1-9]\d{0,5})\]/g;
+
+/** The refs an answer names in brackets, each once, in the order written. */
+export function refsInAnswer(text: string): { ref: string; kind: RefKind; number: number }[] {
+  const seen = new Map<string, { ref: string; kind: RefKind; number: number }>();
+  for (const [, letter, digits] of text.matchAll(IN_ANSWER)) {
+    const ref = `${letter}${digits}`;
+    if (!seen.has(ref)) seen.set(ref, { ref, kind: KIND_OF_LETTER[letter], number: Number(digits) });
+  }
+  return [...seen.values()];
+}
+
+/** One record's ref. */
+export async function refOf(refs: RefTable, kind: RefKind, id: string): Promise<string> {
+  return (await refs.issue(kind, [id])).get(id)!;
+}

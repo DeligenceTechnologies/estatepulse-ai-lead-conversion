@@ -112,6 +112,7 @@ export const crmNoNameReason = (p: CrmProviderLabel): string => `${NO_NAME_REASO
 
 /** lead_sources.provider / provider_credentials.provider for each CRM. */
 export const HUBSPOT_PROVIDER = 'HUBSPOT';
+export const BOLDTRAIL_PROVIDER = 'BOLDTRAIL';
 
 /**
  * Every CRM this build knows, by provider code. Adding a CRM adds a line here
@@ -119,6 +120,7 @@ export const HUBSPOT_PROVIDER = 'HUBSPOT';
  */
 export const CRM_PROVIDER_LABELS: Record<string, CrmProviderLabel> = {
   [HUBSPOT_PROVIDER]: { displayName: 'HubSpot', customPrefix: 'HubSpot ' },
+  [BOLDTRAIL_PROVIDER]: { displayName: 'BoldTrail', customPrefix: 'BoldTrail ' },
 };
 
 /** The import reason each CRM's new leads start with; approval and rejection spend whichever one a lead carries. */

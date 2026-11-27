@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Prisma, type CalendarBlockKind, type CalendarMemberSyncStatus } from '@prisma/client';
+import { CalendarMeetingStatus, Prisma, type CalendarBlockKind, type CalendarMemberSyncStatus } from '@prisma/client';
 import { PrismaService } from '@/common/prisma/prisma.service';
 import { isTimeZone } from '@/common/utils/zoned-time';
 import { SecretBoxService } from '@/common/service/secret-box.service';
@@ -399,6 +399,15 @@ export class CalendarSyncService implements OnModuleDestroy {
       validMeeting,
     );
     const links = await this.meetingLinks(connection, unique);
+    // How each meeting stood before this sync, so a cancellation is acted on once, when it happens.
+    const before = new Map(
+      (
+        await this.prisma.calendarMeeting.findMany({
+          where: { connectionId: connection.id, externalId: { in: unique.map((m) => meetingRow(m, syncedAt).externalId) } },
+          select: { externalId: true, status: true, leadId: true },
+        })
+      ).map((row) => [row.externalId, row]),
+    );
     const booked = new Set<string>();
     for (let index = 0; index < unique.length; index += MEETING_WRITE_BATCH) {
       await this.prisma.$transaction(
@@ -432,6 +441,12 @@ export class CalendarSyncService implements OnModuleDestroy {
       await this.engine
         .appointmentBooked(connection.orgId, leadId)
         .catch((error) => this.logger.warn(`appointment booked for lead ${leadId}: ${(error as Error).message}`));
+    }
+    for (const leadId of newlyCanceled(unique.map((m) => meetingRow(m, syncedAt)), before)) {
+      if (booked.has(leadId)) continue;
+      await this.engine
+        .appointmentCanceled(connection.orgId, leadId)
+        .catch((error) => this.logger.warn(`meeting canceled for lead ${leadId}: ${(error as Error).message}`));
     }
   }
 
@@ -757,6 +772,22 @@ function validMeeting(meeting: BookedMeeting): boolean {
 }
 
 /** A provider meeting as its database row: instants as Date (stored UTC), text cut to the column sizes. */
+/**
+ * The leads whose meeting this sync found canceled while it had been on the calendar for them.
+ * A meeting first seen already canceled, or canceled before, is not a new cancellation.
+ */
+export function newlyCanceled(
+  rows: { externalId: string; status: CalendarMeetingStatus }[],
+  before: ReadonlyMap<string, { status: CalendarMeetingStatus; leadId: string | null }>,
+): Set<string> {
+  const leads = new Set<string>();
+  for (const row of rows) {
+    const was = before.get(row.externalId);
+    if (row.status === CalendarMeetingStatus.canceled && was?.leadId && was.status !== CalendarMeetingStatus.canceled) leads.add(was.leadId);
+  }
+  return leads;
+}
+
 export function meetingRow(meeting: BookedMeeting, syncedAt: Date) {
   const cut = (value: string | null, max: number) => (value ? value.slice(0, max) : null);
   const zone = (value: string | null) => (isTimeZone(value) ? value : null);

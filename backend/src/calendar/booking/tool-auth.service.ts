@@ -6,6 +6,8 @@ export type { ToolRequest } from '@/telnyx/tools/assistant-tool-auth.service';
 
 export interface ToolContext extends AssistantToolCaller {
   config: InCallBookingConfig;
+  /** Set when a person books through Ask EstatePulse rather than the AI on a call or in a text chat. */
+  staff?: { userId: string };
 }
 
 /**

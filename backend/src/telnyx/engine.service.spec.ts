@@ -25,7 +25,7 @@ interface CallRow {
 
 function setup(steps: StrategyStep[] = SCREENSHOT, guardrails: Record<string, unknown> = {}) {
   // timezone UTC: the lead's clock is the test clock, so the contact window never gets in the way of the step timing under test.
-  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, automationPaused: false, reviewReasons: [] as string[] };
+  const lead = { id: LEAD, orgId: ORG, firstName: 'Ana', phone: '+12895550100', normalizedPhone: null as string | null, timezone: 'UTC' as string | null, status: 'new', dncStatus: false, consentStatus: 'granted', automationPaused: false, reviewReasons: [] as string[] };
   const calls: CallRow[] = [];
   const texts: { direction: 'inbound' | 'outbound'; createdAt: Date }[] = [];
   const since = (where: { createdAt?: { gte: Date } }) => calls.filter((c) => !where.createdAt || c.createdAt >= where.createdAt.gte);
@@ -303,6 +303,34 @@ describe('EngineService strategy', () => {
     expect(s.queue.enqueue).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1 * MIN + 1_000);
     expect(s.queue.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('never starts a lead who withdrew consent; a pending consent (a lead who filled in a form) starts as usual', async () => {
+    const withdrawn = setup();
+    withdrawn.prisma.lead.findFirst.mockResolvedValue({ ...withdrawn.lead, consentStatus: 'revoked' });
+    await withdrawn.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(withdrawn.prisma.lead.updateMany).not.toHaveBeenCalled();
+    expect(withdrawn.texts()).toEqual([]);
+    const pending = setup();
+    pending.prisma.lead.findFirst.mockResolvedValue({ ...pending.lead, consentStatus: 'pending' });
+    pending.prisma.lead.findUnique.mockResolvedValue({ ...pending.lead, consentStatus: 'pending' });
+    await pending.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending.texts()).toEqual(['text s1']);
+  });
+
+  it('stops once the lead withdraws consent mid-strategy, and says why', async () => {
+    const s = setup();
+    await s.engine.enroll(ORG, LEAD);
+    await vi.advanceTimersByTimeAsync(0);
+    s.prisma.lead.findUnique.mockResolvedValue({ ...s.lead, consentStatus: 'revoked' });
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(s.texts()).toEqual(['text s1']);
+    expect(s.queue.enqueue).not.toHaveBeenCalled();
+    expect(s.engine.isRunning(LEAD)).toBe(false);
+    const stopped = (s.prisma.leadEvent.create.mock.calls as any[]).filter((c) => c[0].data.type === 'strategy_stopped');
+    expect(stopped.at(-1)?.[0].data.reason).toBe('The lead withdrew consent to be contacted');
   });
 
   it('stops before the next step once the lead booked', async () => {
@@ -699,3 +727,31 @@ describe('EngineService failed texts (SMS08)', () => {
     expect(s.queue.enqueue).not.toHaveBeenCalled();
   });
 });
+
+describe('EngineService: a canceled meeting', () => {
+  it('moves a booked lead with no other meeting ahead back to follow-up, and enrols the sequence for that reason', async () => {
+    const s = setup();
+    s.lead.status = 'appointment_booked';
+    // The move writes the reason with the status, as the database would.
+    s.prisma.lead.updateMany.mockImplementation(async ({ data }: any) => (Object.assign(s.lead, data), { count: 1 }));
+    s.followup.sequenceForTrigger.mockResolvedValue('after-cancel' as never);
+    expect(await s.engine.appointmentCanceled(ORG, LEAD)).toBe(true);
+    expect(s.lead.status).toBe('follow_up');
+    expect(s.prisma.lead.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ followUpReason: 'appointment_canceled', status: 'follow_up' }) }));
+    expect(s.followup.sequenceForTrigger).toHaveBeenCalledWith(ORG, 'follow_up_appointment_canceled');
+    expect(s.followup.enroll).toHaveBeenCalledWith(ORG, LEAD, 'after-cancel');
+  });
+
+  it('leaves the lead alone while another meeting is ahead, or once a person moved it on', async () => {
+    const booked = setup();
+    booked.lead.status = 'appointment_booked';
+    booked.prisma.calendarMeeting.count.mockResolvedValue(1);
+    expect(await booked.engine.appointmentCanceled(ORG, LEAD)).toBe(false);
+    expect(booked.lead.status).toBe('appointment_booked');
+    const moved = setup();
+    moved.lead.status = 'closed';
+    expect(await moved.engine.appointmentCanceled(ORG, LEAD)).toBe(false);
+    expect(moved.prisma.lead.updateMany).not.toHaveBeenCalled();
+  });
+});
+

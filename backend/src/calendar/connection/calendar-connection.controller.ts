@@ -7,6 +7,8 @@ import { Public } from '@/auth/decorators/public.decorator';
 import type { AuthContext } from '@/auth/auth.types';
 import { RequirePermissions } from '@/role/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '@/role/permissions';
+import { RequireFeature } from '@/billing/entitlements/require-feature.decorator';
+import { Feature } from '@/billing/billing-plans';
 import type { AuthEnv } from '@/common/utils/interface';
 import { CALENDAR_ROUTE, CALENDLY_OAUTH_COOKIE } from '../calendar.types';
 import { CalendlyClient } from '../providers/calendly.client';
@@ -38,6 +40,7 @@ export class CalendarConnectionController {
   @Post('calendly/authorize')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  @RequireFeature(Feature.CALENDAR_INTEGRATION)
   authorizeCalendly(@CurrentAuth() auth: AuthContext, @Res({ passthrough: true }) res: Response) {
     const { authorizeUrl, nonce } = this.connections.startCalendly(auth.organizationId, auth.userId);
     res.cookie(CALENDLY_OAUTH_COOKIE, nonce, { ...this.oauthCookieOptions(), maxAge: OAUTH_STATE_TTL_MS });
@@ -99,6 +102,7 @@ export class CalendarConnectionController {
   @Post('cal/teams')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  @RequireFeature(Feature.CALENDAR_INTEGRATION)
   calTeams(@Body() dto: CalApiKeyDto) {
     return this.connections.listCalTeams(dto.apiKey);
   }
@@ -106,6 +110,7 @@ export class CalendarConnectionController {
   @Post('cal/connect')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  @RequireFeature(Feature.CALENDAR_INTEGRATION)
   connectCal(@CurrentAuth() auth: AuthContext, @Body() dto: CalConnectDto) {
     return this.connections.connectCal(auth.organizationId, auth.userId, dto);
   }
@@ -113,6 +118,7 @@ export class CalendarConnectionController {
   @Post('activate')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
+  @RequireFeature(Feature.CALENDAR_INTEGRATION)
   activate(@CurrentAuth() auth: AuthContext, @Body() dto: ActivateCalendarDto) {
     return this.connections.activate(auth.organizationId, dto.provider);
   }

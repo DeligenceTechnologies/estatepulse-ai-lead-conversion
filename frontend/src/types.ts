@@ -45,6 +45,8 @@ export type LeadSource =
   | 'file upload'
   // Imported from a connected HubSpot account (provider HUBSPOT).
   | 'hubspot'
+  // Imported from a connected BoldTrail account (provider BOLDTRAIL).
+  | 'boldtrail'
   | 'webhook';
 
 export type Channel = 'voice' | 'sms' | 'email' | 'web_chat';

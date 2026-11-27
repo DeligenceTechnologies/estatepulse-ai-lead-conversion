@@ -84,6 +84,11 @@ describe('decodeError', () => {
     expect(messageFor(error)).toBe('Old password is incorrect');
   });
 
+  it("shows the assistant's own words when it is briefly unavailable (a 503)", () => {
+    const error = decodeError(503, { error: { code: 'ASSISTANT_UNAVAILABLE', message: 'The assistant is briefly unavailable. Try again in a minute.' } });
+    expect(messageFor(error)).toBe('The assistant is briefly unavailable. Try again in a minute.');
+  });
+
   it('recognises a taken email', () => {
     expect(decodeError(409, { statusCode: 409, message: 'User with this email already exists' }).code).toBe('EMAIL_TAKEN');
   });

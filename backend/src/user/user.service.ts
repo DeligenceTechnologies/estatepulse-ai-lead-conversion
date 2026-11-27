@@ -18,6 +18,7 @@ import { welcomeEmail, type WelcomeEmailInput } from './templates/welcome-email'
 import { toWorkingHoursJson } from '@/common/utils/working-hours';
 import { cleanServiceAreas } from '@/transfer/live-transfer';
 import { assertMemberAreas, assertMemberPhone } from './member-contact';
+import { EntitlementService } from '@/billing/entitlements/entitlement.service';
 
 
 /** A new member; phone and areas may be missing only for one imported from a calendar. */
@@ -58,6 +59,7 @@ export class UserService {
     private readonly accountEmails: AccountEmailService,
     private readonly audit: AuditService,
     config: ConfigService<AppEnv, true>,
+    private readonly entitlements: EntitlementService,
   ) {
     const appUrl = config.get('APP_URL', { infer: true });
     this.loginUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/login` : undefined;
@@ -81,6 +83,8 @@ export class UserService {
       assertMemberAreas(serviceAreas);
     }
     await this.findRolesInOrg(roleIds, dto.orgId);
+    // The plan's member limit (PLAN_LIMIT_REACHED); one place for Team and calendar imports alike.
+    await this.entitlements.assertCanAddMembers(dto.orgId);
 
     const password = generatePassword();
     let user;

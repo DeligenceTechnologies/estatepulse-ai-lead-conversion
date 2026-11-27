@@ -31,7 +31,8 @@ export type EnrollTrigger =
   | 'follow_up_not_ready'
   | 'follow_up_callback_requested'
   | 'follow_up_needs_time'
-  | 'follow_up_other';
+  | 'follow_up_other'
+  | 'follow_up_appointment_canceled';
 
 /**
  * The tick boxes, in the order a person thinks about them: what the call
@@ -68,6 +69,8 @@ export const ENROLL_TRIGGERS: Array<{
     hint: 'They asked us to call them back later.' },
   { value: 'follow_up_needs_time', group: 'follow_up', label: 'Needs time',
     hint: 'They want more time before deciding.' },
+  { value: 'follow_up_appointment_canceled', group: 'follow_up', label: 'Meeting canceled',
+    hint: 'They canceled the meeting they had booked.' },
   { value: 'follow_up_other', group: 'follow_up', label: 'Other',
     hint: 'Moved to follow-up for any other reason.' },
 ];
@@ -170,7 +173,7 @@ export interface EnrollResult {
     leadId: string;
     leadName: string;
     /** 'in_strategy' — the strategy engine is still contacting them. */
-    reason: 'dnc' | 'already_enrolled' | 'not_found' | 'in_strategy';
+    reason: 'dnc' | 'already_enrolled' | 'not_found' | 'in_strategy' | 'consent_revoked';
   }[];
   dryRun: boolean;
 }

@@ -88,6 +88,9 @@ export interface IntegrationEnv {
   HUBSPOT_AUTH_BASE_URL: string;
   HUBSPOT_API_VERSION: string;
   HUBSPOT_RETRY_BASE_MS: number;
+  BOLDTRAIL_ENABLED: boolean;
+  BOLDTRAIL_API_BASE_URL: string;
+  BOLDTRAIL_RETRY_BASE_MS: number;
   CRM_POLL_MS: number;
   CRM_RECONCILE_INTERVAL_MS: number;
   AIRTABLE_ENABLED: boolean;

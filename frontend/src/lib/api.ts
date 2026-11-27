@@ -57,7 +57,16 @@ export type ErrorCode =
   | 'EMAIL_NOT_VERIFIED'
   | 'EMAIL_VERIFICATION_INVALID'
   | 'INTERNAL'
-  | 'NETWORK';
+  | 'NETWORK'
+  // Billing (/billing and plan limits anywhere). The server's message is shown.
+  | 'PLAN_LIMIT_REACHED'
+  | 'PLAN_UPGRADE_REQUIRED'
+  | 'BILLING_NOT_CONFIGURED'
+  | 'BILLING_PRICE_MISMATCH'
+  | 'PAYMENT_FAILED'
+  | 'SUBSCRIPTION_EXISTS'
+  | 'SUBSCRIPTION_PENDING'
+  | 'ASSISTANT_UNAVAILABLE';
 
 /**
  * Which application shell a user gets. The backend has free-form roles; the
@@ -195,10 +204,30 @@ const MESSAGES: Record<ErrorCode, string> = {
   EMAIL_VERIFICATION_INVALID: 'This verification link is invalid or has expired. Request a new one.',
   INTERNAL: 'Something went wrong on our end. Please try again.',
   NETWORK: 'Cannot reach the server. Check that the API is running.',
+  PLAN_LIMIT_REACHED: 'Your plan’s limit is reached. Upgrade to add more.',
+  PLAN_UPGRADE_REQUIRED: 'This needs a higher plan.',
+  BILLING_NOT_CONFIGURED: 'Billing is not set up on this server yet.',
+  BILLING_PRICE_MISMATCH: 'This plan’s price is being updated. Please try again later.',
+  PAYMENT_FAILED: 'The payment did not go through.',
+  SUBSCRIPTION_EXISTS: 'Your organization already has a subscription.',
+  SUBSCRIPTION_PENDING: 'Your payment is still being confirmed.',
+  ASSISTANT_UNAVAILABLE: 'The assistant is briefly unavailable. Try again in a minute.',
 };
 
 /** Codes whose server message is written for people and beats our generic one. */
-const SERVER_WORDED: ErrorCode[] = ['BAD_REQUEST', 'CONFLICT', 'FORBIDDEN'];
+const SERVER_WORDED: ErrorCode[] = [
+  'BAD_REQUEST',
+  'CONFLICT',
+  'FORBIDDEN',
+  'PLAN_LIMIT_REACHED',
+  'PLAN_UPGRADE_REQUIRED',
+  'BILLING_NOT_CONFIGURED',
+  'PAYMENT_FAILED',
+  'SUBSCRIPTION_EXISTS',
+  'SUBSCRIPTION_PENDING',
+  // A 503 whose words are written for the person ("try again in a minute").
+  'ASSISTANT_UNAVAILABLE',
+];
 
 /**
  * Prefers the server's own wording where it is meant for the user: a field
@@ -211,6 +240,8 @@ export function messageFor(err: unknown): string {
       return err.details[0].message;
     }
     if (SERVER_WORDED.includes(err.code) && err.message) return err.message;
+    // A code this client predates (a newer server's): its own message is the best there is.
+    if (!(err.code in MESSAGES) && err.message && err.status < 500) return err.message;
     return MESSAGES[err.code] ?? MESSAGES.INTERNAL;
   }
   return MESSAGES.INTERNAL;

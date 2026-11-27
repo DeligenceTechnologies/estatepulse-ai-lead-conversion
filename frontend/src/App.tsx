@@ -11,6 +11,7 @@ import { AppShell } from './components/layout/AppShell';
 
 // Views. Only the sections under active development are imported; the rest
 // render ComingSoonView, so their prototype dummy data never reaches the UI.
+import { AssistantHome } from './components/assistant/AssistantHome';
 import { DashboardView } from './components/views/DashboardView';
 import { LeadsView } from './components/views/LeadsView';
 import { AgentsView } from './components/views/AgentsView';
@@ -26,6 +27,7 @@ import { ConversationsView } from './components/views/ConversationsView';
 import { FollowUpsView } from './components/views/FollowUpsView';
 import { RolesView } from './components/views/RolesView';
 import { SettingsView } from './components/views/SettingsView';
+import { PricingView } from './components/views/PricingView';
 import { CalendarView } from './components/views/CalendarView';
 import { AgentAvailability } from './components/agent/AgentAvailability';
 
@@ -41,6 +43,7 @@ const AppContent: React.FC = () => {
   return (
     <>
       <AppShell groups={navGroups} activeId={activeView} onNavigate={(id) => setActiveView(id as AppView)}>
+        {activeView === 'assistant' && <AssistantHome />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'leads' && <LeadsView />}
         {activeView === 'conversations' && <ConversationsView />}
@@ -59,6 +62,7 @@ const AppContent: React.FC = () => {
         {activeView === 'duplicates' && <DuplicatesView />}
         {activeView === 'ai_settings' && <AISettingsView />}
         {activeView === 'settings' && <SettingsView />}
+        {activeView === 'pricing' && <PricingView />}
         {activeView === 'analytics' && <ComingSoonView title="Analytics & ROI" />}
       </AppShell>
 

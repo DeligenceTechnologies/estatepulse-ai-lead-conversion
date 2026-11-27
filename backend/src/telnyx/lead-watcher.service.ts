@@ -5,6 +5,7 @@ import { PrismaService } from '@/common/prisma/prisma.service';
 import type { IntegrationEnv } from '@/common/utils/interface';
 import { IN_STRATEGY_STATUSES } from '@/lead/lead-status';
 import { EngineService } from './engine.service';
+import { MAY_CONTACT } from '@/lead/consent';
 
 const NEW_LEADS_PER_TICK = 10;
 
@@ -57,7 +58,8 @@ export class LeadWatcherService implements OnModuleInit, OnModuleDestroy {
         distinct: ['orgId'],
       });
       for (const { orgId } of orgs) {
-        const workable = { orgId, automationPaused: false, dncStatus: false };
+        // Never a lead who withdrew consent (one typed in by hand without consent is already paused for consent review).
+        const workable = { orgId, automationPaused: false, dncStatus: false, ...MAY_CONTACT };
         // Every poll, not only the first: a lead whose start failed after its claim is claimed but not
         // running. resume() skips the steps already logged and leads that left the strategy.
         const inFlight = await this.prisma.lead.findMany({

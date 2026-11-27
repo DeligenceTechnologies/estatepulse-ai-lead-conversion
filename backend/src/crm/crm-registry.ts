@@ -2,14 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { httpError } from '@/common/errors/app-error';
 import type { IntegrationEnv } from '@/common/utils/interface';
+import { BoldTrailClient } from './boldtrail/boldtrail.client';
+import { BOLDTRAIL_PROVIDER, HUBSPOT_PROVIDER } from './crm-records';
 import { HubSpotClient } from './hubspot/hubspot.client';
 import type { CrmAdapter } from './types';
 
 /**
  * The CRMs this build can connect, by the slug in their routes
- * (`/integrations/crm/hubspot/...`). Each is switched on separately
- * (HUBSPOT_ENABLED), like Google Sheets: switched off, its routes answer 404
- * and nothing syncs, and switching it off changes no data.
+ * (`/integrations/crm/hubspot/...`, `/integrations/crm/boldtrail/...`). Each is
+ * switched on separately (HUBSPOT_ENABLED, BOLDTRAIL_ENABLED), like Google
+ * Sheets: switched off, its routes answer 404 and nothing syncs, and switching
+ * it off changes no data.
  */
 @Injectable()
 export class CrmRegistry {
@@ -17,13 +20,24 @@ export class CrmRegistry {
 
   constructor(
     hubspot: HubSpotClient,
+    boldtrail: BoldTrailClient,
     private readonly config: ConfigService<IntegrationEnv, true>,
   ) {
-    this.bySlug = new Map<string, CrmAdapter>([['hubspot', hubspot]]);
+    this.bySlug = new Map<string, CrmAdapter>([
+      ['hubspot', hubspot],
+      ['boldtrail', boldtrail],
+    ]);
   }
 
   enabled(adapter: CrmAdapter): boolean {
-    return adapter.provider === 'HUBSPOT' && this.config.get('HUBSPOT_ENABLED', { infer: true }) === true;
+    switch (adapter.provider) {
+      case HUBSPOT_PROVIDER:
+        return this.config.get('HUBSPOT_ENABLED', { infer: true }) === true;
+      case BOLDTRAIL_PROVIDER:
+        return this.config.get('BOLDTRAIL_ENABLED', { infer: true }) === true;
+      default:
+        return false;
+    }
   }
 
   /** Every adapter switched on in this deployment. */

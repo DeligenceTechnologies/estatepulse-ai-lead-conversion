@@ -67,3 +67,13 @@ it('an unlisted path still sends a signed-out visitor to /login', () => {
   auth.current = { status: 'anon', role: null };
   expect(render('/dashboard')).toBe('<i data-navigate="/login"></i>');
 });
+
+it('sends a signed-in person from / to the assistant, the home page', () => {
+  auth.current = { status: 'authed', role: 'owner' };
+  expect(render('/')).toBe('<i data-navigate="/assistant"></i>');
+});
+
+it('still sends / with a query string (the Calendly boot signal) to /dashboard, where it is read', () => {
+  auth.current = { status: 'authed', role: 'owner' };
+  expect(render('/?calendly=connected')).toBe('<i data-navigate="/dashboard"></i>');
+});
