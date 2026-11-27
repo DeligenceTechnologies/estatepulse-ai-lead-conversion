@@ -1,5 +1,6 @@
 import { GoogleFormsAdapter } from './google-forms.adapter';
 import { TallyAdapter } from './tally.adapter';
+import { JotformAdapter } from './jotform.adapter';
 import { TypeformAdapter } from './typeform.adapter';
 import { InvalidPayloadError, type IngestAdapter, type NormalizedAnswer, type NormalizedDelivery } from './types';
 
@@ -63,4 +64,6 @@ export const adapterFor = (provider: string): IngestAdapter =>
       ? new TypeformAdapter()
       : provider === 'GOOGLE_FORMS'
         ? new GoogleFormsAdapter()
-        : new GenericWebhookAdapter();
+        : provider === 'JOTFORM'
+          ? new JotformAdapter()
+          : new GenericWebhookAdapter();

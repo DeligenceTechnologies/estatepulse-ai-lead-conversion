@@ -7,6 +7,12 @@ export interface NormalizedAnswer {
   scalarText: string;
   optionIds?: string[];
   allOptions?: NormalizedOption[];
+  /**
+   * The provider sent no question text, so `label` was made from the key.
+   * It names a field seen for the first time, but never replaces a label
+   * already known from the form itself.
+   */
+  labelInferred?: boolean;
 }
 
 export interface NormalizedOption {

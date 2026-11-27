@@ -103,6 +103,9 @@ export const envValidationSchema = Joi.object({
 
     TALLY_API_BASE_URL: Joi.string().uri().default('https://api.tally.so'),
     TYPEFORM_API_BASE_URL: Joi.string().uri().default('https://api.typeform.com'),
+    JOTFORM_API_BASE_URL: Joi.string().uri().default('https://api.jotform.com'),
+    // Accounts in Jotform's EU region answer only here; a key the US API rejects is tried on it.
+    JOTFORM_EU_API_BASE_URL: Joi.string().uri().default('https://eu-api.jotform.com'),
     PROVIDER_HTTP_TIMEOUT_MS: Joi.number().integer().positive().default(10_000),
 
     // The worker that turns stored form deliveries into leads.

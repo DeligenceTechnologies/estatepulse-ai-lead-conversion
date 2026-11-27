@@ -137,6 +137,7 @@ enum IntegrationProvider {
   hubspot
   airtable
   retell
+  jotform
 
   @@map("integration_provider")
 }
@@ -164,6 +165,8 @@ enum LeadSourceProvider {
   /// A Google Form. An Apps Script on the form posts each response to our
   /// webhook; backend polling of forms.responses.list recovers what it missed.
   GOOGLE_FORMS
+  /// A Jotform form, connected with the owner's API key like Tally and Typeform.
+  JOTFORM
 
   @@map("lead_source_provider")
 }

@@ -147,7 +147,7 @@ export interface LeadSourceConfig {
   timezoneMapped?: boolean;
 
   // --- set only on API-connected sources ---
-  /** 'TALLY' | 'TYPEFORM'. Absent on sources created before providers existed. */
+  /** 'TALLY' | 'TYPEFORM' | 'JOTFORM'. Absent on sources created before providers existed. */
   provider?: string | null;
   /** 'MANUAL' (customer pasted our URL) | 'API' (we installed the webhook). */
   connectionMethod?: string | null;

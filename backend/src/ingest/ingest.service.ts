@@ -27,7 +27,7 @@ export type IngestResult =
   | { kind: 'unknown_token' }
   | { kind: 'archived' };
 
-export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WEBHOOK' | 'GOOGLE_FORMS'>;
+export type IngestRoute = Extract<LeadSourceProvider, 'TALLY' | 'TYPEFORM' | 'WEBHOOK' | 'GOOGLE_FORMS' | 'JOTFORM'>;
 
 const SIGNATURE_HEADERS = new Set(['tally-signature', 'typeform-signature', GOOGLE_FORMS_SIGNATURE_HEADER]);
 const ALLOWED_HEADERS = new Set(['content-type', 'content-length', 'user-agent', 'x-forwarded-for', ...SIGNATURE_HEADERS]);
@@ -88,6 +88,14 @@ export class IngestService {
     // a leaked Apps Script token cannot be replayed against the generic
     // webhook route to dodge the signature this route insists on.
     if ((route === LeadSourceProvider.GOOGLE_FORMS) !== (source.provider === LeadSourceProvider.GOOGLE_FORMS)) {
+      this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
+      return { kind: 'unknown_token' };
+    }
+
+    // Jotform's token is bound to its route the same way. Its route reads a
+    // multipart body that no other route accepts, so a token from elsewhere
+    // has no business arriving here, and a Jotform token nowhere else.
+    if ((route === LeadSourceProvider.JOTFORM) !== (source.provider === LeadSourceProvider.JOTFORM)) {
       this.logger.warn(`Ingest rejected: ${source.provider} token ${token.slice(0, 12)}… on the ${route} route`);
       return { kind: 'unknown_token' };
     }

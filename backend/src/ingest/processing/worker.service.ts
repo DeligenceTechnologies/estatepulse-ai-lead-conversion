@@ -344,7 +344,7 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
         : a.optionIds
           ? a.textValues.map((text, i) => ({ id: a.optionIds![i], text }))
           : undefined;
-      await this.prisma.leadSourceField.upsert({
+      const stored = await this.prisma.leadSourceField.upsert({
         where: { leadSourceId_fieldKey: { leadSourceId, fieldKey: a.key } },
         create: {
           orgId,
@@ -356,8 +356,11 @@ export class ProcessingWorker implements OnModuleInit, OnModuleDestroy {
           sampleValues: [a.scalarText].filter(Boolean),
           status: 'ACTIVE',
         },
-        update: { label: a.label, lastSeenAt: new Date(), missingStreak: 0, status: 'ACTIVE' },
+        update: { ...(a.labelInferred ? {} : { label: a.label }), lastSeenAt: new Date(), missingStreak: 0, status: 'ACTIVE' },
       });
+      // A guessed label gives way to the one read from the form, so a custom
+      // field is saved as "Budget", not "Q15 textbox".
+      if (a.labelInferred && stored?.label) a.label = stored.label;
     }
   }
 

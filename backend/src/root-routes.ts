@@ -9,6 +9,7 @@ export const ROOT_ROUTES = [
   'v1/health',
   'ingest/v1/tally/:token',
   'ingest/v1/typeform/:token',
+  'ingest/v1/jotform/:token',
   'ingest/v1/webhook/:token',
   'ingest/v1/custom/:token',
   // The URL baked into the Apps Script on an owner's Google Form.

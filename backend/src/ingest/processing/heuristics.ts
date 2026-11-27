@@ -33,17 +33,22 @@ function typeCompatible(target: CanonicalKey, providerType: string): boolean {
   const spec = CANONICAL_FIELDS[target];
   if (spec.providerTypes?.includes(providerType)) return true;
 
-  // Tally's vocabulary is upper-case, Typeform's lower-case; they never collide.
+  // Tally's vocabulary is upper-case, Typeform's lower-case, Jotform's `control_`-prefixed; they never collide.
   const choice = [
     'DROPDOWN', 'MULTIPLE_CHOICE', 'CHECKBOXES', 'MULTI_SELECT',
     'dropdown', 'multiple_choice', 'picture_choice',
+    'control_dropdown', 'control_radio', 'control_checkbox',
   ].includes(providerType);
   if (choice) {
     return ['timeline', 'buying_intent', 'financing_status', 'consent_status', 'location', 'bedrooms',
             'min_budget', 'max_budget', 'motivation', 'timezone'].includes(target);
   }
-  if (providerType === 'INPUT_EMAIL' || providerType === 'email') return target === 'email';
-  if (providerType === 'INPUT_PHONE_NUMBER' || providerType === 'phone_number') return target === 'phone';
+  if (providerType === 'INPUT_EMAIL' || providerType === 'email' || providerType === 'control_email') return target === 'email';
+  if (providerType === 'INPUT_PHONE_NUMBER' || providerType === 'phone_number' || providerType === 'control_phone') {
+    return target === 'phone';
+  }
+  // A name part can only be a name.
+  if (providerType === 'control_fullname') return target === 'first_name' || target === 'last_name';
   return true;
 }
 
